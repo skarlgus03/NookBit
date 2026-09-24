@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "paths": {
+    "homeRoot": "C:/Users/example/Organized",
+    "watchFolders": [
+      {
+        "path": "C:/Users/example/Downloads",
+        "recursive": false,
+        "enabled": true
+      }
+    ],
+    "excludePatterns": ["*.partial", "*.crdownload", "~$*"]
+  },
+  "organization": {
+    "collisionPolicy": "rename",
+    "multiMatchPolicy": "first_match",
+    "unmatchedPolicy": "leave_in_place",
+    "crossVolumePolicy": "block"
+  },
+  "watch": {
+    "debounceMs": 1500,
+    "rescanIntervalMinutes": 30,
+    "promptFileCount": 20
+  },
+  "safety": {
+    "approvalRequired": true,
+    "permanentDeleteAllowed": false,
+    "silentOverwriteAllowed": false,
+    "followReparsePoints": false,
+    "integrityLevel": "standard"
+  },
+  "history": {
+    "retentionDays": 180,
+    "diagnosticLogDays": 14
+  },
+  "character": {
+    "enabled": true,
+    "alwaysOnTop": true,
+    "doNotDisturb": "auto"
+  }
+}

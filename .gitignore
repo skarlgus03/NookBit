@@ -1,0 +1,15 @@
+/build/
+/out/
+/.vs/
+/.vscode/
+/CMakeUserPresets.json
+*.user
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+.env
+.env.*

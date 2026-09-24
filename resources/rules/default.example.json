@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "ruleSetId": "default",
+  "version": "2026-09-23T00:00:00Z",
+  "rules": [
+    {
+      "id": "images",
+      "enabled": true,
+      "priority": 100,
+      "when": {
+        "extensions": ["jpg", "jpeg", "png", "webp"]
+      },
+      "then": {
+        "destination": "Pictures/{yyyy}/{MM}",
+        "collisionPolicy": "inherit"
+      }
+    },
+    {
+      "id": "pdf-documents",
+      "enabled": true,
+      "priority": 90,
+      "when": {
+        "extensions": ["pdf"]
+      },
+      "then": {
+        "destination": "Documents/PDF",
+        "collisionPolicy": "inherit"
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,530 @@
+#include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
+
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
+
+#include <algorithm>
+#include <chrono>
+#include <type_traits>
+#include <utility>
+
+namespace nookbit {
+namespace {
+
+// SQL 오류를 코어 결과의 오류 형식으로 변환하는 함수.
+Result<void> sqlFailure(const char* code, const QSqlQuery& query) {
+    return Result<void>::failure({code, query.lastError().text().toStdString()});
+}
+
+// 경로를 SQLite에 저장할 유니코드 문자열로 변환하는 함수.
+QString pathString(const std::filesystem::path& path) {
+    return QString::fromStdWString(path.wstring());
+}
+
+// 계획 상태를 DB의 고정된 문자열로 변환하는 함수.
+QString planStatus(PlanStatus status) {
+    switch (status) {
+    case PlanStatus::Draft: return QStringLiteral("draft");
+    case PlanStatus::Planned: return QStringLiteral("planned");
+    case PlanStatus::AwaitingApproval: return QStringLiteral("awaiting_approval");
+    case PlanStatus::Approved: return QStringLiteral("approved");
+    case PlanStatus::Executing: return QStringLiteral("executing");
+    case PlanStatus::Completed: return QStringLiteral("completed");
+    case PlanStatus::RollingBack: return QStringLiteral("rolling_back");
+    case PlanStatus::RolledBack: return QStringLiteral("rolled_back");
+    case PlanStatus::NeedsRecovery: return QStringLiteral("needs_recovery");
+    case PlanStatus::Failed: return QStringLiteral("failed");
+    case PlanStatus::Cancelled: return QStringLiteral("cancelled");
+    }
+    return {};
+}
+
+// DB의 계획 상태 문자열을 코어 값으로 복원하는 함수.
+std::optional<PlanStatus> parsePlanStatus(const QString& text) {
+    for (int value = static_cast<int>(PlanStatus::Draft);
+         value <= static_cast<int>(PlanStatus::Cancelled); ++value) {
+        const auto candidate = static_cast<PlanStatus>(value);
+        if (planStatus(candidate) == text) return candidate;
+    }
+    return std::nullopt;
+}
+
+// 단계 상태를 DB의 고정된 문자열로 변환하는 함수.
+QString stepStatus(StepStatus status) {
+    switch (status) {
+    case StepStatus::Planned: return QStringLiteral("planned");
+    case StepStatus::Skipped: return QStringLiteral("skipped");
+    case StepStatus::IntentRecorded: return QStringLiteral("intent_recorded");
+    case StepStatus::Applied: return QStringLiteral("applied");
+    case StepStatus::RollbackIntentRecorded: return QStringLiteral("rollback_intent_recorded");
+    case StepStatus::RolledBack: return QStringLiteral("rolled_back");
+    case StepStatus::NeedsRecovery: return QStringLiteral("needs_recovery");
+    case StepStatus::Failed: return QStringLiteral("failed");
+    }
+    return {};
+}
+
+// DB의 단계 상태 문자열을 코어 값으로 복원하는 함수.
+std::optional<StepStatus> parseStepStatus(const QString& text) {
+    for (int value = static_cast<int>(StepStatus::Planned);
+         value <= static_cast<int>(StepStatus::Failed); ++value) {
+        const auto candidate = static_cast<StepStatus>(value);
+        if (stepStatus(candidate) == text) return candidate;
+    }
+    return std::nullopt;
+}
+
+// 충돌 정책을 DB의 고정된 문자열로 변환하는 함수.
+QString collisionPolicy(CollisionPolicy policy) {
+    switch (policy) {
+    case CollisionPolicy::Rename: return QStringLiteral("rename");
+    case CollisionPolicy::Skip: return QStringLiteral("skip");
+    case CollisionPolicy::Abort: return QStringLiteral("abort");
+    }
+    return {};
+}
+
+// DB의 충돌 정책 문자열을 코어 값으로 복원하는 함수.
+std::optional<CollisionPolicy> parseCollisionPolicy(const QString& text) {
+    if (text == QStringLiteral("rename")) return CollisionPolicy::Rename;
+    if (text == QStringLiteral("skip")) return CollisionPolicy::Skip;
+    if (text == QStringLiteral("abort")) return CollisionPolicy::Abort;
+    return std::nullopt;
+}
+
+// 파일 지문을 정밀도 손실 없이 JSON 문자열로 만드는 함수.
+QString fingerprintJson(const FileFingerprint& fingerprint) {
+    QJsonObject object;
+    object.insert(QStringLiteral("size"), QString::number(fingerprint.size));
+    object.insert(QStringLiteral("modifiedUtcMs"), QString::number(fingerprint.modifiedUtcMs));
+    if (fingerprint.volumeId) object.insert(QStringLiteral("volumeId"),
+                                              QString::fromStdString(*fingerprint.volumeId));
+    if (fingerprint.fileId) object.insert(QStringLiteral("fileId"),
+                                            QString::fromStdString(*fingerprint.fileId));
+    if (fingerprint.sha256) object.insert(QStringLiteral("sha256"),
+                                           QString::fromStdString(*fingerprint.sha256));
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+// JSON 문자열에서 파일 지문을 복원하는 함수.
+std::optional<FileFingerprint> parseFingerprint(const QString& text) {
+    const auto object = QJsonDocument::fromJson(text.toUtf8()).object();
+    bool sizeOk = false;
+    bool modifiedOk = false;
+    FileFingerprint fingerprint;
+    fingerprint.size = object.value(QStringLiteral("size")).toString().toULongLong(&sizeOk);
+    fingerprint.modifiedUtcMs = object.value(QStringLiteral("modifiedUtcMs"))
+                                    .toString().toLongLong(&modifiedOk);
+    if (!sizeOk || !modifiedOk) return std::nullopt;
+    if (object.contains(QStringLiteral("volumeId")))
+        fingerprint.volumeId = object.value(QStringLiteral("volumeId")).toString().toStdString();
+    if (object.contains(QStringLiteral("fileId")))
+        fingerprint.fileId = object.value(QStringLiteral("fileId")).toString().toStdString();
+    if (object.contains(QStringLiteral("sha256")))
+        fingerprint.sha256 = object.value(QStringLiteral("sha256")).toString().toStdString();
+    return fingerprint;
+}
+
+// 경고 목록을 DB의 JSON 문자열로 만드는 함수.
+QString warningsJson(const std::vector<Error>& warnings) {
+    QJsonArray array;
+    for (const auto& warning : warnings) {
+        QJsonObject object;
+        object.insert(QStringLiteral("code"), QString::fromStdString(warning.code));
+        object.insert(QStringLiteral("message"), QString::fromStdString(warning.message));
+        array.append(object);
+    }
+    return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+// DB의 JSON 문자열에서 경고 목록을 복원하는 함수.
+std::optional<std::vector<Error>> parseWarnings(const QString& text) {
+    const auto document = QJsonDocument::fromJson(text.toUtf8());
+    if (!document.isArray()) return std::nullopt;
+    std::vector<Error> warnings;
+    for (const auto& value : document.array()) {
+        if (!value.isObject()) return std::nullopt;
+        const auto object = value.toObject();
+        warnings.push_back({object.value(QStringLiteral("code")).toString().toStdString(),
+                            object.value(QStringLiteral("message")).toString().toStdString()});
+    }
+    return warnings;
+}
+
+} // namespace
+
+// DB 파일과 초기 Schema 경로를 보관하는 생성자.
+SqliteHistoryRepository::SqliteHistoryRepository(QString databasePath, QString migrationPath)
+    : databasePath_(std::move(databasePath)), migrationPath_(std::move(migrationPath)),
+      connectionName_(QStringLiteral("nookbit-history-%1")
+                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces))) {}
+
+// 자신이 연 DB 연결을 닫는 소멸자.
+SqliteHistoryRepository::~SqliteHistoryRepository() {
+    if (!database_.isValid()) return;
+    database_.close();
+    database_ = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName_);
+}
+
+// 데이터베이스를 열고 초기 Schema를 적용하는 함수.
+Result<void> SqliteHistoryRepository::ensureOpen() const {
+    if (database_.isOpen()) return Result<void>::success();
+    if (databasePath_.isEmpty() || !QFileInfo(databasePath_).isAbsolute()) {
+        return Result<void>::failure({"history.path_invalid", "Database path must be absolute."});
+    }
+    QFile migration(migrationPath_);
+    if (!migration.open(QIODevice::ReadOnly)) {
+        return Result<void>::failure({"history.migration_missing", "Cannot read SQLite schema."});
+    }
+    if (!QDir().mkpath(QFileInfo(databasePath_).absolutePath())) {
+        return Result<void>::failure({"history.directory_failed", "Cannot create app-data directory."});
+    }
+    if (!database_.isValid()) database_ = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName_);
+    database_.setDatabaseName(databasePath_);
+    if (!database_.open()) {
+        return Result<void>::failure({"history.open_failed", database_.lastError().text().toStdString()});
+    }
+
+    const auto statements = QString::fromUtf8(migration.readAll()).split(';', Qt::SkipEmptyParts);
+    for (const auto& statement : statements) {
+        if (statement.trimmed().isEmpty()) continue;
+        QSqlQuery query(database_);
+        if (!query.exec(statement)) return sqlFailure("history.migration_failed", query);
+    }
+    return Result<void>::success();
+}
+
+// Planned 계획과 단계들을 한 트랜잭션에 저장하는 함수.
+Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
+    if (plan.status != PlanStatus::Planned || plan.id.empty() || plan.planHash.size() != 64 ||
+        plan.settingsRevision.size() != 64 || plan.rulesRevision.size() != 64 ||
+        std::none_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
+            return step.status == StepStatus::Planned;
+        })) {
+        return Result<void>::failure({"history.plan_invalid", "Only a hashed Planned plan can be saved."});
+    }
+    auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) {
+        return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
+    }
+
+    QSqlQuery planQuery(database_);
+    planQuery.prepare(QStringLiteral(
+        "INSERT INTO plans(id, created_at, rule_set_version, settings_revision, rules_revision, "
+        "plan_hash, status, warnings_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"));
+    planQuery.addBindValue(QString::fromStdString(plan.id));
+    planQuery.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    planQuery.addBindValue(QString::fromStdString(plan.ruleSetVersion));
+    planQuery.addBindValue(QString::fromStdString(plan.settingsRevision));
+    planQuery.addBindValue(QString::fromStdString(plan.rulesRevision));
+    planQuery.addBindValue(QString::fromStdString(plan.planHash));
+    planQuery.addBindValue(planStatus(plan.status));
+    planQuery.addBindValue(warningsJson(plan.warnings));
+    if (!planQuery.exec()) {
+        auto error = sqlFailure("history.insert_plan_failed", planQuery);
+        database_.rollback();
+        return error;
+    }
+
+    for (std::size_t index = 0; index < plan.steps.size(); ++index) {
+        const auto& step = plan.steps[index];
+        QSqlQuery stepQuery(database_);
+        stepQuery.prepare(QStringLiteral(
+            "INSERT INTO steps(id, plan_id, sequence_no, source_path, destination_path, "
+            "fingerprint_json, matched_rule_id, reason, collision_policy, status) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        stepQuery.addBindValue(QString::fromStdString(step.id));
+        stepQuery.addBindValue(QString::fromStdString(plan.id));
+        stepQuery.addBindValue(static_cast<qlonglong>(index));
+        stepQuery.addBindValue(pathString(step.source));
+        stepQuery.addBindValue(pathString(step.destination));
+        stepQuery.addBindValue(fingerprintJson(step.fingerprint));
+        stepQuery.addBindValue(QString::fromStdString(step.matchedRuleId));
+        stepQuery.addBindValue(QString::fromStdString(step.reason));
+        stepQuery.addBindValue(collisionPolicy(step.collisionPolicy));
+        stepQuery.addBindValue(stepStatus(step.status));
+        if (!stepQuery.exec()) {
+            auto error = sqlFailure("history.insert_step_failed", stepQuery);
+            database_.rollback();
+            return error;
+        }
+    }
+    if (!database_.commit()) {
+        database_.rollback();
+        return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
+    }
+    return Result<void>::success();
+}
+
+// 해시가 같은 Planned 계획 하나를 Approved로 기록하는 함수.
+Result<void> SqliteHistoryRepository::saveApproval(const ApprovalRecord& approval) {
+    if (approval.planId.empty() || approval.planHash.size() != 64 ||
+        approval.approvedAt == std::chrono::system_clock::time_point{}) {
+        return Result<void>::failure({"history.approval_invalid", "Approval record is incomplete."});
+    }
+    auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) {
+        return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
+    }
+    QSqlQuery update(database_);
+    update.prepare(QStringLiteral(
+        "UPDATE plans SET status = 'approved', approved_at = ? "
+        "WHERE id = ? AND plan_hash = ? AND status = 'planned'"));
+    const auto approvedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        approval.approvedAt.time_since_epoch()).count();
+    update.addBindValue(QDateTime::fromMSecsSinceEpoch(approvedMs, Qt::UTC)
+                            .toString(Qt::ISODateWithMs));
+    update.addBindValue(QString::fromStdString(approval.planId));
+    update.addBindValue(QString::fromStdString(approval.planHash));
+    if (!update.exec() || update.numRowsAffected() != 1) {
+        auto error = update.lastError().isValid()
+            ? sqlFailure("history.approval_failed", update)
+            : Result<void>::failure({"history.approval_conflict", "Plan was not Planned with this hash."});
+        database_.rollback();
+        return error;
+    }
+    QSqlQuery event(database_);
+    event.prepare(QStringLiteral(
+        "INSERT INTO events(plan_id, occurred_at, event_type, payload_json) "
+        "VALUES(?, ?, 'plan_approved', '{}')"));
+    event.addBindValue(QString::fromStdString(approval.planId));
+    event.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    if (!event.exec()) {
+        auto error = sqlFailure("history.event_failed", event);
+        database_.rollback();
+        return error;
+    }
+    if (!database_.commit()) {
+        database_.rollback();
+        return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
+    }
+    return Result<void>::success();
+}
+
+// 실행 상태 변경과 이벤트를 한 트랜잭션에 기록하는 함수.
+Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
+    auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) {
+        return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
+    }
+
+    QString planId;
+    QString stepId;
+    QString eventType;
+    QJsonObject payload;
+    QString updateSql;
+    QString newStatus;
+    QString previousStatus;
+    bool fixedPreviousStates = false;
+    std::visit([&](const auto& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, PlanCreated>) {
+            planId = QString::fromStdString(value.planId);
+            eventType = QStringLiteral("plan_created");
+        } else if constexpr (std::is_same_v<T, PlanStatusChanged>) {
+            planId = QString::fromStdString(value.planId);
+            eventType = QStringLiteral("plan_status_changed");
+            newStatus = planStatus(value.status);
+            payload.insert(QStringLiteral("status"), newStatus);
+            updateSql = QStringLiteral("UPDATE plans SET status = ? WHERE id = ? AND status = ?");
+            switch (value.status) {
+            case PlanStatus::Executing: previousStatus = QStringLiteral("approved"); break;
+            case PlanStatus::Completed:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? "
+                    "AND status IN ('executing','rolling_back')");
+                fixedPreviousStates = true;
+                break;
+            case PlanStatus::RollingBack:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed')");
+                fixedPreviousStates = true;
+                break;
+            case PlanStatus::RolledBack: previousStatus = QStringLiteral("rolling_back"); break;
+            case PlanStatus::Failed: previousStatus = QStringLiteral("executing"); break;
+            case PlanStatus::NeedsRecovery:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('executing','rolling_back')");
+                fixedPreviousStates = true;
+                break;
+            default: break;
+            }
+        } else if constexpr (std::is_same_v<T, StepStatusChanged>) {
+            planId = QString::fromStdString(value.planId);
+            stepId = QString::fromStdString(value.stepId);
+            eventType = QStringLiteral("step_status_changed");
+            newStatus = stepStatus(value.status);
+            payload.insert(QStringLiteral("status"), newStatus);
+            updateSql = QStringLiteral(
+                "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? AND status = ?");
+            switch (value.status) {
+            case StepStatus::IntentRecorded: previousStatus = QStringLiteral("planned"); break;
+            case StepStatus::Applied:
+                updateSql = QStringLiteral(
+                    "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
+                    "AND status IN ('intent_recorded','rollback_intent_recorded')");
+                fixedPreviousStates = true;
+                break;
+            case StepStatus::RollbackIntentRecorded: previousStatus = QStringLiteral("applied"); break;
+            case StepStatus::RolledBack: previousStatus = QStringLiteral("rollback_intent_recorded"); break;
+            case StepStatus::Failed: previousStatus = QStringLiteral("intent_recorded"); break;
+            case StepStatus::NeedsRecovery:
+                updateSql = QStringLiteral(
+                    "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
+                    "AND status IN ('intent_recorded','rollback_intent_recorded')");
+                fixedPreviousStates = true;
+                break;
+            default: break;
+            }
+        } else if constexpr (std::is_same_v<T, HomeStateChanged>) {
+            eventType = QStringLiteral("home_state_changed");
+            payload.insert(QStringLiteral("unclassifiedFiles"), QString::number(value.unclassifiedFiles));
+            payload.insert(QStringLiteral("staleFiles"), QString::number(value.staleFiles));
+            payload.insert(QStringLiteral("largeFiles"), QString::number(value.largeFiles));
+            payload.insert(QStringLiteral("totalBytes"), QString::number(value.totalBytes));
+        }
+    }, event);
+
+    if (eventType.isEmpty() ||
+        (!updateSql.isEmpty() && previousStatus.isEmpty() && !fixedPreviousStates)) {
+        database_.rollback();
+        return Result<void>::failure({"history.transition_invalid", "This status transition is not allowed."});
+    }
+    if (!updateSql.isEmpty()) {
+        QSqlQuery update(database_);
+        update.prepare(updateSql);
+        update.addBindValue(newStatus);
+        update.addBindValue(stepId.isEmpty() ? planId : stepId);
+        if (!stepId.isEmpty()) update.addBindValue(planId);
+        if (!fixedPreviousStates) update.addBindValue(previousStatus);
+        if (!update.exec() || update.numRowsAffected() != 1) {
+            auto error = update.lastError().isValid()
+                ? sqlFailure("history.transition_failed", update)
+                : Result<void>::failure({"history.transition_conflict", "Stored status differs from expected status."});
+            database_.rollback();
+            return error;
+        }
+    }
+
+    QSqlQuery insert(database_);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO events(plan_id, step_id, occurred_at, event_type, payload_json) "
+        "VALUES(?, ?, ?, ?, ?)"));
+    insert.addBindValue(planId.isEmpty() ? QVariant() : QVariant(planId));
+    insert.addBindValue(stepId.isEmpty() ? QVariant() : QVariant(stepId));
+    insert.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    insert.addBindValue(eventType);
+    insert.addBindValue(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    if (!insert.exec()) {
+        auto error = sqlFailure("history.event_failed", insert);
+        database_.rollback();
+        return error;
+    }
+    if (!database_.commit()) {
+        database_.rollback();
+        return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
+    }
+    return Result<void>::success();
+}
+
+// 아직 완료되지 않은 저장 계획을 읽어오는 함수.
+Result<std::vector<OperationPlan>> SqliteHistoryRepository::incompletePlans() const {
+    return readPlans(QStringLiteral(
+        "status NOT IN ('completed', 'rolled_back', 'cancelled')"));
+}
+
+// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
+Result<OperationPlan> SqliteHistoryRepository::loadPlan(const PlanId& planId) const {
+    if (planId.empty()) {
+        return Result<OperationPlan>::failure({"history.plan_id_empty", "Plan ID is required."});
+    }
+    auto plans = readPlans(QStringLiteral("id = ?"), QString::fromStdString(planId));
+    if (!plans) return Result<OperationPlan>::failure(plans.error());
+    if (plans.value().size() != 1) {
+        return Result<OperationPlan>::failure({"history.plan_missing", "Plan was not found."});
+    }
+    return Result<OperationPlan>::success(std::move(plans.value().front()));
+}
+
+// 주어진 조건에 맞는 계획과 단계들을 DB에서 복원하는 함수.
+Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
+    const QString& whereClause, const QString& planId) const {
+    auto opened = ensureOpen();
+    if (!opened) return Result<std::vector<OperationPlan>>::failure(opened.error());
+    QSqlQuery plans(database_);
+    plans.prepare(QStringLiteral(
+        "SELECT id, rule_set_version, settings_revision, rules_revision, plan_hash, "
+        "status, warnings_json FROM plans WHERE ") + whereClause +
+        QStringLiteral(" ORDER BY created_at, id"));
+    if (!planId.isEmpty()) plans.addBindValue(planId);
+    if (!plans.exec()) {
+        return Result<std::vector<OperationPlan>>::failure({
+            "history.select_failed", plans.lastError().text().toStdString(),
+        });
+    }
+    std::vector<OperationPlan> result;
+    while (plans.next()) {
+        OperationPlan plan;
+        plan.id = plans.value(0).toString().toStdString();
+        plan.ruleSetVersion = plans.value(1).toString().toStdString();
+        plan.settingsRevision = plans.value(2).toString().toStdString();
+        plan.rulesRevision = plans.value(3).toString().toStdString();
+        plan.planHash = plans.value(4).toString().toStdString();
+        const auto status = parsePlanStatus(plans.value(5).toString());
+        const auto warnings = parseWarnings(plans.value(6).toString());
+        if (!status || !warnings) {
+            return Result<std::vector<OperationPlan>>::failure({
+                "history.corrupt_plan", "A saved plan has invalid status or warnings.",
+            });
+        }
+        plan.status = *status;
+        plan.warnings = *warnings;
+
+        QSqlQuery steps(database_);
+        steps.prepare(QStringLiteral(
+            "SELECT id, source_path, destination_path, fingerprint_json, matched_rule_id, "
+            "reason, collision_policy, status FROM steps WHERE plan_id = ? ORDER BY sequence_no"));
+        steps.addBindValue(QString::fromStdString(plan.id));
+        if (!steps.exec()) {
+            return Result<std::vector<OperationPlan>>::failure({
+                "history.select_steps_failed", steps.lastError().text().toStdString(),
+            });
+        }
+        while (steps.next()) {
+            MoveStep step;
+            step.id = steps.value(0).toString().toStdString();
+            step.source = std::filesystem::path(steps.value(1).toString().toStdWString());
+            step.destination = std::filesystem::path(steps.value(2).toString().toStdWString());
+            const auto fingerprint = parseFingerprint(steps.value(3).toString());
+            const auto collision = parseCollisionPolicy(steps.value(6).toString());
+            const auto stepState = parseStepStatus(steps.value(7).toString());
+            if (!fingerprint || !collision || !stepState) {
+                return Result<std::vector<OperationPlan>>::failure({
+                    "history.corrupt_step", "A saved step has invalid metadata.",
+                });
+            }
+            step.fingerprint = *fingerprint;
+            step.matchedRuleId = steps.value(4).toString().toStdString();
+            step.reason = steps.value(5).toString().toStdString();
+            step.collisionPolicy = *collision;
+            step.status = *stepState;
+            plan.steps.push_back(std::move(step));
+        }
+        result.push_back(std::move(plan));
+    }
+    return Result<std::vector<OperationPlan>>::success(std::move(result));
+}
+
+} // namespace nookbit

@@ -1,0 +1,48 @@
+#pragma once
+
+#include <nookbit/application/ports.hpp>
+
+#include <QSqlDatabase>
+#include <QString>
+
+namespace nookbit {
+
+/// 승인 전 계획을 앱 데이터 폴더의 SQLite에 저장하는 이력 저장소.
+class SqliteHistoryRepository final : public IHistoryRepository {
+public:
+    /// DB 파일과 초기 Schema 경로를 보관하는 생성자.
+    SqliteHistoryRepository(QString databasePath, QString migrationPath);
+
+    /// 자신이 연 DB 연결을 닫는 소멸자.
+    ~SqliteHistoryRepository() override;
+
+    /// Planned 계획과 단계들을 한 트랜잭션에 저장하는 함수.
+    [[nodiscard]] Result<void> savePlan(const OperationPlan& plan) override;
+
+    /// 해시가 같은 Planned 계획 하나를 Approved로 기록하는 함수.
+    [[nodiscard]] Result<void> saveApproval(const ApprovalRecord& approval) override;
+
+    /// 실행 상태 변경과 이벤트를 한 트랜잭션에 기록하는 함수.
+    [[nodiscard]] Result<void> appendEvent(const DomainEvent& event) override;
+
+    /// 아직 완료되지 않은 저장 계획을 읽어오는 함수.
+    [[nodiscard]] Result<std::vector<OperationPlan>> incompletePlans() const override;
+
+    /// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
+    [[nodiscard]] Result<OperationPlan> loadPlan(const PlanId& planId) const override;
+
+private:
+    /// 데이터베이스를 열고 초기 Schema를 적용하는 함수.
+    [[nodiscard]] Result<void> ensureOpen() const;
+
+    /// 주어진 조건에 맞는 계획과 단계들을 DB에서 복원하는 함수.
+    [[nodiscard]] Result<std::vector<OperationPlan>> readPlans(
+        const QString& whereClause, const QString& planId = {}) const;
+
+    QString databasePath_;
+    QString migrationPath_;
+    QString connectionName_;
+    mutable QSqlDatabase database_;
+};
+
+} // namespace nookbit

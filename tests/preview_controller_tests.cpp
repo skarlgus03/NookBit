@@ -1,0 +1,414 @@
+#include "presentation/pending_files_model.hpp"
+#include "presentation/preview_controller.hpp"
+#include "application/use_cases/plan_signature.hpp"
+#include "application/use_cases/create_preview_use_case.hpp"
+#include "application/use_cases/freeze_preview_use_case.hpp"
+#include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "infrastructure/cryptography/qt_plan_hasher.hpp"
+#include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "modules/planner/planner.hpp"
+#include "modules/rules/rule_engine.hpp"
+
+#include <QCoreApplication>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTemporaryDir>
+#include <QUrl>
+#include <QVariantMap>
+
+#include <filesystem>
+#include <iostream>
+#include <string>
+
+namespace {
+
+int failures = 0;
+
+// 테스트가 미리보기 중간에 설정을 바꿀 수 있게 하는 저장소.
+class MutableSettingsRepository final : public nookbit::ISettingsRepository {
+public:
+    nookbit::UserSettings settings;
+
+    // 현재 테스트 설정을 반환하는 함수.
+    [[nodiscard]] nookbit::Result<nookbit::UserSettings> load() const override {
+        return nookbit::Result<nookbit::UserSettings>::success(settings);
+    }
+
+    // 테스트에서는 설정을 파일에 쓰지 않는 함수.
+    [[nodiscard]] nookbit::Result<void> save(const nookbit::UserSettings&) override {
+        return nookbit::Result<void>::failure({"test.read_only", "Not used in this test."});
+    }
+};
+
+// 테스트에서 준비한 규칙을 그대로 반환하는 저장소.
+class MemoryRulesRepository final : public nookbit::IRuleSetRepository {
+public:
+    nookbit::RuleSet rules;
+
+    // 현재 테스트 규칙을 반환하는 함수.
+    [[nodiscard]] nookbit::Result<nookbit::RuleSet> load() const override {
+        return nookbit::Result<nookbit::RuleSet>::success(rules);
+    }
+};
+
+// 조건이 거짓이면 테스트 실패를 기록하는 함수.
+void expect(bool condition, const std::string& message) {
+    if (!condition) {
+        ++failures;
+        std::cerr << "FAIL: " << message << '\n';
+    }
+}
+
+// 프로젝트의 예제 규칙 및 Schema 경로를 만드는 함수.
+QString projectPath(const char* relativePath) {
+    return QString::fromUtf8(NOOKBIT_SOURCE_DIR) + QStringLiteral("/") +
+           QString::fromUtf8(relativePath);
+}
+
+// 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
+void testPreviewFromPendingFiles() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "temporary directory should be available");
+    if (!directory.isValid()) return;
+
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "source fixture should open");
+    if (!file.isOpen()) return;
+    file.write("original content");
+    file.close();
+
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = directory.filePath(QStringLiteral("app-data"));
+    nookbit::PreviewController controller(
+        pending,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(appData.toStdWString()), home,
+        directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    controller.createPreview(home);
+
+    expect(controller.hasPreview(), "preview should be available");
+    expect(controller.steps().size() == 1, "image should create one planned step");
+    if (controller.steps().size() == 1) {
+        const auto step = controller.steps().at(0).toMap();
+        expect(step.value(QStringLiteral("rule")).toString() == QStringLiteral("images"),
+               "image rule should be displayed");
+        expect(step.value(QStringLiteral("destination")).toString().startsWith(home),
+               "destination should stay under selected home");
+        expect(step.value(QStringLiteral("destination")).toString().contains(
+                   QStringLiteral("Pictures")),
+               "destination should include the image category");
+    }
+    expect(QFile::exists(source), "preview must not move the original file");
+    expect(!QFile::exists(home), "preview must not create the destination directory");
+
+    controller.freezePreview();
+    expect(controller.hasFrozenPlan(), "unchanged preview should be frozen");
+    expect(QFile::exists(directory.filePath(QStringLiteral("history.sqlite"))),
+           "frozen plan should be saved to SQLite");
+    nookbit::SqliteHistoryRepository stored(
+        directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    const auto plans = stored.incompletePlans();
+    expect(plans.hasValue() && plans.value().size() == 1,
+           "stored plan should be readable after saving");
+    if (plans && plans.value().size() == 1) {
+        const auto& storedPlan = plans.value().front();
+        expect(plans.value().front().status == nookbit::PlanStatus::Planned,
+               "stored plan must be Planned, not Approved");
+        expect(plans.value().front().planHash.size() == 64,
+               "stored plan should contain a SHA-256 digest");
+        expect(plans.value().front().steps.size() == 1 &&
+                   plans.value().front().steps.front().source ==
+                       std::filesystem::path(source.toStdWString()),
+               "stored step should preserve the selected source");
+        nookbit::QtPlanHasher hasher;
+        const auto expectedHash = hasher.sha256(
+            nookbit::PlanSignature::approvalPayload(storedPlan));
+        expect(storedPlan.planHash == expectedHash,
+               "stored plan should round-trip without changing its approval hash");
+    }
+    expect(controller.verifySavedPlan(), "unchanged saved plan should pass revalidation");
+    expect(QFile::exists(source) && !QFile::exists(home),
+           "saving a plan must not move files or create the destination");
+
+    pending.removeAt(0);
+    expect(!controller.hasPreview() && controller.steps().isEmpty(),
+           "changing the pending list should clear a stale preview");
+
+    pending.addUrl(QUrl::fromLocalFile(source));
+    controller.createPreview(QStringLiteral("relative/path"));
+    expect(!controller.hasPreview() && !controller.message().isEmpty(),
+           "relative destination should be rejected");
+    expect(QFile::exists(source), "invalid preview must not change the original file");
+}
+
+// 저장 뒤 원본이 바뀌면 재검사를 통과하지 못하는지 검사하는 함수.
+void testChangedFileAfterSaveFailsVerification() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "post-save directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "post-save source should open");
+    if (!file.isOpen()) return;
+    file.write("before");
+    file.close();
+
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    nookbit::PreviewController controller(
+        pending,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
+        home, directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    controller.createPreview(home);
+    controller.freezePreview();
+    expect(controller.hasFrozenPlan(), "post-save plan should be stored");
+    expect(file.open(QIODevice::Append), "post-save source should reopen");
+    if (!file.isOpen()) return;
+    file.write(" changed");
+    file.close();
+    expect(!controller.verifySavedPlan(), "changed source must fail saved-plan verification");
+    expect(QFile::exists(source) && !QFile::exists(home),
+           "failed verification must not move or copy files");
+}
+
+// 저장된 단계 경로가 DB에서 바뀌면 계획 해시 검사로 거절하는지 확인하는 함수.
+void testTamperedSavedPlanFailsVerification() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "tamper-test directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "tamper-test source should open");
+    if (!file.isOpen()) return;
+    file.write("image");
+    file.close();
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto dbPath = directory.filePath(QStringLiteral("history.sqlite"));
+    nookbit::PreviewController controller(
+        pending,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
+        home, dbPath,
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    controller.createPreview(home);
+    controller.freezePreview();
+    expect(controller.verifySavedPlan(), "untampered plan should pass first");
+
+    const QString connection = QStringLiteral("nookbit-tamper-test");
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        database.setDatabaseName(dbPath);
+        expect(database.open(), "tamper-test database should open");
+        if (database.isOpen()) {
+            QSqlQuery query(database);
+            expect(query.exec(QStringLiteral(
+                       "UPDATE steps SET destination_path = 'C:/unexpected/photo.jpg'")),
+                   "tamper-test destination should be modified");
+        }
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    expect(!controller.verifySavedPlan(), "modified DB step must fail its saved hash");
+    expect(QFile::exists(source) && !QFile::exists(home),
+           "tamper detection must not change source or destination");
+}
+
+// 같은 버전의 규칙 내용이 바뀌어도 오래된 미리보기를 거절하는지 검사하는 함수.
+void testChangedRulesCannotBeFrozen() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "rule-change directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "rule-change source should open");
+    if (!file.isOpen()) return;
+    file.write("image");
+    file.close();
+
+    QFile example(projectPath("resources/rules/default.example.json"));
+    expect(example.open(QIODevice::ReadOnly), "example rules should open");
+    if (!example.isOpen()) return;
+    const auto rulesPath = directory.filePath(QStringLiteral("rules.json"));
+    QFile rulesFile(rulesPath);
+    expect(rulesFile.open(QIODevice::WriteOnly), "rule-change copy should open");
+    if (!rulesFile.isOpen()) return;
+    rulesFile.write(example.readAll());
+    rulesFile.close();
+    example.close();
+
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    nookbit::PreviewController controller(
+        pending, rulesPath, projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
+        home, directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    controller.createPreview(home);
+    expect(controller.hasPreview(), "rule-change preview should be available");
+
+    expect(rulesFile.open(QIODevice::ReadOnly), "rule-change copy should reopen");
+    if (!rulesFile.isOpen()) return;
+    auto object = QJsonDocument::fromJson(rulesFile.readAll()).object();
+    rulesFile.close();
+    auto rules = object.value(QStringLiteral("rules")).toArray();
+    auto first = rules.at(0).toObject();
+    auto then = first.value(QStringLiteral("then")).toObject();
+    then.insert(QStringLiteral("destination"), QStringLiteral("Other/{yyyy}/{MM}"));
+    first.insert(QStringLiteral("then"), then);
+    rules.replace(0, first);
+    object.insert(QStringLiteral("rules"), rules);
+    expect(rulesFile.open(QIODevice::WriteOnly | QIODevice::Truncate),
+           "changed rules should be writable");
+    if (!rulesFile.isOpen()) return;
+    rulesFile.write(QJsonDocument(object).toJson());
+    rulesFile.close();
+
+    controller.freezePreview();
+    expect(!controller.hasFrozenPlan() && !controller.hasPreview(),
+           "same-version rule edits should invalidate the preview");
+    expect(!QFile::exists(directory.filePath(QStringLiteral("history.sqlite"))),
+           "changed rules must not create a stored plan");
+    expect(QFile::exists(source), "rule-change rejection must leave the source in place");
+}
+
+// 분류 결과가 같아도 설정 자체가 바뀌면 고정을 거절하는지 검사하는 함수.
+void testChangedSettingsCannotBeFrozen() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "settings-change directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "settings-change source should open");
+    if (!file.isOpen()) return;
+    file.write("image");
+    file.close();
+
+    MutableSettingsRepository settings;
+    settings.settings.homeRoot = std::filesystem::path(
+        directory.filePath(QStringLiteral("organized")).toStdWString());
+    MemoryRulesRepository rules;
+    nookbit::ClassificationRule rule;
+    rule.id = "images";
+    rule.enabled = true;
+    rule.priority = 100;
+    rule.extensions = {"jpg"};
+    rule.destinationRelativePath = L"Pictures";
+    rules.rules = {"default", "rules-1", {rule}};
+
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, std::filesystem::path(
+        directory.filePath(QStringLiteral("app-data")).toStdWString()));
+    nookbit::QtPlanHasher hasher;
+    nookbit::SqliteHistoryRepository history(
+        directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
+    const auto sourcePath = std::filesystem::path(source.toStdWString());
+    const auto draft = preview.execute({"rules-1", {sourcePath}});
+    expect(draft.hasValue(), "settings-change draft should be created");
+    if (!draft) return;
+
+    settings.settings.recursiveScan = true;
+    nookbit::FreezePreviewUseCase freeze(settings, rules, scanner, planner, hasher, history);
+    const auto result = freeze.execute(draft.value(), {sourcePath});
+    expect(!result.hasValue() && result.error().code == "freeze.settings_changed",
+           "setting changes must be rejected even when planned destination is unchanged");
+    expect(!QFile::exists(directory.filePath(QStringLiteral("history.sqlite"))),
+           "changed settings must not create a stored plan");
+    expect(QFile::exists(source), "settings-change rejection must leave the source in place");
+
+    settings.settings.recursiveScan = false;
+    const auto frozen = freeze.execute(draft.value(), {sourcePath});
+    expect(frozen.hasValue(), "restored settings should allow storing the plan");
+    if (!frozen) return;
+    nookbit::VerifySavedPlanUseCase verify(settings, rules, scanner, planner, hasher, history);
+    expect(verify.execute(frozen.value().id, {sourcePath}).hasValue(),
+           "unchanged settings and rules should verify");
+
+    settings.settings.recursiveScan = true;
+    const auto changedSettings = verify.execute(frozen.value().id, {sourcePath});
+    expect(!changedSettings.hasValue() && changedSettings.error().code == "verify.settings_changed",
+           "post-save setting changes should fail verification");
+    settings.settings.recursiveScan = false;
+    rules.rules.rules.front().destinationRelativePath = L"Other";
+    const auto changedRules = verify.execute(frozen.value().id, {sourcePath});
+    expect(!changedRules.hasValue() && changedRules.error().code == "verify.rules_changed",
+           "post-save rule changes should fail verification even with the same version");
+}
+
+// 미리보기 뒤 원본 파일이 바뀌면 저장을 거부하는지 검사하는 함수.
+void testChangedFileCannotBeFrozen() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "stale-test directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "stale-test source should open");
+    if (!file.isOpen()) return;
+    file.write("before");
+    file.close();
+
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    nookbit::PreviewController controller(
+        pending,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
+        home,
+        directory.filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    controller.createPreview(home);
+    expect(controller.hasPreview(), "stale-test preview should be available");
+    expect(file.open(QIODevice::Append), "stale-test source should reopen");
+    if (!file.isOpen()) return;
+    file.write(" changed");
+    file.close();
+
+    controller.freezePreview();
+    expect(!controller.hasFrozenPlan() && !controller.hasPreview(),
+           "modified file should invalidate the preview");
+    expect(!QFile::exists(directory.filePath(QStringLiteral("history.sqlite"))),
+           "stale preview must not create a saved plan");
+    expect(QFile::exists(source), "stale rejection must leave the source in place");
+}
+
+} // namespace
+
+// 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
+int main(int argc, char* argv[]) {
+    QCoreApplication application(argc, argv);
+    testPreviewFromPendingFiles();
+    testChangedFileCannotBeFrozen();
+    testChangedRulesCannotBeFrozen();
+    testChangedSettingsCannotBeFrozen();
+    testChangedFileAfterSaveFailsVerification();
+    testTamperedSavedPlanFailsVerification();
+    if (failures == 0) {
+        std::cout << "All preview-controller tests passed.\n";
+        return 0;
+    }
+    std::cerr << failures << " preview-controller assertion(s) failed.\n";
+    return 1;
+}

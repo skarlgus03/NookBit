@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/nookbit">
+    <file alias="rules.json">rules/default.example.json</file>
+    <file alias="rules.schema.json">../schemas/rules.schema.json</file>
+    <file alias="001_initial.sql">../src/infrastructure/persistence_sqlite/migrations/001_initial.sql</file>
+  </qresource>
+</RCC>

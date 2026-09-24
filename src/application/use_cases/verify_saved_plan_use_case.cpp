@@ -1,0 +1,77 @@
+#include "application/use_cases/verify_saved_plan_use_case.hpp"
+
+#include "application/use_cases/plan_signature.hpp"
+
+#include <algorithm>
+
+namespace nookbit {
+
+// 이력 읽기와 현재 상태 재검사에 필요한 기능을 받는 생성자.
+VerifySavedPlanUseCase::VerifySavedPlanUseCase(ISettingsRepository& settings,
+                                               IRuleSetRepository& rules,
+                                               IScanner& scanner,
+                                               IPlanner& planner,
+                                               IPlanHasher& hasher,
+                                               IHistoryRepository& history)
+    : settings_(settings), rules_(rules), scanner_(scanner), planner_(planner),
+      hasher_(hasher), history_(history) {}
+
+// DB에서 계획을 다시 읽고 해시와 현재 계획을 비교하는 함수.
+Result<OperationPlan> VerifySavedPlanUseCase::execute(
+    const PlanId& planId,
+    const std::vector<std::filesystem::path>& selectedFiles,
+    PlanStatus expectedStatus) {
+    if (planId.empty() || selectedFiles.empty()) {
+        return Result<OperationPlan>::failure({
+            "verify.input_invalid", "A saved plan and its selected files are required.",
+        });
+    }
+    auto loaded = history_.incompletePlans();
+    if (!loaded) return Result<OperationPlan>::failure(loaded.error());
+    const auto found = std::find_if(loaded.value().begin(), loaded.value().end(),
+                                    [&planId](const OperationPlan& plan) {
+                                        return plan.id == planId;
+                                    });
+    if (found == loaded.value().end()) {
+        return Result<OperationPlan>::failure({
+            "verify.plan_missing", "The saved plan could not be found.",
+        });
+    }
+    const auto& saved = *found;
+    if (saved.status != expectedStatus ||
+        !PlanSignature::isSha256Hex(saved.planHash) ||
+        saved.planHash != hasher_.sha256(PlanSignature::approvalPayload(saved))) {
+        return Result<OperationPlan>::failure({
+            "verify.plan_modified", "The saved plan is not an intact unapproved plan.",
+        });
+    }
+
+    auto settings = settings_.load();
+    if (!settings) return Result<OperationPlan>::failure(settings.error());
+    if (saved.settingsRevision != hasher_.sha256(PlanSignature::settings(settings.value()))) {
+        return Result<OperationPlan>::failure({
+            "verify.settings_changed", "Settings changed after the plan was saved.",
+        });
+    }
+    auto rules = rules_.load();
+    if (!rules) return Result<OperationPlan>::failure(rules.error());
+    if (saved.ruleSetVersion != rules.value().version ||
+        saved.rulesRevision != hasher_.sha256(PlanSignature::rules(rules.value()))) {
+        return Result<OperationPlan>::failure({
+            "verify.rules_changed", "Rules changed after the plan was saved.",
+        });
+    }
+
+    auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
+    if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
+    auto current = planner_.buildPlan(snapshot.value(), settings.value(), rules.value());
+    if (!current) return Result<OperationPlan>::failure(current.error());
+    if (PlanSignature::planContents(saved) != PlanSignature::planContents(current.value())) {
+        return Result<OperationPlan>::failure({
+            "verify.plan_stale", "Files or proposed destinations changed after the plan was saved.",
+        });
+    }
+    return Result<OperationPlan>::success(saved);
+}
+
+} // namespace nookbit
