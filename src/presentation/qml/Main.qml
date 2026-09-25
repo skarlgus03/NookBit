@@ -198,8 +198,36 @@ ApplicationWindow {
             }
             Button {
                 text: qsTr("저장 계획 검사")
-                enabled: previewController.hasFrozenPlan
+                enabled: previewController.hasFrozenPlan && !previewController.hasApprovedPlan
                 onClicked: previewController.verifySavedPlan()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            Button {
+                text: qsTr("파일 하나 승인")
+                enabled: previewController.hasFrozenPlan && !previewController.hasApprovedPlan
+                         && pendingFiles.count === 1 && previewController.steps.length === 1
+                         && previewController.steps[0].status === qsTr("예정")
+                onClicked: previewController.approvePlan()
+            }
+            Button {
+                text: qsTr("승인한 파일 이동")
+                enabled: previewController.hasApprovedPlan && pendingFiles.count === 1
+                onClicked: previewController.moveApprovedFile()
+            }
+            Button {
+                text: qsTr("마지막 이동 되돌리기")
+                enabled: previewController.canUndo
+                onClicked: previewController.undoLastMove()
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                text: qsTr("한 번에 파일 하나만 이동할 수 있어요.")
+                color: "#67716a"
             }
         }
 
@@ -277,7 +305,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             text: pendingFiles.lastMessage.length > 0
                   ? pendingFiles.lastMessage
-                  : qsTr("미리보기는 읽기 전용입니다. 실제 이동과 승인은 아직 실행되지 않아요.")
+                  : qsTr("승인 전에는 파일을 이동하지 않습니다.")
             color: "#426349"
             wrapMode: Text.WordWrap
         }

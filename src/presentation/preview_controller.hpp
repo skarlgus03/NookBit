@@ -17,7 +17,7 @@
 
 namespace nookbit {
 
-/// 대기 파일을 읽기 전용 미리보기 유스케이스에 연결하는 화면 컨트롤러.
+/// 대기 파일의 미리보기와 단일 파일 승인·실행·되돌리기를 연결하는 화면 컨트롤러.
 class PreviewController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList steps READ steps NOTIFY previewChanged)
@@ -26,6 +26,8 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString recoveryNotice READ recoveryNotice NOTIFY recoveryNoticeChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool hasFrozenPlan READ hasFrozenPlan NOTIFY previewChanged)
+    Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
 
 public:
@@ -60,6 +62,10 @@ public:
     /// 현재 미리보기를 SQLite에 고정 저장했는지 반환하는 함수.
     [[nodiscard]] bool hasFrozenPlan() const noexcept;
 
+    [[nodiscard]] bool hasApprovedPlan() const noexcept;
+
+    [[nodiscard]] bool canUndo() const noexcept;
+
     /// 처음 제안할 정리 목적지 루트를 반환하는 함수.
     [[nodiscard]] QString defaultDestinationRoot() const;
 
@@ -71,6 +77,15 @@ public:
 
     /// 저장된 계획을 DB에서 다시 읽고 현재 상태와 비교하는 함수.
     Q_INVOKABLE bool verifySavedPlan();
+
+    /// 저장된 단일 파일 계획을 다시 검사하고 명시적 승인을 기록하는 함수.
+    Q_INVOKABLE void approvePlan();
+
+    /// 승인된 단일 파일을 다시 검사한 뒤 실제로 이동하는 함수.
+    Q_INVOKABLE void moveApprovedFile();
+
+    /// 마지막으로 이동한 파일을 원래 위치로 되돌리는 함수.
+    Q_INVOKABLE void undoLastMove();
 
     /// 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
     Q_INVOKABLE void clear();
@@ -90,9 +105,12 @@ private:
     Planner planner_;
     QtPlanHasher hasher_;
     SqliteHistoryRepository history_;
+    std::filesystem::path appDataRoot_;
     QString defaultDestinationRoot_;
     QString previewHomeRoot_;
     std::optional<OperationPlan> draft_;
+    std::optional<ApprovalRecord> approval_;
+    std::optional<PlanId> undoPlanId_;
     QVariantList steps_;
     QStringList warnings_;
     QString message_;

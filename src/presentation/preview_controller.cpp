@@ -1,8 +1,10 @@
 #include "presentation/preview_controller.hpp"
 
+#include "application/use_cases/approve_plan_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "infrastructure/filesystem/safe_executor.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -54,8 +56,9 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
     : QObject(parent),
       pendingFiles_(pendingFiles),
       rules_(std::move(rulesPath), std::move(schemaPath)),
-      planner_(ruleEngine_, std::move(appDataRoot)),
+      planner_(ruleEngine_, appDataRoot),
       history_(std::move(databasePath), std::move(migrationPath)),
+      appDataRoot_(std::move(appDataRoot)),
       defaultDestinationRoot_(std::move(defaultDestinationRoot)) {
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::rowsRemoved, this, [this] { clear(); });
@@ -85,6 +88,10 @@ bool PreviewController::hasPreview() const noexcept { return hasPreview_; }
 
 // 현재 미리보기를 SQLite에 고정 저장했는지 반환하는 함수.
 bool PreviewController::hasFrozenPlan() const noexcept { return hasFrozenPlan_; }
+
+bool PreviewController::hasApprovedPlan() const noexcept { return approval_.has_value(); }
+
+bool PreviewController::canUndo() const noexcept { return undoPlanId_.has_value(); }
 
 // 처음 제안할 정리 목적지 루트를 반환하는 함수.
 QString PreviewController::defaultDestinationRoot() const { return defaultDestinationRoot_; }
@@ -201,16 +208,104 @@ bool PreviewController::verifySavedPlan() {
     return true;
 }
 
+// 단일 파일 계획을 다시 검사한 뒤 승인 기록을 저장하는 함수.
+void PreviewController::approvePlan() {
+    if (!draft_ || !hasFrozenPlan_ || approval_ || pendingFiles_.count() != 1 ||
+        draft_->steps.size() != 1 || draft_->steps.front().status != StepStatus::Planned) {
+        message_ = QStringLiteral("승인하려면 이동 예정인 파일 하나의 계획을 고정·저장해 주세요.");
+        emit previewChanged();
+        return;
+    }
+    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
+    VerifySavedPlanUseCase verifier(settings, rules_, scanner_, planner_, hasher_, history_);
+    ApprovePlanUseCase approver(verifier, history_);
+    const auto paths = pendingFiles_.filePaths();
+    const std::vector<std::filesystem::path> selectedFiles = {
+        std::filesystem::path(paths.front().toStdWString())};
+    const auto result = approver.execute(draft_->id, selectedFiles);
+    if (!result) {
+        message_ = QStringLiteral("승인하지 못했어요. 새 미리보기가 필요할 수 있어요: %1")
+                       .arg(QString::fromStdString(result.error().message));
+        emit previewChanged();
+        return;
+    }
+    approval_ = result.value();
+    message_ = QStringLiteral("파일 하나의 이동을 승인했어요. 실제 이동은 '승인한 파일 이동'을 눌러야 시작돼요.");
+    emit previewChanged();
+}
+
+// 승인된 파일 하나를 다시 검증하고 실행하는 함수.
+void PreviewController::moveApprovedFile() {
+    if (!draft_ || !approval_ || pendingFiles_.count() != 1 || previewHomeRoot_.isEmpty()) {
+        message_ = QStringLiteral("먼저 파일 하나의 저장 계획을 승인해 주세요.");
+        emit previewChanged();
+        return;
+    }
+    const auto paths = pendingFiles_.filePaths();
+    const std::vector<std::filesystem::path> selectedFiles = {
+        std::filesystem::path(paths.front().toStdWString())};
+    const auto loaded = history_.loadPlan(draft_->id);
+    if (!loaded || loaded.value().status != PlanStatus::Approved) {
+        approval_.reset();
+        message_ = QStringLiteral("승인된 계획을 읽지 못했어요. 새 미리보기부터 다시 시작해 주세요.");
+        emit previewChanged();
+        return;
+    }
+    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
+    SafeExecutor executor(settings, rules_, scanner_, planner_, hasher_, history_, appDataRoot_);
+    const auto result = executor.execute(loaded.value(), *approval_, selectedFiles);
+    if (!result) {
+        const auto current = history_.loadPlan(draft_->id);
+        if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
+        message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
+                       .arg(QString::fromStdString(result.error().message));
+        emit previewChanged();
+        return;
+    }
+    const auto movedPlanId = draft_->id;
+    pendingFiles_.removeAt(0);
+    undoPlanId_ = movedPlanId;
+    message_ = QStringLiteral("파일을 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.");
+    emit previewChanged();
+}
+
+// 마지막으로 이동한 단일 파일 계획을 안전하게 되돌리는 함수.
+void PreviewController::undoLastMove() {
+    if (!undoPlanId_) {
+        message_ = QStringLiteral("되돌릴 이동 작업이 없어요.");
+        emit previewChanged();
+        return;
+    }
+    SessionSettingsRepository settings(std::filesystem::path(defaultDestinationRoot_.toStdWString()));
+    SafeExecutor executor(settings, rules_, scanner_, planner_, hasher_, history_, appDataRoot_);
+    const auto result = executor.rollback(*undoPlanId_);
+    if (!result) {
+        const auto current = history_.loadPlan(*undoPlanId_);
+        if (current && current.value().status != PlanStatus::Completed &&
+            current.value().status != PlanStatus::Failed) {
+            undoPlanId_.reset();
+        }
+        message_ = QStringLiteral("되돌리지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
+                       .arg(QString::fromStdString(result.error().message));
+        emit previewChanged();
+        return;
+    }
+    undoPlanId_.reset();
+    message_ = QStringLiteral("파일을 원래 위치로 되돌렸어요.");
+    emit previewChanged();
+}
+
 // 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
 void PreviewController::clear() {
     if (steps_.isEmpty() && warnings_.isEmpty() && message_.isEmpty() &&
-        !hasPreview_ && !hasFrozenPlan_ && !draft_) return;
+        !hasPreview_ && !hasFrozenPlan_ && !draft_ && !approval_) return;
     steps_.clear();
     warnings_.clear();
     message_.clear();
     hasPreview_ = false;
     hasFrozenPlan_ = false;
     draft_.reset();
+    approval_.reset();
     previewHomeRoot_.clear();
     emit previewChanged();
 }
@@ -222,6 +317,7 @@ void PreviewController::showError(const QString& message) {
     hasPreview_ = false;
     hasFrozenPlan_ = false;
     draft_.reset();
+    approval_.reset();
     previewHomeRoot_.clear();
     message_ = message;
     emit previewChanged();

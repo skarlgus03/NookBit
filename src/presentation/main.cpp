@@ -9,6 +9,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 
 #include <cstdlib>
@@ -64,14 +65,18 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection);
     engine.loadFromModule(QStringLiteral("NookBit"), QStringLiteral("Main"));
 
-    // 자동 검사에서는 화면 객체 생성까지만 확인하고 이벤트 루프에 들어가지 않는다.
+    // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
         const nookbit::JsonRuleSetRepository bundledRules(
             QStringLiteral(":/nookbit/rules.json"),
             QStringLiteral(":/nookbit/rules.schema.json"));
         const bool ready = !engine.rootObjects().isEmpty() && bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql"));
-        return ready ? EXIT_SUCCESS : EXIT_FAILURE;
+        if (!ready) {
+            return EXIT_FAILURE;
+        }
+        QTimer::singleShot(0, &application, &QCoreApplication::quit);
+        return application.exec();
     }
 
     return application.exec();
