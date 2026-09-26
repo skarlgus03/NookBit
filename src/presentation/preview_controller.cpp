@@ -5,6 +5,7 @@
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/filesystem/recovery_service.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -76,11 +77,81 @@ QString PreviewController::message() const { return message_; }
 // 시작 시 발견한 미완료 작업 안내를 반환하는 함수.
 QString PreviewController::recoveryNotice() const { return recoveryNotice_; }
 
+// 사용자가 확인할 중단 작업 목록을 반환하는 함수.
+QVariantList PreviewController::recoveryCases() const { return recoveryCases_; }
+
+// 복구 화면의 마지막 검사 결과를 반환하는 함수.
+QString PreviewController::recoveryMessage() const { return recoveryMessage_; }
+
 // 시작 시 복구 검사 결과를 화면에 전달하는 함수.
 void PreviewController::setRecoveryNotice(QString notice) {
     if (recoveryNotice_ == notice) return;
     recoveryNotice_ = std::move(notice);
     emit recoveryNoticeChanged();
+}
+
+// 중단 작업의 현재 원본·목적지 상태를 다시 읽는 함수.
+void PreviewController::refreshRecoveryCases() {
+    RecoveryService recovery(history_, scanner_, hasher_);
+    auto inspected = recovery.inspectCases();
+    if (!inspected) {
+        recoveryMessage_ = QStringLiteral("복구 기록을 읽지 못했어요: %1")
+                               .arg(QString::fromStdString(inspected.error().message));
+        emit recoveryCasesChanged();
+        return;
+    }
+    recoveryCases_.clear();
+    for (const auto& item : inspected.value()) {
+        // 파일 검사 상태를 복구 화면의 한국어 문구로 바꾸는 함수.
+        const auto stateText = [](FileProbe state) -> QString {
+            switch (state) {
+            case FileProbe::Missing: return QStringLiteral("없음");
+            case FileProbe::Matches: return QStringLiteral("기록과 일치");
+            case FileProbe::Different: return QStringLiteral("다른 파일");
+            case FileProbe::Unavailable: return QStringLiteral("확인 불가");
+            }
+            return QStringLiteral("확인 불가");
+        };
+        QString detail;
+        if (!item.contentHashAvailable) {
+            detail = QStringLiteral("이전 기록에는 파일 내용 해시가 없어 자동 확정할 수 없어요.");
+        } else if (!item.planIntact || !item.originKnown) {
+            detail = QStringLiteral("계획 기록이나 중단 시점을 신뢰할 수 없어 자동 확정할 수 없어요.");
+        } else if (item.canResolve) {
+            detail = QStringLiteral("한 곳에만 원래 파일이 있어, 파일을 옮기지 않고 기록만 정리할 수 있어요.");
+        } else {
+            detail = QStringLiteral("위치가 모호해요. 두 파일을 직접 확인한 뒤 다시 검사해 주세요. 앱은 파일을 건드리지 않아요.");
+        }
+        QVariantMap row;
+        row.insert(QStringLiteral("planId"), QString::fromStdString(item.planId));
+        row.insert(QStringLiteral("source"), displayPath(item.source));
+        row.insert(QStringLiteral("destination"), displayPath(item.destination));
+        row.insert(QStringLiteral("sourceState"), stateText(item.sourceState));
+        row.insert(QStringLiteral("destinationState"), stateText(item.destinationState));
+        row.insert(QStringLiteral("canResolve"), item.canResolve);
+        row.insert(QStringLiteral("detail"), detail);
+        recoveryCases_.append(row);
+    }
+    recoveryMessage_ = QStringLiteral("현재 파일 상태를 다시 확인했어요. 파일은 이동하지 않았어요.");
+    setRecoveryNotice(recoveryCases_.isEmpty()
+        ? QString() : QStringLiteral("확인이 필요한 중단 작업 %1건이 있어요. 파일은 건드리지 않았어요.")
+                          .arg(recoveryCases_.size()));
+    emit recoveryCasesChanged();
+}
+
+// 파일 위치를 다시 검증하고 확실한 작업 기록만 정리하는 함수.
+void PreviewController::resolveRecoveryCase(const QString& planId) {
+    RecoveryService recovery(history_, scanner_, hasher_);
+    auto resolved = recovery.resolveCase(planId.toStdString());
+    if (!resolved) {
+        recoveryMessage_ = QStringLiteral("기록을 정리하지 못했어요: %1")
+                               .arg(QString::fromStdString(resolved.error().message));
+        emit recoveryCasesChanged();
+        return;
+    }
+    refreshRecoveryCases();
+    recoveryMessage_ = QStringLiteral("파일을 옮기지 않고 현재 상태에 맞게 작업 기록을 정리했어요.");
+    emit recoveryCasesChanged();
 }
 
 // 유효한 미리보기 초안의 존재 여부를 반환하는 함수.

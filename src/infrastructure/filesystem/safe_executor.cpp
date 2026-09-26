@@ -72,7 +72,7 @@ Result<void> SafeExecutor::execute(
         step.value().source, step.value().destination, selectedFiles,
         settings.value().homeRoot, appDataRoot_);
     if (!safety) return safety;
-    auto fingerprint = scanFingerprint(scanner_, step.value().source);
+    auto fingerprint = scanFingerprint(scanner_, step.value().source, &hasher_);
     if (!fingerprint) return Result<void>::failure(fingerprint.error());
     if (!sameFingerprint(step.value().fingerprint, fingerprint.value())) {
         return Result<void>::failure({"execute.source_changed", "Selected file changed before execution."});
@@ -93,7 +93,7 @@ Result<void> SafeExecutor::execute(
         if (!planFailed) return planFailed;
         return moved;
     }
-    auto movedFingerprint = scanFingerprint(scanner_, step.value().destination);
+    auto movedFingerprint = scanFingerprint(scanner_, step.value().destination, &hasher_);
     if (!movedFingerprint ||
         !sameFingerprint(step.value().fingerprint, movedFingerprint.value())) {
         auto stepRecovery = history_.appendEvent(
@@ -139,6 +139,12 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
     }
     auto step = singlePlannedStep(plan, StepStatus::Applied);
     if (!step) return Result<void>::failure(step.error());
+    if (!step.value().fingerprint.sha256 ||
+        !PlanSignature::isSha256Hex(*step.value().fingerprint.sha256)) {
+        return Result<void>::failure({
+            "rollback.content_hash_missing", "Undo requires a saved file content hash.",
+        });
+    }
     if (!step.value().source.is_absolute() || !step.value().destination.is_absolute() ||
         !appDataRoot_.is_absolute() ||
         PathSafetyValidator::isWithin(step.value().source, appDataRoot_) ||
@@ -147,7 +153,7 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
             "rollback.unsafe_path", "Undo would touch an invalid or protected path.",
         });
     }
-    auto fingerprint = scanFingerprint(scanner_, step.value().destination);
+    auto fingerprint = scanFingerprint(scanner_, step.value().destination, &hasher_);
     if (!fingerprint) return Result<void>::failure(fingerprint.error());
     if (!sameFingerprint(step.value().fingerprint, fingerprint.value())) {
         return Result<void>::failure({"rollback.destination_changed", "Moved file changed after execution."});
@@ -174,7 +180,7 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
             "rollback.needs_recovery", "Undo did not complete; inspect the journal before retrying.",
         });
     }
-    auto returnedFingerprint = scanFingerprint(scanner_, step.value().source);
+    auto returnedFingerprint = scanFingerprint(scanner_, step.value().source, &hasher_);
     if (!returnedFingerprint ||
         !sameFingerprint(step.value().fingerprint, returnedFingerprint.value())) {
         auto stepRecovery = history_.appendEvent(

@@ -6,11 +6,14 @@
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "infrastructure/filesystem/recovery_service.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -475,6 +478,69 @@ void testMultipleFilesCannotBeApproved() {
            "multi-file approval attempt must not move either file");
 }
 
+// 중단 작업이 화면에 나타나고 확인 후 기록만 정리되는지 검사하는 함수.
+void testRecoveryCasesInController() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "recovery-screen directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile sourceFile(source);
+    expect(sourceFile.open(QIODevice::WriteOnly), "recovery-screen source should open");
+    if (!sourceFile.isOpen()) return;
+    sourceFile.write("original bytes");
+    sourceFile.close();
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto databasePath = directory.filePath(QStringLiteral("history.sqlite"));
+    const auto migrationPath = projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
+    nookbit::PreviewController controller(
+        pending, projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
+        home, databasePath, migrationPath);
+    controller.createPreview(home);
+    controller.freezePreview();
+    controller.approvePlan();
+    expect(controller.hasApprovedPlan(), "recovery-screen plan should be approved");
+    if (!controller.hasApprovedPlan()) return;
+    nookbit::SqliteHistoryRepository history(databasePath, migrationPath);
+    auto plans = history.incompletePlans();
+    expect(plans.hasValue() && plans.value().size() == 1,
+           "recovery-screen plan should be readable");
+    if (!plans || plans.value().size() != 1) return;
+    const auto& plan = plans.value().front();
+    const auto& step = plan.steps.front();
+    expect(history.appendEvent(
+               nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(),
+           "recovery-screen execution should begin");
+    expect(history.appendEvent(
+               nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::IntentRecorded}).hasValue(),
+           "recovery-screen intent should be recorded");
+    const auto destination = QString::fromStdWString(step.destination.wstring());
+    expect(QDir().mkpath(QFileInfo(destination).absolutePath()),
+           "recovery-screen destination parent should exist");
+    expect(QFile::copy(source, destination), "recovery-screen copy should be created");
+    nookbit::FilesystemScanner scanner;
+    nookbit::QtPlanHasher hasher;
+    nookbit::RecoveryService recovery(history, scanner, hasher);
+    auto reconciled = recovery.reconcile();
+    expect(reconciled.hasValue() && reconciled.value().needsAttention.size() == 1,
+           "ambiguous recovery-screen plan should require attention");
+    controller.refreshRecoveryCases();
+    expect(controller.recoveryCases().size() == 1 &&
+               !controller.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
+           "screen should show ambiguity without offering confirmation");
+    expect(QFile::remove(destination), "test copy should be removed");
+    controller.refreshRecoveryCases();
+    expect(controller.recoveryCases().size() == 1 &&
+               controller.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
+           "screen should offer confirmation when only the matching source remains");
+    controller.resolveRecoveryCase(QString::fromStdString(plan.id));
+    expect(controller.recoveryCases().isEmpty() && QFile::exists(source),
+           "screen confirmation should clear the record without moving the source");
+}
+
 } // namespace
 
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
@@ -488,6 +554,7 @@ int main(int argc, char* argv[]) {
     testTamperedSavedPlanFailsVerification();
     testSingleFileApproveMoveUndo();
     testMultipleFilesCannotBeApproved();
+    testRecoveryCasesInController();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";
         return 0;

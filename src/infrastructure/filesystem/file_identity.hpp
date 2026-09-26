@@ -19,12 +19,14 @@ enum class FileProbe {
 /// 한 경로를 스캔해 현재 파일 지문을 반환하는 함수.
 [[nodiscard]] Result<FileFingerprint> scanFingerprint(
     IScanner& scanner,
-    const std::filesystem::path& path);
+    const std::filesystem::path& path,
+    const IPlanHasher* hasher = nullptr);
 
 /// 파일이 없거나, 같은 파일이거나, 다른 파일인지 구분하는 함수.
 [[nodiscard]] FileProbe probeFile(
     IScanner& scanner,
     const std::filesystem::path& path,
-    const FileFingerprint& expected);
+    const FileFingerprint& expected,
+    const IPlanHasher* hasher = nullptr);
 
 } // namespace nookbit

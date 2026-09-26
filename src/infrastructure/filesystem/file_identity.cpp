@@ -1,6 +1,7 @@
 #include "infrastructure/filesystem/file_identity.hpp"
 
 #include <system_error>
+#include <utility>
 
 namespace nookbit {
 
@@ -13,7 +14,8 @@ bool sameFingerprint(const FileFingerprint& expected, const FileFingerprint& act
 }
 
 // 한 경로를 스캔해 현재 파일 지문을 반환하는 함수.
-Result<FileFingerprint> scanFingerprint(IScanner& scanner, const std::filesystem::path& path) {
+Result<FileFingerprint> scanFingerprint(IScanner& scanner, const std::filesystem::path& path,
+                                        const IPlanHasher* hasher) {
     auto scanned = scanner.scan({{}, false, {}, {path}});
     if (!scanned) return Result<FileFingerprint>::failure(scanned.error());
     if (scanned.value().files.size() != 1) {
@@ -21,13 +23,27 @@ Result<FileFingerprint> scanFingerprint(IScanner& scanner, const std::filesystem
             "identity.file_missing", "Expected exactly one accessible selected file.",
         });
     }
-    return Result<FileFingerprint>::success(scanned.value().files.front().fingerprint);
+    auto fingerprint = scanned.value().files.front().fingerprint;
+    if (hasher) {
+        auto digest = hasher->sha256File(path);
+        if (!digest) return Result<FileFingerprint>::failure(digest.error());
+        auto checked = scanner.scan({{}, false, {}, {path}});
+        if (!checked || checked.value().files.size() != 1 ||
+            !sameFingerprint(fingerprint, checked.value().files.front().fingerprint)) {
+            return Result<FileFingerprint>::failure({
+                "identity.changed_during_hash", "File changed while its content was hashed.",
+            });
+        }
+        fingerprint.sha256 = std::move(digest.value());
+    }
+    return Result<FileFingerprint>::success(std::move(fingerprint));
 }
 
 // 파일이 없거나, 같은 파일이거나, 다른 파일인지 구분하는 함수.
 FileProbe probeFile(IScanner& scanner,
                     const std::filesystem::path& path,
-                    const FileFingerprint& expected) {
+                    const FileFingerprint& expected,
+                    const IPlanHasher* hasher) {
     std::error_code error;
     const auto status = std::filesystem::symlink_status(path, error);
     if (error == std::errc::no_such_file_or_directory) return FileProbe::Missing;
@@ -35,7 +51,7 @@ FileProbe probeFile(IScanner& scanner,
     if (!std::filesystem::exists(status)) return FileProbe::Missing;
     if (std::filesystem::is_symlink(status) ||
         !std::filesystem::is_regular_file(status)) return FileProbe::Unavailable;
-    auto fingerprint = scanFingerprint(scanner, path);
+    auto fingerprint = scanFingerprint(scanner, path, expected.sha256 ? hasher : nullptr);
     if (!fingerprint) return FileProbe::Unavailable;
     return sameFingerprint(expected, fingerprint.value())
         ? FileProbe::Matches : FileProbe::Different;

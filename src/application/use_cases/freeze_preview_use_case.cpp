@@ -1,5 +1,6 @@
 #include "application/use_cases/freeze_preview_use_case.hpp"
 
+#include "application/use_cases/content_fingerprint.hpp"
 #include "application/use_cases/plan_signature.hpp"
 
 #include <algorithm>
@@ -69,6 +70,8 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     }
 
     OperationPlan frozen = draft;
+    auto hashed = attachContentHashes(frozen, scanner_, hasher_);
+    if (!hashed) return Result<OperationPlan>::failure(hashed.error());
     frozen.status = PlanStatus::Planned;
     frozen.planHash = hasher_.sha256(PlanSignature::approvalPayload(frozen));
     if (!PlanSignature::isSha256Hex(frozen.planHash)) {

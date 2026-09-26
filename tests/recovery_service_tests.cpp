@@ -126,6 +126,8 @@ void testIntentBeforeMove() {
     if (!approved) return;
     const auto& plan = approved.value().plan;
     const auto& step = plan.steps.front();
+    expect(step.fingerprint.sha256.has_value(),
+           "recovery plan should include a content hash");
     expect(scenario.history.appendEvent(
                nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(),
            "executing intent should be recorded");
@@ -299,6 +301,26 @@ void testAmbiguousFilesNeedAttention() {
     const auto repeated = recovery.reconcile();
     expect(repeated.hasValue() && repeated.value().needsAttention.size() == 1,
            "repeated recovery should keep unresolved plan visible");
+    const auto cases = recovery.inspectCases();
+    expect(cases.hasValue() && cases.value().size() == 1 && !cases.value().front().canResolve,
+           "ambiguous manual recovery should not offer a completion action");
+    expect(!recovery.resolveCase(plan.id).hasValue(),
+           "manual confirmation must refuse two occupied file locations");
+    expect(QFile::exists(scenario.source) && QFile::exists(destination),
+           "refused manual recovery must leave both files untouched");
+    expect(QFile::remove(destination), "test copy should be removed before reinspection");
+    const auto inspected = recovery.inspectCases();
+    expect(inspected.hasValue() && inspected.value().size() == 1 &&
+               inspected.value().front().canResolve,
+           "manual recovery should become available when one matching file remains");
+    expect(recovery.resolveCase(plan.id).hasValue(),
+           "manual recovery should confirm the verified source-only state");
+    const auto resolved = scenario.history.loadPlan(plan.id);
+    expect(resolved.hasValue() && resolved.value().status == nookbit::PlanStatus::Failed &&
+               resolved.value().steps.front().status == nookbit::StepStatus::Failed,
+           "source-only interrupted move should be recorded as failed");
+    expect(QFile::exists(scenario.source) && !QFile::exists(destination),
+           "manual recovery should not move the remaining file");
 }
 
 } // namespace

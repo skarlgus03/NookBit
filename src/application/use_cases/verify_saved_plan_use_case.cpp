@@ -1,5 +1,6 @@
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 
+#include "application/use_cases/content_fingerprint.hpp"
 #include "application/use_cases/plan_signature.hpp"
 
 #include <algorithm>
@@ -66,6 +67,8 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
     auto current = planner_.buildPlan(snapshot.value(), settings.value(), rules.value());
     if (!current) return Result<OperationPlan>::failure(current.error());
+    auto hashed = attachContentHashes(current.value(), scanner_, hasher_);
+    if (!hashed) return Result<OperationPlan>::failure(hashed.error());
     if (PlanSignature::planContents(saved) != PlanSignature::planContents(current.value())) {
         return Result<OperationPlan>::failure({
             "verify.plan_stale", "Files or proposed destinations changed after the plan was saved.",

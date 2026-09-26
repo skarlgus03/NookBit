@@ -31,6 +31,9 @@ public:
     /// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
     [[nodiscard]] Result<OperationPlan> loadPlan(const PlanId& planId) const override;
 
+    /// 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.
+    [[nodiscard]] Result<PlanStatus> interruptedStatus(const PlanId& planId) const override;
+
 private:
     /// 데이터베이스를 열고 초기 Schema를 적용하는 함수.
     [[nodiscard]] Result<void> ensureOpen() const;

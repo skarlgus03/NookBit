@@ -86,6 +86,8 @@ public:
     [[nodiscard]] virtual Result<std::vector<OperationPlan>> incompletePlans() const = 0;
     /// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
     [[nodiscard]] virtual Result<OperationPlan> loadPlan(const PlanId& planId) const = 0;
+    /// 확인 필요 상태에 들어가기 직전 실행 또는 되돌리기 상태를 찾는 함수.
+    [[nodiscard]] virtual Result<PlanStatus> interruptedStatus(const PlanId& planId) const = 0;
 };
 
 /// 계획 스냅샷의 변조 검출용 SHA-256을 제공하는 포트.
@@ -96,6 +98,9 @@ public:
 
     /// 입력 바이트의 소문자 16진 SHA-256을 반환하는 함수.
     [[nodiscard]] virtual std::string sha256(std::string_view bytes) const = 0;
+
+    /// 파일을 나눠 읽으며 내용의 SHA-256을 반환하는 함수.
+    [[nodiscard]] virtual Result<std::string> sha256File(const std::filesystem::path& path) const = 0;
 };
 
 class ISettingsRepository {

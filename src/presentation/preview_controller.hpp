@@ -24,6 +24,8 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY previewChanged)
     Q_PROPERTY(QString message READ message NOTIFY previewChanged)
     Q_PROPERTY(QString recoveryNotice READ recoveryNotice NOTIFY recoveryNoticeChanged)
+    Q_PROPERTY(QVariantList recoveryCases READ recoveryCases NOTIFY recoveryCasesChanged)
+    Q_PROPERTY(QString recoveryMessage READ recoveryMessage NOTIFY recoveryCasesChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool hasFrozenPlan READ hasFrozenPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
@@ -53,8 +55,20 @@ public:
     /// 시작 시 발견한 미완료 작업 안내를 반환하는 함수.
     [[nodiscard]] QString recoveryNotice() const;
 
+    /// 사용자가 확인할 중단 작업 목록을 반환하는 함수.
+    [[nodiscard]] QVariantList recoveryCases() const;
+
+    /// 복구 화면의 마지막 검사 결과를 반환하는 함수.
+    [[nodiscard]] QString recoveryMessage() const;
+
     /// 시작 시 복구 검사 결과를 화면에 전달하는 함수.
     void setRecoveryNotice(QString notice);
+
+    /// 중단 작업의 현재 원본·목적지 상태를 다시 읽는 함수.
+    Q_INVOKABLE void refreshRecoveryCases();
+
+    /// 파일 위치를 다시 검증하고 확실한 작업 기록만 정리하는 함수.
+    Q_INVOKABLE void resolveRecoveryCase(const QString& planId);
 
     /// 유효한 미리보기 초안의 존재 여부를 반환하는 함수.
     [[nodiscard]] bool hasPreview() const noexcept;
@@ -93,6 +107,7 @@ public:
 signals:
     void previewChanged();
     void recoveryNoticeChanged();
+    void recoveryCasesChanged();
 
 private:
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
@@ -115,6 +130,8 @@ private:
     QStringList warnings_;
     QString message_;
     QString recoveryNotice_;
+    QVariantList recoveryCases_;
+    QString recoveryMessage_;
     bool hasPreview_{false};
     bool hasFrozenPlan_{false};
 };

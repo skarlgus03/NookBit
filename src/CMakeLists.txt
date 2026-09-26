@@ -1,6 +1,7 @@
 add_library(nookbit_core STATIC
   app/composition_root.cpp
   application/use_cases/create_preview_use_case.cpp
+  application/use_cases/content_fingerprint.cpp
   application/use_cases/approve_plan_use_case.cpp
   application/use_cases/freeze_preview_use_case.cpp
   application/use_cases/plan_signature.cpp

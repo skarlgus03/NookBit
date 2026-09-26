@@ -54,6 +54,9 @@ int main(int argc, char* argv[]) {
         databasePath,
         migrationPath);
     previewController.setRecoveryNotice(recoveryNotice);
+    if (!verifyUi && QFileInfo::exists(databasePath)) {
+        previewController.refreshRecoveryCases();
+    }
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);

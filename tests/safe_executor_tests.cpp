@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -106,6 +107,8 @@ void testApprovedSingleFileMoveAndUndo() {
     const auto frozen = freezer.execute(draft.value(), {sourcePath});
     expect(frozen.hasValue(), "draft should be frozen");
     if (!frozen) return;
+    expect(frozen.value().steps.front().fingerprint.sha256.has_value(),
+           "frozen plan should store the file content hash");
     const auto destination = QString::fromStdWString(frozen.value().steps.front().destination.wstring());
     expect(QFile::exists(source) && !QFile::exists(destination),
            "frozen plan should not change files");
@@ -135,6 +138,38 @@ void testApprovedSingleFileMoveAndUndo() {
     expect(!wrongHash.hasValue(), "wrong approval hash must not execute");
     expect(QFile::exists(source) && !QFile::exists(destination),
            "wrong approval hash must leave files unchanged");
+
+    const auto originalModified = QFileInfo(source).lastModified();
+    const QByteArray changed(original.size(), 'x');
+    expect(writeFile(source, changed), "same-size tampered source should be written");
+    QFile sourceFile(source);
+    expect(sourceFile.open(QIODevice::ReadWrite), "tampered source should reopen");
+    if (sourceFile.isOpen()) {
+        expect(sourceFile.setFileTime(originalModified, QFileDevice::FileModificationTime),
+               "source modification time should be restored");
+        sourceFile.close();
+    }
+    const auto tamperedSnapshot = scanner.scan({{}, false, {}, {sourcePath}});
+    expect(tamperedSnapshot.hasValue() && tamperedSnapshot.value().files.size() == 1 &&
+               tamperedSnapshot.value().files.front().fingerprint.size ==
+                   frozen.value().steps.front().fingerprint.size &&
+               tamperedSnapshot.value().files.front().fingerprint.modifiedUtcMs ==
+                   frozen.value().steps.front().fingerprint.modifiedUtcMs &&
+               tamperedSnapshot.value().files.front().fingerprint.fileId ==
+                   frozen.value().steps.front().fingerprint.fileId,
+           "tampered fixture should retain size, modified time and file ID");
+    const auto changedContent = executor.execute(approved.value(), approval.value(), {sourcePath});
+    expect(!changedContent.hasValue() && changedContent.error().code == "verify.plan_stale",
+           "same-size and same-time content change must be rejected by its hash");
+    expect(QFile::exists(source) && !QFile::exists(destination),
+           "content-hash rejection must not move the file");
+    expect(writeFile(source, original), "original test content should be restored");
+    expect(sourceFile.open(QIODevice::ReadWrite), "restored source should reopen");
+    if (sourceFile.isOpen()) {
+        expect(sourceFile.setFileTime(originalModified, QFileDevice::FileModificationTime),
+               "original source modification time should be restored");
+        sourceFile.close();
+    }
 
     expect(QDir().mkpath(QFileInfo(destination).absolutePath()),
            "collision parent should be available");
@@ -173,11 +208,30 @@ void testApprovedSingleFileMoveAndUndo() {
            "undo completion should be recorded");
 }
 
+// 큰 파일을 나눠 읽는 해시가 전체 바이트 해시와 같은지 검사하는 함수.
+void testStreamingContentHash() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "content-hash directory should be available");
+    if (!directory.isValid()) return;
+    const auto path = directory.filePath(QStringLiteral("large.bin"));
+    const QByteArray bytes(2 * 1024 * 1024 + 17, 'x');
+    expect(writeFile(path, bytes), "content-hash fixture should be written");
+    nookbit::QtPlanHasher hasher;
+    const auto digest = hasher.sha256File(std::filesystem::path(path.toStdWString()));
+    expect(digest.hasValue() && digest.value() == hasher.sha256(
+               std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size()))),
+           "streamed file hash should equal the in-memory hash");
+    expect(!hasher.sha256File(std::filesystem::path(
+               directory.filePath(QStringLiteral("missing.bin")).toStdWString())).hasValue(),
+           "missing file must not produce a content hash");
+}
+
 } // namespace
 
 // 안전한 단일 파일 이동·되돌리기 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
     if (failures == 0) {
         std::cout << "All safe-executor tests passed.\n";

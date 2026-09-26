@@ -344,7 +344,7 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
             case PlanStatus::Completed:
                 updateSql = QStringLiteral(
                     "UPDATE plans SET status = ? WHERE id = ? "
-                    "AND status IN ('executing','rolling_back')");
+                    "AND status IN ('executing','rolling_back','needs_recovery')");
                 fixedPreviousStates = true;
                 break;
             case PlanStatus::RollingBack:
@@ -352,8 +352,18 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
                     "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed')");
                 fixedPreviousStates = true;
                 break;
-            case PlanStatus::RolledBack: previousStatus = QStringLiteral("rolling_back"); break;
-            case PlanStatus::Failed: previousStatus = QStringLiteral("executing"); break;
+            case PlanStatus::RolledBack:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? "
+                    "AND status IN ('rolling_back','needs_recovery')");
+                fixedPreviousStates = true;
+                break;
+            case PlanStatus::Failed:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? "
+                    "AND status IN ('executing','needs_recovery')");
+                fixedPreviousStates = true;
+                break;
             case PlanStatus::NeedsRecovery:
                 updateSql = QStringLiteral(
                     "UPDATE plans SET status = ? WHERE id = ? AND status IN ('executing','rolling_back')");
@@ -374,16 +384,26 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
             case StepStatus::Applied:
                 updateSql = QStringLiteral(
                     "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
-                    "AND status IN ('intent_recorded','rollback_intent_recorded')");
+                    "AND status IN ('intent_recorded','rollback_intent_recorded','needs_recovery')");
                 fixedPreviousStates = true;
                 break;
             case StepStatus::RollbackIntentRecorded: previousStatus = QStringLiteral("applied"); break;
-            case StepStatus::RolledBack: previousStatus = QStringLiteral("rollback_intent_recorded"); break;
-            case StepStatus::Failed: previousStatus = QStringLiteral("intent_recorded"); break;
+            case StepStatus::RolledBack:
+                updateSql = QStringLiteral(
+                    "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
+                    "AND status IN ('rollback_intent_recorded','needs_recovery')");
+                fixedPreviousStates = true;
+                break;
+            case StepStatus::Failed:
+                updateSql = QStringLiteral(
+                    "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
+                    "AND status IN ('intent_recorded','needs_recovery')");
+                fixedPreviousStates = true;
+                break;
             case StepStatus::NeedsRecovery:
                 updateSql = QStringLiteral(
                     "UPDATE steps SET status = ? WHERE id = ? AND plan_id = ? "
-                    "AND status IN ('intent_recorded','rollback_intent_recorded')");
+                    "AND status IN ('intent_recorded','rollback_intent_recorded','applied','rolled_back','failed','planned')");
                 fixedPreviousStates = true;
                 break;
             default: break;
@@ -456,6 +476,36 @@ Result<OperationPlan> SqliteHistoryRepository::loadPlan(const PlanId& planId) co
         return Result<OperationPlan>::failure({"history.plan_missing", "Plan was not found."});
     }
     return Result<OperationPlan>::success(std::move(plans.value().front()));
+}
+
+// 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.
+Result<PlanStatus> SqliteHistoryRepository::interruptedStatus(const PlanId& planId) const {
+    auto opened = ensureOpen();
+    if (!opened) return Result<PlanStatus>::failure(opened.error());
+    QSqlQuery events(database_);
+    events.prepare(QStringLiteral(
+        "SELECT payload_json FROM events WHERE plan_id = ? AND event_type = 'plan_status_changed' "
+        "ORDER BY id DESC"));
+    events.addBindValue(QString::fromStdString(planId));
+    if (!events.exec()) {
+        return Result<PlanStatus>::failure({
+            "history.select_events_failed", events.lastError().text().toStdString(),
+        });
+    }
+    while (events.next()) {
+        const auto payload = QJsonDocument::fromJson(events.value(0).toString().toUtf8());
+        if (!payload.isObject()) continue;
+        const auto state = payload.object().value(QStringLiteral("status")).toString();
+        if (state == QStringLiteral("executing")) {
+            return Result<PlanStatus>::success(PlanStatus::Executing);
+        }
+        if (state == QStringLiteral("rolling_back")) {
+            return Result<PlanStatus>::success(PlanStatus::RollingBack);
+        }
+    }
+    return Result<PlanStatus>::failure({
+        "history.recovery_origin_missing", "Cannot determine the interrupted operation.",
+    });
 }
 
 // 주어진 조건에 맞는 계획과 단계들을 DB에서 복원하는 함수.

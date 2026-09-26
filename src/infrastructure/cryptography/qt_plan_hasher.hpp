@@ -9,6 +9,9 @@ class QtPlanHasher final : public IPlanHasher {
 public:
     /// 입력 바이트의 소문자 16진 SHA-256을 계산하는 함수.
     [[nodiscard]] std::string sha256(std::string_view bytes) const override;
+
+    /// 파일 전체를 나눠 읽으며 SHA-256을 계산하는 함수.
+    [[nodiscard]] Result<std::string> sha256File(const std::filesystem::path& path) const override;
 };
 
 } // namespace nookbit

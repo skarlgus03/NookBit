@@ -38,6 +38,15 @@ ApplicationWindow {
             wrapMode: Text.WordWrap
         }
 
+        Button {
+            visible: previewController.recoveryCases.length > 0
+            text: qsTr("중단 작업 확인")
+            onClicked: {
+                previewController.refreshRecoveryCases()
+                recoveryDialog.open()
+            }
+        }
+
         Rectangle {
             id: dropZone
             property bool dragging: false
@@ -308,6 +317,87 @@ ApplicationWindow {
                   : qsTr("승인 전에는 파일을 이동하지 않습니다.")
             color: "#426349"
             wrapMode: Text.WordWrap
+        }
+    }
+
+    Dialog {
+        id: recoveryDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 760)
+        height: Math.min(root.height - 32, 560)
+        modal: true
+        title: qsTr("중단 작업 확인")
+        standardButtons: Dialog.Close
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("파일을 자동으로 옮기거나 삭제하지 않습니다. 원본과 목적지를 직접 확인해 주세요.")
+                wrapMode: Text.WordWrap
+            }
+            Button {
+                text: qsTr("파일 상태 다시 검사")
+                onClicked: previewController.refreshRecoveryCases()
+            }
+            Label {
+                Layout.fillWidth: true
+                text: previewController.recoveryMessage
+                wrapMode: Text.WordWrap
+                color: "#9b5c23"
+            }
+            ScrollView {
+                id: recoveryScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                Column {
+                    width: recoveryScroll.availableWidth
+                    spacing: 8
+
+                    Repeater {
+                        model: previewController.recoveryCases
+                        delegate: Frame {
+                            required property var modelData
+                            width: parent.width
+
+                            ColumnLayout {
+                                width: parent.width
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("작업 기록: ") + modelData.planId
+                                    font.bold: true
+                                    elide: Text.ElideMiddle
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("원본 (") + modelData.sourceState + "): " + modelData.source
+                                    wrapMode: Text.WrapAnywhere
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("목적지 (") + modelData.destinationState + "): " + modelData.destination
+                                    wrapMode: Text.WrapAnywhere
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.detail
+                                    wrapMode: Text.WordWrap
+                                    color: "#9b5c23"
+                                }
+                                Button {
+                                    text: qsTr("현재 상태로 기록 확정")
+                                    enabled: modelData.canResolve
+                                    onClicked: previewController.resolveRecoveryCase(modelData.planId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
