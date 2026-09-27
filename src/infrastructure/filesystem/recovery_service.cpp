@@ -9,13 +9,12 @@
 namespace nookbit {
 namespace {
 
-// 건너뛴 단계 외에 실제 파일 작업 단계 하나만 찾는 함수.
-const MoveStep* onlyActiveStep(const OperationPlan& plan) {
-    const MoveStep* active = nullptr;
+// 건너뛴 단계를 제외한 파일 작업 단계들을 찾는 함수.
+std::vector<const MoveStep*> activeSteps(const OperationPlan& plan) {
+    std::vector<const MoveStep*> active;
     for (const auto& step : plan.steps) {
         if (step.status == StepStatus::Skipped) continue;
-        if (active) return nullptr;
-        active = &step;
+        active.push_back(&step);
     }
     return active;
 }
@@ -26,10 +25,13 @@ bool isOnlyMatch(FileProbe matching, FileProbe missing) {
 }
 
 // 계획의 서명과 파일 내용 해시가 수동 복구에 충분한지 확인하는 함수.
-bool canTrustRecoveryPlan(const OperationPlan& plan, const MoveStep* step,
-                          IPlanHasher& hasher) {
-    return step && step->fingerprint.sha256 &&
-           PlanSignature::isSha256Hex(*step->fingerprint.sha256) &&
+bool canTrustRecoveryPlan(const OperationPlan& plan, IPlanHasher& hasher) {
+    const auto active = activeSteps(plan);
+    return !active.empty() &&
+           std::all_of(active.begin(), active.end(), [](const MoveStep* step) {
+               return step->fingerprint.sha256 &&
+                      PlanSignature::isSha256Hex(*step->fingerprint.sha256);
+           }) &&
            PlanSignature::isSha256Hex(plan.planHash) &&
            plan.planHash == hasher.sha256(PlanSignature::approvalPayload(plan));
 }
@@ -43,11 +45,9 @@ RecoveryService::RecoveryService(IHistoryRepository& history,
     : history_(history), scanner_(scanner), hasher_(hasher) {}
 
 // 불확실한 계획을 NeedsRecovery 상태로 기록하는 함수.
-Result<void> RecoveryService::markNeedsRecovery(
-    const OperationPlan& plan,
-    const MoveStep* step) {
-    if (step && step->status != StepStatus::NeedsRecovery &&
-        step->status != StepStatus::Skipped) {
+Result<void> RecoveryService::markNeedsRecovery(const OperationPlan& plan) {
+    for (const auto* step : activeSteps(plan)) {
+        if (step->status == StepStatus::NeedsRecovery) continue;
         auto marked = history_.appendEvent(
             StepStatusChanged{plan.id, step->id, StepStatus::NeedsRecovery});
         if (!marked) return marked;
@@ -71,14 +71,15 @@ Result<RecoveryReport> RecoveryService::reconcile() {
         if (plan.status != PlanStatus::Executing && plan.status != PlanStatus::RollingBack) {
             continue;
         }
-        const auto* step = onlyActiveStep(plan);
-        const bool intact = canTrustRecoveryPlan(plan, step, hasher_);
+        const auto active = activeSteps(plan);
+        const bool intact = active.size() == 1 && canTrustRecoveryPlan(plan, hasher_);
         if (!intact) {
-            auto marked = markNeedsRecovery(plan, step);
+            auto marked = markNeedsRecovery(plan);
             if (!marked) return Result<RecoveryReport>::failure(marked.error());
             report.needsAttention.push_back(plan.id);
             continue;
         }
+        const auto* step = active.front();
 
         if (plan.status == PlanStatus::Executing && step->status == StepStatus::Planned) {
             auto marked = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Failed});
@@ -166,7 +167,7 @@ Result<RecoveryReport> RecoveryService::reconcile() {
             ++report.reconciled;
             continue;
         }
-        auto marked = markNeedsRecovery(plan, step);
+        auto marked = markNeedsRecovery(plan);
         if (!marked) return Result<RecoveryReport>::failure(marked.error());
         report.needsAttention.push_back(plan.id);
     }
@@ -180,27 +181,46 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
     std::vector<RecoveryCase> cases;
     for (const auto& plan : loaded.value()) {
         if (plan.status != PlanStatus::NeedsRecovery) continue;
-        RecoveryCase item;
-        item.planId = plan.id;
-        const auto* step = onlyActiveStep(plan);
-        if (step) {
+        const auto active = activeSteps(plan);
+        if (active.empty()) {
+            RecoveryCase item;
+            item.planId = plan.id;
+            item.partIndex = 1;
+            item.partCount = 1;
+            cases.push_back(std::move(item));
+            continue;
+        }
+        const bool intact = canTrustRecoveryPlan(plan, hasher_);
+        auto origin = history_.interruptedStatus(plan.id);
+        const bool originKnown = origin &&
+            (origin.value() == PlanStatus::Executing || origin.value() == PlanStatus::RollingBack);
+        bool allAtSource = !active.empty();
+        bool allAtDestination = !active.empty();
+        const auto firstIndex = cases.size();
+        for (std::size_t index = 0; index < active.size(); ++index) {
+            const auto* step = active[index];
+            RecoveryCase item;
+            item.planId = plan.id;
+            item.partIndex = index + 1;
+            item.partCount = active.size();
             item.source = step->source;
             item.destination = step->destination;
             item.contentHashAvailable = step->fingerprint.sha256 &&
                 PlanSignature::isSha256Hex(*step->fingerprint.sha256);
-            item.planIntact = canTrustRecoveryPlan(plan, step, hasher_);
-            if (item.planIntact) {
+            item.planIntact = intact;
+            item.originKnown = originKnown;
+            if (intact) {
                 item.sourceState = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
                 item.destinationState = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
             }
+            allAtSource = allAtSource && isOnlyMatch(item.sourceState, item.destinationState);
+            allAtDestination = allAtDestination && isOnlyMatch(item.destinationState, item.sourceState);
+            cases.push_back(std::move(item));
         }
-        auto origin = history_.interruptedStatus(plan.id);
-        item.originKnown = origin && (origin.value() == PlanStatus::Executing ||
-                                       origin.value() == PlanStatus::RollingBack);
-        item.canResolve = item.planIntact && item.originKnown &&
-            (isOnlyMatch(item.sourceState, item.destinationState) ||
-             isOnlyMatch(item.destinationState, item.sourceState));
-        cases.push_back(std::move(item));
+        for (std::size_t index = firstIndex; index < cases.size(); ++index) {
+            cases[index].canResolve = intact && originKnown &&
+                (allAtSource || allAtDestination);
+        }
     }
     return Result<std::vector<RecoveryCase>>::success(std::move(cases));
 }
@@ -213,24 +233,31 @@ Result<void> RecoveryService::resolveCase(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     const auto& plan = loaded.value();
-    const auto* step = onlyActiveStep(plan);
-    if (plan.status != PlanStatus::NeedsRecovery || !canTrustRecoveryPlan(plan, step, hasher_)) {
+    const auto active = activeSteps(plan);
+    if (plan.status != PlanStatus::NeedsRecovery ||
+        !canTrustRecoveryPlan(plan, hasher_)) {
         return Result<void>::failure({
             "recovery.plan_untrusted", "The recovery record lacks a verified content hash or intact plan.",
         });
     }
     auto origin = history_.interruptedStatus(planId);
     if (!origin) return Result<void>::failure(origin.error());
-    const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
-    const auto destination = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
+    bool allAtSource = true;
+    bool allAtDestination = true;
+    for (const auto* step : active) {
+        const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
+        const auto destination = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
+        allAtSource = allAtSource && isOnlyMatch(source, destination);
+        allAtDestination = allAtDestination && isOnlyMatch(destination, source);
+    }
     StepStatus stepOutcome;
     PlanStatus planOutcome;
-    if (isOnlyMatch(source, destination)) {
+    if (allAtSource) {
         stepOutcome = origin.value() == PlanStatus::RollingBack
             ? StepStatus::RolledBack : StepStatus::Failed;
         planOutcome = origin.value() == PlanStatus::RollingBack
             ? PlanStatus::RolledBack : PlanStatus::Failed;
-    } else if (isOnlyMatch(destination, source)) {
+    } else if (allAtDestination) {
         stepOutcome = StepStatus::Applied;
         planOutcome = PlanStatus::Completed;
     } else {
@@ -238,7 +265,13 @@ Result<void> RecoveryService::resolveCase(const PlanId& planId) {
             "recovery.ambiguous", "File locations are still ambiguous; no file or record was changed.",
         });
     }
-    if (step->status != stepOutcome) {
+    for (const auto* step : active) {
+        if (step->status == stepOutcome) continue;
+        if (step->status != StepStatus::NeedsRecovery) {
+            auto pending = history_.appendEvent(
+                StepStatusChanged{planId, step->id, StepStatus::NeedsRecovery});
+            if (!pending) return pending;
+        }
         auto updated = history_.appendEvent(StepStatusChanged{planId, step->id, stepOutcome});
         if (!updated) return updated;
     }

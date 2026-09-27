@@ -63,12 +63,12 @@ class IExecutor {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
     virtual ~IExecutor() = default;
-    /// 승인된 계획의 선택 파일을 검증하고 실행하는 함수.
+    /// 승인된 계획의 선택 파일들을 검증하고 순서대로 실행하는 함수.
     [[nodiscard]] virtual Result<void> execute(
         const OperationPlan& plan,
         const ApprovalRecord& approval,
         const std::vector<std::filesystem::path>& selectedFiles) = 0;
-    /// 완료된 계획의 파일을 원래 위치로 되돌리는 함수.
+    /// 완료된 계획의 이동 파일들을 원래 위치로 되돌리는 함수.
     [[nodiscard]] virtual Result<void> rollback(const PlanId& planId) = 0;
 };
 

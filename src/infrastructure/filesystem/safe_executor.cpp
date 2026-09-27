@@ -14,20 +14,13 @@
 namespace nookbit {
 namespace {
 
-// 실행 대상 중 실제 이동할 단 한 단계를 찾는 함수.
-Result<MoveStep> singlePlannedStep(const OperationPlan& plan, StepStatus status) {
-    const auto found = std::find_if(plan.steps.begin(), plan.steps.end(),
-                                    [status](const MoveStep& step) {
-                                        return step.status == status;
-                                    });
-    if (found == plan.steps.end() ||
-        std::count_if(plan.steps.begin(), plan.steps.end(),
-                      [status](const MoveStep& step) { return step.status == status; }) != 1) {
-        return Result<MoveStep>::failure({
-            "execute.single_step_only", "This first executor supports one file operation per plan.",
-        });
+// 계획에서 지정된 상태의 파일 단계들을 순서대로 찾는 함수.
+std::vector<const MoveStep*> stepsWithStatus(const OperationPlan& plan, StepStatus status) {
+    std::vector<const MoveStep*> result;
+    for (const auto& step : plan.steps) {
+        if (step.status == status) result.push_back(&step);
     }
-    return Result<MoveStep>::success(*found);
+    return result;
 }
 
 } // namespace
@@ -43,7 +36,7 @@ SafeExecutor::SafeExecutor(ISettingsRepository& settings,
     : settings_(settings), rules_(rules), scanner_(scanner), planner_(planner),
       hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)) {}
 
-// DB에 승인된 단일 파일 계획을 덮어쓰기 없이 실행하는 함수.
+// 승인된 계획의 파일들을 덮어쓰기 없이 순서대로 실행하는 함수.
 Result<void> SafeExecutor::execute(
     const OperationPlan& plan,
     const ApprovalRecord& approval,
@@ -64,54 +57,91 @@ Result<void> SafeExecutor::execute(
         PlanSignature::planContents(saved) != PlanSignature::planContents(plan)) {
         return Result<void>::failure({"execute.plan_mismatch", "Requested plan differs from saved approval."});
     }
-    auto step = singlePlannedStep(saved, StepStatus::Planned);
-    if (!step) return Result<void>::failure(step.error());
+    const auto steps = stepsWithStatus(saved, StepStatus::Planned);
+    if (steps.empty()) {
+        return Result<void>::failure({"execute.no_steps", "There are no files to move."});
+    }
     auto settings = settings_.load();
     if (!settings) return Result<void>::failure(settings.error());
-    auto safety = PathSafetyValidator::validateMove(
-        step.value().source, step.value().destination, selectedFiles,
-        settings.value().homeRoot, appDataRoot_);
-    if (!safety) return safety;
-    auto fingerprint = scanFingerprint(scanner_, step.value().source, &hasher_);
-    if (!fingerprint) return Result<void>::failure(fingerprint.error());
-    if (!sameFingerprint(step.value().fingerprint, fingerprint.value())) {
-        return Result<void>::failure({"execute.source_changed", "Selected file changed before execution."});
+    for (const auto* step : steps) {
+        if (!step->fingerprint.sha256 ||
+            !PlanSignature::isSha256Hex(*step->fingerprint.sha256)) {
+            return Result<void>::failure({"execute.content_hash_missing", "Every move needs a content hash."});
+        }
+        auto safety = PathSafetyValidator::validateMove(
+            step->source, step->destination, selectedFiles,
+            settings.value().homeRoot, appDataRoot_);
+        if (!safety) return safety;
+        auto fingerprint = scanFingerprint(scanner_, step->source, &hasher_);
+        if (!fingerprint) return Result<void>::failure(fingerprint.error());
+        if (!sameFingerprint(step->fingerprint, fingerprint.value())) {
+            return Result<void>::failure({"execute.source_changed", "A selected file changed before execution."});
+        }
     }
 
     auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
-    auto intent = history_.appendEvent(
-        StepStatusChanged{plan.id, step.value().id, StepStatus::IntentRecorded});
-    if (!intent) return intent;
-
-    auto moved = WindowsFileMover::moveNoReplace(step.value().source, step.value().destination);
-    if (!moved) {
-        auto stepFailed = history_.appendEvent(
-            StepStatusChanged{plan.id, step.value().id, StepStatus::Failed});
-        if (!stepFailed) return stepFailed;
-        auto planFailed = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Failed});
-        if (!planFailed) return planFailed;
-        return moved;
-    }
-    auto movedFingerprint = scanFingerprint(scanner_, step.value().destination, &hasher_);
-    if (!movedFingerprint ||
-        !sameFingerprint(step.value().fingerprint, movedFingerprint.value())) {
-        auto stepRecovery = history_.appendEvent(
-            StepStatusChanged{plan.id, step.value().id, StepStatus::NeedsRecovery});
-        if (!stepRecovery) return stepRecovery;
-        auto planRecovery = history_.appendEvent(
-            PlanStatusChanged{plan.id, PlanStatus::NeedsRecovery});
-        if (!planRecovery) return planRecovery;
-        return Result<void>::failure({
-            "execute.destination_changed", "Moved file identity changed; manual recovery is required.",
-        });
-    }
-    auto applied = history_.appendEvent(
-        StepStatusChanged{plan.id, step.value().id, StepStatus::Applied});
-    if (!applied) {
-        return Result<void>::failure({
-            "execute.needs_recovery", "File moved, but recording completion failed; inspect the journal.",
-        });
+    std::vector<const MoveStep*> appliedSteps;
+    for (const auto* step : steps) {
+        auto intent = history_.appendEvent(
+            StepStatusChanged{plan.id, step->id, StepStatus::IntentRecorded});
+        if (!intent) {
+            if (appliedSteps.empty()) {
+                auto failed = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Failed});
+                if (!failed) return failed;
+                return intent;
+            }
+            auto rolled = rollbackAppliedSteps(saved, appliedSteps, PlanStatus::Failed, true);
+            if (!rolled) return rolled;
+            return Result<void>::failure({
+                "execute.batch_rolled_back", "A file could not start; earlier moves were undone.",
+            });
+        }
+        auto moved = WindowsFileMover::moveNoReplace(step->source, step->destination);
+        if (!moved) {
+            const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
+            const auto destination = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
+            if (source != FileProbe::Matches ||
+                (destination != FileProbe::Missing && destination != FileProbe::Different)) {
+                auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+                return Result<void>::failure({
+                    "execute.needs_recovery", "A move failed with uncertain file state; review is required.",
+                });
+            }
+            auto failedStep = history_.appendEvent(
+                StepStatusChanged{plan.id, step->id, StepStatus::Failed});
+            if (!failedStep) return failedStep;
+            if (appliedSteps.empty()) {
+                auto failedPlan = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Failed});
+                if (!failedPlan) return failedPlan;
+                return moved;
+            }
+            auto rolled = rollbackAppliedSteps(saved, appliedSteps, PlanStatus::Failed, true);
+            if (!rolled) return rolled;
+            return Result<void>::failure({
+                "execute.batch_rolled_back", "A file could not move; earlier moves were undone.",
+            });
+        }
+        auto movedFingerprint = scanFingerprint(scanner_, step->destination, &hasher_);
+        if (!movedFingerprint ||
+            !sameFingerprint(step->fingerprint, movedFingerprint.value())) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({
+                "execute.needs_recovery", "Moved file could not be verified; review is required.",
+            });
+        }
+        auto applied = history_.appendEvent(
+            StepStatusChanged{plan.id, step->id, StepStatus::Applied});
+        if (!applied) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({
+                "execute.needs_recovery", "File moved, but its completion record needs review.",
+            });
+        }
+        appliedSteps.push_back(step);
     }
     auto completed = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Completed});
     if (!completed) {
@@ -122,7 +152,88 @@ Result<void> SafeExecutor::execute(
     return Result<void>::success();
 }
 
-// 완료된 단일 파일 계획을 원래 위치로 안전하게 되돌리는 함수.
+// 확인 불가 상태를 기록하고 작업을 중단하는 함수.
+Result<void> SafeExecutor::markNeedsRecovery(const PlanId& planId) {
+    auto loaded = history_.loadPlan(planId);
+    if (!loaded) return Result<void>::failure(loaded.error());
+    for (const auto& step : loaded.value().steps) {
+        if (step.status == StepStatus::Skipped || step.status == StepStatus::NeedsRecovery) continue;
+        auto changed = history_.appendEvent(
+            StepStatusChanged{planId, step.id, StepStatus::NeedsRecovery});
+        if (!changed) return changed;
+    }
+    return history_.appendEvent(PlanStatusChanged{planId, PlanStatus::NeedsRecovery});
+}
+
+// 이미 적용된 단계들을 검증하고 역순으로 되돌려 최종 상태를 기록하는 함수.
+Result<void> SafeExecutor::rollbackAppliedSteps(
+    const OperationPlan& plan,
+    const std::vector<const MoveStep*>& applied,
+    PlanStatus finalStatus,
+    bool duringExecution) {
+    if (applied.empty()) {
+        return Result<void>::failure({"rollback.no_steps", "There are no applied files to undo."});
+    }
+    for (const auto* step : applied) {
+        if (!step->fingerprint.sha256 ||
+            !PlanSignature::isSha256Hex(*step->fingerprint.sha256) ||
+            !step->source.is_absolute() || !step->destination.is_absolute() ||
+            !appDataRoot_.is_absolute() ||
+            PathSafetyValidator::isWithin(step->source, appDataRoot_) ||
+            PathSafetyValidator::isWithin(step->destination, appDataRoot_) ||
+            probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
+            probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
+            if (duringExecution) {
+                auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+            }
+            return Result<void>::failure({
+                duringExecution ? "execute.rollback_needs_recovery" : "rollback.file_changed",
+                "An applied file cannot be safely returned; no file was overwritten.",
+            });
+        }
+    }
+    auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RollingBack});
+    if (!started) return started;
+    for (auto iterator = applied.rbegin(); iterator != applied.rend(); ++iterator) {
+        const auto* step = *iterator;
+        if (probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
+            probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({
+                "rollback.needs_recovery", "A file changed during undo; review is required.",
+            });
+        }
+        auto intent = history_.appendEvent(
+            StepStatusChanged{plan.id, step->id, StepStatus::RollbackIntentRecorded});
+        if (!intent) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return intent;
+        }
+        auto moved = WindowsFileMover::moveNoReplace(step->destination, step->source);
+        if (!moved ||
+            probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches ||
+            probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Missing) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({
+                "rollback.needs_recovery", "Undo stopped with uncertain file state; review is required.",
+            });
+        }
+        auto reverted = history_.appendEvent(
+            StepStatusChanged{plan.id, step->id, StepStatus::RolledBack});
+        if (!reverted) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return reverted;
+        }
+    }
+    return history_.appendEvent(PlanStatusChanged{plan.id, finalStatus});
+}
+
+// 완료된 계획의 이동 파일들을 역순으로 안전하게 되돌리는 함수.
 Result<void> SafeExecutor::rollback(const PlanId& planId) {
     OperationMutex operationLock;
     auto locked = operationLock.acquire();
@@ -137,72 +248,8 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
             "rollback.plan_invalid", "Only an intact completed or failed plan can be rolled back.",
         });
     }
-    auto step = singlePlannedStep(plan, StepStatus::Applied);
-    if (!step) return Result<void>::failure(step.error());
-    if (!step.value().fingerprint.sha256 ||
-        !PlanSignature::isSha256Hex(*step.value().fingerprint.sha256)) {
-        return Result<void>::failure({
-            "rollback.content_hash_missing", "Undo requires a saved file content hash.",
-        });
-    }
-    if (!step.value().source.is_absolute() || !step.value().destination.is_absolute() ||
-        !appDataRoot_.is_absolute() ||
-        PathSafetyValidator::isWithin(step.value().source, appDataRoot_) ||
-        PathSafetyValidator::isWithin(step.value().destination, appDataRoot_)) {
-        return Result<void>::failure({
-            "rollback.unsafe_path", "Undo would touch an invalid or protected path.",
-        });
-    }
-    auto fingerprint = scanFingerprint(scanner_, step.value().destination, &hasher_);
-    if (!fingerprint) return Result<void>::failure(fingerprint.error());
-    if (!sameFingerprint(step.value().fingerprint, fingerprint.value())) {
-        return Result<void>::failure({"rollback.destination_changed", "Moved file changed after execution."});
-    }
-    std::error_code sourceError;
-    if (std::filesystem::exists(step.value().source, sourceError)) {
-        return Result<void>::failure({
-            "rollback.source_occupied", "Original path is occupied; undo will not overwrite it.",
-        });
-    }
-    if (sourceError) {
-        return Result<void>::failure({
-            "rollback.source_unavailable", "Cannot inspect the original path for undo.",
-        });
-    }
-    auto started = history_.appendEvent(PlanStatusChanged{planId, PlanStatus::RollingBack});
-    if (!started) return started;
-    auto intent = history_.appendEvent(
-        StepStatusChanged{planId, step.value().id, StepStatus::RollbackIntentRecorded});
-    if (!intent) return intent;
-    auto moved = WindowsFileMover::moveNoReplace(step.value().destination, step.value().source);
-    if (!moved) {
-        return Result<void>::failure({
-            "rollback.needs_recovery", "Undo did not complete; inspect the journal before retrying.",
-        });
-    }
-    auto returnedFingerprint = scanFingerprint(scanner_, step.value().source, &hasher_);
-    if (!returnedFingerprint ||
-        !sameFingerprint(step.value().fingerprint, returnedFingerprint.value())) {
-        auto stepRecovery = history_.appendEvent(
-            StepStatusChanged{planId, step.value().id, StepStatus::NeedsRecovery});
-        if (!stepRecovery) return stepRecovery;
-        auto planRecovery = history_.appendEvent(
-            PlanStatusChanged{planId, PlanStatus::NeedsRecovery});
-        if (!planRecovery) return planRecovery;
-        return Result<void>::failure({
-            "rollback.source_changed", "Returned file identity changed; manual recovery is required.",
-        });
-    }
-    auto reverted = history_.appendEvent(
-        StepStatusChanged{planId, step.value().id, StepStatus::RolledBack});
-    if (!reverted) {
-        return Result<void>::failure({
-            "rollback.needs_recovery", "File returned, but recording undo failed.",
-        });
-    }
-    auto finished = history_.appendEvent(PlanStatusChanged{planId, PlanStatus::RolledBack});
-    if (!finished) return finished;
-    return Result<void>::success();
+    const auto applied = stepsWithStatus(plan, StepStatus::Applied);
+    return rollbackAppliedSteps(plan, applied, PlanStatus::RolledBack, false);
 }
 
 } // namespace nookbit

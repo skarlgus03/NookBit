@@ -447,22 +447,28 @@ void testSingleFileApproveMoveUndo() {
 #endif
 }
 
-// 여러 대기 파일에 대한 승인 시도는 실제 이동으로 이어지지 않아야 한다.
-void testMultipleFilesCannotBeApproved() {
+// 여러 대기 파일을 한 계획으로 승인하고 되돌릴 수 있는지 검사하는 함수.
+void testMultipleFilesCanBeMoved() {
     QTemporaryDir directory;
     expect(directory.isValid(), "multi-file directory should be available");
     if (!directory.isValid()) return;
     const auto first = directory.filePath(QStringLiteral("first.jpg"));
     const auto second = directory.filePath(QStringLiteral("second.jpg"));
+    const auto unmatched = directory.filePath(QStringLiteral("notes.txt"));
     for (const auto& path : {first, second}) {
         QFile file(path);
         expect(file.open(QIODevice::WriteOnly), "multi-file source should open");
         if (!file.isOpen()) return;
         file.write("content");
     }
+    QFile noteFile(unmatched);
+    expect(noteFile.open(QIODevice::WriteOnly) && noteFile.write("keep") == 4,
+           "unmatched file should be written");
+    noteFile.close();
     nookbit::PendingFilesModel pending;
     pending.addUrl(QUrl::fromLocalFile(first));
     pending.addUrl(QUrl::fromLocalFile(second));
+    pending.addUrl(QUrl::fromLocalFile(unmatched));
     const auto home = directory.filePath(QStringLiteral("organized"));
     nookbit::PreviewController controller(
         pending, projectPath("resources/rules/default.example.json"),
@@ -471,11 +477,26 @@ void testMultipleFilesCannotBeApproved() {
         home, directory.filePath(QStringLiteral("history.sqlite")),
         projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
     controller.createPreview(home);
+    const auto previewRows = controller.steps();
+    expect(previewRows.size() == 2, "both classified files should appear in preview");
+    if (previewRows.size() != 2) return;
+    const auto firstDestination = previewRows.at(0).toMap().value(QStringLiteral("destination")).toString();
+    const auto secondDestination = previewRows.at(1).toMap().value(QStringLiteral("destination")).toString();
     controller.freezePreview();
     controller.approvePlan();
-    expect(!controller.hasApprovedPlan(), "multi-file plan must not be approved from the screen");
+    expect(controller.hasApprovedPlan(), "multi-file plan should be approved from the screen");
     expect(QFile::exists(first) && QFile::exists(second),
-           "multi-file approval attempt must not move either file");
+           "multi-file approval must not move either file");
+    controller.moveApprovedFile();
+    expect(!QFile::exists(first) && !QFile::exists(second) &&
+               QFile::exists(firstDestination) && QFile::exists(secondDestination) &&
+               QFile::exists(unmatched) && pending.count() == 1 && controller.canUndo(),
+           "approved multi-file plan should move only classified files and offer undo");
+    controller.undoLastMove();
+    expect(QFile::exists(first) && QFile::exists(second) &&
+               !QFile::exists(firstDestination) && !QFile::exists(secondDestination) &&
+               QFile::exists(unmatched) && pending.count() == 1 && !controller.canUndo(),
+           "multi-file undo should restore both files");
 }
 
 // 중단 작업이 화면에 나타나고 확인 후 기록만 정리되는지 검사하는 함수.
@@ -553,7 +574,7 @@ int main(int argc, char* argv[]) {
     testChangedFileAfterSaveFailsVerification();
     testTamperedSavedPlanFailsVerification();
     testSingleFileApproveMoveUndo();
-    testMultipleFilesCannotBeApproved();
+    testMultipleFilesCanBeMoved();
     testRecoveryCasesInController();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";

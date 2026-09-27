@@ -217,15 +217,14 @@ ApplicationWindow {
             spacing: 12
 
             Button {
-                text: qsTr("파일 하나 승인")
+                text: qsTr("파일 이동 승인")
                 enabled: previewController.hasFrozenPlan && !previewController.hasApprovedPlan
-                         && pendingFiles.count === 1 && previewController.steps.length === 1
-                         && previewController.steps[0].status === qsTr("예정")
+                         && previewController.hasMovableSteps
                 onClicked: previewController.approvePlan()
             }
             Button {
-                text: qsTr("승인한 파일 이동")
-                enabled: previewController.hasApprovedPlan && pendingFiles.count === 1
+                text: qsTr("승인한 파일들 이동")
+                enabled: previewController.hasApprovedPlan && pendingFiles.count > 0
                 onClicked: previewController.moveApprovedFile()
             }
             Button {
@@ -235,7 +234,7 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
             Label {
-                text: qsTr("한 번에 파일 하나만 이동할 수 있어요.")
+                text: qsTr("중간에 실패하면 되돌리기를 시도하고, 불확실하면 확인을 요청해요.")
                 color: "#67716a"
             }
         }
@@ -368,7 +367,8 @@ ApplicationWindow {
                                 width: parent.width
                                 Label {
                                     Layout.fillWidth: true
-                                    text: qsTr("작업 기록: ") + modelData.planId
+                                    text: qsTr("작업 기록: ") + modelData.planId +
+                                          qsTr(" · 파일 ") + modelData.partIndex + "/" + modelData.partCount
                                     font.bold: true
                                     elide: Text.ElideMiddle
                                 }
@@ -390,6 +390,7 @@ ApplicationWindow {
                                 }
                                 Button {
                                     text: qsTr("현재 상태로 기록 확정")
+                                    visible: modelData.partIndex === 1
                                     enabled: modelData.canResolve
                                     onClicked: previewController.resolveRecoveryCase(modelData.planId)
                                 }

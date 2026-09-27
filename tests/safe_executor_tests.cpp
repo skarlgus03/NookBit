@@ -21,6 +21,8 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 
 namespace {
 
@@ -54,6 +56,64 @@ public:
     [[nodiscard]] nookbit::Result<void> save(const nookbit::UserSettings&) override {
         return nookbit::Result<void>::failure({"test.read_only", "Not needed in this test."});
     }
+};
+
+// 두 번째 단계에서 기록 실패나 목적지 충돌을 재현하는 저장소.
+class FailingIntentHistory final : public nookbit::IHistoryRepository {
+public:
+    // 실제 SQLite 저장소를 테스트 대리자로 받는 생성자.
+    explicit FailingIntentHistory(nookbit::SqliteHistoryRepository& backing,
+                                  QString collisionDestination = {})
+        : backing_(backing), collisionDestination_(std::move(collisionDestination)) {}
+
+    // 계획 저장을 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<void> savePlan(const nookbit::OperationPlan& plan) override {
+        return backing_.savePlan(plan);
+    }
+
+    // 승인을 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<void> saveApproval(const nookbit::ApprovalRecord& approval) override {
+        return backing_.saveApproval(approval);
+    }
+
+    // 두 번째 이동 의도에서 오류 또는 목적지 충돌을 주입하는 함수.
+    [[nodiscard]] nookbit::Result<void> appendEvent(const nookbit::DomainEvent& event) override {
+        if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
+            changed && changed->status == nookbit::StepStatus::IntentRecorded && ++intents_ == 2) {
+            if (collisionDestination_.isEmpty()) {
+                return nookbit::Result<void>::failure({
+                    "test.intent_failed", "Injected second-step journal failure.",
+                });
+            }
+            QFile collision(collisionDestination_);
+            if (!collision.open(QIODevice::WriteOnly) || collision.write("occupant") != 8) {
+                return nookbit::Result<void>::failure({
+                    "test.collision_failed", "Cannot create second-step collision fixture.",
+                });
+            }
+        }
+        return backing_.appendEvent(event);
+    }
+
+    // 미완료 계획 조회를 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<std::vector<nookbit::OperationPlan>> incompletePlans() const override {
+        return backing_.incompletePlans();
+    }
+
+    // 계획 조회를 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<nookbit::OperationPlan> loadPlan(const nookbit::PlanId& id) const override {
+        return backing_.loadPlan(id);
+    }
+
+    // 중단 전 상태 조회를 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<nookbit::PlanStatus> interruptedStatus(const nookbit::PlanId& id) const override {
+        return backing_.interruptedStatus(id);
+    }
+
+private:
+    nookbit::SqliteHistoryRepository& backing_;
+    QString collisionDestination_;
+    int intents_{0};
 };
 
 // 임시 파일을 만들고 원본 내용을 기록하는 함수.
@@ -208,6 +268,82 @@ void testApprovedSingleFileMoveAndUndo() {
            "undo completion should be recorded");
 }
 
+// 두 번째 단계의 기록 실패나 목적지 충돌 뒤 첫 이동을 되돌리는지 검사하는 함수.
+void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "batch-failure directory should be available");
+    if (!directory.isValid()) return;
+    const auto incoming = directory.filePath(QStringLiteral("incoming"));
+    expect(QDir().mkpath(incoming), "batch-failure incoming directory should exist");
+    const auto first = QDir(incoming).filePath(QStringLiteral("first.jpg"));
+    const auto second = QDir(incoming).filePath(QStringLiteral("second.jpg"));
+    expect(writeFile(first, QByteArray("first bytes")) &&
+               writeFile(second, QByteArray("second bytes")),
+           "batch-failure source files should be written");
+    const auto firstPath = std::filesystem::path(first.toStdWString());
+    const auto secondPath = std::filesystem::path(second.toStdWString());
+    const std::vector<std::filesystem::path> selected{firstPath, secondPath};
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = directory.filePath(QStringLiteral("app-data"));
+    TestSettingsRepository settings;
+    settings.settings.homeRoot = std::filesystem::path(home.toStdWString());
+    nookbit::JsonRuleSetRepository rules(
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine ruleEngine;
+    nookbit::Planner planner(ruleEngine, std::filesystem::path(appData.toStdWString()));
+    nookbit::QtPlanHasher hasher;
+    nookbit::SqliteHistoryRepository history(
+        QDir(appData).filePath(QStringLiteral("history.sqlite")),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    auto loadedRules = rules.load();
+    if (!loadedRules) {
+        expect(false, "batch-failure rules should load");
+        return;
+    }
+    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
+    auto draft = preview.execute({loadedRules.value().version, selected});
+    if (!draft) {
+        expect(false, "batch-failure preview should succeed");
+        return;
+    }
+    nookbit::FreezePreviewUseCase freezer(settings, rules, scanner, planner, hasher, history);
+    auto frozen = freezer.execute(draft.value(), selected);
+    if (!frozen) {
+        expect(false, "batch-failure plan should freeze");
+        return;
+    }
+    nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
+    nookbit::ApprovePlanUseCase approver(verifier, history);
+    auto approval = approver.execute(frozen.value().id, selected);
+    auto approved = history.loadPlan(frozen.value().id);
+    if (!approval || !approved) {
+        expect(false, "batch-failure plan should be approved");
+        return;
+    }
+    const auto secondDestination = QString::fromStdWString(approved.value().steps.at(1).destination.wstring());
+    FailingIntentHistory failingHistory(history,
+        destinationCollision ? secondDestination : QString());
+    nookbit::SafeExecutor executor(settings, rules, scanner, planner, hasher, failingHistory,
+                                   std::filesystem::path(appData.toStdWString()));
+    auto executed = executor.execute(approved.value(), approval.value(), selected);
+    expect(!executed.hasValue() && executed.error().code == "execute.batch_rolled_back",
+           "second-step failure should report completed compensation");
+    const auto firstDestination = QString::fromStdWString(approved.value().steps.at(0).destination.wstring());
+    expect(QFile::exists(first) && QFile::exists(second) &&
+               !QFile::exists(firstDestination) &&
+               (destinationCollision ? readFile(secondDestination) == QByteArray("occupant")
+                                     : !QFile::exists(secondDestination)),
+           "batch compensation should restore both original paths");
+    auto saved = history.loadPlan(frozen.value().id);
+    expect(saved.hasValue() && saved.value().status == nookbit::PlanStatus::Failed &&
+               saved.value().steps.at(0).status == nookbit::StepStatus::RolledBack &&
+               saved.value().steps.at(1).status ==
+                   (destinationCollision ? nookbit::StepStatus::Failed : nookbit::StepStatus::Planned),
+           "batch journal should record rollback and unstarted step");
+}
+
 // 큰 파일을 나눠 읽는 해시가 전체 바이트 해시와 같은지 검사하는 함수.
 void testStreamingContentHash() {
     QTemporaryDir directory;
@@ -233,6 +369,8 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
+    testBatchFailureRollsBackEarlierMove(false);
+    testBatchFailureRollsBackEarlierMove(true);
     if (failures == 0) {
         std::cout << "All safe-executor tests passed.\n";
         return 0;

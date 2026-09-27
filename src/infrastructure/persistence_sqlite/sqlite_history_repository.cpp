@@ -349,7 +349,7 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
                 break;
             case PlanStatus::RollingBack:
                 updateSql = QStringLiteral(
-                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed')");
+                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed','executing')");
                 fixedPreviousStates = true;
                 break;
             case PlanStatus::RolledBack:
@@ -361,7 +361,7 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
             case PlanStatus::Failed:
                 updateSql = QStringLiteral(
                     "UPDATE plans SET status = ? WHERE id = ? "
-                    "AND status IN ('executing','needs_recovery')");
+                    "AND status IN ('executing','rolling_back','needs_recovery')");
                 fixedPreviousStates = true;
                 break;
             case PlanStatus::NeedsRecovery:

@@ -96,23 +96,29 @@ struct Scenario {
         return std::filesystem::path(source.toStdWString());
     }
 
-    // 미리보기·고정·검증을 거쳐 명시적 승인된 계획을 만드는 함수.
-    [[nodiscard]] nookbit::Result<ApprovedBundle> approve() {
+    // 선택한 파일들의 계획을 미리보기·고정·검증 후 승인하는 함수.
+    [[nodiscard]] nookbit::Result<ApprovedBundle> approveFiles(
+        const std::vector<std::filesystem::path>& selected) {
         auto loadedRules = rules.load();
         if (!loadedRules) return nookbit::Result<ApprovedBundle>::failure(loadedRules.error());
         nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
-        auto draft = preview.execute({loadedRules.value().version, {sourcePath()}});
+        auto draft = preview.execute({loadedRules.value().version, selected});
         if (!draft) return nookbit::Result<ApprovedBundle>::failure(draft.error());
         nookbit::FreezePreviewUseCase freeze(settings, rules, scanner, planner, hasher, history);
-        auto frozen = freeze.execute(draft.value(), {sourcePath()});
+        auto frozen = freeze.execute(draft.value(), selected);
         if (!frozen) return nookbit::Result<ApprovedBundle>::failure(frozen.error());
         nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
         nookbit::ApprovePlanUseCase approver(verifier, history);
-        auto approval = approver.execute(frozen.value().id, {sourcePath()});
+        auto approval = approver.execute(frozen.value().id, selected);
         if (!approval) return nookbit::Result<ApprovedBundle>::failure(approval.error());
         auto plan = history.loadPlan(frozen.value().id);
         if (!plan) return nookbit::Result<ApprovedBundle>::failure(plan.error());
         return nookbit::Result<ApprovedBundle>::success({plan.value(), approval.value()});
+    }
+
+    // 기본 사진 파일 하나의 승인 계획을 만드는 함수.
+    [[nodiscard]] nookbit::Result<ApprovedBundle> approve() {
+        return approveFiles({sourcePath()});
     }
 };
 
@@ -323,6 +329,61 @@ void testAmbiguousFilesNeedAttention() {
            "manual recovery should not move the remaining file");
 }
 
+// 배치가 중간에 끊기면 모든 파일을 보여주고 동일한 위치로 확인될 때만 정리하는 함수.
+void testInterruptedBatchNeedsManualReview() {
+    Scenario scenario;
+    expect(scenario.ready, "batch-recovery scenario should be ready");
+    if (!scenario.ready) return;
+    const auto second = QDir(scenario.incoming).filePath(QStringLiteral("second.jpg"));
+    QFile secondFile(second);
+    expect(secondFile.open(QIODevice::WriteOnly) && secondFile.write("second bytes") == 12,
+           "batch-recovery second source should be written");
+    secondFile.close();
+    const auto secondPath = std::filesystem::path(second.toStdWString());
+    auto approved = scenario.approveFiles({scenario.sourcePath(), secondPath});
+    expect(approved.hasValue() && approved.value().plan.steps.size() == 2,
+           "batch-recovery plan should contain two moves");
+    if (!approved || approved.value().plan.steps.size() != 2) return;
+    const auto& plan = approved.value().plan;
+    const auto& firstStep = plan.steps.front();
+    expect(scenario.history.appendEvent(
+               nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(),
+           "batch-recovery execution should begin");
+    expect(scenario.history.appendEvent(
+               nookbit::StepStatusChanged{plan.id, firstStep.id, nookbit::StepStatus::IntentRecorded}).hasValue(),
+           "batch-recovery first intent should be recorded");
+    expect(nookbit::WindowsFileMover::moveNoReplace(firstStep.source, firstStep.destination).hasValue(),
+           "batch-recovery first file should move before interruption");
+    expect(scenario.history.appendEvent(
+               nookbit::StepStatusChanged{plan.id, firstStep.id, nookbit::StepStatus::Applied}).hasValue(),
+           "batch-recovery first application should be recorded");
+    nookbit::RecoveryService recovery(scenario.history, scenario.scanner, scenario.hasher);
+    auto reconciled = recovery.reconcile();
+    expect(reconciled.hasValue() && reconciled.value().needsAttention.size() == 1,
+           "interrupted batch should require user review");
+    auto cases = recovery.inspectCases();
+    expect(cases.hasValue() && cases.value().size() == 2 &&
+               !cases.value().at(0).canResolve && !cases.value().at(1).canResolve,
+           "mixed file positions should be visible but not confirmable");
+    expect(!recovery.resolveCase(plan.id).hasValue(),
+           "mixed batch positions must not be confirmed");
+    expect(nookbit::WindowsFileMover::moveNoReplace(firstStep.destination, firstStep.source).hasValue(),
+           "test should simulate user's manual return of the first file");
+    cases = recovery.inspectCases();
+    expect(cases.hasValue() && cases.value().size() == 2 &&
+               cases.value().at(0).canResolve && cases.value().at(1).canResolve,
+           "source-only batch should be confirmable");
+    expect(recovery.resolveCase(plan.id).hasValue(),
+           "verified source-only batch should clear the recovery record");
+    auto saved = scenario.history.loadPlan(plan.id);
+    expect(saved.hasValue() && saved.value().status == nookbit::PlanStatus::Failed &&
+               saved.value().steps.at(0).status == nookbit::StepStatus::Failed &&
+               saved.value().steps.at(1).status == nookbit::StepStatus::Failed,
+           "manually returned batch should be recorded as failed without moving files");
+    expect(QFile::exists(scenario.source) && QFile::exists(second),
+           "manual confirmation should preserve both source files");
+}
+
 } // namespace
 
 // 중단 시점별 복구 테스트를 실행하는 함수.
@@ -333,6 +394,7 @@ int main(int argc, char* argv[]) {
     testUndoBeforeCompletionRecord();
     testUndoIntentBeforeMove();
     testAmbiguousFilesNeedAttention();
+    testInterruptedBatchNeedsManualReview();
     if (failures == 0) {
         std::cout << "All recovery-service tests passed.\n";
         return 0;

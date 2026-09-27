@@ -14,6 +14,8 @@ struct RecoveryReport {
 /// 사용자가 검토할 중단 작업의 실제 파일 상태를 담는다.
 struct RecoveryCase {
     PlanId planId;
+    std::size_t partIndex{0};
+    std::size_t partCount{0};
     std::filesystem::path source;
     std::filesystem::path destination;
     FileProbe sourceState{FileProbe::Unavailable};
@@ -24,7 +26,7 @@ struct RecoveryCase {
     bool canResolve{false};
 };
 
-/// 중단된 단일 파일 작업의 실제 파일 위치와 DB 상태를 대조하는 서비스.
+/// 중단된 작업의 각 파일 위치와 DB 상태를 대조하는 서비스.
 class RecoveryService final {
 public:
     /// 이력과 현재 파일 정보를 확인할 기능을 받는 생성자.
@@ -41,9 +43,7 @@ public:
 
 private:
     /// 불확실한 계획을 NeedsRecovery 상태로 기록하는 함수.
-    [[nodiscard]] Result<void> markNeedsRecovery(
-        const OperationPlan& plan,
-        const MoveStep* step);
+    [[nodiscard]] Result<void> markNeedsRecovery(const OperationPlan& plan);
 
     IHistoryRepository& history_;
     IScanner& scanner_;
