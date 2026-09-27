@@ -86,6 +86,8 @@ public:
     [[nodiscard]] virtual Result<std::vector<OperationPlan>> incompletePlans() const = 0;
     /// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
     [[nodiscard]] virtual Result<OperationPlan> loadPlan(const PlanId& planId) const = 0;
+    /// 최근 실행 작업의 요약을 최신순으로 읽는 함수.
+    [[nodiscard]] virtual Result<std::vector<PlanHistoryEntry>> recentPlans(int limit) const = 0;
     /// 확인 필요 상태에 들어가기 직전 실행 또는 되돌리기 상태를 찾는 함수.
     [[nodiscard]] virtual Result<PlanStatus> interruptedStatus(const PlanId& planId) const = 0;
 };

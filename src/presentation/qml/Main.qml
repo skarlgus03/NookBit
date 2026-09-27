@@ -232,6 +232,13 @@ ApplicationWindow {
                 enabled: previewController.canUndo
                 onClicked: previewController.undoLastMove()
             }
+            Button {
+                text: qsTr("작업 기록")
+                onClicked: {
+                    previewController.refreshHistory()
+                    historyDialog.open()
+                }
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("중간에 실패하면 되돌리기를 시도하고, 불확실하면 확인을 요청해요.")
@@ -315,6 +322,150 @@ ApplicationWindow {
                   ? pendingFiles.lastMessage
                   : qsTr("승인 전에는 파일을 이동하지 않습니다.")
             color: "#426349"
+            wrapMode: Text.WordWrap
+        }
+    }
+
+    Dialog {
+        id: historyDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 840)
+        height: Math.min(root.height - 32, 600)
+        modal: true
+        title: qsTr("지난 작업 기록")
+        standardButtons: Dialog.Close
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                text: previewController.historyMessage
+                wrapMode: Text.WordWrap
+                color: "#426349"
+            }
+            Button {
+                text: qsTr("목록 새로고침")
+                onClicked: previewController.refreshHistory()
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+                ListView {
+                    id: historyList
+                    Layout.preferredWidth: 280
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 6
+                    model: previewController.historyEntries
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: historyList.width
+                        height: 100
+                        radius: 9
+                        color: modelData.planId === previewController.selectedHistoryPlanId
+                               ? "#e8f4e5" : "#f7f9f6"
+                        border.color: "#d8dcd5"
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 9
+                            spacing: 2
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.time + " · " + modelData.status
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: qsTr("대상 %1개 · 현재 이동됨 %2개")
+                                      .arg(modelData.fileCount).arg(modelData.appliedCount)
+                                color: "#67716a"
+                            }
+                            Button {
+                                text: qsTr("파일 보기")
+                                onClicked: previewController.selectHistoryPlan(modelData.planId)
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 8
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: previewController.selectedHistoryPlanId.length > 0
+                              ? qsTr("선택한 작업의 파일") : qsTr("왼쪽에서 작업을 선택해 주세요.")
+                        font.bold: true
+                    }
+                    ScrollView {
+                        id: historyStepScroll
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        Column {
+                            width: historyStepScroll.availableWidth
+                            spacing: 6
+
+                            Repeater {
+                                model: previewController.historySteps
+                                delegate: Frame {
+                                    required property var modelData
+                                    width: parent.width
+
+                                    ColumnLayout {
+                                        width: parent.width
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: modelData.fileName + " · " + modelData.status
+                                            font.bold: true
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: qsTr("원본: ") + modelData.source
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: qsTr("목적지: ") + modelData.destination
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Button {
+                        text: qsTr("이 작업 되돌리기")
+                        enabled: previewController.canUndoSelectedHistory
+                        onClicked: undoHistoryDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: undoHistoryDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 80, 480)
+        modal: true
+        title: qsTr("선택한 작업 되돌리기")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: previewController.undoSelectedHistory()
+
+        Label {
+            width: parent.width
+            text: qsTr("이 작업에서 이동된 파일 %1개를 원래 위치로 되돌릴까요?\n"
+                       + "파일이 바뀌었거나 원본 경로가 사용 중이면 중단합니다.")
+                  .arg(previewController.selectedHistoryFileCount)
             wrapMode: Text.WordWrap
         }
     }

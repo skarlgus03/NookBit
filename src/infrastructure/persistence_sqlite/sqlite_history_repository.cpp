@@ -478,6 +478,45 @@ Result<OperationPlan> SqliteHistoryRepository::loadPlan(const PlanId& planId) co
     return Result<OperationPlan>::success(std::move(plans.value().front()));
 }
 
+// 최근 실행 작업의 상태와 파일 수를 최신순으로 읽는 함수.
+Result<std::vector<PlanHistoryEntry>> SqliteHistoryRepository::recentPlans(int limit) const {
+    if (limit < 1 || limit > 100) {
+        return Result<std::vector<PlanHistoryEntry>>::failure({
+            "history.limit_invalid", "History limit must be between 1 and 100.",
+        });
+    }
+    auto opened = ensureOpen();
+    if (!opened) return Result<std::vector<PlanHistoryEntry>>::failure(opened.error());
+    QSqlQuery query(database_);
+    query.prepare(QStringLiteral(
+        "SELECT p.id, COALESCE((SELECT MAX(e.occurred_at) FROM events e WHERE e.plan_id = p.id), "
+        "p.created_at), p.status, "
+        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id = p.id AND s.status != 'skipped'), "
+        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id = p.id AND s.status = 'applied') "
+        "FROM plans p WHERE p.status IN "
+        "('executing', 'completed', 'rolling_back', 'rolled_back', 'needs_recovery', 'failed') "
+        "ORDER BY 2 DESC, p.id DESC LIMIT ?"));
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        return Result<std::vector<PlanHistoryEntry>>::failure({
+            "history.recent_select_failed", query.lastError().text().toStdString(),
+        });
+    }
+    std::vector<PlanHistoryEntry> result;
+    while (query.next()) {
+        const auto status = parsePlanStatus(query.value(2).toString());
+        if (!status) {
+            return Result<std::vector<PlanHistoryEntry>>::failure({
+                "history.corrupt_plan", "A saved plan has an invalid status.",
+            });
+        }
+        result.push_back({query.value(0).toString().toStdString(),
+                          query.value(1).toString().toStdString(), *status,
+                          query.value(3).toInt(), query.value(4).toInt()});
+    }
+    return Result<std::vector<PlanHistoryEntry>>::success(std::move(result));
+}
+
 // 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.
 Result<PlanStatus> SqliteHistoryRepository::interruptedStatus(const PlanId& planId) const {
     auto opened = ensureOpen();

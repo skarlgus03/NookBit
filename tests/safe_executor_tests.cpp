@@ -105,6 +105,11 @@ public:
         return backing_.loadPlan(id);
     }
 
+    // 최근 작업 목록 조회를 실제 저장소에 위임하는 함수.
+    [[nodiscard]] nookbit::Result<std::vector<nookbit::PlanHistoryEntry>> recentPlans(int limit) const override {
+        return backing_.recentPlans(limit);
+    }
+
     // 중단 전 상태 조회를 실제 저장소에 위임하는 함수.
     [[nodiscard]] nookbit::Result<nookbit::PlanStatus> interruptedStatus(const nookbit::PlanId& id) const override {
         return backing_.interruptedStatus(id);

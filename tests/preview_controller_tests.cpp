@@ -499,6 +499,88 @@ void testMultipleFilesCanBeMoved() {
            "multi-file undo should restore both files");
 }
 
+// 앱을 다시 연 뒤 과거 작업을 골라 안전하게 되돌리는 흐름을 검사하는 함수.
+void testHistoryUndoAfterRestart() {
+#ifdef _WIN32
+    QTemporaryDir directory;
+    expect(directory.isValid(), "history directory should be available");
+    if (!directory.isValid()) return;
+    const auto first = directory.filePath(QStringLiteral("first.jpg"));
+    const auto second = directory.filePath(QStringLiteral("second.jpg"));
+    for (const auto& path : {first, second}) {
+        QFile file(path);
+        expect(file.open(QIODevice::WriteOnly) && file.write("original bytes") == 14,
+               "history source should be written");
+    }
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto dbPath = directory.filePath(QStringLiteral("history.sqlite"));
+    const auto rulesPath = projectPath("resources/rules/default.example.json");
+    const auto schemaPath = projectPath("schemas/rules.schema.json");
+    const auto migrationPath = projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    QString firstPlanId;
+    QString firstDestination;
+    QString secondDestination;
+    {
+        nookbit::PendingFilesModel pending;
+        nookbit::PreviewController controller(
+            pending, rulesPath, schemaPath, appData, home, dbPath, migrationPath);
+        pending.addUrl(QUrl::fromLocalFile(first));
+        controller.createPreview(home);
+        firstDestination = controller.steps().front().toMap().value(QStringLiteral("destination")).toString();
+        controller.freezePreview();
+        controller.approvePlan();
+        controller.moveApprovedFile();
+        controller.refreshHistory();
+        expect(controller.historyEntries().size() == 1, "first move should appear in history");
+        if (controller.historyEntries().isEmpty()) return;
+        firstPlanId = controller.historyEntries().front().toMap().value(QStringLiteral("planId")).toString();
+
+        pending.addUrl(QUrl::fromLocalFile(second));
+        controller.createPreview(home);
+        secondDestination = controller.steps().front().toMap().value(QStringLiteral("destination")).toString();
+        controller.freezePreview();
+        controller.approvePlan();
+        controller.moveApprovedFile();
+    }
+    expect(QFile::exists(firstDestination) && QFile::exists(secondDestination),
+           "both files should stay moved after closing the first controller");
+    nookbit::PendingFilesModel pendingAfterRestart;
+    nookbit::PreviewController restarted(
+        pendingAfterRestart, rulesPath, schemaPath, appData, home, dbPath, migrationPath);
+    restarted.refreshHistory();
+    expect(restarted.historyEntries().size() == 2, "restart should reload both past moves");
+    restarted.selectHistoryPlan(firstPlanId);
+    expect(restarted.canUndoSelectedHistory() && restarted.selectedHistoryFileCount() == 1,
+           "older selected move should offer undo");
+    expect(restarted.historySteps().size() == 1,
+           "older selected move should show its file");
+    if (restarted.historySteps().size() == 1) {
+        const auto shownSource = restarted.historySteps().front().toMap()
+                                     .value(QStringLiteral("source")).toString();
+        expect(QDir::fromNativeSeparators(shownSource) == QDir::fromNativeSeparators(first),
+               "older selected move should show the original path");
+    }
+
+    QFile occupied(first);
+    expect(occupied.open(QIODevice::WriteOnly) && occupied.write("new occupant") == 12,
+           "source collision should be created");
+    occupied.close();
+    restarted.undoSelectedHistory();
+    expect(QFile::exists(firstDestination) && QFile::exists(first) &&
+               restarted.historyMessage().contains(QStringLiteral("되돌리지 못했어요")),
+           "history undo must refuse an occupied original path");
+    expect(QFile::remove(first), "collision fixture should be removed");
+    restarted.selectHistoryPlan(firstPlanId);
+    restarted.undoSelectedHistory();
+    expect(QFile::exists(first) && !QFile::exists(firstDestination) &&
+               QFile::exists(secondDestination) && !QFile::exists(second),
+           "chosen older move should undo without touching the newer move");
+    restarted.selectHistoryPlan(firstPlanId);
+    expect(!restarted.canUndoSelectedHistory(), "already undone history must not be undoable again");
+#endif
+}
+
 // 중단 작업이 화면에 나타나고 확인 후 기록만 정리되는지 검사하는 함수.
 void testRecoveryCasesInController() {
     QTemporaryDir directory;
@@ -575,6 +657,7 @@ int main(int argc, char* argv[]) {
     testTamperedSavedPlanFailsVerification();
     testSingleFileApproveMoveUndo();
     testMultipleFilesCanBeMoved();
+    testHistoryUndoAfterRestart();
     testRecoveryCasesInController();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";

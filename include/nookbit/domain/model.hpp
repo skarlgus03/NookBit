@@ -122,6 +122,15 @@ struct OperationPlan {
     PlanStatus status{PlanStatus::Draft};
 };
 
+/// 저장된 작업 목록에 보여줄 최소한의 이력 정보.
+struct PlanHistoryEntry {
+    PlanId id;
+    std::string lastActivityUtc;
+    PlanStatus status{PlanStatus::Draft};
+    int fileCount{0};
+    int appliedCount{0};
+};
+
 struct ApprovalRecord {
     PlanId planId;
     std::string planHash;

@@ -31,6 +31,9 @@ public:
     /// 완료된 계획까지 포함해 ID 하나로 읽는 함수.
     [[nodiscard]] Result<OperationPlan> loadPlan(const PlanId& planId) const override;
 
+    /// 최근 실행 작업을 파일을 변경하지 않고 최신순으로 조회하는 함수.
+    [[nodiscard]] Result<std::vector<PlanHistoryEntry>> recentPlans(int limit) const override;
+
     /// 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.
     [[nodiscard]] Result<PlanStatus> interruptedStatus(const PlanId& planId) const override;
 
