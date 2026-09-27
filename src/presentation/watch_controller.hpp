@@ -1,12 +1,8 @@
 #pragma once
 
-#include "infrastructure/configuration/json_rule_set_repository.hpp"
-#include "infrastructure/configuration/json_watch_settings_repository.hpp"
-#include "infrastructure/filesystem/filesystem_scanner.hpp"
-#include "modules/rules/rule_engine.hpp"
 #include "presentation/pending_files_model.hpp"
 
-#include <nookbit/domain/watch.hpp>
+#include <nookbit/application/ports.hpp>
 
 #include <QFileSystemWatcher>
 #include <QObject>
@@ -37,12 +33,10 @@ class WatchController final : public QObject {
     Q_PROPERTY(QStringList proposalFiles READ proposalFiles NOTIFY watchChanged)
 
 public:
-    /// 대기 목록, 규칙, 감시 설정 경로와 기본 폴더를 연결하는 생성자.
+    /// 대기 목록과 감시 설정·제안 계약을 연결하는 생성자.
     WatchController(PendingFilesModel& pendingFiles,
-                    QString rulesPath,
-                    QString rulesSchemaPath,
-                    QString settingsPath,
-                    QString settingsSchemaPath,
+                    IWatchSettingsRepository& repository,
+                    IWatchProposalUseCase& evaluateWatchFolder,
                     QString defaultFolder,
                     QObject* parent = nullptr);
 
@@ -113,10 +107,8 @@ private:
     void clearProposal();
 
     PendingFilesModel& pendingFiles_;
-    JsonRuleSetRepository rules_;
-    JsonWatchSettingsRepository repository_;
-    FilesystemScanner scanner_;
-    RuleEngine ruleEngine_;
+    IWatchSettingsRepository& repository_;
+    IWatchProposalUseCase& evaluateWatchFolder_;
     QFileSystemWatcher directoryWatcher_;
     QTimer rescanTimer_;
     QTimer debounceTimer_;

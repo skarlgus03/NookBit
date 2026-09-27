@@ -3,6 +3,7 @@
 #include <nookbit/application/events.hpp>
 #include <nookbit/domain/model.hpp>
 #include <nookbit/domain/result.hpp>
+#include <nookbit/domain/watch.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -120,6 +121,27 @@ public:
 
     /// 현재 분류 규칙 묶음을 읽어 반환하는 함수.
     [[nodiscard]] virtual Result<RuleSet> load() const = 0;
+};
+
+/// 감시 설정을 읽고 저장하는 계약.
+class IWatchSettingsRepository {
+public:
+    /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
+    virtual ~IWatchSettingsRepository() = default;
+    /// 사용자 감시 조건을 읽는 함수.
+    [[nodiscard]] virtual Result<WatchSettings> load() const = 0;
+    /// 사용자 감시 조건을 저장하는 함수.
+    [[nodiscard]] virtual Result<void> save(const WatchSettings& settings) const = 0;
+};
+
+/// 감시 폴더를 평가해 이동 없는 제안을 돌려주는 계약.
+class IWatchProposalUseCase {
+public:
+    /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
+    virtual ~IWatchProposalUseCase() = default;
+    /// 설정된 폴더를 검사하고 분류 가능 파일의 조건 충족 여부를 반환하는 함수.
+    [[nodiscard]] virtual Result<WatchProposal> execute(
+        const WatchSettings& settings, std::int64_t nowUtcMs) = 0;
 };
 
 } // namespace nookbit

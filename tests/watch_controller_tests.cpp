@@ -1,5 +1,10 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/watch_controller.hpp"
+#include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "infrastructure/configuration/json_rule_set_repository.hpp"
+#include "infrastructure/configuration/json_watch_settings_repository.hpp"
+#include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "modules/rules/rule_engine.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -43,13 +48,16 @@ void testProposalAndPendingOnly() {
     const auto settingsPath = directory.filePath(QStringLiteral("watch.json"));
     expect(writeFile(first), "first watched file should be written");
     nookbit::PendingFilesModel pending;
-    nookbit::WatchController controller(
-        pending,
+    nookbit::JsonWatchSettingsRepository repository(
+        settingsPath, projectPath("schemas/watch.schema.json"));
+    nookbit::JsonRuleSetRepository rules(
         projectPath("resources/rules/default.example.json"),
-        projectPath("schemas/rules.schema.json"),
-        settingsPath,
-        projectPath("schemas/watch.schema.json"),
-        folder);
+        projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine ruleEngine;
+    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, ruleEngine, rules);
+    nookbit::WatchController controller(
+        pending, repository, evaluateWatchFolder, folder);
     controller.saveSettings(folder, true, false, 10, false,
                             true, 2, false, 1, false, 1, QStringLiteral("*.partial"));
     expect(controller.enabled() && controller.minimumFileCount() == 2 &&
@@ -73,12 +81,7 @@ void testProposalAndPendingOnly() {
            "accepting a proposal should register paths without moving files");
     nookbit::PendingFilesModel restartedPending;
     nookbit::WatchController restarted(
-        restartedPending,
-        projectPath("resources/rules/default.example.json"),
-        projectPath("schemas/rules.schema.json"),
-        settingsPath,
-        projectPath("schemas/watch.schema.json"),
-        QString());
+        restartedPending, repository, evaluateWatchFolder, QString());
     expect(restarted.enabled() && restarted.folder() == folder &&
                restarted.minimumFileCount() == 2 && restarted.rescanIntervalMinutes() == 10,
            "watch settings should reload after restarting the controller");

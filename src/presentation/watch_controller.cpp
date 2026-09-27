@@ -1,7 +1,5 @@
 #include "presentation/watch_controller.hpp"
 
-#include "modules/watch/watch_evaluator.hpp"
-
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFileInfo>
@@ -36,17 +34,14 @@ QString snapshotSignature(const std::vector<FileFact>& files) {
 
 } // namespace
 
-// 대기 목록, 규칙, 감시 설정 경로와 기본 폴더를 연결하는 생성자.
+// 대기 목록과 감시 설정·제안 계약을 연결하는 생성자.
 WatchController::WatchController(PendingFilesModel& pendingFiles,
-                                 QString rulesPath,
-                                 QString rulesSchemaPath,
-                                 QString settingsPath,
-                                 QString settingsSchemaPath,
+                                 IWatchSettingsRepository& repository,
+                                 IWatchProposalUseCase& evaluateWatchFolder,
                                  QString defaultFolder,
                                  QObject* parent)
     : QObject(parent), pendingFiles_(pendingFiles),
-      rules_(std::move(rulesPath), std::move(rulesSchemaPath)),
-      repository_(std::move(settingsPath), std::move(settingsSchemaPath)) {
+      repository_(repository), evaluateWatchFolder_(evaluateWatchFolder) {
     debounceTimer_.setSingleShot(true);
     debounceTimer_.setInterval(1500);
     connect(&directoryWatcher_, &QFileSystemWatcher::directoryChanged,
@@ -208,55 +203,23 @@ void WatchController::checkNow() {
     if (settings_.enabled && directoryWatcher_.directories().isEmpty() && QFileInfo(folder()).isDir()) {
         directoryWatcher_.addPath(folder());
     }
-    ScanRequest request;
-    request.roots = {settings_.folder};
-    request.recursive = settings_.recursive;
-    request.excludePatterns = settings_.excludePatterns;
-    const auto scanned = scanner_.scan(request);
-    if (!scanned) {
-        clearProposal();
-        statusMessage_ = QStringLiteral("감시 폴더를 검사하지 못했어요: %1")
-                             .arg(QString::fromStdString(scanned.error().message));
-        emit watchChanged();
-        return;
-    }
-    const auto rules = rules_.load();
-    if (!rules) {
-        clearProposal();
-        statusMessage_ = QStringLiteral("분류 규칙을 읽지 못했어요: %1")
-                             .arg(QString::fromStdString(rules.error().message));
-        emit watchChanged();
-        return;
-    }
     const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
-    std::vector<FileFact> eligible;
-    eligible.reserve(scanned.value().files.size());
-    for (const auto& file : scanned.value().files) {
-        const auto decision = ruleEngine_.decide(file, rules.value(),
-                                                 MultiMatchPolicy::FirstMatch, nowUtcMs);
-        if (!decision) {
-            clearProposal();
-            statusMessage_ = QStringLiteral("감시 파일의 분류 규칙을 판단하지 못했어요: %1")
-                                 .arg(QString::fromStdString(decision.error().message));
-            emit watchChanged();
-            return;
-        }
-        if (decision.value()) eligible.push_back(file);
-    }
-    const auto evaluated = WatchEvaluator::evaluate(settings_, eligible, nowUtcMs);
-    if (!evaluated) {
+    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs);
+    if (!result) {
         clearProposal();
-        statusMessage_ = QStringLiteral("감시 조건을 판단하지 못했어요: %1")
-                             .arg(QString::fromStdString(evaluated.error().message));
+        statusMessage_ = QStringLiteral("감시 폴더를 평가하지 못했어요: %1")
+                             .arg(QString::fromStdString(result.error().message));
         emit watchChanged();
         return;
     }
-    if (!evaluated.value().shouldOffer) {
+    const auto& evaluation = result.value().evaluation;
+    const auto& eligible = result.value().eligibleFiles;
+    if (!evaluation.shouldOffer) {
         clearProposal();
         statusMessage_ = QStringLiteral("조건 미충족: 분류 가능한 파일 %1개 · 총 %2 MiB · 가장 오래된 파일 %3분")
-                             .arg(evaluated.value().fileCount)
-                             .arg(evaluated.value().totalBytes / (1024ULL * 1024ULL))
-                             .arg(evaluated.value().oldestAgeMinutes);
+                             .arg(evaluation.fileCount)
+                             .arg(evaluation.totalBytes / (1024ULL * 1024ULL))
+                             .arg(evaluation.oldestAgeMinutes);
         emit watchChanged();
         return;
     }

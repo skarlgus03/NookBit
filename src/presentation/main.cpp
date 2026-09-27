@@ -2,6 +2,11 @@
 #include "presentation/preview_controller.hpp"
 #include "presentation/watch_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
+#include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "infrastructure/configuration/json_rule_set_repository.hpp"
+#include "infrastructure/configuration/json_watch_settings_repository.hpp"
+#include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "modules/rules/rule_engine.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -58,12 +63,18 @@ int main(int argc, char* argv[]) {
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         previewController.refreshRecoveryCases();
     }
-    nookbit::WatchController watchController(
-        pendingFiles,
-        QStringLiteral(":/nookbit/rules.json"),
-        QStringLiteral(":/nookbit/rules.schema.json"),
+    nookbit::JsonWatchSettingsRepository watchSettings(
         QDir(appData).filePath(QStringLiteral("watch.json")),
-        QStringLiteral(":/nookbit/watch.schema.json"),
+        QStringLiteral(":/nookbit/watch.schema.json"));
+    nookbit::JsonRuleSetRepository watchRules(
+        QStringLiteral(":/nookbit/rules.json"),
+        QStringLiteral(":/nookbit/rules.schema.json"));
+    nookbit::FilesystemScanner watchScanner;
+    nookbit::RuleEngine watchRuleEngine;
+    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(
+        watchScanner, watchRuleEngine, watchRules);
+    nookbit::WatchController watchController(
+        pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
