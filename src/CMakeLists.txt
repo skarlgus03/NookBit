@@ -7,6 +7,7 @@ add_library(nookbit_core STATIC
   application/use_cases/plan_signature.cpp
   application/use_cases/verify_saved_plan_use_case.cpp
   modules/rules/rule_engine.cpp
+  modules/watch/watch_evaluator.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
   modules/planner/path_safety_validator.cpp
@@ -49,6 +50,7 @@ if(NOOKBIT_BUILD_QT_APP)
     add_library(nookbit_json_config STATIC
       infrastructure/configuration/json_document_loader.cpp
       infrastructure/configuration/json_settings_repository.cpp
+      infrastructure/configuration/json_watch_settings_repository.cpp
       infrastructure/configuration/json_rule_set_repository.cpp
     )
     target_include_directories(nookbit_json_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -67,6 +69,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
       presentation/preview_controller.cpp
+      presentation/watch_controller.hpp
+      presentation/watch_controller.cpp
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)

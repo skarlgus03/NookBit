@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/preview_controller.hpp"
+#include "presentation/watch_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 
 #include <QDir>
@@ -57,9 +58,17 @@ int main(int argc, char* argv[]) {
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         previewController.refreshRecoveryCases();
     }
+    nookbit::WatchController watchController(
+        pendingFiles,
+        QStringLiteral(":/nookbit/rules.json"),
+        QStringLiteral(":/nookbit/rules.schema.json"),
+        QDir(appData).filePath(QStringLiteral("watch.json")),
+        QStringLiteral(":/nookbit/watch.schema.json"),
+        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
+    engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -74,7 +83,8 @@ int main(int argc, char* argv[]) {
             QStringLiteral(":/nookbit/rules.json"),
             QStringLiteral(":/nookbit/rules.schema.json"));
         const bool ready = !engine.rootObjects().isEmpty() && bundledRules.load().hasValue() &&
-                           QFile::exists(QStringLiteral(":/nookbit/001_initial.sql"));
+                           QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
+                           QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));
         if (!ready) {
             return EXIT_FAILURE;
         }

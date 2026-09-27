@@ -30,6 +30,58 @@ ApplicationWindow {
             color: "#5a5a56"
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                Layout.fillWidth: true
+                text: watchController.enabled ? qsTr("폴더 감시 중 · ") + watchController.folder
+                                              : qsTr("폴더 감시 꺼짐")
+                color: "#426349"
+                elide: Text.ElideMiddle
+            }
+            Button {
+                text: qsTr("폴더 감시 설정")
+                onClicked: {
+                    watchFolderField.text = watchController.folder
+                    watchEnabledCheck.checked = watchController.enabled
+                    watchRecursiveCheck.checked = watchController.recursive
+                    watchIntervalSpin.value = watchController.rescanIntervalMinutes
+                    watchCombination.currentIndex = watchController.combineAll ? 1 : 0
+                    watchCountCheck.checked = watchController.countEnabled
+                    watchCountSpin.value = watchController.minimumFileCount
+                    watchSizeCheck.checked = watchController.sizeEnabled
+                    watchSizeSpin.value = watchController.minimumTotalMiB
+                    watchAgeCheck.checked = watchController.ageEnabled
+                    watchAgeSpin.value = watchController.minimumAgeMinutes
+                    watchExcludeField.text = watchController.excludePatterns
+                    watchDialog.open()
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: watchController.proposalVisible ? 92 : 0
+            visible: watchController.proposalVisible
+            radius: 12
+            color: "#e8f4e5"
+            border.color: "#8ab793"
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                Label {
+                    Layout.fillWidth: true
+                    text: watchController.proposalText
+                    wrapMode: Text.WordWrap
+                    color: "#24382a"
+                }
+                Button {
+                    text: qsTr("제안 확인")
+                    onClicked: watchProposalDialog.open()
+                }
+            }
+        }
+
         Label {
             Layout.fillWidth: true
             visible: previewController.recoveryNotice.length > 0
@@ -323,6 +375,191 @@ ApplicationWindow {
                   : qsTr("승인 전에는 파일을 이동하지 않습니다.")
             color: "#426349"
             wrapMode: Text.WordWrap
+        }
+    }
+
+    Dialog {
+        id: watchDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 720)
+        height: Math.min(root.height - 32, 640)
+        modal: true
+        title: qsTr("폴더 감시 조건")
+        standardButtons: Dialog.Close
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("조건을 만족하면 정리를 제안합니다. 파일은 자동으로 이동하지 않습니다.")
+                wrapMode: Text.WordWrap
+            }
+            ScrollView {
+                id: watchSettingsScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                ColumnLayout {
+                    width: watchSettingsScroll.availableWidth
+                    spacing: 12
+                    Label { text: qsTr("감시할 폴더") }
+                    TextField {
+                        id: watchFolderField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("예: C:/Users/이름/Downloads")
+                    }
+                    RowLayout {
+                        CheckBox {
+                            id: watchEnabledCheck
+                            text: qsTr("자동 감시 켜기")
+                        }
+                        CheckBox {
+                            id: watchRecursiveCheck
+                            text: qsTr("하위 폴더 포함")
+                        }
+                    }
+                    RowLayout {
+                        Label { text: qsTr("정기 재검사 간격") }
+                        SpinBox {
+                            id: watchIntervalSpin
+                            from: 1
+                            to: 1440
+                            value: 30
+                        }
+                        Label { text: qsTr("분") }
+                    }
+                    RowLayout {
+                        Label { text: qsTr("조건 조합") }
+                        ComboBox {
+                            id: watchCombination
+                            model: [qsTr("하나만 충족"), qsTr("모두 충족")]
+                        }
+                    }
+                    RowLayout {
+                        CheckBox {
+                            id: watchCountCheck
+                            text: qsTr("분류 가능한 파일이")
+                        }
+                        SpinBox {
+                            id: watchCountSpin
+                            from: 1
+                            to: 1000000
+                            value: 20
+                            enabled: watchCountCheck.checked
+                        }
+                        Label { text: qsTr("개 이상") }
+                    }
+                    RowLayout {
+                        CheckBox {
+                            id: watchSizeCheck
+                            text: qsTr("파일 전체 크기가")
+                        }
+                        SpinBox {
+                            id: watchSizeSpin
+                            from: 1
+                            to: 1000000
+                            value: 100
+                            enabled: watchSizeCheck.checked
+                        }
+                        Label { text: qsTr("MiB 이상") }
+                    }
+                    RowLayout {
+                        CheckBox {
+                            id: watchAgeCheck
+                            text: qsTr("가장 오래된 파일이")
+                        }
+                        SpinBox {
+                            id: watchAgeSpin
+                            from: 1
+                            to: 1000000
+                            value: 60
+                            enabled: watchAgeCheck.checked
+                        }
+                        Label { text: qsTr("분 이상") }
+                    }
+                    Label { text: qsTr("제외할 파일명 패턴 · 쉼표로 구분") }
+                    TextField {
+                        id: watchExcludeField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("*.partial, *.crdownload, ~$*")
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: watchController.statusMessage
+                wrapMode: Text.WordWrap
+                color: "#426349"
+            }
+            RowLayout {
+                Button {
+                    text: qsTr("조건 저장")
+                    onClicked: watchController.saveSettings(
+                        watchFolderField.text, watchEnabledCheck.checked,
+                        watchRecursiveCheck.checked, watchIntervalSpin.value,
+                        watchCombination.currentIndex === 1,
+                        watchCountCheck.checked, watchCountSpin.value,
+                        watchSizeCheck.checked, watchSizeSpin.value,
+                        watchAgeCheck.checked, watchAgeSpin.value,
+                        watchExcludeField.text)
+                }
+                Button {
+                    text: qsTr("저장된 조건 지금 검사")
+                    onClicked: watchController.checkNow()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: watchProposalDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 700)
+        height: Math.min(root.height - 32, 500)
+        modal: true
+        title: qsTr("정리 제안")
+        standardButtons: Dialog.Close
+
+        ColumnLayout {
+            anchors.fill: parent
+            Label {
+                Layout.fillWidth: true
+                text: watchController.proposalText
+                wrapMode: Text.WordWrap
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: watchController.proposalFiles
+                delegate: Label {
+                    required property string modelData
+                    width: parent.width
+                    text: modelData
+                    wrapMode: Text.WrapAnywhere
+                    padding: 5
+                }
+            }
+            RowLayout {
+                Button {
+                    text: qsTr("대기 목록에 담기")
+                    enabled: watchController.proposalVisible
+                    onClicked: {
+                        watchController.addProposalToPending()
+                        watchProposalDialog.close()
+                    }
+                }
+                Button {
+                    text: qsTr("이번 제안 닫기")
+                    onClicked: {
+                        watchController.dismissProposal()
+                        watchProposalDialog.close()
+                    }
+                }
+            }
         }
     }
 

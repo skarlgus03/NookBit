@@ -1,5 +1,6 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_settings_repository.hpp"
+#include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "modules/rules/rule_engine.hpp"
 
 #include <QFile>
@@ -220,6 +221,49 @@ void testMissingAndMalformedFiles() {
            "malformed settings should report a parse error");
 }
 
+// 사용자가 정한 감시 조건이 저장·복원되고 잘못된 값은 거부되는지 검사하는 함수.
+void testWatchSettingsRoundTrip() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "watch-settings directory should be available");
+    if (!directory.isValid()) return;
+    const auto path = directory.filePath(QStringLiteral("watch.json"));
+    nookbit::JsonWatchSettingsRepository repository(
+        path, projectPath("schemas/watch.schema.json"));
+    nookbit::WatchSettings settings;
+    settings.folder = std::filesystem::path(directory.path().toStdWString());
+    settings.enabled = true;
+    settings.recursive = true;
+    settings.rescanIntervalMinutes = 5;
+    settings.combination = nookbit::WatchCombination::All;
+    settings.conditions = {
+        {nookbit::WatchConditionType::FileCount, 3},
+        {nookbit::WatchConditionType::OldestAgeMinutes, 10},
+    };
+    settings.excludePatterns = {"*.partial", "~$*"};
+    expect(repository.save(settings).hasValue(), "watch settings should save");
+    const auto loaded = repository.load();
+    expect(loaded.hasValue() && loaded.value().enabled && loaded.value().recursive &&
+               loaded.value().rescanIntervalMinutes == 5 &&
+               loaded.value().combination == nookbit::WatchCombination::All &&
+               loaded.value().conditions.size() == 2 &&
+               loaded.value().excludePatterns.size() == 2,
+           "saved watch conditions should survive reload");
+    settings.conditions.push_back(settings.conditions.front());
+    expect(!repository.save(settings).hasValue(), "duplicate watch conditions must not save");
+    expect(repository.load().hasValue(), "rejected save must leave the earlier file intact");
+
+    auto object = readExample(path);
+    auto conditions = object.value(QStringLiteral("conditions")).toArray();
+    auto first = conditions.at(0).toObject();
+    first.insert(QStringLiteral("threshold"), 0);
+    conditions.replace(0, first);
+    object.insert(QStringLiteral("conditions"), conditions);
+    expect(writeObject(path, object), "invalid watch fixture should be written");
+    const auto invalid = repository.load();
+    expect(!invalid.hasValue() && invalid.error().code == "json.schema_invalid",
+           "invalid saved watch threshold should be rejected");
+}
+
 } // namespace
 
 // JSON 설정과 규칙 로더 테스트를 실행하는 함수.
@@ -228,6 +272,7 @@ int main() {
     testInvalidSettingsAreRejected();
     testInvalidRulesAreRejected();
     testMissingAndMalformedFiles();
+    testWatchSettingsRoundTrip();
     if (failures == 0) {
         std::cout << "All JSON configuration tests passed.\n";
         return 0;

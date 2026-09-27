@@ -20,12 +20,15 @@ add_executable(nookbit_planner_tests
 )
 target_link_libraries(nookbit_planner_tests PRIVATE nookbit_filesystem)
 
+add_executable(nookbit_watch_evaluator_tests watch_evaluator_tests.cpp)
+
 set(NOOKBIT_TEST_TARGETS
   nookbit_core_tests
   nookbit_preview_use_case_tests
   nookbit_rule_engine_tests
   nookbit_filesystem_scanner_tests
   nookbit_planner_tests
+  nookbit_watch_evaluator_tests
 )
 
 foreach(target IN LISTS NOOKBIT_TEST_TARGETS)
@@ -45,6 +48,7 @@ add_test(NAME nookbit_preview_use_case_tests COMMAND nookbit_preview_use_case_te
 add_test(NAME nookbit_rule_engine_tests COMMAND nookbit_rule_engine_tests)
 add_test(NAME nookbit_filesystem_scanner_tests COMMAND nookbit_filesystem_scanner_tests)
 add_test(NAME nookbit_planner_tests COMMAND nookbit_planner_tests)
+add_test(NAME nookbit_watch_evaluator_tests COMMAND nookbit_watch_evaluator_tests)
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql)
@@ -75,6 +79,25 @@ if(TARGET nookbit_json_config)
   add_test(NAME nookbit_pending_files_model_tests COMMAND nookbit_pending_files_model_tests)
   if(WIN32)
     set_tests_properties(nookbit_pending_files_model_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+
+  add_executable(nookbit_watch_controller_tests
+    watch_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.cpp
+  )
+  set_target_properties(nookbit_watch_controller_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_watch_controller_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_watch_controller_tests PRIVATE
+    NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_watch_controller_tests PRIVATE
+    nookbit_filesystem nookbit_json_config Qt6::Core)
+  add_test(NAME nookbit_watch_controller_tests COMMAND nookbit_watch_controller_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_watch_controller_tests PROPERTIES
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
 
