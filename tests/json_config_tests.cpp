@@ -2,6 +2,7 @@
 #include "infrastructure/configuration/json_settings_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "modules/rules/rule_engine.hpp"
+#include "application/use_cases/plan_signature.hpp"
 
 #include <QFile>
 #include <QJsonArray>
@@ -268,6 +269,44 @@ void testRuleTreeLoadsAndRejectsInvalidNodes() {
            "tree schema should reject a parent-path destination");
 }
 
+// 편집한 트리를 안전하게 저장·복원하고 잘못된 편집은 기존 파일을 보존하는지 검사하는 함수.
+void testRuleTreeSaveRoundTrip() {
+    nookbit::JsonRuleSetRepository example(
+        projectPath("resources/rules/tree.example.json"),
+        projectPath("schemas/rules-tree.schema.json"));
+    auto loaded = example.load();
+    expect(loaded.hasValue(), "tree fixture should load before a round trip");
+    if (!loaded) return;
+    QTemporaryDir directory;
+    expect(directory.isValid(), "tree-save directory should be available");
+    if (!directory.isValid()) return;
+    const auto path = directory.filePath(QStringLiteral("custom-rules.json"));
+    nookbit::JsonRuleSetRepository repository(path, projectPath("schemas/rules-tree.schema.json"));
+    auto edited = loaded.value();
+    edited.nodes[0].destination->relativePath = L"Custom/Large";
+    edited.globalOtherwise = nookbit::RuleDestination{L"Unsorted", std::nullopt};
+    expect(repository.save(edited).hasValue(), "edited tree should save atomically");
+    auto restored = repository.load();
+    expect(restored && nookbit::PlanSignature::rules(restored.value()) ==
+                           nookbit::PlanSignature::rules(edited),
+           "saved tree order, conditions, leaves, and global else should survive reload");
+    QFile savedFile(path);
+    expect(savedFile.open(QIODevice::ReadOnly), "saved tree should be readable");
+    const auto originalBytes = savedFile.readAll();
+    savedFile.close();
+    edited.nodes[0].destination->relativePath = L"../Escape";
+    const auto invalid = repository.save(edited);
+    expect(!invalid && invalid.error().code == "rules.destination_invalid",
+           "unsafe edited destination must be refused before writing");
+    expect(savedFile.open(QIODevice::ReadOnly) && savedFile.readAll() == originalBytes,
+           "rejected save must preserve the previous complete JSON file");
+    savedFile.close();
+    nookbit::JsonRuleSetRepository bundled(
+        QStringLiteral(":/nookbit/rules.json"), projectPath("schemas/rules-tree.schema.json"));
+    expect(!bundled.save(loaded.value()).hasValue(),
+           "bundled resource must not be treated as a writable rule file");
+}
+
 // 읽을 수 없는 파일이나 파손된 JSON이 명확한 오류를 반환하는지 검사하는 함수.
 void testMissingAndMalformedFiles() {
     QTemporaryDir directory;
@@ -341,6 +380,7 @@ int main() {
     testInvalidSettingsAreRejected();
     testInvalidRulesAreRejected();
     testRuleTreeLoadsAndRejectsInvalidNodes();
+    testRuleTreeSaveRoundTrip();
     testMissingAndMalformedFiles();
     testWatchSettingsRoundTrip();
     if (failures == 0) {

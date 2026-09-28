@@ -123,6 +123,16 @@ public:
     [[nodiscard]] virtual Result<RuleSet> load() const = 0;
 };
 
+/// 사용자가 편집한 규칙 트리를 저장하는 별도 계약.
+class IRuleSetWriter {
+public:
+    /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
+    virtual ~IRuleSetWriter() = default;
+
+    /// 검증된 규칙 트리를 기존 파일을 보호하며 저장하는 함수.
+    [[nodiscard]] virtual Result<void> save(const RuleSet& rules) const = 0;
+};
+
 /// 감시 설정을 읽고 저장하는 계약.
 class IWatchSettingsRepository {
 public:

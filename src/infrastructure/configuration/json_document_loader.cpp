@@ -204,4 +204,11 @@ Result<QJsonObject> loadValidatedJson(
     return document;
 }
 
+// 메모리의 JSON 객체를 저장 전에 같은 Schema로 검증하는 함수.
+Result<void> validateJsonObject(const QJsonObject& document, const QString& schemaPath) {
+    auto schema = readObject(schemaPath, "json.schema");
+    if (!schema) return Result<void>::failure(schema.error());
+    return validateValue(document, schema.value(), schema.value(), QStringLiteral("$"));
+}
+
 } // namespace nookbit

@@ -2,7 +2,11 @@
 #include "infrastructure/configuration/json_document_loader.hpp"
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
+#include <QDir>
+#include <QFileInfo>
+#include <QSaveFile>
 
 #include <limits>
 #include <set>
@@ -192,6 +196,137 @@ Result<std::vector<RuleNode>> convertNodes(const QJsonArray& array, std::set<std
     return Result<std::vector<RuleNode>>::success(std::move(nodes));
 }
 
+// 리프 목적지를 상대 경로와 충돌 정책이 있는 JSON으로 변환하는 함수.
+Result<QJsonObject> destinationObject(const RuleDestination& destination) {
+    const auto& path = destination.relativePath;
+    if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+        return Result<QJsonObject>::failure({
+            "rules.destination_invalid", "Destination must be a relative path.",
+        });
+    }
+    for (const auto& part : path) {
+        if (part == L"..") {
+            return Result<QJsonObject>::failure({
+                "rules.destination_invalid", "Destination cannot leave the organizing root.",
+            });
+        }
+    }
+    QString policy = QStringLiteral("inherit");
+    if (destination.collisionPolicy == CollisionPolicy::Rename) policy = QStringLiteral("rename");
+    if (destination.collisionPolicy == CollisionPolicy::Skip) policy = QStringLiteral("skip");
+    if (destination.collisionPolicy == CollisionPolicy::Abort) policy = QStringLiteral("abort");
+    return Result<QJsonObject>::success(QJsonObject{
+        {QStringLiteral("path"), QString::fromStdWString(path.wstring())},
+        {QStringLiteral("collisionPolicy"), policy},
+    });
+}
+
+// 파일 조건의 정밀도와 범위를 확인하며 JSON으로 변환하는 함수.
+Result<QJsonObject> conditionObject(const RuleCondition& condition) {
+    QJsonObject object;
+    if (!condition.extensions.empty()) {
+        QJsonArray values;
+        for (const auto& value : condition.extensions) values.append(QString::fromStdString(value));
+        object.insert(QStringLiteral("extensions"), values);
+    }
+    if (!condition.fileNameGlobs.empty()) {
+        QJsonArray values;
+        for (const auto& value : condition.fileNameGlobs) values.append(QString::fromStdString(value));
+        object.insert(QStringLiteral("fileNameGlobs"), values);
+    }
+    constexpr std::uintmax_t largestExactInteger = 9007199254740991ULL;
+    for (const auto& [key, value] : {
+             std::pair{QStringLiteral("minimumBytes"), condition.minimumBytes},
+             std::pair{QStringLiteral("maximumBytes"), condition.maximumBytes},
+             std::pair{QStringLiteral("greaterThanBytes"), condition.greaterThanBytes}}) {
+        if (!value) continue;
+        if (*value > largestExactInteger) {
+            return Result<QJsonObject>::failure({
+                "rules.byte_count_too_large", "File size must fit in an exact JSON integer.",
+            });
+        }
+        object.insert(key, static_cast<double>(*value));
+    }
+    if (condition.minimumAgeDays) {
+        object.insert(QStringLiteral("minimumAgeDays"), *condition.minimumAgeDays);
+    }
+    if (condition.maximumAgeDays) {
+        object.insert(QStringLiteral("maximumAgeDays"), *condition.maximumAgeDays);
+    }
+    if ((condition.minimumBytes && condition.maximumBytes &&
+         *condition.minimumBytes > *condition.maximumBytes) ||
+        (condition.greaterThanBytes && condition.maximumBytes &&
+         *condition.greaterThanBytes >= *condition.maximumBytes) ||
+        (condition.minimumAgeDays && condition.maximumAgeDays &&
+         *condition.minimumAgeDays > *condition.maximumAgeDays)) {
+        return Result<QJsonObject>::failure({
+            "rules.range_invalid", "A rule minimum cannot exceed its maximum.",
+        });
+    }
+    return Result<QJsonObject>::success(std::move(object));
+}
+
+// 노드 순서와 else 유일성을 보존하며 트리를 JSON으로 변환하는 함수.
+Result<QJsonArray> nodesObject(const std::vector<RuleNode>& nodes, std::set<std::string>& ids,
+                              int depth, int& nodeCount) {
+    if (depth > 32 || nodeCount + nodes.size() > 1000) {
+        return Result<QJsonArray>::failure({
+            "rules.tree_too_large", "Rule tree exceeds its depth or node limit.",
+        });
+    }
+    QJsonArray result;
+    bool foundOtherwise = false;
+    for (const auto& node : nodes) {
+        if (!ids.insert(node.id).second) {
+            return Result<QJsonArray>::failure({
+                "rules.duplicate_id", "Each rule node must have a unique ID.",
+            });
+        }
+        QJsonObject object{
+            {QStringLiteral("id"), QString::fromStdString(node.id)},
+            {QStringLiteral("enabled"), node.enabled},
+        };
+        if (node.otherwise) {
+            if (foundOtherwise) {
+                return Result<QJsonArray>::failure({
+                    "rules.invalid_otherwise", "Each level allows one else node.",
+                });
+            }
+            foundOtherwise = true;
+            auto condition = conditionObject(node.condition);
+            if (!condition) return Result<QJsonArray>::failure(condition.error());
+            if (!condition.value().isEmpty()) {
+                return Result<QJsonArray>::failure({
+                    "rules.invalid_otherwise", "An else node cannot have a condition.",
+                });
+            }
+            object.insert(QStringLiteral("otherwise"), true);
+        } else {
+            auto condition = conditionObject(node.condition);
+            if (!condition) return Result<QJsonArray>::failure(condition.error());
+            object.insert(QStringLiteral("when"), condition.value());
+        }
+        if (!node.children.empty() && node.destination) {
+            return Result<QJsonArray>::failure({
+                "rules.internal_destination", "Only a leaf node may have a destination.",
+            });
+        }
+        if (node.destination) {
+            auto destination = destinationObject(*node.destination);
+            if (!destination) return Result<QJsonArray>::failure(destination.error());
+            object.insert(QStringLiteral("destination"), destination.value());
+        }
+        ++nodeCount;
+        if (!node.children.empty()) {
+            auto children = nodesObject(node.children, ids, depth + 1, nodeCount);
+            if (!children) return Result<QJsonArray>::failure(children.error());
+            object.insert(QStringLiteral("children"), children.value());
+        }
+        result.append(object);
+    }
+    return Result<QJsonArray>::success(std::move(result));
+}
+
 } // namespace
 
 // 규칙 파일과 Schema 경로를 보관하는 생성자.
@@ -237,6 +372,50 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
         result.rules.push_back(std::move(rule.value()));
     }
     return Result<RuleSet>::success(std::move(result));
+}
+
+// v2 규칙 트리를 검사하고 기존 파일을 보호하며 JSON으로 저장하는 함수.
+Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
+    if (rules.schemaVersion != 2 || !rules.rules.empty()) {
+        return Result<void>::failure({
+            "rules.save_version", "Only a v2 rule tree can be saved.",
+        });
+    }
+    if (rulesPath_.startsWith(QLatin1Char(':')) || !QFileInfo(rulesPath_).isAbsolute()) {
+        return Result<void>::failure({
+            "rules.path_invalid", "Rule trees can only be saved to an absolute local path.",
+        });
+    }
+    std::set<std::string> ids;
+    int nodeCount = 0;
+    auto nodes = nodesObject(rules.nodes, ids, 0, nodeCount);
+    if (!nodes) return Result<void>::failure(nodes.error());
+    QJsonObject object{
+        {QStringLiteral("schemaVersion"), 2},
+        {QStringLiteral("ruleSetId"), QString::fromStdString(rules.id)},
+        {QStringLiteral("version"), QString::fromStdString(rules.version)},
+        {QStringLiteral("nodes"), nodes.value()},
+    };
+    if (rules.globalOtherwise) {
+        auto destination = destinationObject(*rules.globalOtherwise);
+        if (!destination) return Result<void>::failure(destination.error());
+        object.insert(QStringLiteral("globalOtherwise"), destination.value());
+    }
+    auto checked = validateJsonObject(object, schemaPath_);
+    if (!checked) return checked;
+    if (!QDir().mkpath(QFileInfo(rulesPath_).absolutePath())) {
+        return Result<void>::failure({
+            "rules.path_invalid", "Cannot prepare the rule file location.",
+        });
+    }
+    const auto json = QJsonDocument(object).toJson(QJsonDocument::Indented);
+    QSaveFile file(rulesPath_);
+    if (!file.open(QIODevice::WriteOnly) || file.write(json) != json.size() || !file.commit()) {
+        return Result<void>::failure({
+            "rules.save_failed", "Cannot save the rule tree atomically.",
+        });
+    }
+    return Result<void>::success();
 }
 
 } // namespace nookbit
