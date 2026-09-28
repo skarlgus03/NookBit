@@ -5,6 +5,8 @@
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
+#include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "application/use_cases/approve_plan_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
@@ -68,10 +70,15 @@ int main(int argc, char* argv[]) {
     nookbit::SqliteHistoryRepository history(databasePath, migrationPath);
     nookbit::FreezePreviewUseCase freezePreview(
         previewRules, previewScanner, previewPlanner, previewHasher, history);
+    nookbit::VerifySavedPlanUseCase verifySavedPlan(
+        previewRules, previewScanner, previewPlanner, previewHasher, history);
+    nookbit::ApprovePlanUseCase approvePlan(verifySavedPlan, history);
     nookbit::PreviewController previewController(
         pendingFiles,
         createPreview,
         freezePreview,
+        verifySavedPlan,
+        approvePlan,
         history,
         QStringLiteral(":/nookbit/rules.json"),
         QStringLiteral(":/nookbit/rules.schema.json"),

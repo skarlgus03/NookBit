@@ -178,7 +178,7 @@ void testApprovedSingleFileMoveAndUndo() {
     expect(QFile::exists(source) && !QFile::exists(destination),
            "frozen plan should not change files");
 
-    nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
+    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history);
     nookbit::SafeExecutor executor(
         settings, verifier, scanner, hasher, history,
         std::filesystem::path(appData.toStdWString()));
@@ -190,7 +190,8 @@ void testApprovedSingleFileMoveAndUndo() {
            "rejected execution must not change files");
 
     nookbit::ApprovePlanUseCase approver(verifier, history);
-    const auto approval = approver.execute(frozen.value().id, {sourcePath});
+    const auto approval = approver.execute(
+        frozen.value().id, {sourcePath}, settings.settings);
     expect(approval.hasValue(), "unchanged plan should receive explicit approval");
     if (!approval) return;
     const auto approved = history.loadPlan(frozen.value().id);
@@ -327,9 +328,9 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
         expect(false, "batch-failure plan should freeze");
         return;
     }
-    nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
+    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history);
     nookbit::ApprovePlanUseCase approver(verifier, history);
-    auto approval = approver.execute(frozen.value().id, selected);
+    auto approval = approver.execute(frozen.value().id, selected, settings.settings);
     auto approved = history.loadPlan(frozen.value().id);
     if (!approval || !approved) {
         expect(false, "batch-failure plan should be approved");
@@ -339,7 +340,7 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
     FailingIntentHistory failingHistory(history,
         destinationCollision ? secondDestination : QString());
     nookbit::VerifySavedPlanUseCase executionVerifier(
-        settings, rules, scanner, planner, hasher, failingHistory);
+        rules, scanner, planner, hasher, failingHistory);
     nookbit::SafeExecutor executor(settings, executionVerifier, scanner, hasher, failingHistory,
                                    std::filesystem::path(appData.toStdWString()));
     auto executed = executor.execute(approved.value(), approval.value(), selected);

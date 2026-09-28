@@ -4,6 +4,7 @@
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "application/use_cases/approve_plan_use_case.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
@@ -84,6 +85,8 @@ struct PreviewWorkflow {
     nookbit::CreatePreviewUseCase useCase;
     nookbit::SqliteHistoryRepository history;
     nookbit::FreezePreviewUseCase freezeUseCase;
+    nookbit::VerifySavedPlanUseCase verifyUseCase;
+    nookbit::ApprovePlanUseCase approveUseCase;
 
     /// 테스트 규칙과 보호 경로로 미리보기 작업을 조립하는 생성자.
     PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData)
@@ -92,7 +95,9 @@ struct PreviewWorkflow {
           useCase(rules, scanner, planner, &hasher),
           history(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
                   projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")),
-          freezeUseCase(rules, scanner, planner, hasher, history) {}
+          freezeUseCase(rules, scanner, planner, hasher, history),
+          verifyUseCase(rules, scanner, planner, hasher, history),
+          approveUseCase(verifyUseCase, history) {}
 
     /// 기본 예제 규칙으로 미리보기 작업을 조립하는 생성자.
     explicit PreviewWorkflow(std::filesystem::path appData)
@@ -119,7 +124,9 @@ void testPreviewFromPendingFiles() {
     const auto appData = directory.filePath(QStringLiteral("app-data"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(appData.toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(appData.toStdWString()), home);
@@ -198,7 +205,9 @@ void testChangedFileAfterSaveFailsVerification() {
     const auto home = directory.filePath(QStringLiteral("organized"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
@@ -232,7 +241,9 @@ void testTamperedSavedPlanFailsVerification() {
     const auto dbPath = directory.filePath(QStringLiteral("history.sqlite"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
@@ -290,7 +301,9 @@ void testChangedRulesCannotBeFrozen() {
     PreviewWorkflow previewWorkflow(rulesPath, projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         rulesPath, projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
@@ -373,17 +386,19 @@ void testChangedSettingsCannotBeFrozen() {
     const auto frozen = freeze.execute(draft.value(), {sourcePath}, settings.settings);
     expect(frozen.hasValue(), "restored settings should allow storing the plan");
     if (!frozen) return;
-    nookbit::VerifySavedPlanUseCase verify(settings, rules, scanner, planner, hasher, history);
-    expect(verify.execute(frozen.value().id, {sourcePath}).hasValue(),
+    nookbit::VerifySavedPlanUseCase verify(rules, scanner, planner, hasher, history);
+    expect(verify.execute(frozen.value().id, {sourcePath}, settings.settings).hasValue(),
            "unchanged settings and rules should verify");
 
     settings.settings.recursiveScan = true;
-    const auto changedSettings = verify.execute(frozen.value().id, {sourcePath});
+    const auto changedSettings = verify.execute(
+        frozen.value().id, {sourcePath}, settings.settings);
     expect(!changedSettings.hasValue() && changedSettings.error().code == "verify.settings_changed",
            "post-save setting changes should fail verification");
     settings.settings.recursiveScan = false;
     rules.rules.rules.front().destinationRelativePath = L"Other";
-    const auto changedRules = verify.execute(frozen.value().id, {sourcePath});
+    const auto changedRules = verify.execute(
+        frozen.value().id, {sourcePath}, settings.settings);
     expect(!changedRules.hasValue() && changedRules.error().code == "verify.rules_changed",
            "post-save rule changes should fail verification even with the same version");
 }
@@ -405,7 +420,9 @@ void testChangedFileCannotBeFrozen() {
     const auto home = directory.filePath(QStringLiteral("organized"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
@@ -443,7 +460,9 @@ void testSingleFileApproveMoveUndo() {
     const auto home = directory.filePath(QStringLiteral("organized"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
@@ -501,7 +520,9 @@ void testMultipleFilesCanBeMoved() {
     const auto home = directory.filePath(QStringLiteral("organized"));
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
@@ -556,7 +577,9 @@ void testHistoryUndoAfterRestart() {
         PreviewWorkflow previewWorkflow(rulesPath, schemaPath, appData);
         nookbit::PreviewController controller(
             pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
-            previewWorkflow.history, rulesPath, schemaPath, appData, home);
+            previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+            previewWorkflow.history,
+            rulesPath, schemaPath, appData, home);
         pending.addUrl(QUrl::fromLocalFile(first));
         controller.createPreview(home);
         firstDestination = controller.steps().front().toMap().value(QStringLiteral("destination")).toString();
@@ -581,7 +604,9 @@ void testHistoryUndoAfterRestart() {
     PreviewWorkflow restartedWorkflow(rulesPath, schemaPath, appData);
     nookbit::PreviewController restarted(
         pendingAfterRestart, restartedWorkflow.useCase, restartedWorkflow.freezeUseCase,
-        restartedWorkflow.history, rulesPath, schemaPath, appData, home);
+        restartedWorkflow.verifyUseCase, restartedWorkflow.approveUseCase,
+        restartedWorkflow.history,
+        rulesPath, schemaPath, appData, home);
     restarted.refreshHistory();
     expect(restarted.historyEntries().size() == 2, "restart should reload both past moves");
     restarted.selectHistoryPlan(firstPlanId);
@@ -633,7 +658,9 @@ void testRecoveryCasesInController() {
     const auto migrationPath = projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
     PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+        previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
+        previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),

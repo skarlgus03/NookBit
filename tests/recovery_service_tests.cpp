@@ -107,9 +107,9 @@ struct Scenario {
         nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history);
         auto frozen = freeze.execute(draft.value(), selected, settings.settings);
         if (!frozen) return nookbit::Result<ApprovedBundle>::failure(frozen.error());
-        nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
+        nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history);
         nookbit::ApprovePlanUseCase approver(verifier, history);
-        auto approval = approver.execute(frozen.value().id, selected);
+        auto approval = approver.execute(frozen.value().id, selected, settings.settings);
         if (!approval) return nookbit::Result<ApprovedBundle>::failure(approval.error());
         auto plan = history.loadPlan(frozen.value().id);
         if (!plan) return nookbit::Result<ApprovedBundle>::failure(plan.error());
@@ -206,7 +206,7 @@ void testUndoBeforeCompletionRecord() {
     const auto& plan = approved.value().plan;
     const auto& step = plan.steps.front();
     nookbit::VerifySavedPlanUseCase verifier(
-        scenario.settings, scenario.rules, scenario.scanner, scenario.planner,
+        scenario.rules, scenario.scanner, scenario.planner,
         scenario.hasher, scenario.history);
     nookbit::SafeExecutor executor(
         scenario.settings, verifier, scenario.scanner,
@@ -247,7 +247,7 @@ void testUndoIntentBeforeMove() {
     const auto& plan = approved.value().plan;
     const auto& step = plan.steps.front();
     nookbit::VerifySavedPlanUseCase verifier(
-        scenario.settings, scenario.rules, scenario.scanner, scenario.planner,
+        scenario.rules, scenario.scanner, scenario.planner,
         scenario.hasher, scenario.history);
     nookbit::SafeExecutor executor(
         scenario.settings, verifier, scenario.scanner,

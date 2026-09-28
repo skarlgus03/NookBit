@@ -1,7 +1,5 @@
 #include "presentation/preview_controller.hpp"
 
-#include "application/use_cases/approve_plan_use_case.hpp"
-#include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 
@@ -71,10 +69,12 @@ QString historyStepStatusText(StepStatus status) {
 
 } // namespace
 
-// 화면 모델과 미리보기 요청 계약 및 보호할 앱 데이터 경로를 받는 생성자.
+// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
 PreviewController::PreviewController(PendingFilesModel& pendingFiles,
                                      ICreatePreviewUseCase& createPreview,
                                      IFreezePreviewUseCase& freezePreview,
+                                     IVerifySavedPlanUseCase& verifySavedPlan,
+                                     IApprovePlanUseCase& approvePlan,
                                      IHistoryRepository& history,
                                      QString rulesPath,
                                      QString schemaPath,
@@ -85,6 +85,8 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
       pendingFiles_(pendingFiles),
       createPreview_(createPreview),
       freezePreview_(freezePreview),
+      verifySavedPlan_(verifySavedPlan),
+      approvePlan_(approvePlan),
       rules_(std::move(rulesPath), std::move(schemaPath)),
       planner_(ruleEngine_, appDataRoot),
       history_(history),
@@ -320,15 +322,14 @@ bool PreviewController::verifySavedPlan() {
         emit previewChanged();
         return false;
     }
-    SessionSettingsRepository settings(
-        std::filesystem::path(previewHomeRoot_.toStdWString()));
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     std::vector<std::filesystem::path> selectedFiles;
     const auto paths = pendingFiles_.filePaths();
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
 
-    VerifySavedPlanUseCase useCase(settings, rules_, scanner_, planner_, hasher_, history_);
-    const auto result = useCase.execute(draft_->id, selectedFiles);
+    const auto result = verifySavedPlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
         message_ = QStringLiteral("저장 계획 검사 실패. 새 미리보기가 필요할 수 있어요: %1")
                        .arg(QString::fromStdString(result.error().message));
@@ -348,14 +349,13 @@ void PreviewController::approvePlan() {
         emit previewChanged();
         return;
     }
-    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
-    VerifySavedPlanUseCase verifier(settings, rules_, scanner_, planner_, hasher_, history_);
-    ApprovePlanUseCase approver(verifier, history_);
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     const auto paths = pendingFiles_.filePaths();
     std::vector<std::filesystem::path> selectedFiles;
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
-    const auto result = approver.execute(draft_->id, selectedFiles);
+    const auto result = approvePlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
         message_ = QStringLiteral("승인하지 못했어요. 새 미리보기가 필요할 수 있어요: %1")
                        .arg(QString::fromStdString(result.error().message));
@@ -386,8 +386,7 @@ void PreviewController::moveApprovedFile() {
         return;
     }
     SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
-    VerifySavedPlanUseCase verifier(settings, rules_, scanner_, planner_, hasher_, history_);
-    SafeExecutor executor(settings, verifier, scanner_, hasher_, history_, appDataRoot_);
+    SafeExecutor executor(settings, verifySavedPlan_, scanner_, hasher_, history_, appDataRoot_);
     const auto result = executor.execute(loaded.value(), *approval_, selectedFiles);
     if (!result) {
         const auto current = history_.loadPlan(draft_->id);

@@ -9,8 +9,7 @@ namespace nookbit {
 class VerifySavedPlanUseCase final : public IVerifySavedPlanUseCase {
 public:
     /// 이력 읽기와 현재 상태 재검사에 필요한 기능을 받는 생성자.
-    VerifySavedPlanUseCase(ISettingsRepository& settings,
-                           IRuleSetRepository& rules,
+    VerifySavedPlanUseCase(IRuleSetRepository& rules,
                            IScanner& scanner,
                            IPlanner& planner,
                            IPlanHasher& hasher,
@@ -20,10 +19,10 @@ public:
     [[nodiscard]] Result<OperationPlan> execute(
         const PlanId& planId,
         const std::vector<std::filesystem::path>& selectedFiles,
+        const UserSettings& settings,
         PlanStatus expectedStatus = PlanStatus::Planned) override;
 
 private:
-    ISettingsRepository& settings_;
     IRuleSetRepository& rules_;
     IScanner& scanner_;
     IPlanner& planner_;

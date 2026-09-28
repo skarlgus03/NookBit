@@ -60,7 +60,10 @@ Result<void> SafeExecutor::execute(
         approval.approvedAt == std::chrono::system_clock::time_point{}) {
         return Result<void>::failure({"execute.approval_missing", "A matching approval is required."});
     }
-    auto checked = verifier_->execute(plan.id, selectedFiles, PlanStatus::Approved);
+    auto settings = settings_.load();
+    if (!settings) return Result<void>::failure(settings.error());
+    auto checked = verifier_->execute(
+        plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
     if (saved.planHash != plan.planHash ||
@@ -71,8 +74,6 @@ Result<void> SafeExecutor::execute(
     if (steps.empty()) {
         return Result<void>::failure({"execute.no_steps", "There are no files to move."});
     }
-    auto settings = settings_.load();
-    if (!settings) return Result<void>::failure(settings.error());
     for (const auto* step : steps) {
         if (!step->fingerprint.sha256 ||
             !PlanSignature::isSha256Hex(*step->fingerprint.sha256)) {

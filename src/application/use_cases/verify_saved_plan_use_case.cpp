@@ -8,19 +8,19 @@
 namespace nookbit {
 
 // 이력 읽기와 현재 상태 재검사에 필요한 기능을 받는 생성자.
-VerifySavedPlanUseCase::VerifySavedPlanUseCase(ISettingsRepository& settings,
-                                               IRuleSetRepository& rules,
+VerifySavedPlanUseCase::VerifySavedPlanUseCase(IRuleSetRepository& rules,
                                                IScanner& scanner,
                                                IPlanner& planner,
                                                IPlanHasher& hasher,
                                                IHistoryRepository& history)
-    : settings_(settings), rules_(rules), scanner_(scanner), planner_(planner),
+    : rules_(rules), scanner_(scanner), planner_(planner),
       hasher_(hasher), history_(history) {}
 
 // DB에서 계획을 다시 읽고 해시와 현재 계획을 비교하는 함수.
 Result<OperationPlan> VerifySavedPlanUseCase::execute(
     const PlanId& planId,
     const std::vector<std::filesystem::path>& selectedFiles,
+    const UserSettings& settings,
     PlanStatus expectedStatus) {
     if (planId.empty() || selectedFiles.empty()) {
         return Result<OperationPlan>::failure({
@@ -47,9 +47,7 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
         });
     }
 
-    auto settings = settings_.load();
-    if (!settings) return Result<OperationPlan>::failure(settings.error());
-    if (saved.settingsRevision != hasher_.sha256(PlanSignature::settings(settings.value()))) {
+    if (saved.settingsRevision != hasher_.sha256(PlanSignature::settings(settings))) {
         return Result<OperationPlan>::failure({
             "verify.settings_changed", "Settings changed after the plan was saved.",
         });
@@ -65,7 +63,7 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
 
     auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
-    auto current = planner_.buildPlan(snapshot.value(), settings.value(), rules.value());
+    auto current = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!current) return Result<OperationPlan>::failure(current.error());
     auto hashed = attachContentHashes(current.value(), scanner_, hasher_);
     if (!hashed) return Result<OperationPlan>::failure(hashed.error());

@@ -8,6 +8,8 @@
 #include "presentation/pending_files_model.hpp"
 #include <nookbit/application/use_cases/create_preview.hpp>
 #include <nookbit/application/use_cases/freeze_preview.hpp>
+#include <nookbit/application/use_cases/verify_saved_plan.hpp>
+#include <nookbit/application/use_cases/approve_plan.hpp>
 
 #include <QObject>
 #include <QString>
@@ -41,10 +43,12 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
 
 public:
-    /// 화면 모델과 미리보기 요청 계약 및 보호할 앱 데이터 경로를 받는 생성자.
+    /// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
                       ICreatePreviewUseCase& createPreview,
                       IFreezePreviewUseCase& freezePreview,
+                      IVerifySavedPlanUseCase& verifySavedPlan,
+                      IApprovePlanUseCase& approvePlan,
                       IHistoryRepository& history,
                       QString rulesPath,
                       QString schemaPath,
@@ -156,6 +160,8 @@ private:
     PendingFilesModel& pendingFiles_;
     ICreatePreviewUseCase& createPreview_;
     IFreezePreviewUseCase& freezePreview_;
+    IVerifySavedPlanUseCase& verifySavedPlan_;
+    IApprovePlanUseCase& approvePlan_;
     JsonRuleSetRepository rules_;
     FilesystemScanner scanner_;
     RuleEngine ruleEngine_;

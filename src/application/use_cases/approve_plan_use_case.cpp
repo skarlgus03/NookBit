@@ -12,8 +12,9 @@ ApprovePlanUseCase::ApprovePlanUseCase(IVerifySavedPlanUseCase& verifier,
 // 저장 계획을 다시 확인하고 승인 시각과 해시를 기록하는 함수.
 Result<ApprovalRecord> ApprovePlanUseCase::execute(
     const PlanId& planId,
-    const std::vector<std::filesystem::path>& selectedFiles) {
-    auto checked = verifier_.execute(planId, selectedFiles);
+    const std::vector<std::filesystem::path>& selectedFiles,
+    const UserSettings& settings) {
+    auto checked = verifier_.execute(planId, selectedFiles, settings);
     if (!checked) return Result<ApprovalRecord>::failure(checked.error());
     ApprovalRecord approval{checked.value().id, checked.value().planHash,
                             std::chrono::system_clock::now()};

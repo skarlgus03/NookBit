@@ -15,6 +15,7 @@ public:
     [[nodiscard]] virtual Result<OperationPlan> execute(
         const PlanId& planId,
         const std::vector<std::filesystem::path>& selectedFiles,
+        const UserSettings& settings,
         PlanStatus expectedStatus = PlanStatus::Planned) = 0;
 };
 
