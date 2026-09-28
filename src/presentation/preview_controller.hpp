@@ -26,20 +26,11 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QVariantList steps READ steps NOTIFY previewChanged)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY previewChanged)
     Q_PROPERTY(QString message READ message NOTIFY previewChanged)
-    Q_PROPERTY(QString recoveryNotice READ recoveryNotice NOTIFY recoveryNoticeChanged)
-    Q_PROPERTY(QVariantList recoveryCases READ recoveryCases NOTIFY recoveryCasesChanged)
-    Q_PROPERTY(QString recoveryMessage READ recoveryMessage NOTIFY recoveryCasesChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool hasFrozenPlan READ hasFrozenPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasMovableSteps READ hasMovableSteps NOTIFY previewChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
-    Q_PROPERTY(QVariantList historyEntries READ historyEntries NOTIFY historyChanged)
-    Q_PROPERTY(QVariantList historySteps READ historySteps NOTIFY historyChanged)
-    Q_PROPERTY(QString historyMessage READ historyMessage NOTIFY historyChanged)
-    Q_PROPERTY(QString selectedHistoryPlanId READ selectedHistoryPlanId NOTIFY historyChanged)
-    Q_PROPERTY(bool canUndoSelectedHistory READ canUndoSelectedHistory NOTIFY historyChanged)
-    Q_PROPERTY(int selectedHistoryFileCount READ selectedHistoryFileCount NOTIFY historyChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
 
 public:
@@ -65,24 +56,6 @@ public:
     /// 최근 미리보기 결과 문구를 반환하는 함수.
     [[nodiscard]] QString message() const;
 
-    /// 시작 시 발견한 미완료 작업 안내를 반환하는 함수.
-    [[nodiscard]] QString recoveryNotice() const;
-
-    /// 사용자가 확인할 중단 작업 목록을 반환하는 함수.
-    [[nodiscard]] QVariantList recoveryCases() const;
-
-    /// 복구 화면의 마지막 검사 결과를 반환하는 함수.
-    [[nodiscard]] QString recoveryMessage() const;
-
-    /// 시작 시 복구 검사 결과를 화면에 전달하는 함수.
-    void setRecoveryNotice(QString notice);
-
-    /// 중단 작업의 현재 원본·목적지 상태를 다시 읽는 함수.
-    Q_INVOKABLE void refreshRecoveryCases();
-
-    /// 파일 위치를 다시 검증하고 확실한 작업 기록만 정리하는 함수.
-    Q_INVOKABLE void resolveRecoveryCase(const QString& planId);
-
     /// 유효한 미리보기 초안의 존재 여부를 반환하는 함수.
     [[nodiscard]] bool hasPreview() const noexcept;
 
@@ -95,24 +68,6 @@ public:
     [[nodiscard]] bool hasMovableSteps() const noexcept;
 
     [[nodiscard]] bool canUndo() const noexcept;
-
-    /// 최근 실행 작업 목록을 화면에 반환하는 함수.
-    [[nodiscard]] QVariantList historyEntries() const;
-
-    /// 선택한 작업의 파일별 이동 기록을 반환하는 함수.
-    [[nodiscard]] QVariantList historySteps() const;
-
-    /// 기록 화면의 안내 문구를 반환하는 함수.
-    [[nodiscard]] QString historyMessage() const;
-
-    /// 선택한 작업 ID를 반환하는 함수.
-    [[nodiscard]] QString selectedHistoryPlanId() const;
-
-    /// 선택한 작업에 되돌릴 파일이 있는지 반환하는 함수.
-    [[nodiscard]] bool canUndoSelectedHistory() const noexcept;
-
-    /// 선택한 작업에서 되돌릴 파일 수를 반환하는 함수.
-    [[nodiscard]] int selectedHistoryFileCount() const noexcept;
 
     /// 처음 제안할 정리 목적지 루트를 반환하는 함수.
     [[nodiscard]] QString defaultDestinationRoot() const;
@@ -135,23 +90,15 @@ public:
     /// 마지막으로 이동한 계획의 파일들을 원래 위치로 되돌리는 함수.
     Q_INVOKABLE void undoLastMove();
 
-    /// 저장된 최근 실행 작업을 다시 읽는 함수.
-    Q_INVOKABLE void refreshHistory();
-
-    /// 기록에서 작업 하나를 골라 파일별 경로를 보여주는 함수.
-    Q_INVOKABLE void selectHistoryPlan(const QString& planId);
-
-    /// 선택한 과거 작업의 파일을 검증한 뒤 되돌리는 함수.
-    Q_INVOKABLE void undoSelectedHistory();
+    /// 기록에서 되돌린 작업이 마지막 이동이면 버튼 상태를 갱신하는 함수.
+    void refreshLastUndoAfterHistoryRollback(const QString& planId);
 
     /// 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
     Q_INVOKABLE void clear();
 
 signals:
     void previewChanged();
-    void recoveryNoticeChanged();
-    void recoveryCasesChanged();
-    void historyChanged();
+    void recoveryReconcileRequested();
 
 private:
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
@@ -174,16 +121,9 @@ private:
     std::optional<OperationPlan> draft_;
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;
-    std::optional<OperationPlan> selectedHistoryPlan_;
-    QVariantList historyEntries_;
-    QVariantList historySteps_;
-    QString historyMessage_;
     QVariantList steps_;
     QStringList warnings_;
     QString message_;
-    QString recoveryNotice_;
-    QVariantList recoveryCases_;
-    QString recoveryMessage_;
     bool hasPreview_{false};
     bool hasFrozenPlan_{false};
 };

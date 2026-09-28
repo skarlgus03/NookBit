@@ -1,5 +1,7 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/preview_controller.hpp"
+#include "presentation/history_controller.hpp"
+#include "presentation/recovery_controller.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
@@ -550,6 +552,46 @@ void testMultipleFilesCanBeMoved() {
            "multi-file undo should restore both files");
 }
 
+// 기록에서 마지막 이동을 되돌리면 계획 화면의 되돌리기 버튼도 꺼지는지 검사하는 함수.
+void testHistoryUndoUpdatesLastMove() {
+#ifdef _WIN32
+    QTemporaryDir directory;
+    expect(directory.isValid(), "shared-undo directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "shared-undo source should open");
+    if (!file.isOpen()) return;
+    file.write("original bytes");
+    file.close();
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    PreviewWorkflow workflow(appData);
+    nookbit::PreviewController preview(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"), appData, home);
+    nookbit::HistoryController history(workflow.history, appData, home);
+    QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
+                     &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
+    preview.createPreview(home);
+    preview.freezePreview();
+    preview.approvePlan();
+    preview.moveApprovedFile();
+    expect(preview.canUndo(), "last move should offer undo before history rollback");
+    history.refreshHistory();
+    if (history.historyEntries().isEmpty()) return;
+    history.selectHistoryPlan(history.historyEntries().front().toMap()
+                                  .value(QStringLiteral("planId")).toString());
+    history.undoSelectedHistory();
+    expect(QFile::exists(source) && !preview.canUndo(),
+           "history rollback should restore file and clear last-move undo");
+#endif
+}
+
 // 앱을 다시 연 뒤 과거 작업을 골라 안전하게 되돌리는 흐름을 검사하는 함수.
 void testHistoryUndoAfterRestart() {
 #ifdef _WIN32
@@ -580,16 +622,19 @@ void testHistoryUndoAfterRestart() {
             previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
             previewWorkflow.history,
             rulesPath, schemaPath, appData, home);
+        nookbit::HistoryController historyController(previewWorkflow.history, appData, home);
+        QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
+                         &controller, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
         pending.addUrl(QUrl::fromLocalFile(first));
         controller.createPreview(home);
         firstDestination = controller.steps().front().toMap().value(QStringLiteral("destination")).toString();
         controller.freezePreview();
         controller.approvePlan();
         controller.moveApprovedFile();
-        controller.refreshHistory();
-        expect(controller.historyEntries().size() == 1, "first move should appear in history");
-        if (controller.historyEntries().isEmpty()) return;
-        firstPlanId = controller.historyEntries().front().toMap().value(QStringLiteral("planId")).toString();
+        historyController.refreshHistory();
+        expect(historyController.historyEntries().size() == 1, "first move should appear in history");
+        if (historyController.historyEntries().isEmpty()) return;
+        firstPlanId = historyController.historyEntries().front().toMap().value(QStringLiteral("planId")).toString();
 
         pending.addUrl(QUrl::fromLocalFile(second));
         controller.createPreview(home);
@@ -607,15 +652,18 @@ void testHistoryUndoAfterRestart() {
         restartedWorkflow.verifyUseCase, restartedWorkflow.approveUseCase,
         restartedWorkflow.history,
         rulesPath, schemaPath, appData, home);
-    restarted.refreshHistory();
-    expect(restarted.historyEntries().size() == 2, "restart should reload both past moves");
-    restarted.selectHistoryPlan(firstPlanId);
-    expect(restarted.canUndoSelectedHistory() && restarted.selectedHistoryFileCount() == 1,
+    nookbit::HistoryController restartedHistory(restartedWorkflow.history, appData, home);
+    QObject::connect(&restartedHistory, &nookbit::HistoryController::rollbackAttempted,
+                     &restarted, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
+    restartedHistory.refreshHistory();
+    expect(restartedHistory.historyEntries().size() == 2, "restart should reload both past moves");
+    restartedHistory.selectHistoryPlan(firstPlanId);
+    expect(restartedHistory.canUndoSelectedHistory() && restartedHistory.selectedHistoryFileCount() == 1,
            "older selected move should offer undo");
-    expect(restarted.historySteps().size() == 1,
+    expect(restartedHistory.historySteps().size() == 1,
            "older selected move should show its file");
-    if (restarted.historySteps().size() == 1) {
-        const auto shownSource = restarted.historySteps().front().toMap()
+    if (restartedHistory.historySteps().size() == 1) {
+        const auto shownSource = restartedHistory.historySteps().front().toMap()
                                      .value(QStringLiteral("source")).toString();
         expect(QDir::fromNativeSeparators(shownSource) == QDir::fromNativeSeparators(first),
                "older selected move should show the original path");
@@ -625,18 +673,18 @@ void testHistoryUndoAfterRestart() {
     expect(occupied.open(QIODevice::WriteOnly) && occupied.write("new occupant") == 12,
            "source collision should be created");
     occupied.close();
-    restarted.undoSelectedHistory();
+    restartedHistory.undoSelectedHistory();
     expect(QFile::exists(firstDestination) && QFile::exists(first) &&
-               restarted.historyMessage().contains(QStringLiteral("되돌리지 못했어요")),
+               restartedHistory.historyMessage().contains(QStringLiteral("되돌리지 못했어요")),
            "history undo must refuse an occupied original path");
     expect(QFile::remove(first), "collision fixture should be removed");
-    restarted.selectHistoryPlan(firstPlanId);
-    restarted.undoSelectedHistory();
+    restartedHistory.selectHistoryPlan(firstPlanId);
+    restartedHistory.undoSelectedHistory();
     expect(QFile::exists(first) && !QFile::exists(firstDestination) &&
                QFile::exists(secondDestination) && !QFile::exists(second),
            "chosen older move should undo without touching the newer move");
-    restarted.selectHistoryPlan(firstPlanId);
-    expect(!restarted.canUndoSelectedHistory(), "already undone history must not be undoable again");
+    restartedHistory.selectHistoryPlan(firstPlanId);
+    expect(!restartedHistory.canUndoSelectedHistory(), "already undone history must not be undoable again");
 #endif
 }
 
@@ -665,6 +713,9 @@ void testRecoveryCasesInController() {
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
+    nookbit::RecoveryController recoveryController(previewWorkflow.history);
+    QObject::connect(&controller, &nookbit::PreviewController::recoveryReconcileRequested,
+                     &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
     controller.createPreview(home);
     controller.freezePreview();
     controller.approvePlan();
@@ -693,17 +744,17 @@ void testRecoveryCasesInController() {
     auto reconciled = recovery.reconcile();
     expect(reconciled.hasValue() && reconciled.value().needsAttention.size() == 1,
            "ambiguous recovery-screen plan should require attention");
-    controller.refreshRecoveryCases();
-    expect(controller.recoveryCases().size() == 1 &&
-               !controller.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
+    recoveryController.refreshRecoveryCases();
+    expect(recoveryController.recoveryCases().size() == 1 &&
+               !recoveryController.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
            "screen should show ambiguity without offering confirmation");
     expect(QFile::remove(destination), "test copy should be removed");
-    controller.refreshRecoveryCases();
-    expect(controller.recoveryCases().size() == 1 &&
-               controller.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
+    recoveryController.refreshRecoveryCases();
+    expect(recoveryController.recoveryCases().size() == 1 &&
+               recoveryController.recoveryCases().front().toMap().value(QStringLiteral("canResolve")).toBool(),
            "screen should offer confirmation when only the matching source remains");
-    controller.resolveRecoveryCase(QString::fromStdString(plan.id));
-    expect(controller.recoveryCases().isEmpty() && QFile::exists(source),
+    recoveryController.resolveRecoveryCase(QString::fromStdString(plan.id));
+    expect(recoveryController.recoveryCases().isEmpty() && QFile::exists(source),
            "screen confirmation should clear the record without moving the source");
 }
 
@@ -720,6 +771,7 @@ int main(int argc, char* argv[]) {
     testTamperedSavedPlanFailsVerification();
     testSingleFileApproveMoveUndo();
     testMultipleFilesCanBeMoved();
+    testHistoryUndoUpdatesLastMove();
     testHistoryUndoAfterRestart();
     testRecoveryCasesInController();
     if (failures == 0) {

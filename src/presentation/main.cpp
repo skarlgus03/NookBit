@@ -1,5 +1,7 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/preview_controller.hpp"
+#include "presentation/history_controller.hpp"
+#include "presentation/recovery_controller.hpp"
 #include "presentation/watch_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
@@ -84,9 +86,19 @@ int main(int argc, char* argv[]) {
         QStringLiteral(":/nookbit/rules.schema.json"),
         std::filesystem::path(appData.toStdWString()),
         QDir(documents).filePath(QStringLiteral("NookBit Organized")));
-    previewController.setRecoveryNotice(recoveryNotice);
+    nookbit::RecoveryController recoveryController(history);
+    nookbit::HistoryController historyController(
+        history, std::filesystem::path(appData.toStdWString()),
+        QDir(documents).filePath(QStringLiteral("NookBit Organized")));
+    QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
+                     &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
+    QObject::connect(&historyController, &nookbit::HistoryController::recoveryRefreshRequested,
+                     &recoveryController, &nookbit::RecoveryController::refreshRecoveryCases);
+    QObject::connect(&previewController, &nookbit::PreviewController::recoveryReconcileRequested,
+                     &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
+    recoveryController.setRecoveryNotice(recoveryNotice);
     if (!verifyUi && QFileInfo::exists(databasePath)) {
-        previewController.refreshRecoveryCases();
+        recoveryController.refreshRecoveryCases();
     }
     nookbit::JsonWatchSettingsRepository watchSettings(
         QDir(appData).filePath(QStringLiteral("watch.json")),
@@ -104,6 +116,8 @@ int main(int argc, char* argv[]) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
+    engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
+    engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     QObject::connect(
         &engine,

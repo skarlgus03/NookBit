@@ -84,17 +84,17 @@ ApplicationWindow {
 
         Label {
             Layout.fillWidth: true
-            visible: previewController.recoveryNotice.length > 0
-            text: previewController.recoveryNotice
+            visible: recoveryController.recoveryNotice.length > 0
+            text: recoveryController.recoveryNotice
             color: "#9b5c23"
             wrapMode: Text.WordWrap
         }
 
         Button {
-            visible: previewController.recoveryCases.length > 0
+            visible: recoveryController.recoveryCases.length > 0
             text: qsTr("중단 작업 확인")
             onClicked: {
-                previewController.refreshRecoveryCases()
+                recoveryController.refreshRecoveryCases()
                 recoveryDialog.open()
             }
         }
@@ -287,7 +287,7 @@ ApplicationWindow {
             Button {
                 text: qsTr("작업 기록")
                 onClicked: {
-                    previewController.refreshHistory()
+                    historyController.refreshHistory()
                     historyDialog.open()
                 }
             }
@@ -578,13 +578,13 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: previewController.historyMessage
+                text: historyController.historyMessage
                 wrapMode: Text.WordWrap
                 color: "#426349"
             }
             Button {
                 text: qsTr("목록 새로고침")
-                onClicked: previewController.refreshHistory()
+                onClicked: historyController.refreshHistory()
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -597,13 +597,13 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     clip: true
                     spacing: 6
-                    model: previewController.historyEntries
+                    model: historyController.historyEntries
                     delegate: Rectangle {
                         required property var modelData
                         width: historyList.width
                         height: 100
                         radius: 9
-                        color: modelData.planId === previewController.selectedHistoryPlanId
+                        color: modelData.planId === historyController.selectedHistoryPlanId
                                ? "#e8f4e5" : "#f7f9f6"
                         border.color: "#d8dcd5"
 
@@ -624,7 +624,7 @@ ApplicationWindow {
                             }
                             Button {
                                 text: qsTr("파일 보기")
-                                onClicked: previewController.selectHistoryPlan(modelData.planId)
+                                onClicked: historyController.selectHistoryPlan(modelData.planId)
                             }
                         }
                     }
@@ -637,7 +637,7 @@ ApplicationWindow {
 
                     Label {
                         Layout.fillWidth: true
-                        text: previewController.selectedHistoryPlanId.length > 0
+                        text: historyController.selectedHistoryPlanId.length > 0
                               ? qsTr("선택한 작업의 파일") : qsTr("왼쪽에서 작업을 선택해 주세요.")
                         font.bold: true
                     }
@@ -651,7 +651,7 @@ ApplicationWindow {
                             spacing: 6
 
                             Repeater {
-                                model: previewController.historySteps
+                                model: historyController.historySteps
                                 delegate: Frame {
                                     required property var modelData
                                     width: parent.width
@@ -681,7 +681,7 @@ ApplicationWindow {
                     }
                     Button {
                         text: qsTr("이 작업 되돌리기")
-                        enabled: previewController.canUndoSelectedHistory
+                        enabled: historyController.canUndoSelectedHistory
                         onClicked: undoHistoryDialog.open()
                     }
                 }
@@ -696,13 +696,13 @@ ApplicationWindow {
         modal: true
         title: qsTr("선택한 작업 되돌리기")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        onAccepted: previewController.undoSelectedHistory()
+        onAccepted: historyController.undoSelectedHistory()
 
         Label {
             width: parent.width
             text: qsTr("이 작업에서 이동된 파일 %1개를 원래 위치로 되돌릴까요?\n"
                        + "파일이 바뀌었거나 원본 경로가 사용 중이면 중단합니다.")
-                  .arg(previewController.selectedHistoryFileCount)
+                  .arg(historyController.selectedHistoryFileCount)
             wrapMode: Text.WordWrap
         }
     }
@@ -727,11 +727,11 @@ ApplicationWindow {
             }
             Button {
                 text: qsTr("파일 상태 다시 검사")
-                onClicked: previewController.refreshRecoveryCases()
+                onClicked: recoveryController.refreshRecoveryCases()
             }
             Label {
                 Layout.fillWidth: true
-                text: previewController.recoveryMessage
+                text: recoveryController.recoveryMessage
                 wrapMode: Text.WordWrap
                 color: "#9b5c23"
             }
@@ -746,7 +746,7 @@ ApplicationWindow {
                     spacing: 8
 
                     Repeater {
-                        model: previewController.recoveryCases
+                        model: recoveryController.recoveryCases
                         delegate: Frame {
                             required property var modelData
                             width: parent.width
@@ -780,7 +780,7 @@ ApplicationWindow {
                                     text: qsTr("현재 상태로 기록 확정")
                                     visible: modelData.partIndex === 1
                                     enabled: modelData.canResolve
-                                    onClicked: previewController.resolveRecoveryCase(modelData.planId)
+                                    onClicked: recoveryController.resolveRecoveryCase(modelData.planId)
                                 }
                             }
                         }

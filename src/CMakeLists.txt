@@ -70,6 +70,10 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
       presentation/preview_controller.cpp
+      presentation/history_controller.hpp
+      presentation/history_controller.cpp
+      presentation/recovery_controller.hpp
+      presentation/recovery_controller.cpp
       presentation/watch_controller.hpp
       presentation/watch_controller.cpp
       ${PROJECT_SOURCE_DIR}/resources/config.qrc

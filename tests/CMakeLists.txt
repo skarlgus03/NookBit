@@ -107,6 +107,10 @@ if(TARGET nookbit_json_config)
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/preview_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/preview_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/recovery_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/recovery_controller.cpp
   )
   set_target_properties(nookbit_preview_controller_tests PROPERTIES AUTOMOC ON)
   target_include_directories(nookbit_preview_controller_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
