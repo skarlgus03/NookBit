@@ -16,12 +16,19 @@ public:
         IPlanner& planner,
         IPlanHasher* hasher = nullptr);
 
-    /// 선택한 파일과 현재 규칙 버전으로 정리 미리보기를 생성하는 함수.
+    /// 요청에 포함된 목적지를 사용하도록 외부 일꾼만 받는 생성자.
+    CreatePreviewUseCase(
+        IRuleSetRepository& rules,
+        IScanner& scanner,
+        IPlanner& planner,
+        IPlanHasher* hasher = nullptr);
+
+    /// 선택한 파일과 요청 목적지·규칙으로 정리 미리보기를 생성하는 함수.
     [[nodiscard]] Result<OperationPlan> execute(
         const CreatePreviewRequest& request) override;
 
 private:
-    ISettingsRepository& settings_;
+    ISettingsRepository* settings_;
     IRuleSetRepository& rules_;
     IScanner& scanner_;
     IPlanner& planner_;

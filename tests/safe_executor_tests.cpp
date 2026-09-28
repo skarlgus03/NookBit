@@ -168,8 +168,8 @@ void testApprovedSingleFileMoveAndUndo() {
     const auto draft = preview.execute({loadedRules.value().version, {sourcePath}});
     expect(draft.hasValue(), "draft should be created");
     if (!draft) return;
-    nookbit::FreezePreviewUseCase freezer(settings, rules, scanner, planner, hasher, history);
-    const auto frozen = freezer.execute(draft.value(), {sourcePath});
+    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history);
+    const auto frozen = freezer.execute(draft.value(), {sourcePath}, settings.settings);
     expect(frozen.hasValue(), "draft should be frozen");
     if (!frozen) return;
     expect(frozen.value().steps.front().fingerprint.sha256.has_value(),
@@ -178,8 +178,9 @@ void testApprovedSingleFileMoveAndUndo() {
     expect(QFile::exists(source) && !QFile::exists(destination),
            "frozen plan should not change files");
 
+    nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
     nookbit::SafeExecutor executor(
-        settings, rules, scanner, planner, hasher, history,
+        settings, verifier, scanner, hasher, history,
         std::filesystem::path(appData.toStdWString()));
     const nookbit::ApprovalRecord fakeApproval{
         frozen.value().id, frozen.value().planHash, std::chrono::system_clock::now()};
@@ -188,7 +189,6 @@ void testApprovedSingleFileMoveAndUndo() {
     expect(QFile::exists(source) && !QFile::exists(destination),
            "rejected execution must not change files");
 
-    nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
     nookbit::ApprovePlanUseCase approver(verifier, history);
     const auto approval = approver.execute(frozen.value().id, {sourcePath});
     expect(approval.hasValue(), "unchanged plan should receive explicit approval");
@@ -197,6 +197,14 @@ void testApprovedSingleFileMoveAndUndo() {
     expect(approved.hasValue() && approved.value().status == nookbit::PlanStatus::Approved,
            "approved status should be persisted");
     if (!approved) return;
+    nookbit::SafeExecutor rollbackOnly(
+        settings, scanner, hasher, history, std::filesystem::path(appData.toStdWString()));
+    const auto missingVerifier = rollbackOnly.execute(
+        approved.value(), approval.value(), {sourcePath});
+    expect(!missingVerifier.hasValue() &&
+               missingVerifier.error().code == "execute.verifier_missing" &&
+               QFile::exists(source) && !QFile::exists(destination),
+           "rollback-only executor must reject a move without changing files");
     auto wrongApproval = approval.value();
     wrongApproval.planHash = std::string(64, '0');
     const auto wrongHash = executor.execute(approved.value(), wrongApproval, {sourcePath});
@@ -313,8 +321,8 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
         expect(false, "batch-failure preview should succeed");
         return;
     }
-    nookbit::FreezePreviewUseCase freezer(settings, rules, scanner, planner, hasher, history);
-    auto frozen = freezer.execute(draft.value(), selected);
+    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history);
+    auto frozen = freezer.execute(draft.value(), selected, settings.settings);
     if (!frozen) {
         expect(false, "batch-failure plan should freeze");
         return;
@@ -330,7 +338,9 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
     const auto secondDestination = QString::fromStdWString(approved.value().steps.at(1).destination.wstring());
     FailingIntentHistory failingHistory(history,
         destinationCollision ? secondDestination : QString());
-    nookbit::SafeExecutor executor(settings, rules, scanner, planner, hasher, failingHistory,
+    nookbit::VerifySavedPlanUseCase executionVerifier(
+        settings, rules, scanner, planner, hasher, failingHistory);
+    nookbit::SafeExecutor executor(settings, executionVerifier, scanner, hasher, failingHistory,
                                    std::filesystem::path(appData.toStdWString()));
     auto executed = executor.execute(approved.value(), approval.value(), selected);
     expect(!executed.hasValue() && executed.error().code == "execute.batch_rolled_back",

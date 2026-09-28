@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/use_cases/verify_saved_plan.hpp>
 
 #include <filesystem>
 
@@ -11,9 +12,15 @@ class SafeExecutor final : public IExecutor {
 public:
     /// 현재 상태 검증과 이력 저장에 필요한 기능을 받는 생성자.
     SafeExecutor(ISettingsRepository& settings,
-                 IRuleSetRepository& rules,
+                 IVerifySavedPlanUseCase& verifier,
                  IScanner& scanner,
-                 IPlanner& planner,
+                 IPlanHasher& hasher,
+                 IHistoryRepository& history,
+                 std::filesystem::path appDataRoot);
+
+    /// 검증이 필요 없는 되돌리기만 할 때 사용할 실행기를 만드는 생성자.
+    SafeExecutor(ISettingsRepository& settings,
+                 IScanner& scanner,
                  IPlanHasher& hasher,
                  IHistoryRepository& history,
                  std::filesystem::path appDataRoot);
@@ -39,9 +46,8 @@ private:
     [[nodiscard]] Result<void> markNeedsRecovery(const PlanId& planId);
 
     ISettingsRepository& settings_;
-    IRuleSetRepository& rules_;
+    IVerifySavedPlanUseCase* verifier_;
     IScanner& scanner_;
-    IPlanner& planner_;
     IPlanHasher& hasher_;
     IHistoryRepository& history_;
     std::filesystem::path appDataRoot_;

@@ -7,6 +7,8 @@
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
+#include "infrastructure/configuration/json_rule_set_repository.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
 
@@ -72,6 +74,32 @@ QString projectPath(const char* relativePath) {
            QString::fromUtf8(relativePath);
 }
 
+/// 화면 테스트에서 미리보기 일꾼과 유스케이스의 수명을 함께 관리한다.
+struct PreviewWorkflow {
+    nookbit::JsonRuleSetRepository rules;
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine ruleEngine;
+    nookbit::Planner planner;
+    nookbit::QtPlanHasher hasher;
+    nookbit::CreatePreviewUseCase useCase;
+    nookbit::SqliteHistoryRepository history;
+    nookbit::FreezePreviewUseCase freezeUseCase;
+
+    /// 테스트 규칙과 보호 경로로 미리보기 작업을 조립하는 생성자.
+    PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData)
+        : rules(std::move(rulesPath), std::move(schemaPath)),
+          planner(ruleEngine, appData),
+          useCase(rules, scanner, planner, &hasher),
+          history(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
+                  projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")),
+          freezeUseCase(rules, scanner, planner, hasher, history) {}
+
+    /// 기본 예제 규칙으로 미리보기 작업을 조립하는 생성자.
+    explicit PreviewWorkflow(std::filesystem::path appData)
+        : PreviewWorkflow(projectPath("resources/rules/default.example.json"),
+                          projectPath("schemas/rules.schema.json"), std::move(appData)) {}
+};
+
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
 void testPreviewFromPendingFiles() {
     QTemporaryDir directory;
@@ -89,13 +117,12 @@ void testPreviewFromPendingFiles() {
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
     const auto appData = directory.filePath(QStringLiteral("app-data"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(appData.toStdWString()));
     nookbit::PreviewController controller(
-        pending,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(appData.toStdWString()), home,
-        directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        std::filesystem::path(appData.toStdWString()), home);
     controller.createPreview(home);
 
     expect(controller.hasPreview(), "preview should be available");
@@ -169,13 +196,13 @@ void testChangedFileAfterSaveFailsVerification() {
     nookbit::PendingFilesModel pending;
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     controller.freezePreview();
     expect(controller.hasFrozenPlan(), "post-save plan should be stored");
@@ -203,13 +230,13 @@ void testTamperedSavedPlanFailsVerification() {
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
     const auto dbPath = directory.filePath(QStringLiteral("history.sqlite"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, dbPath,
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     controller.freezePreview();
     expect(controller.verifySavedPlan(), "untampered plan should pass first");
@@ -260,11 +287,13 @@ void testChangedRulesCannotBeFrozen() {
     nookbit::PendingFilesModel pending;
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow previewWorkflow(rulesPath, projectPath("schemas/rules.schema.json"),
+        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, rulesPath, projectPath("schemas/rules.schema.json"),
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        rulesPath, projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     expect(controller.hasPreview(), "rule-change preview should be available");
 
@@ -332,8 +361,8 @@ void testChangedSettingsCannotBeFrozen() {
     if (!draft) return;
 
     settings.settings.recursiveScan = true;
-    nookbit::FreezePreviewUseCase freeze(settings, rules, scanner, planner, hasher, history);
-    const auto result = freeze.execute(draft.value(), {sourcePath});
+    nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history);
+    const auto result = freeze.execute(draft.value(), {sourcePath}, settings.settings);
     expect(!result.hasValue() && result.error().code == "freeze.settings_changed",
            "setting changes must be rejected even when planned destination is unchanged");
     expect(!QFile::exists(directory.filePath(QStringLiteral("history.sqlite"))),
@@ -341,7 +370,7 @@ void testChangedSettingsCannotBeFrozen() {
     expect(QFile::exists(source), "settings-change rejection must leave the source in place");
 
     settings.settings.recursiveScan = false;
-    const auto frozen = freeze.execute(draft.value(), {sourcePath});
+    const auto frozen = freeze.execute(draft.value(), {sourcePath}, settings.settings);
     expect(frozen.hasValue(), "restored settings should allow storing the plan");
     if (!frozen) return;
     nookbit::VerifySavedPlanUseCase verify(settings, rules, scanner, planner, hasher, history);
@@ -374,14 +403,13 @@ void testChangedFileCannotBeFrozen() {
     nookbit::PendingFilesModel pending;
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending,
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home,
-        directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     expect(controller.hasPreview(), "stale-test preview should be available");
     expect(file.open(QIODevice::Append), "stale-test source should reopen");
@@ -413,12 +441,13 @@ void testSingleFileApproveMoveUndo() {
     nookbit::PendingFilesModel pending;
     pending.addUrl(QUrl::fromLocalFile(source));
     const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, projectPath("resources/rules/default.example.json"),
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     expect(controller.hasPreview() && controller.steps().size() == 1,
            "single file should create one preview step");
@@ -470,12 +499,13 @@ void testMultipleFilesCanBeMoved() {
     pending.addUrl(QUrl::fromLocalFile(second));
     pending.addUrl(QUrl::fromLocalFile(unmatched));
     const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, projectPath("resources/rules/default.example.json"),
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, directory.filePath(QStringLiteral("history.sqlite")),
-        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        home);
     controller.createPreview(home);
     const auto previewRows = controller.steps();
     expect(previewRows.size() == 2, "both classified files should appear in preview");
@@ -523,8 +553,10 @@ void testHistoryUndoAfterRestart() {
     QString secondDestination;
     {
         nookbit::PendingFilesModel pending;
+        PreviewWorkflow previewWorkflow(rulesPath, schemaPath, appData);
         nookbit::PreviewController controller(
-            pending, rulesPath, schemaPath, appData, home, dbPath, migrationPath);
+            pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
+            previewWorkflow.history, rulesPath, schemaPath, appData, home);
         pending.addUrl(QUrl::fromLocalFile(first));
         controller.createPreview(home);
         firstDestination = controller.steps().front().toMap().value(QStringLiteral("destination")).toString();
@@ -546,8 +578,10 @@ void testHistoryUndoAfterRestart() {
     expect(QFile::exists(firstDestination) && QFile::exists(secondDestination),
            "both files should stay moved after closing the first controller");
     nookbit::PendingFilesModel pendingAfterRestart;
+    PreviewWorkflow restartedWorkflow(rulesPath, schemaPath, appData);
     nookbit::PreviewController restarted(
-        pendingAfterRestart, rulesPath, schemaPath, appData, home, dbPath, migrationPath);
+        pendingAfterRestart, restartedWorkflow.useCase, restartedWorkflow.freezeUseCase,
+        restartedWorkflow.history, rulesPath, schemaPath, appData, home);
     restarted.refreshHistory();
     expect(restarted.historyEntries().size() == 2, "restart should reload both past moves");
     restarted.selectHistoryPlan(firstPlanId);
@@ -597,11 +631,13 @@ void testRecoveryCasesInController() {
     const auto home = directory.filePath(QStringLiteral("organized"));
     const auto databasePath = directory.filePath(QStringLiteral("history.sqlite"));
     const auto migrationPath = projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
+    PreviewWorkflow previewWorkflow(std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()));
     nookbit::PreviewController controller(
-        pending, projectPath("resources/rules/default.example.json"),
+        pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase, previewWorkflow.history,
+        projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
-        home, databasePath, migrationPath);
+        home);
     controller.createPreview(home);
     controller.freezePreview();
     controller.approvePlan();

@@ -104,8 +104,8 @@ struct Scenario {
         nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
         auto draft = preview.execute({loadedRules.value().version, selected});
         if (!draft) return nookbit::Result<ApprovedBundle>::failure(draft.error());
-        nookbit::FreezePreviewUseCase freeze(settings, rules, scanner, planner, hasher, history);
-        auto frozen = freeze.execute(draft.value(), selected);
+        nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history);
+        auto frozen = freeze.execute(draft.value(), selected, settings.settings);
         if (!frozen) return nookbit::Result<ApprovedBundle>::failure(frozen.error());
         nookbit::VerifySavedPlanUseCase verifier(settings, rules, scanner, planner, hasher, history);
         nookbit::ApprovePlanUseCase approver(verifier, history);
@@ -187,7 +187,7 @@ void testMoveBeforeCompletionRecord() {
            "reconciliation must not move the file a second time");
 
     nookbit::SafeExecutor executor(
-        scenario.settings, scenario.rules, scenario.scanner, scenario.planner,
+        scenario.settings, scenario.scanner,
         scenario.hasher, scenario.history,
         std::filesystem::path(scenario.appData.toStdWString()));
     expect(executor.rollback(plan.id).hasValue(),
@@ -205,8 +205,11 @@ void testUndoBeforeCompletionRecord() {
     if (!approved) return;
     const auto& plan = approved.value().plan;
     const auto& step = plan.steps.front();
-    nookbit::SafeExecutor executor(
+    nookbit::VerifySavedPlanUseCase verifier(
         scenario.settings, scenario.rules, scenario.scanner, scenario.planner,
+        scenario.hasher, scenario.history);
+    nookbit::SafeExecutor executor(
+        scenario.settings, verifier, scenario.scanner,
         scenario.hasher, scenario.history,
         std::filesystem::path(scenario.appData.toStdWString()));
     expect(executor.execute(plan, approved.value().approval, {scenario.sourcePath()}).hasValue(),
@@ -243,8 +246,11 @@ void testUndoIntentBeforeMove() {
     if (!approved) return;
     const auto& plan = approved.value().plan;
     const auto& step = plan.steps.front();
-    nookbit::SafeExecutor executor(
+    nookbit::VerifySavedPlanUseCase verifier(
         scenario.settings, scenario.rules, scenario.scanner, scenario.planner,
+        scenario.hasher, scenario.history);
+    nookbit::SafeExecutor executor(
+        scenario.settings, verifier, scenario.scanner,
         scenario.hasher, scenario.history,
         std::filesystem::path(scenario.appData.toStdWString()));
     expect(executor.execute(plan, approved.value().approval, {scenario.sourcePath()}).hasValue(),

@@ -3,10 +3,15 @@
 #include "presentation/watch_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "application/use_cases/create_preview_use_case.hpp"
+#include "application/use_cases/freeze_preview_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "modules/rules/rule_engine.hpp"
+#include "modules/planner/planner.hpp"
+#include "infrastructure/cryptography/qt_plan_hasher.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -51,14 +56,27 @@ int main(int argc, char* argv[]) {
                                  .arg(result.value().reconciled);
         }
     }
+    nookbit::JsonRuleSetRepository previewRules(
+        QStringLiteral(":/nookbit/rules.json"),
+        QStringLiteral(":/nookbit/rules.schema.json"));
+    nookbit::FilesystemScanner previewScanner;
+    nookbit::RuleEngine previewRuleEngine;
+    nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));
+    nookbit::QtPlanHasher previewHasher;
+    nookbit::CreatePreviewUseCase createPreview(
+        previewRules, previewScanner, previewPlanner, &previewHasher);
+    nookbit::SqliteHistoryRepository history(databasePath, migrationPath);
+    nookbit::FreezePreviewUseCase freezePreview(
+        previewRules, previewScanner, previewPlanner, previewHasher, history);
     nookbit::PreviewController previewController(
         pendingFiles,
+        createPreview,
+        freezePreview,
+        history,
         QStringLiteral(":/nookbit/rules.json"),
         QStringLiteral(":/nookbit/rules.schema.json"),
         std::filesystem::path(appData.toStdWString()),
-        QDir(documents).filePath(QStringLiteral("NookBit Organized")),
-        databasePath,
-        migrationPath);
+        QDir(documents).filePath(QStringLiteral("NookBit Organized")));
     previewController.setRecoveryNotice(recoveryNotice);
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         previewController.refreshRecoveryCases();

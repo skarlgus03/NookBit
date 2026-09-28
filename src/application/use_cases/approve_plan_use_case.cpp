@@ -5,7 +5,7 @@
 namespace nookbit {
 
 // 재검증과 이력 저장 기능을 받는 생성자.
-ApprovePlanUseCase::ApprovePlanUseCase(VerifySavedPlanUseCase& verifier,
+ApprovePlanUseCase::ApprovePlanUseCase(IVerifySavedPlanUseCase& verifier,
                                      IHistoryRepository& history)
     : verifier_(verifier), history_(history) {}
 

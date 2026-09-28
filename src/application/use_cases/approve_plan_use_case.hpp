@@ -1,6 +1,7 @@
 #pragma once
 
-#include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include <nookbit/application/ports.hpp>
+#include <nookbit/application/use_cases/verify_saved_plan.hpp>
 
 namespace nookbit {
 
@@ -8,7 +9,7 @@ namespace nookbit {
 class ApprovePlanUseCase final {
 public:
     /// 재검증과 이력 저장 기능을 받는 생성자.
-    ApprovePlanUseCase(VerifySavedPlanUseCase& verifier, IHistoryRepository& history);
+    ApprovePlanUseCase(IVerifySavedPlanUseCase& verifier, IHistoryRepository& history);
 
     /// 저장 계획을 다시 확인하고 승인 시각과 해시를 기록하는 함수.
     [[nodiscard]] Result<ApprovalRecord> execute(
@@ -16,7 +17,7 @@ public:
         const std::vector<std::filesystem::path>& selectedFiles);
 
 private:
-    VerifySavedPlanUseCase& verifier_;
+    IVerifySavedPlanUseCase& verifier_;
     IHistoryRepository& history_;
 };
 

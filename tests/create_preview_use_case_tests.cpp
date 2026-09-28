@@ -72,16 +72,18 @@ public:
         nookbit::Result<nookbit::OperationPlan>::success({});
     std::string lastSnapshotId;
     nookbit::RuleSetVersion lastRuleSetVersion;
+    std::filesystem::path lastHomeRoot;
     int buildCalls{0};
 
     // 전달받은 입력을 기록하고 준비된 이동 계획을 반환하는 함수.
     [[nodiscard]] nookbit::Result<nookbit::OperationPlan> buildPlan(
         const nookbit::ScanSnapshot& snapshot,
-        const nookbit::UserSettings&,
+        const nookbit::UserSettings& settings,
         const nookbit::RuleSet& rules) override {
         ++buildCalls;
         lastSnapshotId = snapshot.id;
         lastRuleSetVersion = rules.version;
+        lastHomeRoot = settings.homeRoot;
         return planResult;
     }
 };
@@ -131,6 +133,39 @@ void testSuccessfulPreview() {
            "preview should pass the scan snapshot to the planner");
     expect(planner.lastRuleSetVersion == "rules-1",
            "preview should pass the requested rule-set version to the planner");
+}
+
+// 화면 요청의 목적지를 사용하고 규칙을 한 번만 읽는지 검사하는 함수.
+void testRequestDestinationLoadsRulesOnce() {
+    FakeRuleSetRepository rules;
+    FakeScanner scanner;
+    FakePlanner planner;
+    nookbit::CreatePreviewUseCase useCase(rules, scanner, planner);
+
+    const auto result = useCase.execute({{}, sampleSelection, L"C:/requested-home"});
+
+    expect(result.hasValue(), "request destination should create a preview");
+    expect(rules.loadCalls == 1, "preview should load current rules once");
+    expect(planner.lastHomeRoot == std::filesystem::path(L"C:/requested-home"),
+           "planner should receive the requested destination");
+    expect(planner.lastRuleSetVersion == "rules-1",
+           "planner should use the loaded rules version");
+}
+
+// 설정 저장소가 없을 때 목적지를 빠뜨린 요청을 거절하는지 검사하는 함수.
+void testRequestWithoutDestinationStopsEarly() {
+    FakeRuleSetRepository rules;
+    FakeScanner scanner;
+    FakePlanner planner;
+    nookbit::CreatePreviewUseCase useCase(rules, scanner, planner);
+
+    const auto result = useCase.execute({"rules-1", sampleSelection});
+
+    expect(!result.hasValue() &&
+               result.error().code == "preview.destination_root_empty",
+           "preview without settings should require a destination");
+    expect(rules.loadCalls == 0 && scanner.scanCalls == 0 && planner.buildCalls == 0,
+           "missing destination should stop before calling workers");
 }
 
 // 잘못된 요청이 외부 모듈을 호출하기 전에 거부되는지 검사하는 함수.
@@ -291,6 +326,8 @@ void testPlannerFailureIsReturned() {
 // 모든 미리보기 유스케이스 테스트를 실행하고 결과 코드를 반환하는 함수.
 int runTests() {
     testSuccessfulPreview();
+    testRequestDestinationLoadsRulesOnce();
+    testRequestWithoutDestinationStopsEarly();
     testEmptyRuleSetVersionStopsEarly();
     testSettingsFailureStopsWorkflow();
     testEmptySelectionStopsBeforeScanning();

@@ -3,10 +3,11 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
-#include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
 #include "presentation/pending_files_model.hpp"
+#include <nookbit/application/use_cases/create_preview.hpp>
+#include <nookbit/application/use_cases/freeze_preview.hpp>
 
 #include <QObject>
 #include <QString>
@@ -40,14 +41,15 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
 
 public:
-    /// 화면 모델과 규칙 파일 및 보호할 앱 데이터 경로를 받는 생성자.
+    /// 화면 모델과 미리보기 요청 계약 및 보호할 앱 데이터 경로를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
+                      ICreatePreviewUseCase& createPreview,
+                      IFreezePreviewUseCase& freezePreview,
+                      IHistoryRepository& history,
                       QString rulesPath,
                       QString schemaPath,
                       std::filesystem::path appDataRoot,
                       QString defaultDestinationRoot,
-                      QString databasePath,
-                      QString migrationPath,
                       QObject* parent = nullptr);
 
     /// 화면에 표시할 파일별 이동 초안을 반환하는 함수.
@@ -152,12 +154,14 @@ private:
     void showError(const QString& message);
 
     PendingFilesModel& pendingFiles_;
+    ICreatePreviewUseCase& createPreview_;
+    IFreezePreviewUseCase& freezePreview_;
     JsonRuleSetRepository rules_;
     FilesystemScanner scanner_;
     RuleEngine ruleEngine_;
     Planner planner_;
     QtPlanHasher hasher_;
-    SqliteHistoryRepository history_;
+    IHistoryRepository& history_;
     std::filesystem::path appDataRoot_;
     QString defaultDestinationRoot_;
     QString previewHomeRoot_;

@@ -5,10 +5,11 @@
 
 namespace nookbit {
 
-/// 정리 미리보기에 사용할 규칙 버전과 대기 파일 목록을 전달하는 요청.
+/// 대기 파일과 선택적 규칙 버전·목적지를 전달하는 미리보기 요청.
 struct CreatePreviewRequest {
     RuleSetVersion ruleSetVersion;
     std::vector<std::filesystem::path> selectedFiles;
+    std::filesystem::path destinationRoot;
 };
 
 /// 파일을 변경하지 않고 정리 계획을 생성하는 입력 인터페이스.

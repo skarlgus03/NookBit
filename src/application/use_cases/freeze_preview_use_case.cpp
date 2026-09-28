@@ -8,19 +8,19 @@
 namespace nookbit {
 
 // 재검사·해시·저장에 필요한 외부 기능을 받는 생성자.
-FreezePreviewUseCase::FreezePreviewUseCase(ISettingsRepository& settings,
-                                           IRuleSetRepository& rules,
+FreezePreviewUseCase::FreezePreviewUseCase(IRuleSetRepository& rules,
                                            IScanner& scanner,
                                            IPlanner& planner,
                                            IPlanHasher& hasher,
                                            IHistoryRepository& history)
-    : settings_(settings), rules_(rules), scanner_(scanner), planner_(planner),
+    : rules_(rules), scanner_(scanner), planner_(planner),
       hasher_(hasher), history_(history) {}
 
 // 화면 초안과 현재 상태가 같을 때만 Planned 계획으로 저장하는 함수.
 Result<OperationPlan> FreezePreviewUseCase::execute(
     const OperationPlan& draft,
-    const std::vector<std::filesystem::path>& selectedFiles) {
+    const std::vector<std::filesystem::path>& selectedFiles,
+    const UserSettings& settings) {
     if (draft.status != PlanStatus::Draft || !draft.planHash.empty() ||
         draft.id.empty() || draft.settingsRevision.empty() ||
         draft.rulesRevision.empty() || selectedFiles.empty()) {
@@ -29,9 +29,7 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
         });
     }
 
-    auto settings = settings_.load();
-    if (!settings) return Result<OperationPlan>::failure(settings.error());
-    const auto currentRevision = hasher_.sha256(PlanSignature::settings(settings.value()));
+    const auto currentRevision = hasher_.sha256(PlanSignature::settings(settings));
     if (currentRevision != draft.settingsRevision) {
         return Result<OperationPlan>::failure({
             "freeze.settings_changed", "Settings changed after the preview was created.",
@@ -54,7 +52,7 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
 
     auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
-    auto refreshed = planner_.buildPlan(snapshot.value(), settings.value(), rules.value());
+    auto refreshed = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
     if (PlanSignature::planContents(draft) != PlanSignature::planContents(refreshed.value())) {
         return Result<OperationPlan>::failure({

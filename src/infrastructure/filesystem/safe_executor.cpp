@@ -1,7 +1,6 @@
 #include "infrastructure/filesystem/safe_executor.hpp"
 
 #include "application/use_cases/plan_signature.hpp"
-#include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include "infrastructure/filesystem/windows_file_mover.hpp"
@@ -27,13 +26,21 @@ std::vector<const MoveStep*> stepsWithStatus(const OperationPlan& plan, StepStat
 
 // 현재 상태 검증과 이력 저장에 필요한 기능을 받는 생성자.
 SafeExecutor::SafeExecutor(ISettingsRepository& settings,
-                           IRuleSetRepository& rules,
+                           IVerifySavedPlanUseCase& verifier,
                            IScanner& scanner,
-                           IPlanner& planner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
                            std::filesystem::path appDataRoot)
-    : settings_(settings), rules_(rules), scanner_(scanner), planner_(planner),
+    : settings_(settings), verifier_(&verifier), scanner_(scanner),
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)) {}
+
+// 검증 객체 없이 되돌리기만 할 실행기를 만드는 생성자.
+SafeExecutor::SafeExecutor(ISettingsRepository& settings,
+                           IScanner& scanner,
+                           IPlanHasher& hasher,
+                           IHistoryRepository& history,
+                           std::filesystem::path appDataRoot)
+    : settings_(settings), verifier_(nullptr), scanner_(scanner),
       hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)) {}
 
 // 승인된 계획의 파일들을 덮어쓰기 없이 순서대로 실행하는 함수.
@@ -41,6 +48,10 @@ Result<void> SafeExecutor::execute(
     const OperationPlan& plan,
     const ApprovalRecord& approval,
     const std::vector<std::filesystem::path>& selectedFiles) {
+    if (!verifier_) {
+        return Result<void>::failure({
+            "execute.verifier_missing", "A verifier is required to move files."});
+    }
     OperationMutex operationLock;
     auto locked = operationLock.acquire();
     if (!locked) return locked;
@@ -49,8 +60,7 @@ Result<void> SafeExecutor::execute(
         approval.approvedAt == std::chrono::system_clock::time_point{}) {
         return Result<void>::failure({"execute.approval_missing", "A matching approval is required."});
     }
-    VerifySavedPlanUseCase verifier(settings_, rules_, scanner_, planner_, hasher_, history_);
-    auto checked = verifier.execute(plan.id, selectedFiles, PlanStatus::Approved);
+    auto checked = verifier_->execute(plan.id, selectedFiles, PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
     if (saved.planHash != plan.planHash ||

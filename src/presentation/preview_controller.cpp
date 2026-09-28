@@ -1,8 +1,6 @@
 #include "presentation/preview_controller.hpp"
 
 #include "application/use_cases/approve_plan_use_case.hpp"
-#include "application/use_cases/create_preview_use_case.hpp"
-#include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
@@ -73,20 +71,23 @@ QString historyStepStatusText(StepStatus status) {
 
 } // namespace
 
-// 화면 모델과 규칙 파일 및 보호할 앱 데이터 경로를 받는 생성자.
+// 화면 모델과 미리보기 요청 계약 및 보호할 앱 데이터 경로를 받는 생성자.
 PreviewController::PreviewController(PendingFilesModel& pendingFiles,
+                                     ICreatePreviewUseCase& createPreview,
+                                     IFreezePreviewUseCase& freezePreview,
+                                     IHistoryRepository& history,
                                      QString rulesPath,
                                      QString schemaPath,
                                      std::filesystem::path appDataRoot,
                                      QString defaultDestinationRoot,
-                                     QString databasePath,
-                                     QString migrationPath,
                                      QObject* parent)
     : QObject(parent),
       pendingFiles_(pendingFiles),
+      createPreview_(createPreview),
+      freezePreview_(freezePreview),
       rules_(std::move(rulesPath), std::move(schemaPath)),
       planner_(ruleEngine_, appDataRoot),
-      history_(std::move(databasePath), std::move(migrationPath)),
+      history_(history),
       appDataRoot_(std::move(appDataRoot)),
       defaultDestinationRoot_(std::move(defaultDestinationRoot)) {
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
@@ -250,24 +251,15 @@ void PreviewController::createPreview(const QString& destinationRoot) {
         return;
     }
 
-    const auto ruleSet = rules_.load();
-    if (!ruleSet) {
-        showError(QStringLiteral("분류 규칙을 읽지 못했어요: %1")
-                      .arg(QString::fromStdString(ruleSet.error().message)));
-        return;
-    }
-
     CreatePreviewRequest request;
-    request.ruleSetVersion = ruleSet.value().version;
+    request.destinationRoot = std::filesystem::path(homeInfo.absoluteFilePath().toStdWString());
     const auto paths = pendingFiles_.filePaths();
     request.selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) {
         request.selectedFiles.emplace_back(path.toStdWString());
     }
 
-    SessionSettingsRepository settings(std::filesystem::path(homeInfo.absoluteFilePath().toStdWString()));
-    CreatePreviewUseCase useCase(settings, rules_, scanner_, planner_, &hasher_);
-    const auto result = useCase.execute(request);
+    const auto result = createPreview_.execute(request);
     if (!result) {
         showError(QStringLiteral("미리보기를 만들지 못했어요: %1")
                       .arg(QString::fromStdString(result.error().message)));
@@ -302,15 +294,14 @@ void PreviewController::freezePreview() {
         showError(QStringLiteral("먼저 새 미리보기를 만들어 주세요."));
         return;
     }
-    SessionSettingsRepository settings(
-        std::filesystem::path(previewHomeRoot_.toStdWString()));
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     std::vector<std::filesystem::path> selectedFiles;
     const auto paths = pendingFiles_.filePaths();
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
 
-    FreezePreviewUseCase useCase(settings, rules_, scanner_, planner_, hasher_, history_);
-    const auto result = useCase.execute(*draft_, selectedFiles);
+    const auto result = freezePreview_.execute(*draft_, selectedFiles, settings);
     if (!result) {
         showError(QStringLiteral("계획을 저장하지 못했어요. 새 미리보기를 확인해 주세요: %1")
                       .arg(QString::fromStdString(result.error().message)));
@@ -395,7 +386,8 @@ void PreviewController::moveApprovedFile() {
         return;
     }
     SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
-    SafeExecutor executor(settings, rules_, scanner_, planner_, hasher_, history_, appDataRoot_);
+    VerifySavedPlanUseCase verifier(settings, rules_, scanner_, planner_, hasher_, history_);
+    SafeExecutor executor(settings, verifier, scanner_, hasher_, history_, appDataRoot_);
     const auto result = executor.execute(loaded.value(), *approval_, selectedFiles);
     if (!result) {
         const auto current = history_.loadPlan(draft_->id);
@@ -434,7 +426,7 @@ void PreviewController::undoLastMove() {
         return;
     }
     SessionSettingsRepository settings(std::filesystem::path(defaultDestinationRoot_.toStdWString()));
-    SafeExecutor executor(settings, rules_, scanner_, planner_, hasher_, history_, appDataRoot_);
+    SafeExecutor executor(settings, scanner_, hasher_, history_, appDataRoot_);
     const auto result = executor.rollback(*undoPlanId_);
     if (!result) {
         const auto current = history_.loadPlan(*undoPlanId_);
@@ -528,7 +520,7 @@ void PreviewController::undoSelectedHistory() {
     }
     const auto planId = selectedHistoryPlan_->id;
     SessionSettingsRepository settings(std::filesystem::path(defaultDestinationRoot_.toStdWString()));
-    SafeExecutor executor(settings, rules_, scanner_, planner_, hasher_, history_, appDataRoot_);
+    SafeExecutor executor(settings, scanner_, hasher_, history_, appDataRoot_);
     const auto result = executor.rollback(planId);
     if (undoPlanId_ && *undoPlanId_ == planId) {
         const auto current = history_.loadPlan(planId);
