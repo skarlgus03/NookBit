@@ -93,11 +93,41 @@ struct ClassificationRule {
     std::optional<CollisionPolicy> collisionPolicy;
 };
 
+/// 트리 노드 하나에서 검사할 파일 조건을 표현한다.
+struct RuleCondition {
+    std::vector<std::string> extensions;
+    std::vector<std::string> fileNameGlobs;
+    std::optional<std::uintmax_t> minimumBytes;
+    std::optional<std::uintmax_t> maximumBytes;
+    std::optional<std::uintmax_t> greaterThanBytes;
+    std::optional<int> minimumAgeDays;
+    std::optional<int> maximumAgeDays;
+};
+
+/// 리프 또는 전체 예외가 정한 목적지와 충돌 정책을 표현한다.
+struct RuleDestination {
+    std::filesystem::path relativePath;
+    std::optional<CollisionPolicy> collisionPolicy;
+};
+
+/// 순서 있는 조건 가지와 같은 높이의 else 가지를 표현한다.
+struct RuleNode {
+    std::string id;
+    bool enabled{true};
+    bool otherwise{false};
+    RuleCondition condition;
+    std::optional<RuleDestination> destination;
+    std::vector<RuleNode> children;
+};
+
 /// 버전이 있는 분류 규칙 묶음을 표현한다.
 struct RuleSet {
     std::string id;
     RuleSetVersion version;
     std::vector<ClassificationRule> rules;
+    int schemaVersion{1};
+    std::vector<RuleNode> nodes;
+    std::optional<RuleDestination> globalOtherwise;
 };
 
 struct MoveStep {

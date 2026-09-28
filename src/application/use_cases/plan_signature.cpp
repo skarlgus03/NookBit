@@ -38,6 +38,37 @@ void appendOptionalString(std::string& output, const std::optional<std::string>&
     if (value) append(output, *value);
 }
 
+// 트리 조건을 순서와 선택값까지 포함해 서명 문자열에 추가하는 함수.
+void appendCondition(std::string& output, const RuleCondition& condition) {
+    appendNumber(output, condition.extensions.size());
+    for (const auto& extension : condition.extensions) append(output, extension);
+    appendNumber(output, condition.fileNameGlobs.size());
+    for (const auto& glob : condition.fileNameGlobs) append(output, glob);
+    appendOptionalNumber(output, condition.minimumBytes);
+    appendOptionalNumber(output, condition.maximumBytes);
+    appendOptionalNumber(output, condition.greaterThanBytes);
+    appendOptionalNumber(output, condition.minimumAgeDays);
+    appendOptionalNumber(output, condition.maximumAgeDays);
+}
+
+// 선택한 목적지와 충돌 정책을 서명 문자열에 추가하는 함수.
+void appendDestination(std::string& output, const RuleDestination& destination) {
+    appendPath(output, destination.relativePath);
+    appendOptionalNumber(output, destination.collisionPolicy);
+}
+
+// 트리 노드와 자식을 화면 순서대로 서명 문자열에 추가하는 함수.
+void appendNode(std::string& output, const RuleNode& node) {
+    append(output, node.id);
+    appendNumber(output, node.enabled);
+    appendNumber(output, node.otherwise);
+    appendCondition(output, node.condition);
+    appendNumber(output, node.destination.has_value());
+    if (node.destination) appendDestination(output, *node.destination);
+    appendNumber(output, node.children.size());
+    for (const auto& child : node.children) appendNode(output, child);
+}
+
 } // namespace
 
 // 사용자 설정 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
@@ -57,6 +88,16 @@ std::string PlanSignature::settings(const UserSettings& settings) {
 
 // 규칙 내용 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
 std::string PlanSignature::rules(const RuleSet& rules) {
+    if (rules.schemaVersion == 2) {
+        std::string output = "nookbit-rules-v2";
+        append(output, rules.id);
+        append(output, rules.version);
+        appendNumber(output, rules.nodes.size());
+        for (const auto& node : rules.nodes) appendNode(output, node);
+        appendNumber(output, rules.globalOtherwise.has_value());
+        if (rules.globalOtherwise) appendDestination(output, *rules.globalOtherwise);
+        return output;
+    }
     std::string output = "nookbit-rules-v1";
     append(output, rules.id);
     append(output, rules.version);

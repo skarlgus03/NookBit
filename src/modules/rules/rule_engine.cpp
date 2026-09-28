@@ -59,7 +59,8 @@ bool matchesGlob(std::string_view pattern, std::string_view fileName) {
 }
 
 // 파일 정보가 규칙의 모든 조건 그룹을 만족하는지 확인하는 함수.
-bool matchesRule(const ClassificationRule& rule, const FileFact& file, std::int64_t nowUtcMs) {
+template<typename Condition>
+bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUtcMs) {
     const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
     std::string extension = file.extension.empty()
         ? utf8Path(path.extension()) : file.extension;
@@ -79,6 +80,9 @@ bool matchesRule(const ClassificationRule& rule, const FileFact& file, std::int6
     }
     if (rule.minimumBytes && file.fingerprint.size < *rule.minimumBytes) return false;
     if (rule.maximumBytes && file.fingerprint.size > *rule.maximumBytes) return false;
+    if constexpr (requires { rule.greaterThanBytes; }) {
+        if (rule.greaterThanBytes && file.fingerprint.size <= *rule.greaterThanBytes) return false;
+    }
 
     if (rule.minimumAgeDays || rule.maximumAgeDays) {
         constexpr long double millisecondsPerDay = 86400000.0L;
@@ -102,7 +106,7 @@ void replaceToken(std::wstring& destination, const std::wstring& token,
 }
 
 // 규칙 목적지를 펼치고 상위 경로 탈출 여부를 검사하는 함수.
-Result<std::filesystem::path> destinationFor(const ClassificationRule& rule,
+Result<std::filesystem::path> destinationFor(const std::filesystem::path& relativePath,
                                               const FileFact& file) {
     using namespace std::chrono;
     const sys_time<milliseconds> modified{milliseconds{file.fingerprint.modifiedUtcMs}};
@@ -112,7 +116,7 @@ Result<std::filesystem::path> destinationFor(const ClassificationRule& rule,
             "rules.invalid_modified_time", "File modified time cannot be used for a destination.",
         });
     }
-    auto destination = rule.destinationRelativePath.wstring();
+    auto destination = relativePath.wstring();
     auto year = std::to_wstring(static_cast<int>(date.year()));
     if (year.size() < 4) year.insert(0, 4 - year.size(), L'0');
     auto month = std::to_wstring(static_cast<unsigned>(date.month()));
@@ -140,6 +144,43 @@ Result<std::filesystem::path> destinationFor(const ClassificationRule& rule,
     return Result<std::filesystem::path>::success(path);
 }
 
+// 같은 높이에서 처음 맞는 일반 가지를 고르고, 없으면 else 가지를 고르는 함수.
+const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const FileFact& file,
+                                  std::int64_t nowUtcMs) {
+    const RuleNode* otherwise = nullptr;
+    for (const auto& node : nodes) {
+        if (!node.enabled) continue;
+        if (node.otherwise) {
+            otherwise = &node;
+        } else if (matchesRule(node.condition, file, nowUtcMs)) {
+            return &node;
+        }
+    }
+    return otherwise;
+}
+
+// 선택한 리프의 목적지를 파일별 분류 결과로 변환하는 함수.
+Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const RuleSet& rules,
+                                                  std::int64_t nowUtcMs) {
+    const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs);
+    while (node && !node->children.empty()) {
+        node = firstMatchingNode(node->children, file, nowUtcMs);
+    }
+    const RuleDestination* target = node && node->destination ? &*node->destination : nullptr;
+    std::string matchedId = node ? node->id : std::string();
+    if (!target && rules.globalOtherwise) {
+        target = &*rules.globalOtherwise;
+        matchedId = "global-otherwise";
+    }
+    if (!target) return Result<std::optional<RuleDecision>>::success(std::nullopt);
+    auto destination = destinationFor(target->relativePath, file);
+    if (!destination) return Result<std::optional<RuleDecision>>::failure(destination.error());
+    return Result<std::optional<RuleDecision>>::success(RuleDecision{
+        matchedId, std::move(destination.value()),
+        "Matched classification rule: " + matchedId, target->collisionPolicy,
+    });
+}
+
 } // namespace
 
 // 활성 규칙을 우선순위순으로 판단하고 선택된 목적지를 반환하는 함수.
@@ -148,6 +189,7 @@ Result<std::optional<RuleDecision>> RuleEngine::decide(
     const RuleSet& rules,
     MultiMatchPolicy multiMatchPolicy,
     std::int64_t nowUtcMs) const {
+    if (rules.schemaVersion == 2) return treeDecision(file, rules, nowUtcMs);
     const ClassificationRule* selected = nullptr;
     for (const auto& rule : rules.rules) {
         if (!rule.enabled || !matchesRule(rule, file, nowUtcMs)) continue;
@@ -162,7 +204,7 @@ Result<std::optional<RuleDecision>> RuleEngine::decide(
     if (!selected) {
         return Result<std::optional<RuleDecision>>::success(std::nullopt);
     }
-    auto destination = destinationFor(*selected, file);
+    auto destination = destinationFor(selected->destinationRelativePath, file);
     if (!destination) {
         return Result<std::optional<RuleDecision>>::failure(destination.error());
     }

@@ -199,6 +199,75 @@ void testInvalidRulesAreRejected() {
            "reversed rule range should be rejected");
 }
 
+// 트리 JSON의 순서·중첩·else를 읽고 잘못된 구조를 거부하는지 검사하는 함수.
+void testRuleTreeLoadsAndRejectsInvalidNodes() {
+    const auto schema = projectPath("schemas/rules-tree.schema.json");
+    const auto example = projectPath("resources/rules/tree.example.json");
+    nookbit::JsonRuleSetRepository repository(example, schema);
+    const auto loaded = repository.load();
+    expect(loaded.hasValue() && loaded.value().schemaVersion == 2 &&
+               loaded.value().nodes.size() == 4,
+           "tree example should load in its saved order");
+    if (loaded) {
+        nookbit::FileFact file;
+        file.absolutePath = L"C:/Watch/photo.png";
+        file.relativePath = L"photo.png";
+        file.extension = "png";
+        file.fingerprint.size = 6 * 1024 * 1024;
+        file.fingerprint.modifiedUtcMs = 1780099200000;
+        nookbit::RuleEngine engine;
+        const auto decision = engine.decide(file, loaded.value(),
+            nookbit::MultiMatchPolicy::Abort, file.fingerprint.modifiedUtcMs);
+        expect(decision && decision.value() &&
+                   decision.value()->matchedRuleId == "large-png" &&
+                   decision.value()->destinationRelativePath == L"Pictures/Large PNG",
+               "tree JSON should classify through a matching child");
+    }
+    QTemporaryDir directory;
+    expect(directory.isValid(), "tree-rules directory should be available");
+    if (!directory.isValid()) return;
+    const auto path = directory.filePath(QStringLiteral("tree.json"));
+    auto object = readExample(example);
+    auto nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto second = nodes.at(1).toObject();
+    second.insert(QStringLiteral("destination"), QJsonObject{
+        {QStringLiteral("path"), QStringLiteral("Images")},
+        {QStringLiteral("collisionPolicy"), QStringLiteral("inherit")}});
+    nodes.replace(1, second);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(writeObject(path, object), "invalid internal destination should be written");
+    nookbit::JsonRuleSetRepository invalid(path, schema);
+    const auto rejected = invalid.load();
+    expect(!rejected && rejected.error().code == "rules.internal_destination",
+           "an internal node must not also have a destination");
+    object = readExample(example);
+    nodes = object.value(QStringLiteral("nodes")).toArray();
+    second = nodes.at(1).toObject();
+    auto children = second.value(QStringLiteral("children")).toArray();
+    auto duplicateElse = children.at(1).toObject();
+    duplicateElse.insert(QStringLiteral("id"), QStringLiteral("another-else"));
+    children.append(duplicateElse);
+    second.insert(QStringLiteral("children"), children);
+    nodes.replace(1, second);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(writeObject(path, object), "duplicate else should be written");
+    const auto duplicate = invalid.load();
+    expect(!duplicate && duplicate.error().code == "rules.invalid_otherwise",
+           "only one else is allowed among siblings");
+    object = readExample(example);
+    nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto first = nodes.at(0).toObject();
+    auto destination = first.value(QStringLiteral("destination")).toObject();
+    destination.insert(QStringLiteral("path"), QStringLiteral("../Escape"));
+    first.insert(QStringLiteral("destination"), destination);
+    nodes.replace(0, first);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(writeObject(path, object), "unsafe tree destination should be written");
+    const auto unsafe = invalid.load();
+    expect(!unsafe && unsafe.error().code == "json.schema_invalid",
+           "tree schema should reject a parent-path destination");
+}
+
 // 읽을 수 없는 파일이나 파손된 JSON이 명확한 오류를 반환하는지 검사하는 함수.
 void testMissingAndMalformedFiles() {
     QTemporaryDir directory;
@@ -271,6 +340,7 @@ int main() {
     testExampleFilesLoad();
     testInvalidSettingsAreRejected();
     testInvalidRulesAreRejected();
+    testRuleTreeLoadsAndRejectsInvalidNodes();
     testMissingAndMalformedFiles();
     testWatchSettingsRoundTrip();
     if (failures == 0) {

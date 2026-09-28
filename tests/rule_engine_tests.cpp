@@ -1,8 +1,10 @@
 #include "modules/rules/rule_engine.hpp"
+#include "application/use_cases/plan_signature.hpp"
 
 #include <chrono>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -136,6 +138,70 @@ void testUnsafeDestination() {
            "unsupported destination token should be rejected");
 }
 
+// 트리의 첫 일치·중첩 조건·else·전체 예외 동작을 검사하는 함수.
+void testOrderedTreeAndOtherwise() {
+    nookbit::RuleSet rules;
+    rules.id = "tree";
+    rules.version = "v2";
+    rules.schemaVersion = 2;
+    nookbit::RuleNode large;
+    large.id = "large";
+    large.condition.greaterThanBytes = 20 * 1024 * 1024;
+    large.destination = nookbit::RuleDestination{L"Large", std::nullopt};
+    nookbit::RuleNode image;
+    image.id = "image";
+    image.condition.extensions = {"jpg", "png"};
+    nookbit::RuleNode png;
+    png.id = "png";
+    png.condition.extensions = {"png"};
+    png.destination = nookbit::RuleDestination{L"Pictures/PNG", std::nullopt};
+    nookbit::RuleNode other;
+    other.id = "other-image";
+    other.otherwise = true;
+    other.destination = nookbit::RuleDestination{L"Pictures/Other", std::nullopt};
+    image.children = {png, other};
+    rules.nodes = {large, image};
+    nookbit::RuleEngine engine;
+    auto file = sampleFile();
+    file.extension = "png";
+    file.fingerprint.size = 21 * 1024 * 1024;
+    auto decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::Abort,
+                                  utcMillis(2026, 9, 25));
+    expect(decision && decision.value() && decision.value()->matchedRuleId == "large",
+           "first matching root must win even when another branch also matches");
+    file.fingerprint.size = 5 * 1024 * 1024;
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::Abort,
+                             utcMillis(2026, 9, 25));
+    expect(decision && decision.value() && decision.value()->matchedRuleId == "png",
+           "matching child should provide the destination");
+    file.extension = "jpg";
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::Abort,
+                             utcMillis(2026, 9, 25));
+    expect(decision && decision.value() && decision.value()->matchedRuleId == "other-image",
+           "else child should catch unmatched siblings at its own level");
+    image.children.pop_back();
+    rules.nodes[1] = image;
+    nookbit::RuleNode laterRoot;
+    laterRoot.id = "later-root";
+    laterRoot.condition.fileNameGlobs = {"PHOTO.*"};
+    laterRoot.destination = nookbit::RuleDestination{L"Later", std::nullopt};
+    rules.nodes.push_back(laterRoot);
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::Abort,
+                             utcMillis(2026, 9, 25));
+    expect(decision && !decision.value(),
+           "a matching branch with no leaf must not backtrack to a later root");
+    rules.globalOtherwise = nookbit::RuleDestination{L"Unsorted", std::nullopt};
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::Abort,
+                             utcMillis(2026, 9, 25));
+    expect(decision && decision.value() &&
+               decision.value()->matchedRuleId == "global-otherwise",
+           "global else should catch a branch with no destination");
+    const auto originalSignature = nookbit::PlanSignature::rules(rules);
+    std::swap(rules.nodes[0], rules.nodes[1]);
+    expect(nookbit::PlanSignature::rules(rules) != originalSignature,
+           "changing sibling order must invalidate saved plans");
+}
+
 } // namespace
 
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
@@ -143,6 +209,7 @@ int main() {
     testPriorityAndDestination();
     testConditionsAndNoMatch();
     testUnsafeDestination();
+    testOrderedTreeAndOtherwise();
     if (failures == 0) {
         std::cout << "All rule-engine tests passed.\n";
         return 0;

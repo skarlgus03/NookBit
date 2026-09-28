@@ -190,6 +190,44 @@ void testPreviewFromPendingFiles() {
     expect(QFile::exists(source), "invalid preview must not change the original file");
 }
 
+// 트리 JSON의 리프 결과가 기존 미리보기·계획 저장 흐름에 연결되는지 검사하는 함수.
+void testTreeRulesReachPreview() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "tree-preview directory should be available");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "tree-preview source should open");
+    if (!file.isOpen()) return;
+    file.write("small photo");
+    file.close();
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    const auto rulesPath = projectPath("resources/rules/tree.example.json");
+    const auto schemaPath = projectPath("schemas/rules-tree.schema.json");
+    PreviewWorkflow workflow(rulesPath, schemaPath, appData);
+    nookbit::PreviewController controller(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, rulesPath, schemaPath, appData, home);
+    controller.createPreview(home);
+    expect(controller.hasPreview() && controller.steps().size() == 1,
+           "tree rules should produce one preview step");
+    if (controller.steps().size() != 1) {
+        return;
+    }
+    const auto step = controller.steps().front().toMap();
+    expect(step.value(QStringLiteral("rule")).toString() == QStringLiteral("other-images") &&
+               QDir::fromNativeSeparators(step.value(QStringLiteral("destination")).toString()).contains(
+                   QStringLiteral("Pictures/Other")),
+           "tree else leaf should supply the preview destination");
+    controller.freezePreview();
+    expect(controller.hasFrozenPlan() && controller.verifySavedPlan(),
+           "tree plan should remain valid after saving and rechecking");
+    expect(QFile::exists(source), "tree preview must not move the source");
+}
+
 // 저장 뒤 원본이 바뀌면 재검사를 통과하지 못하는지 검사하는 함수.
 void testChangedFileAfterSaveFailsVerification() {
     QTemporaryDir directory;
@@ -764,6 +802,7 @@ void testRecoveryCasesInController() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testPreviewFromPendingFiles();
+    testTreeRulesReachPreview();
     testChangedFileCannotBeFrozen();
     testChangedRulesCannotBeFrozen();
     testChangedSettingsCannotBeFrozen();

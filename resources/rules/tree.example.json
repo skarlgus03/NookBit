@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "ruleSetId": "tree-example",
+  "version": "2026-09-29T00:00:00Z",
+  "nodes": [
+    {
+      "id": "large-files",
+      "enabled": true,
+      "when": { "greaterThanBytes": 20971520 },
+      "destination": { "path": "Large", "collisionPolicy": "inherit" }
+    },
+    {
+      "id": "images",
+      "enabled": true,
+      "when": { "extensions": ["png", "jpg", "jpeg"] },
+      "children": [
+        {
+          "id": "large-png",
+          "enabled": true,
+          "when": { "extensions": ["png"], "greaterThanBytes": 5242880 },
+          "destination": { "path": "Pictures/Large PNG", "collisionPolicy": "inherit" }
+        },
+        {
+          "id": "other-images",
+          "enabled": true,
+          "otherwise": true,
+          "destination": { "path": "Pictures/Other", "collisionPolicy": "inherit" }
+        }
+      ]
+    },
+    {
+      "id": "music",
+      "enabled": true,
+      "when": { "extensions": ["mp3", "flac"] },
+      "destination": { "path": "Music", "collisionPolicy": "inherit" }
+    },
+    {
+      "id": "minecraft-mods",
+      "enabled": true,
+      "when": { "extensions": ["jar"] },
+      "destination": { "path": "Minecraft/Mods", "collisionPolicy": "inherit" }
+    }
+  ]
+}

@@ -41,7 +41,9 @@ Result<void> validateValue(
     const QJsonValue& value,
     const QJsonObject& schema,
     const QJsonObject& schemaRoot,
-    const QString& location) {
+    const QString& location,
+    int depth = 0) {
+    if (depth > 128) return invalid(location, QStringLiteral("JSON nesting is too deep"));
     if (schema.contains(QStringLiteral("$ref"))) {
         const auto reference = schema.value(QStringLiteral("$ref")).toString();
         if (!reference.startsWith(QStringLiteral("#/$defs/"))) {
@@ -53,7 +55,7 @@ Result<void> validateValue(
         if (!definition.isObject()) {
             return invalid(location, QStringLiteral("missing Schema definition"));
         }
-        return validateValue(value, definition.toObject(), schemaRoot, location);
+        return validateValue(value, definition.toObject(), schemaRoot, location, depth + 1);
     }
 
     if (schema.contains(QStringLiteral("type")) &&
@@ -73,7 +75,7 @@ Result<void> validateValue(
     }
     if (schema.contains(QStringLiteral("not")) &&
         validateValue(value, schema.value(QStringLiteral("not")).toObject(),
-                      schemaRoot, location)) {
+                      schemaRoot, location, depth + 1)) {
         return invalid(location, QStringLiteral("value matches a forbidden pattern"));
     }
 
@@ -100,7 +102,8 @@ Result<void> validateValue(
                                QStringLiteral("unknown field"));
             }
             auto checked = validateValue(it.value(), properties.value(it.key()).toObject(),
-                                         schemaRoot, location + QStringLiteral(".") + it.key());
+                                         schemaRoot, location + QStringLiteral(".") + it.key(),
+                                         depth + 1);
             if (!checked) return checked;
         }
     }
@@ -125,7 +128,8 @@ Result<void> validateValue(
             for (int i = 0; i < array.size(); ++i) {
                 auto checked = validateValue(
                     array.at(i), itemSchema, schemaRoot,
-                    location + QStringLiteral("[") + QString::number(i) + QStringLiteral("]"));
+                    location + QStringLiteral("[") + QString::number(i) + QStringLiteral("]"),
+                    depth + 1);
                 if (!checked) return checked;
             }
         }

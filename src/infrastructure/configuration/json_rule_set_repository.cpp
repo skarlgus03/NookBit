@@ -84,6 +84,114 @@ Result<ClassificationRule> convertRule(const QJsonObject& object) {
     return Result<ClassificationRule>::success(std::move(rule));
 }
 
+// 목적지 JSON을 안전한 경로 판단에 사용할 모델로 옮기는 함수.
+RuleDestination convertDestination(const QJsonObject& object) {
+    RuleDestination destination;
+    destination.relativePath = std::filesystem::path(
+        object.value(QStringLiteral("path")).toString().toStdWString());
+    const auto policy = object.value(QStringLiteral("collisionPolicy")).toString();
+    if (policy == QStringLiteral("rename")) destination.collisionPolicy = CollisionPolicy::Rename;
+    if (policy == QStringLiteral("skip")) destination.collisionPolicy = CollisionPolicy::Skip;
+    if (policy == QStringLiteral("abort")) destination.collisionPolicy = CollisionPolicy::Abort;
+    return destination;
+}
+
+// 트리 노드의 조건 JSON을 파일 검사 모델로 옮기는 함수.
+Result<RuleCondition> convertCondition(const QJsonObject& object) {
+    RuleCondition condition;
+    for (const auto& extension : object.value(QStringLiteral("extensions")).toArray()) {
+        condition.extensions.push_back(extension.toString().toStdString());
+    }
+    for (const auto& glob : object.value(QStringLiteral("fileNameGlobs")).toArray()) {
+        condition.fileNameGlobs.push_back(glob.toString().toStdString());
+    }
+    for (const auto& key : {QStringLiteral("minimumBytes"), QStringLiteral("maximumBytes"),
+                            QStringLiteral("greaterThanBytes")}) {
+        if (!object.contains(key)) continue;
+        auto value = byteCount(object, key);
+        if (!value) return Result<RuleCondition>::failure(value.error());
+        if (key == QStringLiteral("minimumBytes")) condition.minimumBytes = value.value();
+        if (key == QStringLiteral("maximumBytes")) condition.maximumBytes = value.value();
+        if (key == QStringLiteral("greaterThanBytes")) condition.greaterThanBytes = value.value();
+    }
+    for (const auto& key : {QStringLiteral("minimumAgeDays"), QStringLiteral("maximumAgeDays")}) {
+        if (!object.contains(key)) continue;
+        auto value = ageDays(object, key);
+        if (!value) return Result<RuleCondition>::failure(value.error());
+        if (key == QStringLiteral("minimumAgeDays")) condition.minimumAgeDays = value.value();
+        if (key == QStringLiteral("maximumAgeDays")) condition.maximumAgeDays = value.value();
+    }
+    if ((condition.minimumBytes && condition.maximumBytes &&
+         *condition.minimumBytes > *condition.maximumBytes) ||
+        (condition.greaterThanBytes && condition.maximumBytes &&
+         *condition.greaterThanBytes >= *condition.maximumBytes) ||
+        (condition.minimumAgeDays && condition.maximumAgeDays &&
+         *condition.minimumAgeDays > *condition.maximumAgeDays)) {
+        return Result<RuleCondition>::failure({
+            "rules.range_invalid", "A rule minimum cannot exceed its maximum.",
+        });
+    }
+    return Result<RuleCondition>::success(std::move(condition));
+}
+
+// 형제 노드의 순서와 else 유일성을 검증하며 트리를 읽는 함수.
+Result<std::vector<RuleNode>> convertNodes(const QJsonArray& array, std::set<std::string>& ids,
+                                            int depth, int& nodeCount) {
+    if (depth > 32 || nodeCount + array.size() > 1000) {
+        return Result<std::vector<RuleNode>>::failure({
+            "rules.tree_too_large", "Rule tree exceeds its depth or node limit.",
+        });
+    }
+    std::vector<RuleNode> nodes;
+    nodes.reserve(static_cast<std::size_t>(array.size()));
+    bool foundOtherwise = false;
+    for (const auto& value : array) {
+        const auto object = value.toObject();
+        RuleNode node;
+        node.id = object.value(QStringLiteral("id")).toString().toStdString();
+        node.enabled = object.value(QStringLiteral("enabled")).toBool();
+        node.otherwise = object.value(QStringLiteral("otherwise")).toBool();
+        if (!ids.insert(node.id).second) {
+            return Result<std::vector<RuleNode>>::failure({
+                "rules.duplicate_id", "Each rule node must have a unique ID.",
+            });
+        }
+        if (node.otherwise) {
+            if (foundOtherwise || object.contains(QStringLiteral("when"))) {
+                return Result<std::vector<RuleNode>>::failure({
+                    "rules.invalid_otherwise", "Each level allows one else node without a condition.",
+                });
+            }
+            foundOtherwise = true;
+        } else {
+            if (!object.contains(QStringLiteral("when"))) {
+                return Result<std::vector<RuleNode>>::failure({
+                    "rules.condition_missing", "A normal rule node needs a condition.",
+                });
+            }
+            auto condition = convertCondition(object.value(QStringLiteral("when")).toObject());
+            if (!condition) return Result<std::vector<RuleNode>>::failure(condition.error());
+            node.condition = std::move(condition.value());
+        }
+        const auto children = object.value(QStringLiteral("children")).toArray();
+        if (!children.isEmpty() && object.contains(QStringLiteral("destination"))) {
+            return Result<std::vector<RuleNode>>::failure({
+                "rules.internal_destination", "Only a leaf node may have a destination.",
+            });
+        }
+        if (object.contains(QStringLiteral("destination"))) {
+            node.destination = convertDestination(
+                object.value(QStringLiteral("destination")).toObject());
+        }
+        ++nodeCount;
+        auto descendants = convertNodes(children, ids, depth + 1, nodeCount);
+        if (!descendants) return Result<std::vector<RuleNode>>::failure(descendants.error());
+        node.children = std::move(descendants.value());
+        nodes.push_back(std::move(node));
+    }
+    return Result<std::vector<RuleNode>>::success(std::move(nodes));
+}
+
 } // namespace
 
 // 규칙 파일과 Schema 경로를 보관하는 생성자.
@@ -98,6 +206,25 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
     RuleSet result;
     result.id = loaded.value().value(QStringLiteral("ruleSetId")).toString().toStdString();
     result.version = loaded.value().value(QStringLiteral("version")).toString().toStdString();
+    result.schemaVersion = loaded.value().value(QStringLiteral("schemaVersion")).toInt();
+    if (result.schemaVersion == 2) {
+        std::set<std::string> ids;
+        int nodeCount = 0;
+        auto nodes = convertNodes(loaded.value().value(QStringLiteral("nodes")).toArray(),
+                                  ids, 0, nodeCount);
+        if (!nodes) return Result<RuleSet>::failure(nodes.error());
+        result.nodes = std::move(nodes.value());
+        if (loaded.value().contains(QStringLiteral("globalOtherwise"))) {
+            result.globalOtherwise = convertDestination(
+                loaded.value().value(QStringLiteral("globalOtherwise")).toObject());
+        }
+        return Result<RuleSet>::success(std::move(result));
+    }
+    if (result.schemaVersion != 1) {
+        return Result<RuleSet>::failure({
+            "rules.schema_version", "Unsupported classification rule schema version.",
+        });
+    }
     std::set<std::string> ids;
     for (const auto& value : loaded.value().value(QStringLiteral("rules")).toArray()) {
         auto rule = convertRule(value.toObject());
