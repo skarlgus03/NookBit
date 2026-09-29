@@ -1,12 +1,20 @@
 #include "presentation/rule_editor_controller.hpp"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPointF>
+#include <QSaveFile>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <utility>
@@ -144,6 +152,7 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
 
     QSet<int> visiting;
     QSet<int> visited;
+    QSet<QString> ruleIds;
     std::function<Result<std::vector<RuleNode>>(int, int)> convertChildren;
     // 각 부모의 연결 순서를 형제 실행 순서로 삼아 규칙 노드를 만드는 함수.
     convertChildren = [&](int owner, int depth) -> Result<std::vector<RuleNode>> {
@@ -167,7 +176,15 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                 return graphError(id, QStringLiteral("'그 외' 뒤에는 조건을 둘 수 없어요."));
             }
             RuleNode node;
-            node.id = "graph-" + std::to_string(id);
+            const auto existingId = block.value(QStringLiteral("ruleId")).toString();
+            const auto ruleId = existingId.isEmpty()
+                ? QStringLiteral("graph-%1").arg(id) : existingId;
+            if (!QRegularExpression(QStringLiteral("^[a-zA-Z0-9._-]+$"))
+                     .match(ruleId).hasMatch() || ruleIds.contains(ruleId))
+                return graphError(id, QStringLiteral("규칙 ID가 올바르지 않거나 중복돼요."));
+            ruleIds.insert(ruleId);
+            node.id = ruleId.toStdString();
+            node.enabled = block.value(QStringLiteral("enabled"), true).toBool();
             node.otherwise = type == QStringLiteral("otherwise");
             const auto value = block.value(QStringLiteral("value")).toString().trimmed();
             if (type == QStringLiteral("extension")) {
@@ -247,7 +264,15 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                             if (part == L"..")
                                 return graphError(terminalId, QStringLiteral("상위 폴더로 나갈 수 없어요."));
                         }
-                        node.destination = RuleDestination{relative, std::nullopt};
+                        std::optional<CollisionPolicy> policy;
+                        const auto policyName = terminal.value(
+                            QStringLiteral("collisionPolicy"), QStringLiteral("inherit")).toString();
+                        if (policyName == QStringLiteral("rename")) policy = CollisionPolicy::Rename;
+                        else if (policyName == QStringLiteral("skip")) policy = CollisionPolicy::Skip;
+                        else if (policyName == QStringLiteral("abort")) policy = CollisionPolicy::Abort;
+                        else if (policyName != QStringLiteral("inherit"))
+                            return graphError(terminalId, QStringLiteral("파일 이름 충돌 설정이 올바르지 않아요."));
+                        node.destination = RuleDestination{relative, policy};
                     }
                 }
             }
@@ -277,17 +302,181 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
     return result;
 }
 
+// 규칙 ID가 맞는 별도 배치 파일에서 유효한 노드 좌표만 읽는 함수.
+QHash<QString, QPointF> readGraphPositions(const QString& path, const std::string& ruleSetId) {
+    QHash<QString, QPointF> positions;
+    if (path.isEmpty()) return positions;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return positions;
+    const auto document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject()) return positions;
+    const auto object = document.object();
+    if (object.value(QStringLiteral("format")).toInt() != 1 ||
+        object.value(QStringLiteral("ruleSetId")).toString() !=
+            QString::fromStdString(ruleSetId)) return positions;
+    const auto saved = object.value(QStringLiteral("positions")).toObject();
+    for (auto it = saved.begin(); it != saved.end(); ++it) {
+        const auto point = it.value().toObject();
+        const auto xValue = point.value(QStringLiteral("x"));
+        const auto yValue = point.value(QStringLiteral("y"));
+        if (!xValue.isDouble() || !yValue.isDouble()) continue;
+        const double x = xValue.toDouble();
+        const double y = yValue.toDouble();
+        if (std::isfinite(x) && std::isfinite(y) && x >= 0 && y >= 0 &&
+            x <= 100000 && y <= 100000) positions.insert(it.key(), QPointF(x, y));
+    }
+    return positions;
+}
+
+// 저장된 좌표가 있으면 자동 배치 좌표 대신 해당 위치를 쓰는 함수.
+QPointF graphPosition(const QHash<QString, QPointF>& saved, const QString& key,
+                      double x, double y) {
+    return saved.value(key, QPointF(x, y));
+}
+
+// 충돌 정책을 화면용 문자열로 바꾸는 함수.
+QString policyName(const std::optional<CollisionPolicy>& policy) {
+    if (!policy) return QStringLiteral("inherit");
+    switch (*policy) {
+    case CollisionPolicy::Rename: return QStringLiteral("rename");
+    case CollisionPolicy::Skip: return QStringLiteral("skip");
+    case CollisionPolicy::Abort: return QStringLiteral("abort");
+    }
+    return QStringLiteral("inherit");
+}
+
+// 저장된 규칙 하나의 조건을 노드 화면의 입력 형태로 바꾸는 함수.
+QVariantMap graphBlockFor(const RuleNode& node, int id) {
+    QVariantMap block{{QStringLiteral("id"), id},
+                      {QStringLiteral("ruleId"), QString::fromStdString(node.id)},
+                      {QStringLiteral("enabled"), node.enabled}};
+    if (node.otherwise) {
+        block.insert(QStringLiteral("type"), QStringLiteral("otherwise"));
+        block.insert(QStringLiteral("value"), QStringLiteral("조건 없음"));
+    } else if (node.atomicCondition) {
+        const auto& condition = *node.atomicCondition;
+        if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+            block.insert(QStringLiteral("type"), QStringLiteral("extension"));
+            block.insert(QStringLiteral("value"), extensionText(*extension));
+        } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
+            block.insert(QStringLiteral("type"), QStringLiteral("name"));
+            block.insert(QStringLiteral("value"), QString::fromStdString(name->text));
+        } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {
+            block.insert(QStringLiteral("type"), QStringLiteral("size"));
+            const bool wholeMiB = size->bytes % 1048576ULL == 0;
+            block.insert(QStringLiteral("value"), QString::number(
+                wholeMiB ? size->bytes / 1048576ULL : size->bytes));
+            block.insert(QStringLiteral("unit"), wholeMiB ? QStringLiteral("MiB")
+                                                          : QStringLiteral("B"));
+            QString comparison = QStringLiteral("greaterThan");
+            if (size->comparison == SizeComparison::AtLeast) comparison = QStringLiteral("atLeast");
+            else if (size->comparison == SizeComparison::LessThan) comparison = QStringLiteral("lessThan");
+            else if (size->comparison == SizeComparison::AtMost) comparison = QStringLiteral("atMost");
+            block.insert(QStringLiteral("comparison"), comparison);
+        } else {
+            const auto& age = std::get<ModifiedAgePredicate>(condition);
+            block.insert(QStringLiteral("type"), QStringLiteral("age"));
+            block.insert(QStringLiteral("value"), QString::number(age.days));
+            block.insert(QStringLiteral("comparison"), age.comparison == AgeComparison::AtLeast
+                ? QStringLiteral("atLeast") : QStringLiteral("lessThan"));
+        }
+    }
+    return block;
+}
+
+// 규칙 트리를 자동 배치와 저장된 좌표를 사용해 화면 그래프로 펼치는 함수.
+QVariantMap graphForRules(const RuleSet& rules,
+                          const QHash<QString, QPointF>& savedPositions) {
+    QVariantList blocks;
+    QVariantList edges;
+    int nextId = 2;
+    int nextRow = 0;
+    int incompleteLeaves = 0;
+    std::function<std::pair<int, double>(const RuleNode&, int)> appendNode;
+    // 자식의 화면 위치를 먼저 구해 부모를 그 가운데에 놓는 함수.
+    appendNode = [&](const RuleNode& node, int depth) -> std::pair<int, double> {
+        const int id = nextId++;
+        auto block = graphBlockFor(node, id);
+        double y = 0;
+        if (!node.children.empty()) {
+            double firstY = -1;
+            double lastY = 0;
+            for (const auto& child : node.children) {
+                const auto [childId, childY] = appendNode(child, depth + 1);
+                edges.append(QVariantMap{{QStringLiteral("from"), id},
+                                         {QStringLiteral("to"), childId}});
+                if (firstY < 0) firstY = childY;
+                lastY = childY;
+            }
+            y = (firstY + lastY) / 2;
+        } else {
+            y = 170 + nextRow++ * 170;
+            if (node.destination || node.exclude) {
+                const int terminalId = nextId++;
+                const auto terminalKey = QStringLiteral("terminal:") + QString::fromStdString(node.id);
+                const auto terminalPosition = graphPosition(
+                    savedPositions, terminalKey, 70 + (depth + 1) * 310, y);
+                QVariantMap terminal{
+                    {QStringLiteral("id"), terminalId},
+                    {QStringLiteral("type"), node.exclude ? QStringLiteral("exclude")
+                                                         : QStringLiteral("destination")},
+                    {QStringLiteral("parentRuleId"), QString::fromStdString(node.id)},
+                    {QStringLiteral("value"), node.exclude ? QStringLiteral("이 파일은 이동하지 않음")
+                        : QString::fromStdWString(node.destination->relativePath.wstring())},
+                    {QStringLiteral("collisionPolicy"), node.destination
+                        ? policyName(node.destination->collisionPolicy) : QStringLiteral("inherit")},
+                    {QStringLiteral("x"), terminalPosition.x()},
+                    {QStringLiteral("y"), terminalPosition.y()}};
+                blocks.append(terminal);
+                edges.append(QVariantMap{{QStringLiteral("from"), id},
+                                         {QStringLiteral("to"), terminalId}});
+            } else {
+                ++incompleteLeaves;
+            }
+        }
+        const auto position = graphPosition(
+            savedPositions, QStringLiteral("node:") + QString::fromStdString(node.id),
+            70 + depth * 310, y);
+        block.insert(QStringLiteral("x"), position.x());
+        block.insert(QStringLiteral("y"), position.y());
+        blocks.append(block);
+        return {id, position.y()};
+    };
+    double firstRootY = -1;
+    double lastRootY = 0;
+    for (const auto& root : rules.nodes) {
+        const auto [id, y] = appendNode(root, 1);
+        edges.append(QVariantMap{{QStringLiteral("from"), 1}, {QStringLiteral("to"), id}});
+        if (firstRootY < 0) firstRootY = y;
+        lastRootY = y;
+    }
+    const auto startPosition = graphPosition(savedPositions, QStringLiteral("start"),
+        70, firstRootY < 0 ? 220 : (firstRootY + lastRootY) / 2);
+    blocks.prepend(QVariantMap{{QStringLiteral("id"), 1},
+                               {QStringLiteral("type"), QStringLiteral("start")},
+                               {QStringLiteral("value"), QStringLiteral("정리할 파일")},
+                               {QStringLiteral("x"), startPosition.x()},
+                               {QStringLiteral("y"), startPosition.y()}});
+    return QVariantMap{{QStringLiteral("valid"), true},
+                       {QStringLiteral("blocks"), blocks},
+                       {QStringLiteral("edges"), edges},
+                       {QStringLiteral("nextId"), nextId},
+                       {QStringLiteral("incompleteLeaves"), incompleteLeaves}};
+}
+
 } // namespace
 
 // 저장소에서 규칙을 읽어 독립된 편집 초안을 만드는 생성자.
 RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                                            QObject* parent)
-    : RuleEditorController(reader, writer, parent, nullptr) {}
+    : RuleEditorController(reader, writer, parent, nullptr, {}) {}
 
 // 이전 규칙 변환 계약도 함께 받아 편집 초안을 만드는 생성자.
 RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
-                                           QObject* parent, IRuleSetMigrator* migrator)
-    : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator) { reload(); }
+                                           QObject* parent, IRuleSetMigrator* migrator,
+                                           QString graphLayoutPath)
+    : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator),
+      graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
 
 // 현재 초안의 모든 노드를 화면 표시 순서로 반환하는 함수.
 QVariantList RuleEditorController::nodes() const {
@@ -539,6 +728,84 @@ bool RuleEditorController::importGraph(const QVariantList& blocks, const QVarian
     draft_.nodes = std::move(converted.value());
     dirty_ = true;
     message_ = QStringLiteral("노드 그래프를 규칙 초안으로 바꿨어요. 기존 편집기에서 확인한 뒤 저장해 주세요.");
+    emit changed();
+    return true;
+}
+
+// 현재 규칙 초안을 별도 배치 파일의 좌표와 합쳐 화면 그래프로 반환하는 함수.
+QVariantMap RuleEditorController::graph() const {
+    if (!loaded_) return QVariantMap{{QStringLiteral("valid"), false},
+                                     {QStringLiteral("message"), message_}};
+    return graphForRules(draft_, readGraphPositions(graphLayoutPath_, draft_.id));
+}
+
+// 노드 ID별 좌표만 규칙 파일과 독립된 JSON 파일에 원자적으로 저장하는 함수.
+bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
+                                           const QVariantList& edges) {
+    if (!loaded_ || dirty_ || graphLayoutPath_.isEmpty()) {
+        message_ = QStringLiteral("규칙을 먼저 저장한 뒤 노드 배치를 저장해 주세요.");
+        emit changed();
+        return false;
+    }
+    QHash<int, QVariantMap> byId;
+    QHash<int, int> parent;
+    for (const auto& item : blocks) {
+        const auto block = item.toMap();
+        byId.insert(block.value(QStringLiteral("id")).toInt(), block);
+    }
+    for (const auto& item : edges) {
+        const auto edge = item.toMap();
+        parent.insert(edge.value(QStringLiteral("to")).toInt(),
+                      edge.value(QStringLiteral("from")).toInt());
+    }
+    QJsonObject positions;
+    for (auto it = byId.cbegin(); it != byId.cend(); ++it) {
+        const auto block = it.value();
+        const auto type = block.value(QStringLiteral("type")).toString();
+        QString key;
+        if (type == QStringLiteral("start")) {
+            key = QStringLiteral("start");
+        } else if (type == QStringLiteral("destination") || type == QStringLiteral("exclude")) {
+            const auto parentBlock = byId.value(parent.value(it.key(), -1));
+            const auto ruleId = parentBlock.value(QStringLiteral("ruleId")).toString();
+            key = QStringLiteral("terminal:") + (ruleId.isEmpty()
+                ? QStringLiteral("graph-%1").arg(parent.value(it.key(), -1)) : ruleId);
+        } else {
+            const auto ruleId = block.value(QStringLiteral("ruleId")).toString();
+            key = QStringLiteral("node:") + (ruleId.isEmpty()
+                ? QStringLiteral("graph-%1").arg(it.key()) : ruleId);
+        }
+        bool validX = false;
+        bool validY = false;
+        const double x = block.value(QStringLiteral("x")).toDouble(&validX);
+        const double y = block.value(QStringLiteral("y")).toDouble(&validY);
+        if (!validX || !validY || !std::isfinite(x) || !std::isfinite(y) ||
+            x < 0 || y < 0 || x > 100000 || y > 100000) {
+            message_ = QStringLiteral("노드 좌표가 올바르지 않아 배치를 저장하지 못했어요.");
+            emit changed();
+            return false;
+        }
+        positions.insert(key, QJsonObject{{QStringLiteral("x"), x},
+                                          {QStringLiteral("y"), y}});
+    }
+    if (!QDir().mkpath(QFileInfo(graphLayoutPath_).absolutePath())) {
+        message_ = QStringLiteral("노드 배치 저장 폴더를 만들지 못했어요.");
+        emit changed();
+        return false;
+    }
+    QSaveFile file(graphLayoutPath_);
+    const QJsonDocument document(QJsonObject{
+        {QStringLiteral("format"), 1},
+        {QStringLiteral("ruleSetId"), QString::fromStdString(draft_.id)},
+        {QStringLiteral("positions"), positions}});
+    const auto encoded = document.toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(encoded) != encoded.size() ||
+        !file.commit()) {
+        message_ = QStringLiteral("노드 배치 파일을 저장하지 못했어요.");
+        emit changed();
+        return false;
+    }
+    message_ = QStringLiteral("노드 위치만 저장했어요. 분류 순서와 규칙 내용은 바뀌지 않습니다.");
     emit changed();
     return true;
 }

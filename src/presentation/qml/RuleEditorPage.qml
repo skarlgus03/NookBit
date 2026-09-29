@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Item {
     id: page
     signal openCurrentEditor()
-    signal graphImported()
+    signal editorDraftReplaced()
 
     readonly property int blockWidth: 226
     readonly property int blockHeight: 112
@@ -58,6 +58,8 @@ Item {
     ]
     property var livePositions: ({})
     property int nextId: 5
+    property bool graphDirty: false
+    property bool stagedGraph: false
     property int selectedId: -1
     property int connectingFrom: -1
     property bool draggingConnection: false
@@ -67,6 +69,63 @@ Item {
     property int connectionStyle: 0
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
     property var selectedBlock: blockForId(selectedId)
+
+    // 현재 편집 초안의 규칙을 노드와 선으로 다시 펼치는 함수.
+    function loadGraphFromDraft() {
+        const restored = ruleEditor.graph()
+        if (!restored.valid) {
+            selectedId = -1
+            blocks = [{ id: 1, type: "start", x: 70, y: 220, value: "정리할 파일" }]
+            edges = []
+            livePositions = ({})
+            nextId = 2
+            graphDirty = false
+            stagedGraph = false
+            statusText = restored.message || qsTr("규칙을 노드 화면에 불러오지 못했어요.")
+            lineCanvas.requestPaint()
+            return
+        }
+        selectedId = -1
+        connectingFrom = -1
+        draggingConnection = false
+        livePositions = ({})
+        blocks = restored.blocks
+        edges = restored.edges
+        nextId = restored.nextId
+        graphDirty = false
+        stagedGraph = false
+        statusText = restored.incompleteLeaves > 0
+                     ? qsTr("기존 규칙에 종착점 없는 가지가 %1개 있어요. 목적지나 정리 제외를 연결해 주세요.").arg(restored.incompleteLeaves)
+                     : qsTr("저장된 규칙을 노드 화면에 불러왔어요.")
+        lineCanvas.requestPaint()
+    }
+
+    Component.onCompleted: loadGraphFromDraft()
+    onBlocksChanged: {
+        graphDirty = true
+        stagedGraph = false
+    }
+    onEdgesChanged: {
+        graphDirty = true
+        stagedGraph = false
+    }
+
+    Connections {
+        target: ruleEditor
+        // 규칙 저장 후에는 확정한 그래프의 배치를 남기고 새 저장본을 다시 펼치는 함수.
+        function onRulesSaved() {
+            if (page.stagedGraph) {
+                const layoutSaved = ruleEditor.saveGraphLayout(page.blocks, page.edges)
+                page.loadGraphFromDraft()
+                if (!layoutSaved)
+                    page.statusText = qsTr("규칙은 저장됐지만 노드 위치는 저장하지 못했어요.")
+            } else if (page.graphDirty) {
+                page.statusText = qsTr("규칙 저장본이 바뀌었어요. 화면의 미저장 그래프는 유지했으니 필요하면 다시 불러오세요.")
+            } else {
+                page.loadGraphFromDraft()
+            }
+        }
+    }
 
     // 노드 종류에 맞는 입력값과 비교 방식을 카드에 표시하는 함수.
     function displayValue(block) {
@@ -255,6 +314,13 @@ Item {
     function toggleUnit(id) {
         blocks = blocks.map(block => block.id === id
                             ? Object.assign({}, block, { unit: block.unit === "MiB" ? "B" : "MiB" })
+                            : block)
+    }
+
+    // 선택한 조건 또는 그 외 가지의 사용 여부를 바꾸는 함수.
+    function toggleEnabled(id) {
+        blocks = blocks.map(block => block.id === id
+                            ? Object.assign({}, block, { enabled: block.enabled === false })
                             : block)
     }
 
@@ -495,7 +561,7 @@ Item {
                 anchors.margins: 12
                 verticalAlignment: Text.AlignVCenter
                 wrapMode: Text.WordWrap
-                text: qsTr("그래프를 초안으로 변환해도 실제 규칙 파일은 바뀌지 않아요. 기존 편집기에서 확인하고 저장해야 적용됩니다.")
+                text: qsTr("규칙은 저장 전에 초안으로 검증합니다. 노드 위치는 분류 규칙과 별도로 저장돼 검사 순서를 바꾸지 않아요.")
                 color: page.darkMode ? "#f3d59d" : "#6a4a19"
             }
         }
@@ -652,6 +718,7 @@ Item {
                                 height: page.blockHeight
                                 radius: 12
                                 color: page.nodeColor
+                                opacity: modelData.enabled === false ? 0.55 : 1.0
                                 border.width: page.selectedId === modelData.id ? 2 : 1
                                 border.color: page.selectedId === modelData.id ? page.colorFor(modelData.type) : page.borderColor
                                 onXChanged: page.noteLivePosition(modelData.id, x, y)
@@ -791,8 +858,16 @@ Item {
                 Layout.fillHeight: true
                 padding: 16
                 background: Rectangle { radius: 10; color: page.surfaceColor; border.color: page.borderColor }
-                ColumnLayout {
+                ScrollView {
+                    id: inspectorScroll
                     anchors.fill: parent
+                    clip: true
+                    contentWidth: availableWidth
+                    contentHeight: inspectorContent.implicitHeight
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ColumnLayout {
+                    id: inspectorContent
+                    width: inspectorScroll.availableWidth
                     spacing: 10
                     Label {
                         Layout.fillWidth: true
@@ -850,6 +925,16 @@ Item {
                         text: page.selectedBlock ? qsTr("단위: %1").arg(page.selectedBlock.unit || "MiB") : ""
                         onClicked: page.toggleUnit(page.selectedId)
                     }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null &&
+                                 page.selectedBlock.type !== "start" &&
+                                 page.selectedBlock.type !== "destination" &&
+                                 page.selectedBlock.type !== "exclude"
+                        text: page.selectedBlock && page.selectedBlock.enabled === false
+                              ? qsTr("규칙 사용하기") : qsTr("규칙 끄기")
+                        onClicked: page.toggleEnabled(page.selectedId)
+                    }
                     Label {
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "exclude"
@@ -895,7 +980,6 @@ Item {
                         enabled: page.selectedBlock !== null && page.selectedId !== 1
                         onClicked: page.removeSelectedBlock()
                     }
-                    Item { Layout.fillHeight: true }
                     ThemeButton {
                         Layout.fillWidth: true
                         text: qsTr("연결 취소")
@@ -908,8 +992,18 @@ Item {
                     }
                     ThemeButton {
                         Layout.fillWidth: true
-                        text: qsTr("예시로 되돌리기")
-                        onClicked: page.resetExample()
+                        text: qsTr("노드 위치 저장")
+                        enabled: !ruleEditor.dirty
+                        onClicked: {
+                            ruleEditor.saveGraphLayout(page.blocks, page.edges)
+                            page.statusText = ruleEditor.message
+                        }
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("저장된 규칙 다시 열기")
+                        onClicked: confirmReload.open()
+                    }
                     }
                 }
             }
@@ -956,9 +1050,49 @@ Item {
                         const valid = ruleEditor.importGraph(page.blocks, page.edges)
                         page.statusText = ruleEditor.message
                         if (valid) {
-                            page.graphImported()
+                            page.stagedGraph = true
+                            page.editorDraftReplaced()
                             page.statusText += qsTr(" 위의 기존 편집기 버튼으로 내용을 확인해 주세요.")
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: confirmReload
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 420)
+        title: qsTr("저장된 규칙 다시 열기")
+        standardButtons: Dialog.NoButton
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: page.primaryText
+                text: qsTr("저장하지 않은 그래프와 기존 편집기의 규칙 초안을 버리고, 마지막 저장본을 다시 불러옵니다.")
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ThemeButton { text: qsTr("취소"); onClicked: confirmReload.close() }
+                ThemeButton {
+                    text: qsTr("다시 열기")
+                    onClicked: {
+                        confirmReload.close()
+                        ruleEditor.reload()
+                        page.loadGraphFromDraft()
+                        page.editorDraftReplaced()
                     }
                 }
             }

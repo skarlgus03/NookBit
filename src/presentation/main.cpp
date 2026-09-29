@@ -73,7 +73,9 @@ int main(int argc, char* argv[]) {
         const auto initial = defaults.load();
         if (initial) previewRules.save(initial.value());
     }
-    nookbit::RuleEditorController ruleEditor(previewRules, previewRules, nullptr, &previewRules);
+    nookbit::RuleEditorController ruleEditor(
+        previewRules, previewRules, nullptr, &previewRules,
+        verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")));
     nookbit::FilesystemScanner previewScanner;
     nookbit::RuleEngine previewRuleEngine;
     nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));

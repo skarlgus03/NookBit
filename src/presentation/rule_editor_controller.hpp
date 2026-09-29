@@ -24,7 +24,8 @@ public:
                          QObject* parent = nullptr);
     /// 이전 규칙 변환 계약까지 받아 편집기를 시작하는 생성자.
     RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
-                         QObject* parent, IRuleSetMigrator* migrator);
+                         QObject* parent, IRuleSetMigrator* migrator,
+                         QString graphLayoutPath = {});
 
     /// 화면에 표시할 깊이 우선 규칙 목록을 반환하는 함수.
     [[nodiscard]] QVariantList nodes() const;
@@ -54,6 +55,10 @@ public:
     Q_INVOKABLE bool remove(const QString& path);
     /// 노드 화면의 연결과 입력을 검사한 뒤 편집 초안으로 변환하는 함수.
     Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
+    /// 현재 규칙 초안을 노드와 연결선으로 펼쳐 반환하는 함수.
+    Q_INVOKABLE QVariantMap graph() const;
+    /// 현재 노드 배치를 분류 규칙과 별도 파일에 저장하는 함수.
+    Q_INVOKABLE bool saveGraphLayout(const QVariantList& blocks, const QVariantList& edges);
     /// 저장하지 않은 수정을 버리고 저장본을 다시 불러오는 함수.
     Q_INVOKABLE void reload();
     /// 유효한 초안을 저장하여 실제 분류 규칙으로 적용하는 함수.
@@ -71,6 +76,7 @@ private:
     IRuleSetRepository& reader_;
     IRuleSetWriter& writer_;
     IRuleSetMigrator* migrator_;
+    QString graphLayoutPath_;
     RuleSet draft_;
     QString message_;
     bool loaded_{false};

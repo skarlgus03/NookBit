@@ -509,7 +509,7 @@ ApplicationWindow {
         anchors.leftMargin: navigation.width
         visible: root.currentPage === 1
         onOpenCurrentEditor: ruleDialog.open()
-        onGraphImported: {
+        onEditorDraftReplaced: {
             root.selectedRulePath = ""
             root.selectedRuleDetail = ({})
             root.ruleFormDirty = false

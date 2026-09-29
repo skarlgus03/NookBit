@@ -173,6 +173,67 @@ void testGraphImport() {
     blocks.replace(2, unsafe);
     expect(!editor.importGraph(blocks, edges), "unsafe destination must block import");
 }
+
+// 저장 규칙의 노드 왕복과 별도 배치 파일의 위치 복원을 검사하는 함수.
+void testGraphRoundTripAndLayout() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "round-trip fixture should load");
+    if (!initial) return;
+    const auto rulesPath = directory.filePath(QStringLiteral("rules.json"));
+    const auto layoutPath = directory.filePath(QStringLiteral("rule-graph-layout.json"));
+    nookbit::JsonRuleSetRepository active(rulesPath, schema);
+    expect(active.save(initial.value()).hasValue(), "round-trip fixture should save");
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, layoutPath);
+    const auto graph = editor.graph();
+    expect(graph.value("valid").toBool() && !graph.value("blocks").toList().isEmpty() &&
+               !graph.value("edges").toList().isEmpty(),
+           "saved rules should expand into connected graph blocks");
+    auto blocks = graph.value("blocks").toList();
+    const auto edges = graph.value("edges").toList();
+    expect(editor.importGraph(blocks, edges), "restored graph should convert without losing rules");
+    expect(editor.save(), "restored graph should save through existing rule writer");
+    const auto roundTrip = active.load();
+    expect(roundTrip && roundTrip.value().nodes.size() == initial.value().nodes.size() &&
+               roundTrip.value().nodes[0].id == initial.value().nodes[0].id &&
+               roundTrip.value().nodes[0].destination->relativePath ==
+                   initial.value().nodes[0].destination->relativePath,
+           "graph round trip should preserve original IDs and destinations");
+    int movedIndex = -1;
+    for (int index = 0; index < blocks.size(); ++index) {
+        if (blocks.at(index).toMap().value("ruleId").toString() ==
+            QString::fromStdString(initial.value().nodes[0].id)) {
+            movedIndex = index;
+            break;
+        }
+    }
+    expect(movedIndex >= 0, "root rule should have a matching graph block");
+    if (movedIndex < 0) return;
+    auto moved = blocks.at(movedIndex).toMap();
+    moved.insert(QStringLiteral("x"), 777);
+    blocks.replace(movedIndex, moved);
+    QFile rulesFile(rulesPath);
+    expect(rulesFile.open(QIODevice::ReadOnly), "rule file should be readable before layout save");
+    const auto unchangedRules = rulesFile.readAll();
+    rulesFile.close();
+    expect(editor.saveGraphLayout(blocks, edges), "node positions should save separately");
+    expect(rulesFile.open(QIODevice::ReadOnly) && rulesFile.readAll() == unchangedRules,
+           "saving node positions must not rewrite classification rules");
+    rulesFile.close();
+    nookbit::RuleEditorController reopened(active, active, nullptr, nullptr, layoutPath);
+    const auto reopenedBlocks = reopened.graph().value("blocks").toList();
+    bool positionRestored = false;
+    for (const auto& block : reopenedBlocks) {
+        const auto item = block.toMap();
+        if (item.value("ruleId").toString() ==
+                QString::fromStdString(initial.value().nodes[0].id) &&
+            item.value("x").toInt() == 777) positionRestored = true;
+    }
+    expect(positionRestored, "saved node position should survive reopening the editor");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -181,5 +242,6 @@ int main(int argc, char* argv[]) {
     testDraftAndSave();
     testNestedAndFallback();
     testGraphImport();
+    testGraphRoundTripAndLayout();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
