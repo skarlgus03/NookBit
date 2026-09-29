@@ -206,6 +206,11 @@ Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const Rul
     while (node && !node->children.empty()) {
         node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion);
     }
+    if (node && node->exclude) {
+        return Result<std::optional<RuleDecision>>::success(RuleDecision{
+            node->id, {}, "Explicitly excluded by classification rule: " + node->id,
+            std::nullopt, true});
+    }
     const RuleDestination* target = node && node->destination ? &*node->destination : nullptr;
     std::string matchedId = node ? node->id : std::string();
     if (!target && rules.globalOtherwise) {

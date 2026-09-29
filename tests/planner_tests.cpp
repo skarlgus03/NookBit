@@ -204,6 +204,41 @@ void testUnmatchedPolicy() {
            "abort policy should reject an unmatched file");
 }
 
+// 명시적으로 제외한 파일은 미일치 중단 설정과 무관하게 이동하지 않는지 검사하는 함수.
+void testExplicitExclusion() {
+    FixtureDirectory fixture;
+    expect(fixture.created, "temporary fixture directory should be created");
+    if (!fixture.created) return;
+    const auto source = fixture.path / "private.jpg";
+    const auto home = fixture.path / "organized";
+    std::filesystem::create_directories(home);
+    expect(writeFile(source, "private"), "excluded source fixture should be created");
+    nookbit::FilesystemScanner scanner;
+    const auto snapshot = scanner.scan({{}, false, {}, {source}});
+    expect(snapshot.hasValue(), "excluded file should still be scanned");
+    if (!snapshot) return;
+    nookbit::RuleSet rules;
+    rules.id = "exclusion";
+    rules.version = "v3";
+    rules.schemaVersion = 3;
+    nookbit::RuleNode exclude;
+    exclude.id = "skip-jpg";
+    exclude.atomicCondition = nookbit::ExtensionPredicate{{"jpg"}};
+    exclude.exclude = true;
+    rules.nodes = {exclude};
+    rules.globalOtherwise = nookbit::RuleDestination{L"Fallback", std::nullopt};
+    nookbit::UserSettings settings;
+    settings.homeRoot = home;
+    settings.unmatchedPolicy = nookbit::UnmatchedPolicy::Abort;
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, fixture.path / "app-data");
+    const auto plan = planner.buildPlan(snapshot.value(), settings, rules);
+    expect(plan && plan.value().steps.empty() && !plan.value().warnings.empty() &&
+               plan.value().warnings.front().code == "plan.excluded_file",
+           "explicit exclusion should skip movement without triggering unmatched abort");
+    expect(std::filesystem::exists(source), "excluded source must remain untouched");
+}
+
 // 앱 데이터 폴더의 파일을 선택해도 이동 초안을 만들지 않는지 검사하는 함수.
 void testAppDataIsProtected() {
     FixtureDirectory fixture;
@@ -236,6 +271,7 @@ int main() {
     testPreviewWorkflowWithoutMoving();
     testCollisionPolicies();
     testUnmatchedPolicy();
+    testExplicitExclusion();
     testAppDataIsProtected();
     if (failures == 0) {
         std::cout << "All planner tests passed.\n";

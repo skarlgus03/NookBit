@@ -35,7 +35,8 @@ Result<WatchProposal> EvaluateWatchFolderUseCase::execute(
         auto decision = ruleEngine_.decide(
             file, rules.value(), MultiMatchPolicy::FirstMatch, nowUtcMs);
         if (!decision) return Result<WatchProposal>::failure(decision.error());
-        if (decision.value()) proposal.eligibleFiles.push_back(file);
+        if (decision.value() && !decision.value()->excluded)
+            proposal.eligibleFiles.push_back(file);
     }
     auto evaluated = WatchEvaluator::evaluate(settings, proposal.eligibleFiles, nowUtcMs);
     if (!evaluated) return Result<WatchProposal>::failure(evaluated.error());

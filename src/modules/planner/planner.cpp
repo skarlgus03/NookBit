@@ -117,6 +117,13 @@ Result<OperationPlan> Planner::buildPlan(
         }
 
         const auto& chosen = *decision.value();
+        if (chosen.excluded) {
+            plan.warnings.push_back({
+                "plan.excluded_file", "A selected file was explicitly excluded: " +
+                    utf8Path(file.absolutePath),
+            });
+            continue;
+        }
         if (!isSafeRelativeDestination(chosen.destinationRelativePath)) {
             return Result<OperationPlan>::failure({
                 "plan.unsafe_destination", "A classification rule returned an unsafe destination.",

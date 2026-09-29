@@ -1,10 +1,14 @@
 #include "presentation/rule_editor_controller.hpp"
 
 #include <QDateTime>
+#include <QHash>
 #include <QRegularExpression>
+#include <QSet>
 #include <QUuid>
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 #include <utility>
 
 namespace nookbit {
@@ -70,6 +74,7 @@ void appendNodes(QVariantList& output, const std::vector<RuleNode>& nodes,
             {QStringLiteral("enabled"), node.enabled},
             {QStringLiteral("destination"), node.destination
                 ? QString::fromStdWString(node.destination->relativePath.wstring()) : QString()},
+            {QStringLiteral("exclude"), node.exclude},
             {QStringLiteral("childrenCount"), static_cast<int>(node.children.size())},
         });
         appendNodes(output, node.children, path, depth + 1);
@@ -82,6 +87,194 @@ QString extensionText(const ExtensionPredicate& condition) {
     for (const auto& extension : condition.values)
         values.append(QString::fromStdString(extension));
     return values.join(QStringLiteral(", "));
+}
+
+// 노드 번호를 포함한 그래프 오류를 반환하는 함수.
+Result<std::vector<RuleNode>> graphError(int id, const QString& description) {
+    const auto message = id > 0
+        ? QStringLiteral("노드 %1: %2").arg(id).arg(description) : description;
+    return Result<std::vector<RuleNode>>::failure({
+        "rules.graph_invalid", message.toStdString()});
+}
+
+// 화면의 블록과 선을 순서 있는 단일 조건 규칙 트리로 바꾸는 함수.
+Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
+                                         const QVariantList& edges) {
+    if (blocks.size() > 1000) return graphError(0, QStringLiteral("노드가 너무 많아요."));
+    QHash<int, QVariantMap> byId;
+    int startId = -1;
+    for (const auto& item : blocks) {
+        const auto block = item.toMap();
+        bool valid = false;
+        const int id = block.value(QStringLiteral("id")).toInt(&valid);
+        if (!valid || id <= 0 || byId.contains(id))
+            return graphError(id, QStringLiteral("노드 번호가 없거나 중복돼요."));
+        byId.insert(id, block);
+        if (block.value(QStringLiteral("type")).toString() == QStringLiteral("start")) {
+            if (startId >= 0) return graphError(id, QStringLiteral("파일 입력 노드는 하나만 둘 수 있어요."));
+            startId = id;
+        }
+    }
+    if (startId < 0) return graphError(0, QStringLiteral("파일 입력 노드가 필요해요."));
+    QHash<int, QVector<int>> children;
+    QHash<int, int> parent;
+    for (const auto& item : edges) {
+        const auto edge = item.toMap();
+        bool validFrom = false;
+        bool validTo = false;
+        const int from = edge.value(QStringLiteral("from")).toInt(&validFrom);
+        const int to = edge.value(QStringLiteral("to")).toInt(&validTo);
+        if (!validFrom || !validTo || !byId.contains(from) || !byId.contains(to))
+            return graphError(0, QStringLiteral("존재하지 않는 노드로 이어진 선이 있어요."));
+        const auto sourceType = byId.value(from).value(QStringLiteral("type")).toString();
+        if (to == startId || sourceType == QStringLiteral("destination") ||
+            sourceType == QStringLiteral("exclude"))
+            return graphError(to, QStringLiteral("이 방향으로는 연결할 수 없어요."));
+        if (parent.contains(to))
+            return graphError(to, QStringLiteral("입력에는 부모를 하나만 연결할 수 있어요."));
+        parent.insert(to, from);
+        children[from].push_back(to);
+    }
+    for (auto it = byId.cbegin(); it != byId.cend(); ++it) {
+        if (it.key() != startId && !parent.contains(it.key()))
+            return graphError(it.key(), QStringLiteral("파일 입력에서 이어지지 않은 노드예요."));
+    }
+    if (children.value(startId).isEmpty())
+        return graphError(startId, QStringLiteral("분류 조건을 하나 이상 연결해 주세요."));
+
+    QSet<int> visiting;
+    QSet<int> visited;
+    std::function<Result<std::vector<RuleNode>>(int, int)> convertChildren;
+    // 각 부모의 연결 순서를 형제 실행 순서로 삼아 규칙 노드를 만드는 함수.
+    convertChildren = [&](int owner, int depth) -> Result<std::vector<RuleNode>> {
+        if (depth > 32) return graphError(owner, QStringLiteral("규칙 단계가 너무 깊어요."));
+        std::vector<RuleNode> converted;
+        bool seenOtherwise = false;
+        const auto siblings = children.value(owner);
+        for (int position = 0; position < siblings.size(); ++position) {
+            const int id = siblings.at(position);
+            if (visiting.contains(id))
+                return graphError(id, QStringLiteral("자기 자신으로 돌아가는 연결이 있어요."));
+            const auto block = byId.value(id);
+            const auto type = block.value(QStringLiteral("type")).toString();
+            if (type == QStringLiteral("destination") || type == QStringLiteral("exclude"))
+                return graphError(id, QStringLiteral("목적지·정리 제외는 조건 뒤에만 놓아 주세요."));
+            if (type == QStringLiteral("otherwise")) {
+                if (seenOtherwise || position != siblings.size() - 1)
+                    return graphError(id, QStringLiteral("'그 외'는 같은 부모의 마지막에 하나만 둘 수 있어요."));
+                seenOtherwise = true;
+            } else if (seenOtherwise) {
+                return graphError(id, QStringLiteral("'그 외' 뒤에는 조건을 둘 수 없어요."));
+            }
+            RuleNode node;
+            node.id = "graph-" + std::to_string(id);
+            node.otherwise = type == QStringLiteral("otherwise");
+            const auto value = block.value(QStringLiteral("value")).toString().trimmed();
+            if (type == QStringLiteral("extension")) {
+                ExtensionPredicate extension;
+                for (const auto& part : value.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                    QString token = part.trimmed().toLower();
+                    if (token.startsWith(QLatin1Char('.'))) token.remove(0, 1);
+                    if (!QRegularExpression(QStringLiteral("^[a-z0-9]+$")).match(token).hasMatch())
+                        return graphError(id, QStringLiteral("확장자를 쉼표로 구분해 입력해 주세요."));
+                    const auto name = token.toStdString();
+                    if (std::find(extension.values.begin(), extension.values.end(), name) ==
+                        extension.values.end()) extension.values.push_back(name);
+                }
+                if (extension.values.empty())
+                    return graphError(id, QStringLiteral("확장자를 하나 이상 입력해 주세요."));
+                node.atomicCondition = std::move(extension);
+            } else if (type == QStringLiteral("name")) {
+                if (value.isEmpty()) return graphError(id, QStringLiteral("포함할 이름을 입력해 주세요."));
+                node.atomicCondition = NameContainsPredicate{value.toStdString()};
+            } else if (type == QStringLiteral("size") || type == QStringLiteral("age")) {
+                bool validNumber = false;
+                const auto amount = value.toULongLong(&validNumber);
+                if (!validNumber) return graphError(id, QStringLiteral("0 이상의 정수를 입력해 주세요."));
+                const auto comparison = block.value(QStringLiteral("comparison")).toString();
+                if (type == QStringLiteral("size")) {
+                    const auto unit = block.value(QStringLiteral("unit")).toString();
+                    const auto factor = unit == QStringLiteral("MiB") ? 1048576ULL : 1ULL;
+                    if ((unit != QStringLiteral("MiB") && unit != QStringLiteral("B")) ||
+                        amount > 9007199254740991ULL / factor)
+                        return graphError(id, QStringLiteral("크기 또는 단위가 올바르지 않아요."));
+                    SizeComparison mode;
+                    if (comparison == QStringLiteral("greaterThan")) mode = SizeComparison::GreaterThan;
+                    else if (comparison == QStringLiteral("atLeast")) mode = SizeComparison::AtLeast;
+                    else if (comparison == QStringLiteral("lessThan")) mode = SizeComparison::LessThan;
+                    else if (comparison == QStringLiteral("atMost")) mode = SizeComparison::AtMost;
+                    else return graphError(id, QStringLiteral("크기 비교 방식을 골라 주세요."));
+                    node.atomicCondition = SizePredicate{mode, amount * factor};
+                } else {
+                    if (amount > static_cast<unsigned long long>(std::numeric_limits<int>::max()))
+                        return graphError(id, QStringLiteral("수정 경과일이 너무 커요."));
+                    if (comparison != QStringLiteral("atLeast") &&
+                        comparison != QStringLiteral("lessThan"))
+                        return graphError(id, QStringLiteral("경과일 비교 방식을 골라 주세요."));
+                    node.atomicCondition = ModifiedAgePredicate{
+                        comparison == QStringLiteral("atLeast") ? AgeComparison::AtLeast
+                                                                 : AgeComparison::LessThan,
+                        static_cast<int>(amount)};
+                }
+            } else if (!node.otherwise) {
+                return graphError(id, QStringLiteral("알 수 없는 조건 종류예요."));
+            }
+            visiting.insert(id);
+            const auto next = children.value(id);
+            if (next.size() == 1) {
+                const int terminalId = next.front();
+                const auto terminal = byId.value(terminalId);
+                const auto terminalType = terminal.value(QStringLiteral("type")).toString();
+                if (terminalType == QStringLiteral("destination") ||
+                    terminalType == QStringLiteral("exclude")) {
+                    if (!children.value(terminalId).isEmpty())
+                        return graphError(terminalId, QStringLiteral("종착 노드 뒤에는 연결할 수 없어요."));
+                    visited.insert(terminalId);
+                    if (terminalType == QStringLiteral("exclude")) {
+                        node.exclude = true;
+                    } else {
+                        const auto path = terminal.value(QStringLiteral("value")).toString().trimmed();
+                        const std::filesystem::path relative{path.toStdWString()};
+                        auto unsupportedTokens = path;
+                        unsupportedTokens.replace(QStringLiteral("{yyyy}"), QString());
+                        unsupportedTokens.replace(QStringLiteral("{MM}"), QString());
+                        if (path.isEmpty() || relative.is_absolute() || relative.has_root_name() ||
+                            relative.has_root_directory() || unsupportedTokens.contains(QLatin1Char('{')) ||
+                            unsupportedTokens.contains(QLatin1Char('}'))) {
+                            return graphError(terminalId, QStringLiteral("정리 기준 폴더 안의 상대 경로를 입력해 주세요."));
+                        }
+                        for (const auto& part : relative) {
+                            if (part == L"..")
+                                return graphError(terminalId, QStringLiteral("상위 폴더로 나갈 수 없어요."));
+                        }
+                        node.destination = RuleDestination{relative, std::nullopt};
+                    }
+                }
+            }
+            if (!node.exclude && !node.destination) {
+                if (next.isEmpty())
+                    return graphError(id, QStringLiteral("목적지 또는 정리 제외 노드를 연결해 주세요."));
+                for (const int child : next) {
+                    const auto childType = byId.value(child).value(QStringLiteral("type")).toString();
+                    if (childType == QStringLiteral("destination") ||
+                        childType == QStringLiteral("exclude"))
+                        return graphError(child, QStringLiteral("종착 노드는 조건 자식과 함께 둘 수 없어요."));
+                }
+                auto descendants = convertChildren(id, depth + 1);
+                if (!descendants) return descendants;
+                node.children = std::move(descendants.value());
+            }
+            visiting.remove(id);
+            visited.insert(id);
+            converted.push_back(std::move(node));
+        }
+        return Result<std::vector<RuleNode>>::success(std::move(converted));
+    };
+    auto result = convertChildren(startId, 0);
+    if (!result) return result;
+    if (visited.size() + 1 != byId.size())
+        return graphError(0, QStringLiteral("순환하거나 연결되지 않은 노드가 있어요."));
+    return result;
 }
 
 } // namespace
@@ -129,6 +322,7 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
         {QStringLiteral("otherwise"), node->otherwise},
         {QStringLiteral("destination"), node->destination
             ? QString::fromStdWString(node->destination->relativePath.wstring()) : QString()},
+        {QStringLiteral("exclude"), node->exclude},
         {QStringLiteral("childrenCount"), static_cast<int>(node->children.size())},
     };
     if (!node->atomicCondition) return result;
@@ -235,6 +429,11 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
         emit changed();
         return false;
     }
+    if (node->exclude && !destination.trimmed().isEmpty()) {
+        message_ = QStringLiteral("정리 제외 규칙에는 목적지를 지정할 수 없어요.");
+        emit changed();
+        return false;
+    }
     node->id = id.trimmed().toStdString();
     node->enabled = enabled;
     node->atomicCondition = std::move(condition);
@@ -252,8 +451,8 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
 bool RuleEditorController::add(const QString& parentPath) {
     auto* parent = parentPath.isEmpty() ? nullptr : nodeAt(draft_, parentPath);
     auto* siblings = loaded_ ? siblingsAt(draft_, parentPath) : nullptr;
-    if (!siblings || (parent && parent->destination)) {
-        message_ = QStringLiteral("자식을 추가하려면 부모 규칙의 목적지를 먼저 비워 주세요.");
+    if (!siblings || (parent && (parent->destination || parent->exclude))) {
+        message_ = QStringLiteral("목적지나 정리 제외로 끝나는 규칙에는 자식을 추가할 수 없어요.");
         emit changed();
         return false;
     }
@@ -272,7 +471,7 @@ bool RuleEditorController::add(const QString& parentPath) {
 bool RuleEditorController::addOtherwise(const QString& parentPath) {
     auto* parent = parentPath.isEmpty() ? nullptr : nodeAt(draft_, parentPath);
     auto* siblings = loaded_ ? siblingsAt(draft_, parentPath) : nullptr;
-    if (!siblings || (parent && parent->destination)) return false;
+    if (!siblings || (parent && (parent->destination || parent->exclude))) return false;
     if (std::any_of(siblings->begin(), siblings->end(),
                     [](const RuleNode& entry) { return entry.otherwise; })) {
         message_ = QStringLiteral("같은 높이에는 '그 외'를 하나만 둘 수 있어요.");
@@ -320,6 +519,26 @@ bool RuleEditorController::remove(const QString& path) {
     siblings->erase(siblings->begin() + index);
     dirty_ = true;
     message_ = QStringLiteral("초안에서 제거했어요. 저장 전에는 되돌릴 수 있습니다.");
+    emit changed();
+    return true;
+}
+
+// 검증된 화면 그래프를 기존 저장본 대신 편집 초안에만 반영하는 함수.
+bool RuleEditorController::importGraph(const QVariantList& blocks, const QVariantList& edges) {
+    if (!loaded_) {
+        message_ = QStringLiteral("현재 규칙을 읽거나 새 형식으로 변환한 뒤 시도해 주세요.");
+        emit changed();
+        return false;
+    }
+    auto converted = graphRules(blocks, edges);
+    if (!converted) {
+        message_ = QString::fromStdString(converted.error().message);
+        emit changed();
+        return false;
+    }
+    draft_.nodes = std::move(converted.value());
+    dirty_ = true;
+    message_ = QStringLiteral("노드 그래프를 규칙 초안으로 바꿨어요. 기존 편집기에서 확인한 뒤 저장해 주세요.");
     emit changed();
     return true;
 }

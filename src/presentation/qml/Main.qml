@@ -4,11 +4,32 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
+    property int currentPage: 0
     property string selectedRulePath: ""
     property var selectedRuleDetail: ({})
     property var collapsedRulePaths: ({})
     property bool ruleFormDirty: false
     property bool globalFormDirty: false
+    readonly property bool editorDark: currentPage === 1 && ruleEditorPage.darkMode
+
+    // 탐색 버튼의 배경과 글자색을 테마에 맞춰 함께 그리는 버튼.
+    component NavigationButton: Button {
+        id: navButton
+        contentItem: Text {
+            text: navButton.text
+            font: navButton.font
+            color: root.editorDark ? "#edf2f8" : "#253428"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Rectangle {
+            radius: 7
+            color: root.editorDark
+                   ? (navButton.highlighted ? "#3e5270" : navButton.hovered ? "#364357" : "#2b3546")
+                   : (navButton.highlighted ? "#dce9db" : navButton.hovered ? "#e6eee5" : "#f3f5f1")
+            border.color: root.editorDark ? "#3d4757" : "#d9dfd4"
+        }
+    }
 
     // 접힌 부모 아래의 노드를 화면에서 숨기는 함수.
     function ruleVisible(path) {
@@ -53,18 +74,68 @@ ApplicationWindow {
         ruleDestinationField.text = selectedRuleDetail.destination || ""
         ruleFormDirty = false
     }
-    width: 920
-    height: 760
-    minimumWidth: 680
+    width: 1240
+    height: 800
+    minimumWidth: 960
     minimumHeight: 620
     visible: true
     title: qsTr("NookBit")
-    color: "#f5f5f2"
+    color: root.editorDark ? "#161a22" : "#f5f5f2"
+
+    Rectangle {
+        id: navigation
+        width: 190
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        color: root.editorDark ? "#1b2230" : "#edf0e9"
+        border.color: root.editorDark ? "#3d4757" : "#d9dfd4"
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 18
+            spacing: 10
+
+            Label {
+                text: qsTr("NookBit")
+                font.pixelSize: 24
+                font.bold: true
+                color: root.editorDark ? "#edf2f8" : "#253428"
+                bottomPadding: 20
+            }
+            NavigationButton {
+                width: parent.width
+                text: qsTr("파일 대기 목록")
+                highlighted: root.currentPage === 0
+                onClicked: root.currentPage = 0
+            }
+            NavigationButton {
+                width: parent.width
+                text: qsTr("분류 규칙")
+                highlighted: root.currentPage === 1
+                onClicked: root.currentPage = 1
+            }
+            Label {
+                width: parent.width
+                topPadding: 14
+                text: qsTr("감시와 기록은 대기 목록 화면에서 확인할 수 있어요.")
+                wrapMode: Text.WordWrap
+                color: root.editorDark ? "#aab6c7" : "#68756b"
+                font.pixelSize: 12
+            }
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 32
+        anchors.leftMargin: navigation.width + 28
+        anchors.rightMargin: 28
+        anchors.topMargin: 28
+        anchors.bottomMargin: 28
         spacing: 14
+        visible: root.currentPage === 0
 
         Label {
             text: qsTr("NookBit")
@@ -431,6 +502,23 @@ ApplicationWindow {
         }
     }
 
+    RuleEditorPage {
+        id: ruleEditorPage
+        objectName: "ruleEditorPage"
+        anchors.fill: parent
+        anchors.leftMargin: navigation.width
+        visible: root.currentPage === 1
+        onOpenCurrentEditor: ruleDialog.open()
+        onGraphImported: {
+            root.selectedRulePath = ""
+            root.selectedRuleDetail = ({})
+            root.ruleFormDirty = false
+            root.globalFormDirty = false
+            root.collapsedRulePaths = ({})
+            globalDestinationField.text = ruleEditor.globalDestination
+        }
+    }
+
     Dialog {
         id: ruleDialog
         anchors.centerIn: parent
@@ -559,7 +647,8 @@ ApplicationWindow {
                                     flat: true
                                     highlighted: root.selectedRulePath === modelData.path
                                     text: (modelData.enabled ? "" : "[꺼짐] ") + modelData.title +
-                                          (modelData.destination ? "  → " + modelData.destination : "")
+                                          (modelData.exclude ? qsTr("  → 정리 제외")
+                                           : modelData.destination ? "  → " + modelData.destination : "")
                                     onClicked: {
                                         if (root.commitRuleForm()) root.selectRule(modelData.path)
                                     }
@@ -657,11 +746,15 @@ ApplicationWindow {
                             ]
                             onActivated: root.ruleFormDirty = true
                         }
-                        Label { text: qsTr("목적지 (자식이 있으면 비워 둠)") }
+                        Label {
+                            text: root.selectedRuleDetail.exclude
+                                  ? qsTr("정리 제외 · 이 규칙에 맞으면 이동하지 않음")
+                                  : qsTr("목적지 (자식이 있으면 비워 둠)")
+                        }
                         TextField {
                             id: ruleDestinationField
                             Layout.fillWidth: true
-                            enabled: root.selectedRulePath.length > 0
+                            enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.exclude
                             placeholderText: qsTr("예: Pictures/PNG")
                             onTextEdited: root.ruleFormDirty = true
                         }

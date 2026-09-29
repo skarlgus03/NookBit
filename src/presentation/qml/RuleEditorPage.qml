@@ -1,0 +1,967 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Item {
+    id: page
+    signal openCurrentEditor()
+    signal graphImported()
+
+    readonly property int blockWidth: 226
+    readonly property int blockHeight: 112
+    property bool darkMode: false
+    readonly property color pageColor: darkMode ? "#161a22" : "#f5f5f2"
+    readonly property color surfaceColor: darkMode ? "#202633" : "#ffffff"
+    readonly property color canvasColor: darkMode ? "#191f2a" : "#f8faf7"
+    readonly property color borderColor: darkMode ? "#3d4757" : "#d9dfd8"
+    readonly property color primaryText: darkMode ? "#edf2f8" : "#27352b"
+    readonly property color mutedText: darkMode ? "#aab6c7" : "#58655b"
+    readonly property color gridColor: darkMode ? "#2a3241" : "#e8ede7"
+    readonly property color nodeColor: darkMode ? "#252d3b" : "#ffffff"
+    readonly property color buttonColor: darkMode ? "#303b4d" : "#f3f5f1"
+    readonly property color buttonHoverColor: darkMode ? "#3d4c62" : "#e6eee5"
+    palette.window: pageColor
+    palette.windowText: primaryText
+    palette.button: buttonColor
+    palette.buttonText: primaryText
+    palette.base: darkMode ? "#252d3b" : "#ffffff"
+    palette.text: primaryText
+    palette.highlight: darkMode ? "#55769f" : "#80a88a"
+    palette.highlightedText: "#ffffff"
+
+    // 운영체제 기본 버튼 색과 글자색이 엇갈리지 않게 그리는 버튼.
+    component ThemeButton: Button {
+        id: themedButton
+        contentItem: Text {
+            text: themedButton.text
+            font: themedButton.font
+            color: themedButton.enabled ? page.primaryText : page.mutedText
+            opacity: themedButton.enabled ? 1 : 0.55
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            radius: 7
+            color: themedButton.down || themedButton.hovered ? page.buttonHoverColor : page.buttonColor
+            border.color: page.borderColor
+        }
+    }
+    property var blocks: [
+        { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
+        { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MiB" },
+        { id: 3, type: "extension", x: 720, y: 220, value: "png, jpg" },
+        { id: 4, type: "destination", x: 1050, y: 220, value: "Pictures" }
+    ]
+    property var edges: [
+        { from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }
+    ]
+    property var livePositions: ({})
+    property int nextId: 5
+    property int selectedId: -1
+    property int connectingFrom: -1
+    property bool draggingConnection: false
+    property real pointerX: 0
+    property real pointerY: 0
+    property real zoom: 1.0
+    property int connectionStyle: 0
+    property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
+    property var selectedBlock: blockForId(selectedId)
+
+    // 노드 종류에 맞는 입력값과 비교 방식을 카드에 표시하는 함수.
+    function displayValue(block) {
+        if (block.type === "size" || block.type === "age") {
+            const comparisons = {
+                greaterThan: qsTr("초과"), atLeast: qsTr("이상"),
+                lessThan: qsTr("미만"), atMost: qsTr("이하")
+            }
+            const unit = block.type === "size" ? (block.unit || "MiB") : qsTr("일")
+            return block.value + " " + unit + " " + (comparisons[block.comparison] || "")
+        }
+        return block.value
+    }
+
+    // 숫자 조건의 현재 비교 방식 이름을 반환하는 함수.
+    function comparisonTitle(block) {
+        const names = {
+            greaterThan: qsTr("초과"), atLeast: qsTr("이상"),
+            lessThan: qsTr("미만"), atMost: qsTr("이하")
+        }
+        return names[block.comparison] || qsTr("선택 안 됨")
+    }
+
+    // ID로 화면의 블록 하나를 찾는 함수.
+    function blockForId(id) {
+        for (const block of blocks) {
+            if (block.id === id)
+                return block
+        }
+        return null
+    }
+
+    // 블록 입력점에 다른 블록의 선이 연결되었는지 반환하는 함수.
+    function hasIncoming(id) {
+        return edges.some(edge => edge.to === id)
+    }
+
+    // 블록 출력점에서 다른 블록으로 선이 이어지는지 반환하는 함수.
+    function hasOutgoing(id) {
+        return edges.some(edge => edge.from === id)
+    }
+
+    // 드래그 중인 블록은 아직 모델에 저장되지 않은 화면 위치를 반환하는 함수.
+    function positionFor(block) {
+        return livePositions[block.id] || block
+    }
+
+    // 블록의 오른쪽 끝에 여백을 더해 필요한 작업 공간 너비를 구하는 함수.
+    function logicalWidth() {
+        let right = 0
+        for (const block of blocks)
+            right = Math.max(right, positionFor(block).x + blockWidth)
+        return Math.max(canvasFlick.width / zoom, Math.ceil((right + 260) / 160) * 160)
+    }
+
+    // 블록의 아래쪽 끝에 여백을 더해 필요한 작업 공간 높이를 구하는 함수.
+    function logicalHeight() {
+        let bottom = 0
+        for (const block of blocks)
+            bottom = Math.max(bottom, positionFor(block).y + blockHeight)
+        return Math.max(canvasFlick.height / zoom, Math.ceil((bottom + 220) / 160) * 160)
+    }
+
+    // 휠 위치를 기준으로 작업 공간을 확대하거나 축소하는 함수.
+    function zoomAt(delta, viewportX, viewportY) {
+        if (delta === 0)
+            return
+        const oldZoom = zoom
+        const nextZoom = Math.max(0.5, Math.min(2.0, oldZoom * Math.pow(1.12, delta / 120)))
+        if (nextZoom === oldZoom)
+            return
+        const worldX = (canvasFlick.contentX + viewportX) / oldZoom
+        const worldY = (canvasFlick.contentY + viewportY) / oldZoom
+        zoom = nextZoom
+        canvasFlick.contentX = Math.max(0, Math.min(canvasFlick.contentWidth - canvasFlick.width,
+                                                   worldX * nextZoom - viewportX))
+        canvasFlick.contentY = Math.max(0, Math.min(canvasFlick.contentHeight - canvasFlick.height,
+                                                   worldY * nextZoom - viewportY))
+    }
+
+    // 블록을 끄는 동안 선도 즉시 따라오게 화면 위치를 기록하는 함수.
+    function noteLivePosition(id, x, y) {
+        if (id === undefined)
+            return
+        const next = Object.assign({}, livePositions)
+        next[id] = { x: x, y: y }
+        livePositions = next
+        lineCanvas.requestPaint()
+    }
+
+    // 종류에 따라 블록 제목을 정하는 함수.
+    function titleFor(type) {
+        switch (type) {
+        case "start": return qsTr("파일 입력")
+        case "extension": return qsTr("확장자")
+        case "size": return qsTr("파일 크기")
+        case "name": return qsTr("이름 포함")
+        case "age": return qsTr("수정 후 지난 일수")
+        case "otherwise": return qsTr("그 외")
+        case "destination": return qsTr("목적지")
+        case "exclude": return qsTr("정리 제외")
+        }
+        return qsTr("조건")
+    }
+
+    // 종류에 따라 블록의 강조 색을 정하는 함수.
+    function colorFor(type) {
+        if (darkMode) {
+            switch (type) {
+            case "start": return "#40566f"
+            case "extension": return "#3c617f"
+            case "size": return "#69617b"
+            case "name": return "#645b83"
+            case "age": return "#616b79"
+            case "otherwise": return "#53606f"
+            case "destination": return "#406b80"
+            case "exclude": return "#6d556f"
+            }
+            return "#53677e"
+        }
+        switch (type) {
+        case "start": return "#35584a"
+        case "extension": return "#3d7292"
+        case "size": return "#99683f"
+        case "name": return "#756397"
+        case "age": return "#7b7650"
+        case "otherwise": return "#69737b"
+        case "destination": return "#38684c"
+        case "exclude": return "#865b79"
+        }
+        return "#647069"
+    }
+
+    // 팔레트에서 고른 종류의 임시 블록을 화면에 추가하는 함수.
+    function addBlock(type) {
+        const examples = {
+            extension: "png, jpg", size: "5", name: "report",
+            age: "7", otherwise: "조건 없음", destination: "Pictures",
+            exclude: "이 파일은 이동하지 않음"
+        }
+        const block = {
+            id: nextId++, type: type,
+            x: canvasFlick.contentX / zoom + 120 + (blocks.length % 3) * 42,
+            y: canvasFlick.contentY / zoom + 110 + (blocks.length % 3) * 38,
+            value: examples[type],
+            comparison: type === "size" ? "greaterThan" : "atLeast",
+            unit: "MiB"
+        }
+        blocks = blocks.concat([block])
+        selectedId = block.id
+        statusText = qsTr("블록을 추가했어요. 블록을 끌어 위치를 바꾸고, 오른쪽 점을 왼쪽 점에 연결해 보세요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 드래그가 끝난 블록의 위치를 임시 그래프에 반영하는 함수.
+    function moveBlock(id, x, y) {
+        blocks = blocks.map(block => block.id === id
+                            ? Object.assign({}, block, { x: Math.round(x), y: Math.round(y) })
+                            : block)
+        const next = Object.assign({}, livePositions)
+        delete next[id]
+        livePositions = next
+        lineCanvas.requestPaint()
+    }
+
+    // 선택한 블록의 실제 조건 입력값을 그래프에서 바꾸는 함수.
+    function updateValue(id, value) {
+        blocks = blocks.map(block => block.id === id
+                            ? Object.assign({}, block, { value: value }) : block)
+        statusText = qsTr("입력값을 바꿨어요. 규칙 초안으로 변환해야 적용됩니다.")
+    }
+
+    // 숫자 조건의 비교 방식을 다음 항목으로 바꾸는 함수.
+    function cycleComparison(id) {
+        blocks = blocks.map(block => {
+            if (block.id !== id) return block
+            const choices = block.type === "size"
+                            ? ["greaterThan", "atLeast", "lessThan", "atMost"]
+                            : ["atLeast", "lessThan"]
+            const index = choices.indexOf(block.comparison)
+            return Object.assign({}, block, { comparison: choices[(index + 1) % choices.length] })
+        })
+    }
+
+    // 크기 조건의 바이트·MiB 단위를 바꾸는 함수.
+    function toggleUnit(id) {
+        blocks = blocks.map(block => block.id === id
+                            ? Object.assign({}, block, { unit: block.unit === "MiB" ? "B" : "MiB" })
+                            : block)
+    }
+
+    // 같은 부모 아래 일반 조건의 검사 순서를 반환하는 함수.
+    function orderFor(id) {
+        const incoming = edges.find(edge => edge.to === id)
+        if (!incoming) return -1
+        const block = blockForId(id)
+        if (!block || block.type === "destination" || block.type === "exclude" ||
+            block.type === "otherwise") return -1
+        let order = 0
+        for (const edge of edges) {
+            if (edge.from !== incoming.from) continue
+            const sibling = blockForId(edge.to)
+            if (sibling && sibling.type !== "otherwise") ++order
+            if (edge.to === id) return order
+        }
+        return -1
+    }
+
+    // 선택한 조건을 같은 부모의 앞뒤 조건과 교환하는 함수.
+    function moveSelectedOrder(direction) {
+        const incoming = edges.find(edge => edge.to === selectedId)
+        if (!incoming || orderFor(selectedId) < 0) return
+        const siblingEdges = edges.filter(edge => edge.from === incoming.from &&
+                                                  blockForId(edge.to).type !== "otherwise")
+        const index = siblingEdges.findIndex(edge => edge.to === selectedId)
+        const target = siblingEdges[index + direction]
+        if (!target) return
+        const next = edges.slice()
+        const first = next.findIndex(edge => edge.from === incoming.from && edge.to === selectedId)
+        const second = next.findIndex(edge => edge.from === incoming.from && edge.to === target.to)
+        const saved = next[first]
+        next[first] = next[second]
+        next[second] = saved
+        edges = next
+        statusText = qsTr("같은 부모 아래 조건의 검사 순서를 바꿨어요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 이미 연결된 경로를 따라 목적지 ID에 도달하는지 검사하는 함수.
+    function hasPath(fromId, targetId) {
+        if (fromId === targetId)
+            return true
+        for (const edge of edges) {
+            if (edge.from === fromId && hasPath(edge.to, targetId))
+                return true
+        }
+        return false
+    }
+
+    // 한 부모와 한 자식 사이에 순환 없는 임시 연결을 만드는 함수.
+    function connectBlocks(fromId, toId) {
+        const source = blockForId(fromId)
+        const target = blockForId(toId)
+        if (!source || !target || source.type === "destination" ||
+            source.type === "exclude" || target.type === "start")
+            return false
+        if (fromId === toId || hasPath(toId, fromId)) {
+            statusText = qsTr("자기 자신이나 조상 블록으로 연결할 수 없어요.")
+            return false
+        }
+        for (const edge of edges) {
+            if (edge.to === toId) {
+                statusText = qsTr("입력 하나에는 부모 블록 하나만 연결할 수 있어요.")
+                return false
+            }
+        }
+        const existing = edges.filter(edge => edge.from === fromId)
+        const terminal = target.type === "destination" || target.type === "exclude"
+        if (source.type === "start" && terminal) {
+            statusText = qsTr("파일 입력 뒤에는 조건 또는 '그 외' 노드를 먼저 연결해 주세요.")
+            return false
+        }
+        if ((terminal && existing.length > 0) ||
+            (!terminal && existing.some(edge => {
+                const child = blockForId(edge.to)
+                return child.type === "destination" || child.type === "exclude"
+            }))) {
+            statusText = qsTr("목적지·정리 제외 노드는 다른 자식과 함께 연결할 수 없어요.")
+            return false
+        }
+        if (target.type === "otherwise" && existing.some(edge => blockForId(edge.to).type === "otherwise")) {
+            statusText = qsTr("같은 부모에는 '그 외'를 하나만 연결할 수 있어요.")
+            return false
+        }
+        const next = edges.slice()
+        const otherwiseIndex = next.findIndex(edge => edge.from === fromId &&
+                                                      blockForId(edge.to).type === "otherwise")
+        if (target.type !== "otherwise" && otherwiseIndex >= 0)
+            next.splice(otherwiseIndex, 0, { from: fromId, to: toId })
+        else
+            next.push({ from: fromId, to: toId })
+        edges = next
+        connectingFrom = -1
+        draggingConnection = false
+        statusText = qsTr("연결했어요. 이 그래프는 아직 분류 규칙으로 저장되지 않습니다.")
+        lineCanvas.requestPaint()
+        return true
+    }
+
+    // 출력점에서 놓은 위치에 입력점이 있으면 두 블록을 연결하는 함수.
+    function finishConnectionAt(x, y) {
+        if (connectingFrom < 0)
+            return
+        draggingConnection = false
+        lineCanvas.requestPaint()
+        for (const block of blocks) {
+            if (block.type !== "start" && Math.abs(x - block.x) < 28 &&
+                Math.abs(y - (block.y + blockHeight / 2)) < 28) {
+                connectBlocks(connectingFrom, block.id)
+                return
+            }
+        }
+        statusText = qsTr("연결할 블록의 왼쪽 점까지 끌거나, 그 점을 클릭해 주세요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 선택한 블록과 이어진 선을 임시 그래프에서 제거하는 함수.
+    function removeSelectedBlock() {
+        if (selectedId < 0 || selectedId === 1)
+            return
+        const removed = selectedId
+        blocks = blocks.filter(block => block.id !== removed)
+        edges = edges.filter(edge => edge.from !== removed && edge.to !== removed)
+        selectedId = -1
+        if (connectingFrom === removed)
+            connectingFrom = -1
+        draggingConnection = false
+        const next = Object.assign({}, livePositions)
+        delete next[removed]
+        livePositions = next
+        statusText = qsTr("블록과 연결선을 화면에서 제거했어요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 선택한 블록으로 들어오거나 나가는 선만 제거하는 함수.
+    function disconnectSelectedBlock() {
+        if (selectedId < 0)
+            return
+        edges = edges.filter(edge => edge.from !== selectedId && edge.to !== selectedId)
+        connectingFrom = -1
+        draggingConnection = false
+        statusText = qsTr("선택한 블록의 연결선을 해제했어요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 예시 블록과 연결을 다시 만드는 함수.
+    function resetExample() {
+        blocks = [
+            { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
+            { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MiB" },
+            { id: 3, type: "extension", x: 720, y: 220, value: "png, jpg" },
+            { id: 4, type: "destination", x: 1050, y: 220, value: "Pictures" }
+        ]
+        edges = [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }]
+        nextId = 5
+        livePositions = ({})
+        selectedId = -1
+        connectingFrom = -1
+        draggingConnection = false
+        zoom = 1.0
+        canvasFlick.contentX = 0
+        canvasFlick.contentY = 0
+        statusText = qsTr("예시 그래프를 다시 불러왔어요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 선택한 직선·곡선 방식으로 연결선과 드래그 중인 선을 그리는 함수.
+    function drawEdge(context, x1, y1, x2, y2, temporary) {
+        const bend = Math.max(65, Math.abs(x2 - x1) * 0.45)
+        context.beginPath()
+        context.moveTo(x1, y1)
+        if (connectionStyle === 0)
+            context.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2)
+        else
+            context.lineTo(x2, y2)
+        context.lineWidth = temporary ? 4 : 4.5
+        context.lineCap = "round"
+        context.strokeStyle = temporary ? (darkMode ? "#b2c9e6" : "#718e78")
+                                        : (darkMode ? "#86aad6" : "#4e765d")
+        context.stroke()
+    }
+
+    onSelectedIdChanged: {
+        const block = blockForId(selectedId)
+        inspectorValue.text = block ? block.value : ""
+    }
+    onDarkModeChanged: lineCanvas.requestPaint()
+
+    Rectangle {
+        anchors.fill: parent
+        color: page.pageColor
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 24
+        spacing: 12
+
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: qsTr("분류 규칙")
+                font.pixelSize: 29
+                font.bold: true
+                color: page.primaryText
+            }
+            Item { Layout.fillWidth: true }
+            ThemeButton {
+                text: page.darkMode ? qsTr("밝은 화면") : qsTr("어두운 화면")
+                onClicked: page.darkMode = !page.darkMode
+            }
+            ThemeButton {
+                text: qsTr("현재 작동하는 규칙 편집기")
+                onClicked: page.openCurrentEditor()
+            }
+            ThemeButton {
+                text: qsTr("그래프 → 규칙 초안")
+                onClicked: confirmImport.open()
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("조건 블록을 놓고, 일치한 다음 검사할 블록을 선으로 연결하세요.")
+            color: page.mutedText
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 56
+            radius: 10
+            color: page.darkMode ? "#3b3020" : "#fff4dd"
+            border.color: page.darkMode ? "#806240" : "#dfc591"
+            Label {
+                anchors.fill: parent
+                anchors.margins: 12
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.WordWrap
+                text: qsTr("그래프를 초안으로 변환해도 실제 규칙 파일은 바뀌지 않아요. 기존 편집기에서 확인하고 저장해야 적용됩니다.")
+                color: page.darkMode ? "#f3d59d" : "#6a4a19"
+            }
+        }
+
+        Frame {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 102
+            padding: 10
+            background: Rectangle { radius: 10; color: page.surfaceColor; border.color: page.borderColor }
+            Column {
+                anchors.fill: parent
+                spacing: 6
+                Label { text: qsTr("블록 추가"); font.bold: true; color: page.primaryText }
+                Flow {
+                    width: parent.width
+                    spacing: 6
+                    Repeater {
+                        model: [
+                            { type: "extension", title: qsTr("확장자") },
+                            { type: "size", title: qsTr("크기") },
+                            { type: "name", title: qsTr("이름 포함") },
+                            { type: "age", title: qsTr("수정 경과일") },
+                            { type: "otherwise", title: qsTr("그 외") },
+                            { type: "destination", title: qsTr("목적지") },
+                            { type: "exclude", title: qsTr("정리 제외") }
+                        ]
+                        delegate: ThemeButton {
+                            required property var modelData
+                            text: "+ " + modelData.title
+                            onClicked: page.addBlock(modelData.type)
+                        }
+                    }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            Label { text: qsTr("연결선 모양"); color: page.primaryText }
+            ThemeButton {
+                text: qsTr("곡선")
+                font.bold: page.connectionStyle === 0
+                onClicked: {
+                    page.connectionStyle = 0
+                    lineCanvas.requestPaint()
+                }
+            }
+            ThemeButton {
+                text: qsTr("직선")
+                font.bold: page.connectionStyle === 1
+                onClicked: {
+                    page.connectionStyle = 1
+                    lineCanvas.requestPaint()
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                text: qsTr("빈 곳 드래그: 이동  ·  휠: 확대/축소  ·  %1%").arg(Math.round(page.zoom * 100))
+                color: page.mutedText
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: 10
+                color: page.canvasColor
+                border.color: page.borderColor
+
+                Flickable {
+                    id: canvasFlick
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    contentWidth: canvasSurface.width * page.zoom
+                    contentHeight: canvasSurface.height * page.zoom
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    WheelHandler {
+                        target: null
+                        blocking: true
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: (event) => page.zoomAt(event.angleDelta.y,
+                                                         point.position.x, point.position.y)
+                    }
+
+                    Item {
+                        id: canvasSurface
+                        width: page.logicalWidth()
+                        height: page.logicalHeight()
+                        scale: page.zoom
+                        transformOrigin: Item.TopLeft
+
+                        Canvas {
+                            id: lineCanvas
+                            anchors.fill: parent
+                            antialiasing: true
+                            onPaint: {
+                                const context = getContext("2d")
+                                context.clearRect(0, 0, width, height)
+                                context.fillStyle = page.canvasColor
+                                context.fillRect(0, 0, width, height)
+                                context.strokeStyle = page.gridColor
+                                context.lineWidth = 1
+                                for (let x = 0; x <= width; x += 40) {
+                                    context.beginPath()
+                                    context.moveTo(x, 0)
+                                    context.lineTo(x, height)
+                                    context.stroke()
+                                }
+                                for (let y = 0; y <= height; y += 40) {
+                                    context.beginPath()
+                                    context.moveTo(0, y)
+                                    context.lineTo(width, y)
+                                    context.stroke()
+                                }
+                                for (const edge of page.edges) {
+                                    const source = page.blockForId(edge.from)
+                                    const target = page.blockForId(edge.to)
+                                    if (source && target) {
+                                        const sourcePos = page.positionFor(source)
+                                        const targetPos = page.positionFor(target)
+                                        page.drawEdge(context, sourcePos.x + page.blockWidth,
+                                                      sourcePos.y + page.blockHeight / 2,
+                                                      targetPos.x, targetPos.y + page.blockHeight / 2, false)
+                                    }
+                                }
+                                if (page.connectingFrom >= 0 && page.draggingConnection) {
+                                    const source = page.blockForId(page.connectingFrom)
+                                    if (source) {
+                                        const sourcePos = page.positionFor(source)
+                                        page.drawEdge(context, sourcePos.x + page.blockWidth,
+                                                      sourcePos.y + page.blockHeight / 2,
+                                                      page.pointerX, page.pointerY, true)
+                                    }
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: page.blocks
+                            delegate: Rectangle {
+                                id: blockCard
+                                required property var modelData
+                                x: modelData.x
+                                y: modelData.y
+                                width: page.blockWidth
+                                height: page.blockHeight
+                                radius: 12
+                                color: page.nodeColor
+                                border.width: page.selectedId === modelData.id ? 2 : 1
+                                border.color: page.selectedId === modelData.id ? page.colorFor(modelData.type) : page.borderColor
+                                onXChanged: page.noteLivePosition(modelData.id, x, y)
+                                onYChanged: page.noteLivePosition(modelData.id, x, y)
+
+                                Rectangle {
+                                    id: cardHeader
+                                    x: 1; y: 1
+                                    width: parent.width - 2
+                                    height: 37
+                                    radius: 11
+                                    color: page.colorFor(modelData.type)
+                                    Label {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: page.orderFor(modelData.id) > 0 ? 42 : 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: page.titleFor(modelData.type)
+                                        font.bold: true
+                                        color: "#ffffff"
+                                    }
+                                    Rectangle {
+                                        visible: page.orderFor(modelData.id) > 0
+                                        x: 9; y: 6
+                                        width: 25; height: 25
+                                        radius: 7
+                                        color: "#ffffff"
+                                        opacity: 0.94
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: page.orderFor(modelData.id)
+                                            font.bold: true
+                                            color: page.colorFor(modelData.type)
+                                        }
+                                    }
+                                }
+                                Label {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: cardHeader.bottom
+                                    anchors.margins: 12
+                                    text: page.displayValue(modelData)
+                                    elide: Text.ElideRight
+                                    color: page.primaryText
+                                }
+                                Label {
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: 10
+                                    text: modelData.type === "destination" ? qsTr("도착")
+                                          : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
+                                    font.pixelSize: 11
+                                    color: page.mutedText
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    preventStealing: true
+                                    drag.target: blockCard
+                                    drag.minimumX: 20
+                                    drag.maximumX: canvasSurface.width - blockCard.width - 20
+                                    drag.minimumY: 20
+                                    drag.maximumY: canvasSurface.height - blockCard.height - 20
+                                    onPressed: page.selectedId = modelData.id
+                                    onClicked: page.selectedId = modelData.id
+                                    onReleased: {
+                                        if (Math.round(blockCard.x) !== modelData.x ||
+                                            Math.round(blockCard.y) !== modelData.y)
+                                            page.moveBlock(modelData.id, blockCard.x, blockCard.y)
+                                    }
+                                }
+                                Rectangle {
+                                    id: inputPort
+                                    visible: modelData.type !== "start"
+                                    x: -8
+                                    y: parent.height / 2 - 8
+                                    width: 16; height: 16
+                                    radius: 8
+                                    color: page.hasIncoming(modelData.id)
+                                           ? page.colorFor(modelData.type) : page.nodeColor
+                                    border.width: 3
+                                    border.color: page.colorFor(modelData.type)
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -12
+                                        onClicked: {
+                                            if (page.connectingFrom >= 0)
+                                                page.connectBlocks(page.connectingFrom, modelData.id)
+                                            else
+                                                page.selectedId = modelData.id
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    id: outputPort
+                                    visible: modelData.type !== "destination" && modelData.type !== "exclude"
+                                    x: parent.width - 8
+                                    y: parent.height / 2 - 8
+                                    width: 16; height: 16
+                                    radius: 8
+                                    color: page.hasOutgoing(modelData.id)
+                                           ? page.colorFor(modelData.type) : page.nodeColor
+                                    border.width: 2
+                                    border.color: page.colorFor(modelData.type)
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -12
+                                        preventStealing: true
+                                        onPressed: (mouse) => {
+                                            page.connectingFrom = modelData.id
+                                            page.draggingConnection = true
+                                            const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                            page.pointerX = point.x
+                                            page.pointerY = point.y
+                                            lineCanvas.requestPaint()
+                                        }
+                                        onPositionChanged: (mouse) => {
+                                            if (page.connectingFrom === modelData.id && page.draggingConnection) {
+                                                const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                                page.pointerX = point.x
+                                                page.pointerY = point.y
+                                                lineCanvas.requestPaint()
+                                            }
+                                        }
+                                        onReleased: (mouse) => {
+                                            const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                            page.finishConnectionAt(point.x, point.y)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Frame {
+                Layout.preferredWidth: 238
+                Layout.fillHeight: true
+                padding: 16
+                background: Rectangle { radius: 10; color: page.surfaceColor; border.color: page.borderColor }
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("블록 설정")
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: page.primaryText
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: page.selectedBlock ? page.titleFor(page.selectedBlock.type)
+                                                 : qsTr("블록을 선택하세요")
+                        wrapMode: Text.WordWrap
+                        color: page.mutedText
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("표시 값")
+                        visible: page.selectedBlock !== null &&
+                                 page.selectedBlock.type !== "start" &&
+                                 page.selectedBlock.type !== "otherwise" &&
+                                 page.selectedBlock.type !== "exclude"
+                    }
+                    TextField {
+                        id: inspectorValue
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null &&
+                                 page.selectedBlock.type !== "start" &&
+                                 page.selectedBlock.type !== "otherwise" &&
+                                 page.selectedBlock.type !== "exclude"
+                        enabled: visible
+                        placeholderText: qsTr("예시 값")
+                        color: page.primaryText
+                        placeholderTextColor: page.mutedText
+                        background: Rectangle {
+                            radius: 6
+                            color: page.nodeColor
+                            border.color: page.borderColor
+                        }
+                        onEditingFinished: {
+                            if (page.selectedBlock)
+                                page.updateValue(page.selectedBlock.id, text)
+                        }
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null &&
+                                 (page.selectedBlock.type === "size" || page.selectedBlock.type === "age")
+                        text: page.selectedBlock ? qsTr("비교: %1").arg(page.comparisonTitle(page.selectedBlock)) : ""
+                        onClicked: page.cycleComparison(page.selectedId)
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "size"
+                        text: page.selectedBlock ? qsTr("단위: %1").arg(page.selectedBlock.unit || "MiB") : ""
+                        onClicked: page.toggleUnit(page.selectedId)
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "exclude"
+                        text: qsTr("이 가지에 도달한 파일은 이동하지 않고, 전체 예외도 적용하지 않아요.")
+                        wrapMode: Text.WordWrap
+                        color: page.mutedText
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: page.orderFor(page.selectedId) > 0
+                        text: qsTr("같은 부모에서 검사 순서: %1").arg(page.orderFor(page.selectedId))
+                        color: page.mutedText
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: page.orderFor(page.selectedId) > 0
+                        ThemeButton {
+                            Layout.fillWidth: true
+                            text: qsTr("순서 앞으로")
+                            onClicked: page.moveSelectedOrder(-1)
+                        }
+                        ThemeButton {
+                            Layout.fillWidth: true
+                            text: qsTr("순서 뒤로")
+                            onClicked: page.moveSelectedOrder(1)
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("선을 잇기: 블록 오른쪽 점을 다른 블록의 왼쪽 점으로 끌어 놓으세요.")
+                        wrapMode: Text.WordWrap
+                        color: page.mutedText
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("선택 블록의 선 끊기")
+                        enabled: page.selectedBlock !== null
+                        onClicked: page.disconnectSelectedBlock()
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("블록 제거")
+                        enabled: page.selectedBlock !== null && page.selectedId !== 1
+                        onClicked: page.removeSelectedBlock()
+                    }
+                    Item { Layout.fillHeight: true }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("연결 취소")
+                        enabled: page.connectingFrom >= 0
+                        onClicked: {
+                            page.connectingFrom = -1
+                            page.draggingConnection = false
+                            lineCanvas.requestPaint()
+                        }
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        text: qsTr("예시로 되돌리기")
+                        onClicked: page.resetExample()
+                    }
+                }
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: page.statusText
+            color: page.darkMode ? "#a9c5e9" : "#42634b"
+            elide: Text.ElideRight
+        }
+    }
+
+    Dialog {
+        id: confirmImport
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 420)
+        title: qsTr("그래프를 규칙 초안으로 변환")
+        standardButtons: Dialog.NoButton
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: page.primaryText
+                text: qsTr("현재 편집 중인 규칙 초안을 이 그래프로 교체합니다. 실제 규칙 파일은 저장 버튼을 누르기 전까지 바뀌지 않아요.")
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ThemeButton { text: qsTr("취소"); onClicked: confirmImport.close() }
+                ThemeButton {
+                    text: qsTr("검증하고 초안으로")
+                    onClicked: {
+                        confirmImport.close()
+                        const valid = ruleEditor.importGraph(page.blocks, page.edges)
+                        page.statusText = ruleEditor.message
+                        if (valid) {
+                            page.graphImported()
+                            page.statusText += qsTr(" 위의 기존 편집기 버튼으로 내용을 확인해 주세요.")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

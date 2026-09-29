@@ -356,6 +356,34 @@ void testAtomicTreeFormat() {
     const auto rejected = invalid.load();
     expect(!rejected && rejected.error().code == "rules.condition_invalid",
            "v3 node must reject fields from two condition kinds");
+    auto excludedObject = readExample(defaultPath);
+    auto excludedNodes = excludedObject.value(QStringLiteral("nodes")).toArray();
+    auto excludedNode = excludedNodes.at(0).toObject();
+    excludedNode.remove(QStringLiteral("destination"));
+    excludedNode.remove(QStringLiteral("children"));
+    excludedNode.insert(QStringLiteral("exclude"), true);
+    excludedNodes.replace(0, excludedNode);
+    excludedObject.insert(QStringLiteral("nodes"), excludedNodes);
+    expect(writeObject(path, excludedObject), "excluded-leaf fixture should be written");
+    const auto excludedLoaded = invalid.load();
+    expect(excludedLoaded && excludedLoaded.value().nodes[0].exclude,
+           "v3 reader should load an explicitly excluded leaf");
+    if (excludedLoaded) {
+        expect(invalid.save(excludedLoaded.value()).hasValue(),
+               "v3 writer should save an explicitly excluded leaf");
+        const auto roundTrip = invalid.load();
+        expect(roundTrip && roundTrip.value().nodes[0].exclude,
+               "excluded leaf should survive a JSON round trip");
+    }
+    excludedNode.insert(QStringLiteral("destination"), QJsonObject{
+        {QStringLiteral("path"), QStringLiteral("Pictures")},
+        {QStringLiteral("collisionPolicy"), QStringLiteral("inherit")}});
+    excludedNodes.replace(0, excludedNode);
+    excludedObject.insert(QStringLiteral("nodes"), excludedNodes);
+    expect(writeObject(path, excludedObject), "conflicting exclusion fixture should be written");
+    const auto conflicting = invalid.load();
+    expect(!conflicting && conflicting.error().code == "rules.invalid_exclude",
+           "an excluded leaf must not also have a destination");
 }
 
 // 변환 가능한 v2만 원본을 백업하고 복합 조건은 그대로 보존하는지 검사하는 함수.

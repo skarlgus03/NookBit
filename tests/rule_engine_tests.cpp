@@ -264,6 +264,22 @@ void testAtomicConditionTree() {
     std::get<nookbit::ModifiedAgePredicate>(*rules.nodes[0].atomicCondition).days = 8;
     expect(nookbit::PlanSignature::rules(rules) != signature,
            "changing a v3 condition must invalidate a saved plan");
+    nookbit::RuleNode excluded;
+    excluded.id = "skip-png";
+    excluded.atomicCondition = nookbit::ExtensionPredicate{{"png"}};
+    excluded.exclude = true;
+    rules.nodes = {excluded};
+    rules.globalOtherwise = nookbit::RuleDestination{L"Fallback", std::nullopt};
+    file.extension = "png";
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                             utcMillis(2026, 9, 29));
+    expect(decision && decision.value() && decision.value()->excluded &&
+               decision.value()->matchedRuleId == "skip-png",
+           "explicit exclusion must stop before the global fallback");
+    const auto excludedSignature = nookbit::PlanSignature::rules(rules);
+    rules.nodes[0].exclude = false;
+    expect(nookbit::PlanSignature::rules(rules) != excludedSignature,
+           "changing an exclusion must invalidate a saved plan");
 }
 
 } // namespace

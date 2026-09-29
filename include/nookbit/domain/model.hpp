@@ -77,6 +77,7 @@ struct RuleDecision {
     std::filesystem::path destinationRelativePath;
     std::string reason;
     std::optional<CollisionPolicy> collisionPolicy;
+    bool excluded{false};
 };
 
 /// JSON 분류 규칙 하나를 코어에서 사용할 수 있게 표현한다.
@@ -150,6 +151,7 @@ struct RuleNode {
     std::optional<AtomicRuleCondition> atomicCondition;
     std::optional<RuleDestination> destination;
     std::vector<RuleNode> children;
+    bool exclude{false};
 };
 
 /// 버전이 있는 분류 규칙 묶음을 표현한다.

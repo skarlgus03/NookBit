@@ -88,6 +88,7 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/RuleEditorPage.qml
     )
 
     target_link_libraries(nookbit PRIVATE

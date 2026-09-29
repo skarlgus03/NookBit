@@ -144,7 +144,10 @@ int main(int argc, char* argv[]) {
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
-        const bool ready = !engine.rootObjects().isEmpty() && bundledRules.load().hasValue() &&
+        const bool ready = !engine.rootObjects().isEmpty() &&
+                           engine.rootObjects().first()->findChild<QObject*>(
+                               QStringLiteral("ruleEditorPage")) != nullptr &&
+                           bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));
         if (!ready) {

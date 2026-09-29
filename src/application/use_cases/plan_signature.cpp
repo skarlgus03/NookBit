@@ -96,6 +96,7 @@ void appendAtomicNode(std::string& output, const RuleNode& node) {
     if (node.atomicCondition) appendAtomicCondition(output, *node.atomicCondition);
     appendNumber(output, node.destination.has_value());
     if (node.destination) appendDestination(output, *node.destination);
+    appendNumber(output, node.exclude);
     appendNumber(output, node.children.size());
     for (const auto& child : node.children) appendAtomicNode(output, child);
 }

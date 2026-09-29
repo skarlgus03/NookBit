@@ -52,6 +52,8 @@ public:
     Q_INVOKABLE bool move(const QString& path, int direction);
     /// 선택한 규칙과 그 자식을 초안에서 제거하는 함수.
     Q_INVOKABLE bool remove(const QString& path);
+    /// 노드 화면의 연결과 입력을 검사한 뒤 편집 초안으로 변환하는 함수.
+    Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
     /// 저장하지 않은 수정을 버리고 저장본을 다시 불러오는 함수.
     Q_INVOKABLE void reload();
     /// 유효한 초안을 저장하여 실제 분류 규칙으로 적용하는 함수.

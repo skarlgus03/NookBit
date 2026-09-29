@@ -226,6 +226,11 @@ Result<std::vector<RuleNode>> convertAtomicNodes(const QJsonArray& array,
         if (!children.isEmpty() && object.contains(QStringLiteral("destination")))
             return Result<std::vector<RuleNode>>::failure({
                 "rules.internal_destination", "Only a leaf node may have a destination."});
+        if (object.contains(QStringLiteral("exclude")) &&
+            (object.contains(QStringLiteral("destination")) || !children.isEmpty()))
+            return Result<std::vector<RuleNode>>::failure({
+                "rules.invalid_exclude", "An excluded leaf cannot have a destination or children."});
+        node.exclude = object.value(QStringLiteral("exclude")).toBool();
         if (object.contains(QStringLiteral("destination")))
             node.destination = convertDestination(object.value(QStringLiteral("destination")).toObject());
         ++nodeCount;
@@ -440,6 +445,10 @@ Result<QJsonArray> atomicNodesObject(const std::vector<RuleNode>& nodes,
         }
         if (!node.children.empty() && node.destination) return Result<QJsonArray>::failure({
             "rules.internal_destination", "Only a leaf node may have a destination."});
+        if (node.exclude && (node.destination || !node.children.empty()))
+            return Result<QJsonArray>::failure({
+                "rules.invalid_exclude", "An excluded leaf cannot have a destination or children."});
+        if (node.exclude) object.insert(QStringLiteral("exclude"), true);
         if (node.destination) {
             auto destination = destinationObject(*node.destination);
             if (!destination) return Result<QJsonArray>::failure(destination.error());

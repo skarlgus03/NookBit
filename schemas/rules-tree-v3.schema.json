@@ -22,6 +22,7 @@
         "otherwise": { "const": true },
         "when": { "$ref": "#/$defs/condition" },
         "destination": { "$ref": "#/$defs/destination" },
+        "exclude": { "const": true },
         "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
       }
     },

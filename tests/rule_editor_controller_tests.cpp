@@ -117,6 +117,62 @@ void testNestedAndFallback() {
                restored.value().globalOtherwise.has_value(),
            "nested children and global fallback should persist");
 }
+// 화면 그래프를 순서 있는 규칙 초안으로 바꾸고 잘못된 연결은 거부하는지 검사하는 함수.
+void testGraphImport() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath(QStringLiteral("rules.json")), schema);
+    const auto initial = defaults.load();
+    expect(initial && active.save(initial.value()), "graph fixture should initialize");
+    if (!initial) return;
+    nookbit::RuleEditorController editor(active, active);
+    QVariantList blocks{
+        QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "extension"}, {"value", "png, jpg"}},
+        QVariantMap{{"id", 3}, {"type", "destination"}, {"value", "Pictures"}},
+        QVariantMap{{"id", 4}, {"type", "age"}, {"value", "7"},
+                    {"comparison", "atLeast"}},
+        QVariantMap{{"id", 5}, {"type", "exclude"}},
+    };
+    QVariantList edges{
+        QVariantMap{{"from", 1}, {"to", 2}},
+        QVariantMap{{"from", 2}, {"to", 3}},
+        QVariantMap{{"from", 1}, {"to", 4}},
+        QVariantMap{{"from", 4}, {"to", 5}},
+    };
+    expect(editor.importGraph(blocks, edges), "complete graph should become a draft");
+    expect(editor.dirty() && editor.nodes().size() == 2 &&
+               editor.detail(QStringLiteral("1")).value("exclude").toBool(),
+           "graph should preserve sibling order and explicit exclusion");
+    const auto beforeSave = active.load();
+    expect(beforeSave && beforeSave.value().nodes[0].id != "graph-2",
+           "importing a graph must not overwrite active rules");
+    expect(editor.save(), "converted graph should save through the existing writer");
+    const auto saved = active.load();
+    expect(saved && saved.value().nodes.size() == 2 &&
+               saved.value().nodes[0].id == "graph-2" &&
+               saved.value().nodes[0].destination.has_value() &&
+               saved.value().nodes[1].exclude,
+           "saved graph should retain ordered destination and excluded leaves");
+    edges.removeLast();
+    expect(!editor.importGraph(blocks, edges), "orphaned terminal should block import");
+    expect(!editor.dirty(), "invalid graph must not change the saved draft");
+    edges.append(QVariantMap{{"from", 4}, {"to", 5}});
+    edges.append(QVariantMap{{"from", 1}, {"to", 5}});
+    expect(!editor.importGraph(blocks, edges), "a node with two parents should block import");
+    edges.removeLast();
+    blocks.removeAt(2);
+    edges.removeAt(1);
+    expect(!editor.importGraph(blocks, edges), "a condition without a terminal should block import");
+    blocks.insert(2, QVariantMap{{"id", 3}, {"type", "destination"}, {"value", "Pictures"}});
+    edges.insert(1, QVariantMap{{"from", 2}, {"to", 3}});
+    auto unsafe = blocks.at(2).toMap();
+    unsafe.insert(QStringLiteral("value"), QStringLiteral("../Outside"));
+    blocks.replace(2, unsafe);
+    expect(!editor.importGraph(blocks, edges), "unsafe destination must block import");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -124,5 +180,6 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testDraftAndSave();
     testNestedAndFallback();
+    testGraphImport();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
