@@ -260,4 +260,12 @@ void WatchController::dismissProposal() {
     emit watchChanged();
 }
 
+// 바뀐 분류 규칙으로 감시 제안을 다시 계산하는 함수.
+void WatchController::rulesChanged() {
+    clearProposal();
+    lastOfferedSignature_.clear();
+    if (settings_.enabled) checkNow();
+    else emit watchChanged();
+}
+
 } // namespace nookbit

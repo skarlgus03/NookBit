@@ -76,6 +76,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/recovery_controller.cpp
       presentation/watch_controller.hpp
       presentation/watch_controller.cpp
+      presentation/rule_editor_controller.hpp
+      presentation/rule_editor_controller.cpp
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)

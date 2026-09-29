@@ -133,6 +133,15 @@ public:
     [[nodiscard]] virtual Result<void> save(const RuleSet& rules) const = 0;
 };
 
+/// 이전 규칙의 의미를 보존할 수 있을 때만 새 형식으로 옮기는 계약.
+class IRuleSetMigrator {
+public:
+    /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
+    virtual ~IRuleSetMigrator() = default;
+    /// 원본을 백업한 뒤 안전하게 변환 가능한 v2 규칙만 v3로 저장하는 함수.
+    [[nodiscard]] virtual Result<void> migrateV2ToV3() const = 0;
+};
+
 /// 감시 설정을 읽고 저장하는 계약.
 class IWatchSettingsRepository {
 public:

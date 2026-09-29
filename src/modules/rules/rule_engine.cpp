@@ -95,6 +95,43 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
     return true;
 }
 
+// v3 노드의 단일 조건 하나만 파일 정보와 비교하는 함수.
+bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
+                   std::int64_t nowUtcMs) {
+    if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+        const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
+        const auto actual = normalizedExtension(file.extension.empty()
+            ? utf8Path(path.extension()) : file.extension);
+        return std::any_of(extension->values.begin(), extension->values.end(),
+            [&actual](const std::string& value) {
+                return normalizedExtension(value) == actual;
+            });
+    }
+    if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
+        const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
+        auto actual = utf8Path(path.filename());
+        auto expected = name->text;
+        std::transform(actual.begin(), actual.end(), actual.begin(), lowerAscii);
+        std::transform(expected.begin(), expected.end(), expected.begin(), lowerAscii);
+        return actual.find(expected) != std::string::npos;
+    }
+    if (const auto* size = std::get_if<SizePredicate>(&condition)) {
+        const auto actual = file.fingerprint.size;
+        switch (size->comparison) {
+        case SizeComparison::GreaterThan: return actual > size->bytes;
+        case SizeComparison::AtLeast: return actual >= size->bytes;
+        case SizeComparison::LessThan: return actual < size->bytes;
+        case SizeComparison::AtMost: return actual <= size->bytes;
+        }
+    }
+    const auto& age = std::get<ModifiedAgePredicate>(condition);
+    constexpr long double millisecondsPerDay = 86400000.0L;
+    const auto elapsed = static_cast<long double>(nowUtcMs) -
+                         static_cast<long double>(file.fingerprint.modifiedUtcMs);
+    const auto days = std::max(0.0L, std::floor(elapsed / millisecondsPerDay));
+    return age.comparison == AgeComparison::AtLeast ? days >= age.days : days < age.days;
+}
+
 // 목적지 문자열 안의 날짜 토큰을 파일 수정일 기준으로 치환하는 함수.
 void replaceToken(std::wstring& destination, const std::wstring& token,
                   const std::wstring& replacement) {
@@ -146,13 +183,16 @@ Result<std::filesystem::path> destinationFor(const std::filesystem::path& relati
 
 // 같은 높이에서 처음 맞는 일반 가지를 고르고, 없으면 else 가지를 고르는 함수.
 const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const FileFact& file,
-                                  std::int64_t nowUtcMs) {
+                                  std::int64_t nowUtcMs, int schemaVersion) {
     const RuleNode* otherwise = nullptr;
     for (const auto& node : nodes) {
         if (!node.enabled) continue;
         if (node.otherwise) {
             otherwise = &node;
-        } else if (matchesRule(node.condition, file, nowUtcMs)) {
+        } else if (schemaVersion == 3 && node.atomicCondition &&
+                   matchesAtomic(*node.atomicCondition, file, nowUtcMs)) {
+            return &node;
+        } else if (schemaVersion == 2 && matchesRule(node.condition, file, nowUtcMs)) {
             return &node;
         }
     }
@@ -162,9 +202,9 @@ const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const File
 // 선택한 리프의 목적지를 파일별 분류 결과로 변환하는 함수.
 Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const RuleSet& rules,
                                                   std::int64_t nowUtcMs) {
-    const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs);
+    const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs, rules.schemaVersion);
     while (node && !node->children.empty()) {
-        node = firstMatchingNode(node->children, file, nowUtcMs);
+        node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion);
     }
     const RuleDestination* target = node && node->destination ? &*node->destination : nullptr;
     std::string matchedId = node ? node->id : std::string();
@@ -189,7 +229,12 @@ Result<std::optional<RuleDecision>> RuleEngine::decide(
     const RuleSet& rules,
     MultiMatchPolicy multiMatchPolicy,
     std::int64_t nowUtcMs) const {
-    if (rules.schemaVersion == 2) return treeDecision(file, rules, nowUtcMs);
+    if (rules.schemaVersion == 2 || rules.schemaVersion == 3)
+        return treeDecision(file, rules, nowUtcMs);
+    if (rules.schemaVersion != 1) {
+        return Result<std::optional<RuleDecision>>::failure({
+            "rules.schema_version", "Unsupported classification rule schema version."});
+    }
     const ClassificationRule* selected = nullptr;
     for (const auto& rule : rules.rules) {
         if (!rule.enabled || !matchesRule(rule, file, nowUtcMs)) continue;

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "ruleSetId": "default",
+  "version": "2026-09-29T00:00:00Z",
+  "nodes": [
+    {
+      "id": "images",
+      "enabled": true,
+      "when": { "extensions": ["jpg", "jpeg", "png", "webp"] },
+      "destination": { "path": "Pictures/{yyyy}/{MM}", "collisionPolicy": "inherit" }
+    },
+    {
+      "id": "pdf-documents",
+      "enabled": true,
+      "when": { "extensions": ["pdf"] },
+      "destination": { "path": "Documents/PDF", "collisionPolicy": "inherit" }
+    }
+  ]
+}

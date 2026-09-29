@@ -5,6 +5,7 @@
 #include "application/use_cases/plan_signature.hpp"
 
 #include <QFile>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -307,6 +308,91 @@ void testRuleTreeSaveRoundTrip() {
            "bundled resource must not be treated as a writable rule file");
 }
 
+// v3 JSON이 조건 종류별 필드를 하나씩 받고 잘못 섞인 필드를 거부하는지 검사하는 함수.
+void testAtomicTreeFormat() {
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto defaultPath = projectPath("resources/rules/default.v3.json");
+    nookbit::JsonRuleSetRepository defaults(defaultPath, schema);
+    const auto loaded = defaults.load();
+    expect(loaded && loaded.value().schemaVersion == 3 &&
+               loaded.value().nodes.size() == 2 &&
+               loaded.value().nodes[0].atomicCondition.has_value(),
+           "v3 default should load one condition per node");
+    nookbit::JsonRuleSetRepository oldDefaults(
+        projectPath("resources/rules/default.tree.json"),
+        projectPath("schemas/rules-tree.schema.json"));
+    const auto old = oldDefaults.load();
+    expect(old.hasValue(), "old default should load for behavior comparison");
+    if (loaded && old) {
+        nookbit::RuleEngine engine;
+        for (const auto& extension : {"jpg", "jpeg", "png", "webp", "pdf", "txt"}) {
+            nookbit::FileFact file;
+            file.absolutePath = std::filesystem::path(L"C:/Input/sample.jpg");
+            file.relativePath = std::filesystem::path(L"sample.jpg");
+            file.extension = extension;
+            file.fingerprint.modifiedUtcMs = 1780099200000;
+            const auto before = engine.decide(file, old.value(),
+                nookbit::MultiMatchPolicy::FirstMatch, file.fingerprint.modifiedUtcMs);
+            const auto after = engine.decide(file, loaded.value(),
+                nookbit::MultiMatchPolicy::FirstMatch, file.fingerprint.modifiedUtcMs);
+            expect(before && after && before.value().has_value() == after.value().has_value() &&
+                       (!before.value() || before.value()->destinationRelativePath ==
+                                           after.value()->destinationRelativePath),
+                   std::string("default v3 should preserve destination for ") + extension);
+        }
+    }
+    QTemporaryDir directory;
+    const auto path = directory.filePath(QStringLiteral("atomic.json"));
+    auto object = readExample(defaultPath);
+    auto nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto first = nodes.at(0).toObject();
+    auto when = first.value(QStringLiteral("when")).toObject();
+    when.insert(QStringLiteral("bytes"), 5242880);
+    first.insert(QStringLiteral("when"), when);
+    nodes.replace(0, first);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(writeObject(path, object), "mixed-condition fixture should be written");
+    nookbit::JsonRuleSetRepository invalid(path, schema);
+    const auto rejected = invalid.load();
+    expect(!rejected && rejected.error().code == "rules.condition_invalid",
+           "v3 node must reject fields from two condition kinds");
+}
+
+// 변환 가능한 v2만 원본을 백업하고 복합 조건은 그대로 보존하는지 검사하는 함수.
+void testSafeV2Migration() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath(QStringLiteral("rules.json"));
+    const auto legacy = projectPath("schemas/rules-tree.schema.json");
+    const auto current = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto defaultV2 = projectPath("resources/rules/default.tree.json");
+    expect(QFile::copy(defaultV2, path), "simple v2 fixture should be copied");
+    nookbit::JsonRuleSetRepository repository(path, current, legacy);
+    expect(repository.load() && repository.load().value().schemaVersion == 2,
+           "dual-schema repository should still read v2");
+    expect(repository.migrateV2ToV3().hasValue(), "simple v2 tree should migrate");
+    const auto upgraded = repository.load();
+    expect(upgraded && upgraded.value().schemaVersion == 3 &&
+               upgraded.value().nodes[0].atomicCondition.has_value(),
+           "migration should preserve rules as v3 atomic conditions");
+    expect(!QDir(directory.path()).entryList(
+               {QStringLiteral("rules.json.v2-backup-*.json")}, QDir::Files).isEmpty(),
+           "migration should leave a v2 backup");
+
+    const auto complex = projectPath("resources/rules/tree.example.json");
+    const auto complexPath = directory.filePath(QStringLiteral("complex.json"));
+    expect(QFile::copy(complex, complexPath), "compound v2 fixture should be copied");
+    QFile original(complexPath);
+    expect(original.open(QIODevice::ReadOnly), "compound fixture should open");
+    const auto originalBytes = original.readAll();
+    original.close();
+    nookbit::JsonRuleSetRepository complexRules(complexPath, current, legacy);
+    const auto blocked = complexRules.migrateV2ToV3();
+    expect(!blocked && blocked.error().code == "rules.migration_requires_review",
+           "compound v2 condition must not be split automatically");
+    expect(original.open(QIODevice::ReadOnly) && original.readAll() == originalBytes,
+           "blocked migration must preserve original bytes");
+}
+
 // 읽을 수 없는 파일이나 파손된 JSON이 명확한 오류를 반환하는지 검사하는 함수.
 void testMissingAndMalformedFiles() {
     QTemporaryDir directory;
@@ -381,6 +467,8 @@ int main() {
     testInvalidRulesAreRejected();
     testRuleTreeLoadsAndRejectsInvalidNodes();
     testRuleTreeSaveRoundTrip();
+    testAtomicTreeFormat();
+    testSafeV2Migration();
     testMissingAndMalformedFiles();
     testWatchSettingsRoundTrip();
     if (failures == 0) {

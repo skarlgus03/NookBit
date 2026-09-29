@@ -45,7 +45,8 @@ public:
                       QString schemaPath,
                       std::filesystem::path appDataRoot,
                       QString defaultDestinationRoot,
-                      QObject* parent = nullptr);
+                      QObject* parent = nullptr,
+                      QString legacySchemaPath = {});
 
     /// 화면에 표시할 파일별 이동 초안을 반환하는 함수.
     [[nodiscard]] QVariantList steps() const;

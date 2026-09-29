@@ -4,6 +4,55 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
+    property string selectedRulePath: ""
+    property var selectedRuleDetail: ({})
+    property var collapsedRulePaths: ({})
+    property bool ruleFormDirty: false
+    property bool globalFormDirty: false
+
+    // 접힌 부모 아래의 노드를 화면에서 숨기는 함수.
+    function ruleVisible(path) {
+        const parts = path.split("/")
+        for (let index = 1; index < parts.length; ++index) {
+            if (collapsedRulePaths[parts.slice(0, index).join("/")])
+                return false
+        }
+        return true
+    }
+
+    // 선택한 가지의 접힘 상태를 바꾸는 함수.
+    function toggleRule(path) {
+        const next = Object.assign({}, collapsedRulePaths)
+        next[path] = !next[path]
+        collapsedRulePaths = next
+    }
+
+    // 입력 중인 규칙을 초안에 반영하고 유효하지 않으면 전환을 막는 함수.
+    function commitRuleForm() {
+        if (!ruleFormDirty || selectedRulePath.length === 0)
+            return true
+        const saved = ruleEditor.edit(selectedRulePath, ruleIdField.text,
+                                      ruleEnabledCheck.checked, ruleConditionType.currentValue,
+                                      ruleConditionComparison.currentValue, ruleConditionValue.text,
+                                      ruleSizeUnit.currentValue, ruleDestinationField.text)
+        if (saved)
+            ruleFormDirty = false
+        return saved
+    }
+
+    // 선택한 규칙의 초안 값을 편집 입력창에 채우는 함수.
+    function selectRule(path) {
+        selectedRulePath = path
+        selectedRuleDetail = ruleEditor.detail(path)
+        ruleIdField.text = selectedRuleDetail.id || ""
+        ruleEnabledCheck.checked = selectedRuleDetail.enabled === true
+        ruleConditionType.currentIndex = Math.max(0, ruleConditionType.indexOfValue(selectedRuleDetail.type || "extension"))
+        ruleConditionComparison.currentIndex = Math.max(0, ruleConditionComparison.indexOfValue(selectedRuleDetail.comparison || "greaterThan"))
+        ruleConditionValue.text = selectedRuleDetail.value === undefined ? "" : String(selectedRuleDetail.value)
+        ruleSizeUnit.currentIndex = Math.max(0, ruleSizeUnit.indexOfValue(selectedRuleDetail.sizeUnit || "MiB"))
+        ruleDestinationField.text = selectedRuleDetail.destination || ""
+        ruleFormDirty = false
+    }
     width: 920
     height: 760
     minimumWidth: 680
@@ -56,6 +105,10 @@ ApplicationWindow {
                     watchExcludeField.text = watchController.excludePatterns
                     watchDialog.open()
                 }
+            }
+            Button {
+                text: qsTr("분류 규칙 편집")
+                onClicked: ruleDialog.open()
             }
         }
 
@@ -375,6 +428,311 @@ ApplicationWindow {
                   : qsTr("승인 전에는 파일을 이동하지 않습니다.")
             color: "#426349"
             wrapMode: Text.WordWrap
+        }
+    }
+
+    Dialog {
+        id: ruleDialog
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 820)
+        height: Math.min(root.height - 32, 660)
+        modal: true
+        title: qsTr("분류 규칙 편집")
+        standardButtons: Dialog.Close
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("위에서부터 검사하고, 한 가지가 맞으면 그 아래로 내려갑니다. 목적지는 정리 기준 폴더 안의 상대 경로입니다.")
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: ruleEditor.message
+                color: ruleEditor.dirty ? "#9b5c23" : "#426349"
+                wrapMode: Text.WordWrap
+            }
+            Button {
+                visible: ruleEditor.legacyRules
+                text: qsTr("기존 규칙 백업 후 새 형식으로 변환")
+                onClicked: ruleEditor.migrateLegacyRules()
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: qsTr("루트 규칙 추가")
+                    onClicked: {
+                        if (root.commitRuleForm() && ruleEditor.add("")) {
+                            root.collapsedRulePaths = ({})
+                            root.selectRule("")
+                        }
+                    }
+                }
+                Button {
+                    text: qsTr("루트 '그 외' 추가")
+                    onClicked: {
+                        if (root.commitRuleForm() && ruleEditor.addOtherwise("")) {
+                            root.collapsedRulePaths = ({})
+                            root.selectRule("")
+                        }
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: qsTr("저장 전 변경 버리기")
+                    enabled: ruleEditor.dirty || root.ruleFormDirty || root.globalFormDirty
+                    onClicked: {
+                        ruleEditor.reload()
+                        root.selectRule("")
+                        globalDestinationField.text = ruleEditor.globalDestination
+                        root.globalFormDirty = false
+                    }
+                }
+                Button {
+                    text: qsTr("규칙 저장")
+                    enabled: ruleEditor.dirty || root.ruleFormDirty || root.globalFormDirty
+                    onClicked: {
+                        if (!root.commitRuleForm())
+                            return
+                        if (root.globalFormDirty)
+                            ruleEditor.setGlobalDestination(globalDestinationField.text)
+                        if (ruleEditor.save()) {
+                            root.ruleFormDirty = false
+                            root.globalFormDirty = false
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("전체 예외 목적지") }
+                TextField {
+                    id: globalDestinationField
+                    Layout.fillWidth: true
+                    text: ruleEditor.globalDestination
+                    placeholderText: qsTr("비우면 미분류")
+                    onTextEdited: root.globalFormDirty = true
+                }
+                Button {
+                    text: qsTr("적용")
+                    onClicked: {
+                        ruleEditor.setGlobalDestination(globalDestinationField.text)
+                        root.globalFormDirty = false
+                    }
+                }
+            }
+            SplitView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                orientation: Qt.Horizontal
+
+                ScrollView {
+                    SplitView.preferredWidth: 350
+                    SplitView.minimumWidth: 220
+                    clip: true
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        Repeater {
+                            model: ruleEditor.nodes
+                            delegate: Row {
+                                required property var modelData
+                                width: parent.width
+                                visible: root.ruleVisible(modelData.path)
+                                height: visible ? 36 : 0
+                                spacing: 2
+                                Item { width: modelData.depth * 16; height: 1 }
+                                Button {
+                                    width: 32
+                                    height: 34
+                                    flat: true
+                                    visible: modelData.childrenCount > 0
+                                    text: root.collapsedRulePaths[modelData.path] ? "▸" : "▾"
+                                    onClicked: root.toggleRule(modelData.path)
+                                }
+                                Button {
+                                    width: parent.width - modelData.depth * 16 - 36
+                                    height: 34
+                                    flat: true
+                                    highlighted: root.selectedRulePath === modelData.path
+                                    text: (modelData.enabled ? "" : "[꺼짐] ") + modelData.title +
+                                          (modelData.destination ? "  → " + modelData.destination : "")
+                                    onClicked: {
+                                        if (root.commitRuleForm()) root.selectRule(modelData.path)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ScrollView {
+                    SplitView.fillWidth: true
+                    clip: true
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 8
+                        Label {
+                            text: root.selectedRulePath.length > 0 ? qsTr("선택한 규칙") : qsTr("왼쪽에서 규칙을 선택하세요")
+                            font.bold: true
+                        }
+                        Label { text: qsTr("규칙 ID (영문·숫자)") }
+                        TextField {
+                            id: ruleIdField
+                            Layout.fillWidth: true
+                            enabled: root.selectedRulePath.length > 0
+                            onTextEdited: root.ruleFormDirty = true
+                        }
+                        CheckBox {
+                            id: ruleEnabledCheck
+                            text: qsTr("규칙 사용")
+                            enabled: root.selectedRulePath.length > 0
+                            onToggled: root.ruleFormDirty = true
+                        }
+                        Label { text: qsTr("분류 조건") }
+                        ComboBox {
+                            id: ruleConditionType
+                            Layout.fillWidth: true
+                            enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.otherwise
+                            textRole: "text"
+                            valueRole: "value"
+                            model: [
+                                { text: qsTr("확장자"), value: "extension" },
+                                { text: qsTr("파일 이름에 포함"), value: "nameContains" },
+                                { text: qsTr("파일 크기"), value: "size" },
+                                { text: qsTr("수정 후 지난 일수"), value: "modifiedAgeDays" }
+                            ]
+                            onCurrentValueChanged: ruleConditionComparison.currentIndex = 0
+                            onActivated: root.ruleFormDirty = true
+                        }
+                        ComboBox {
+                            id: ruleConditionComparison
+                            Layout.fillWidth: true
+                            visible: ruleConditionType.currentValue === "size" ||
+                                     ruleConditionType.currentValue === "modifiedAgeDays"
+                            textRole: "text"
+                            valueRole: "value"
+                            model: ruleConditionType.currentValue === "size"
+                                ? [
+                                    { text: qsTr("초과 (>)"), value: "greaterThan" },
+                                    { text: qsTr("이상 (≥)"), value: "atLeast" },
+                                    { text: qsTr("미만 (<)"), value: "lessThan" },
+                                    { text: qsTr("이하 (≤)"), value: "atMost" }
+                                  ]
+                                : [
+                                    { text: qsTr("이상 (≥)"), value: "atLeast" },
+                                    { text: qsTr("미만 (<)"), value: "lessThan" }
+                                  ]
+                            onActivated: root.ruleFormDirty = true
+                        }
+                        Label {
+                            text: ruleConditionType.currentValue === "extension" ? qsTr("확장자 (쉼표로 구분)")
+                                : ruleConditionType.currentValue === "nameContains" ? qsTr("이름에 포함할 글자")
+                                : ruleConditionType.currentValue === "size" ? qsTr("크기")
+                                : qsTr("수정 후 지난 일수")
+                        }
+                        TextField {
+                            id: ruleConditionValue
+                            Layout.fillWidth: true
+                            enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.otherwise
+                            inputMethodHints: ruleConditionType.currentValue === "size" ||
+                                              ruleConditionType.currentValue === "modifiedAgeDays"
+                                              ? Qt.ImhDigitsOnly : Qt.ImhNone
+                            placeholderText: ruleConditionType.currentValue === "extension"
+                                             ? qsTr("예: png, jpg") : qsTr("값 입력")
+                            onTextEdited: root.ruleFormDirty = true
+                        }
+                        ComboBox {
+                            id: ruleSizeUnit
+                            Layout.fillWidth: true
+                            visible: ruleConditionType.currentValue === "size"
+                            textRole: "text"
+                            valueRole: "value"
+                            model: [
+                                { text: "MiB (1 MiB = 1,048,576 B)", value: "MiB" },
+                                { text: "B", value: "B" }
+                            ]
+                            onActivated: root.ruleFormDirty = true
+                        }
+                        Label { text: qsTr("목적지 (자식이 있으면 비워 둠)") }
+                        TextField {
+                            id: ruleDestinationField
+                            Layout.fillWidth: true
+                            enabled: root.selectedRulePath.length > 0
+                            placeholderText: qsTr("예: Pictures/PNG")
+                            onTextEdited: root.ruleFormDirty = true
+                        }
+                        Button {
+                            text: qsTr("이 규칙 수정")
+                            enabled: root.selectedRulePath.length > 0
+                            onClicked: {
+                                if (ruleEditor.edit(root.selectedRulePath, ruleIdField.text,
+                                                    ruleEnabledCheck.checked, ruleConditionType.currentValue,
+                                                    ruleConditionComparison.currentValue,
+                                                    ruleConditionValue.text, ruleSizeUnit.currentValue,
+                                                    ruleDestinationField.text))
+                                    root.selectRule(root.selectedRulePath)
+                            }
+                        }
+                        RowLayout {
+                            Button {
+                                text: qsTr("자식 추가")
+                                enabled: root.selectedRulePath.length > 0
+                                onClicked: {
+                                    if (root.commitRuleForm() && ruleEditor.add(root.selectedRulePath)) {
+                                        root.collapsedRulePaths = ({})
+                                        root.selectRule(root.selectedRulePath)
+                                    }
+                                }
+                            }
+                            Button {
+                                text: qsTr("그 아래 '그 외'")
+                                enabled: root.selectedRulePath.length > 0
+                                onClicked: {
+                                    if (root.commitRuleForm() && ruleEditor.addOtherwise(root.selectedRulePath)) {
+                                        root.collapsedRulePaths = ({})
+                                        root.selectRule(root.selectedRulePath)
+                                    }
+                                }
+                            }
+                        }
+                        RowLayout {
+                            Button {
+                                text: qsTr("위로")
+                                enabled: root.selectedRulePath.length > 0
+                                onClicked: {
+                                    if (root.commitRuleForm() && ruleEditor.move(root.selectedRulePath, -1)) {
+                                        root.collapsedRulePaths = ({})
+                                        root.selectRule("")
+                                    }
+                                }
+                            }
+                            Button {
+                                text: qsTr("아래로")
+                                enabled: root.selectedRulePath.length > 0
+                                onClicked: {
+                                    if (root.commitRuleForm() && ruleEditor.move(root.selectedRulePath, 1)) {
+                                        root.collapsedRulePaths = ({})
+                                        root.selectRule("")
+                                    }
+                                }
+                            }
+                            Button {
+                                text: qsTr("규칙 제거")
+                                enabled: root.selectedRulePath.length > 0
+                                onClicked: {
+                                    ruleEditor.remove(root.selectedRulePath)
+                                    root.collapsedRulePaths = ({})
+                                    root.selectRule("")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <variant>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,36 @@ struct RuleCondition {
     std::optional<int> maximumAgeDays;
 };
 
+/// v3 노드에서 한 종류의 확장자 조건을 표현한다.
+struct ExtensionPredicate {
+    std::vector<std::string> values;
+};
+
+/// v3 노드에서 파일명에 포함될 문자열을 표현한다.
+struct NameContainsPredicate {
+    std::string text;
+};
+
+enum class SizeComparison { GreaterThan, AtLeast, LessThan, AtMost };
+
+/// v3 노드에서 파일 크기 비교 하나를 표현한다.
+struct SizePredicate {
+    SizeComparison comparison{SizeComparison::GreaterThan};
+    std::uintmax_t bytes{0};
+};
+
+enum class AgeComparison { AtLeast, LessThan };
+
+/// v3 노드에서 수정 후 경과일 비교 하나를 표현한다.
+struct ModifiedAgePredicate {
+    AgeComparison comparison{AgeComparison::AtLeast};
+    int days{0};
+};
+
+/// v3 노드는 이 네 조건 중 정확히 하나만 가진다.
+using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredicate,
+                                         SizePredicate, ModifiedAgePredicate>;
+
 /// 리프 또는 전체 예외가 정한 목적지와 충돌 정책을 표현한다.
 struct RuleDestination {
     std::filesystem::path relativePath;
@@ -116,6 +147,7 @@ struct RuleNode {
     bool enabled{true};
     bool otherwise{false};
     RuleCondition condition;
+    std::optional<AtomicRuleCondition> atomicCondition;
     std::optional<RuleDestination> destination;
     std::vector<RuleNode> children;
 };

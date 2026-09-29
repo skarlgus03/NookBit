@@ -63,6 +63,21 @@ if(TARGET nookbit_json_config)
     target_compile_options(nookbit_json_config_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   endif()
   add_test(NAME nookbit_json_config_tests COMMAND nookbit_json_config_tests)
+  add_executable(nookbit_rule_editor_controller_tests
+    rule_editor_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/rule_editor_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/rule_editor_controller.cpp
+  )
+  set_target_properties(nookbit_rule_editor_controller_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_rule_editor_controller_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_rule_editor_controller_tests PRIVATE
+    NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_rule_editor_controller_tests PRIVATE nookbit_json_config Qt6::Core)
+  add_test(NAME nookbit_rule_editor_controller_tests COMMAND nookbit_rule_editor_controller_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_rule_editor_controller_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   if(WIN32)
     set_tests_properties(nookbit_json_config_tests PROPERTIES
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")

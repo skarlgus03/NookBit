@@ -3,6 +3,7 @@
 #include "presentation/history_controller.hpp"
 #include "presentation/recovery_controller.hpp"
 #include "presentation/watch_controller.hpp"
+#include "presentation/rule_editor_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
@@ -60,9 +61,19 @@ int main(int argc, char* argv[]) {
                                  .arg(result.value().reconciled);
         }
     }
-    nookbit::JsonRuleSetRepository previewRules(
-        QStringLiteral(":/nookbit/rules.json"),
-        QStringLiteral(":/nookbit/rules.schema.json"));
+    const auto treeSchema = QStringLiteral(":/nookbit/rules-tree-v3.schema.json");
+    const auto legacyTreeSchema = QStringLiteral(":/nookbit/rules-tree.schema.json");
+    const auto bundledTree = QStringLiteral(":/nookbit/default-v3.json");
+    const auto rulesPath = verifyUi ? bundledTree
+        : QDir(appData).filePath(QStringLiteral("rules.json"));
+    nookbit::JsonRuleSetRepository previewRules(rulesPath, treeSchema, legacyTreeSchema);
+    // 사용자 규칙이 아직 없다면 이전 기본 분류와 같은 v3 규칙을 처음 한 번 저장한다.
+    if (!verifyUi && !QFileInfo::exists(rulesPath)) {
+        nookbit::JsonRuleSetRepository defaults(bundledTree, treeSchema);
+        const auto initial = defaults.load();
+        if (initial) previewRules.save(initial.value());
+    }
+    nookbit::RuleEditorController ruleEditor(previewRules, previewRules, nullptr, &previewRules);
     nookbit::FilesystemScanner previewScanner;
     nookbit::RuleEngine previewRuleEngine;
     nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));
@@ -82,10 +93,11 @@ int main(int argc, char* argv[]) {
         verifySavedPlan,
         approvePlan,
         history,
-        QStringLiteral(":/nookbit/rules.json"),
-        QStringLiteral(":/nookbit/rules.schema.json"),
+        rulesPath,
+        treeSchema,
         std::filesystem::path(appData.toStdWString()),
-        QDir(documents).filePath(QStringLiteral("NookBit Organized")));
+        QDir(documents).filePath(QStringLiteral("NookBit Organized")),
+        nullptr, legacyTreeSchema);
     nookbit::RecoveryController recoveryController(history);
     nookbit::HistoryController historyController(
         history, std::filesystem::path(appData.toStdWString()),
@@ -96,6 +108,8 @@ int main(int argc, char* argv[]) {
                      &recoveryController, &nookbit::RecoveryController::refreshRecoveryCases);
     QObject::connect(&previewController, &nookbit::PreviewController::recoveryReconcileRequested,
                      &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
+    QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
+                     &previewController, &nookbit::PreviewController::clear);
     recoveryController.setRecoveryNotice(recoveryNotice);
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         recoveryController.refreshRecoveryCases();
@@ -103,22 +117,22 @@ int main(int argc, char* argv[]) {
     nookbit::JsonWatchSettingsRepository watchSettings(
         QDir(appData).filePath(QStringLiteral("watch.json")),
         QStringLiteral(":/nookbit/watch.schema.json"));
-    nookbit::JsonRuleSetRepository watchRules(
-        QStringLiteral(":/nookbit/rules.json"),
-        QStringLiteral(":/nookbit/rules.schema.json"));
     nookbit::FilesystemScanner watchScanner;
     nookbit::RuleEngine watchRuleEngine;
     nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(
-        watchScanner, watchRuleEngine, watchRules);
+        watchScanner, watchRuleEngine, previewRules);
     nookbit::WatchController watchController(
         pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
+                     &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
     engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
+    engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -129,9 +143,7 @@ int main(int argc, char* argv[]) {
 
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
-        const nookbit::JsonRuleSetRepository bundledRules(
-            QStringLiteral(":/nookbit/rules.json"),
-            QStringLiteral(":/nookbit/rules.schema.json"));
+        const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
         const bool ready = !engine.rootObjects().isEmpty() && bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));

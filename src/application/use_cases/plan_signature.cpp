@@ -51,6 +51,24 @@ void appendCondition(std::string& output, const RuleCondition& condition) {
     appendOptionalNumber(output, condition.maximumAgeDays);
 }
 
+// v3 단일 조건의 종류와 값을 서명 문자열에 추가하는 함수.
+void appendAtomicCondition(std::string& output, const AtomicRuleCondition& condition) {
+    appendNumber(output, condition.index());
+    if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+        appendNumber(output, extension->values.size());
+        for (const auto& value : extension->values) append(output, value);
+    } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
+        append(output, name->text);
+    } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {
+        appendNumber(output, size->comparison);
+        appendNumber(output, size->bytes);
+    } else {
+        const auto& age = std::get<ModifiedAgePredicate>(condition);
+        appendNumber(output, age.comparison);
+        appendNumber(output, age.days);
+    }
+}
+
 // 선택한 목적지와 충돌 정책을 서명 문자열에 추가하는 함수.
 void appendDestination(std::string& output, const RuleDestination& destination) {
     appendPath(output, destination.relativePath);
@@ -67,6 +85,19 @@ void appendNode(std::string& output, const RuleNode& node) {
     if (node.destination) appendDestination(output, *node.destination);
     appendNumber(output, node.children.size());
     for (const auto& child : node.children) appendNode(output, child);
+}
+
+// v3 노드의 단일 조건과 자식을 순서대로 서명에 추가하는 함수.
+void appendAtomicNode(std::string& output, const RuleNode& node) {
+    append(output, node.id);
+    appendNumber(output, node.enabled);
+    appendNumber(output, node.otherwise);
+    appendNumber(output, node.atomicCondition.has_value());
+    if (node.atomicCondition) appendAtomicCondition(output, *node.atomicCondition);
+    appendNumber(output, node.destination.has_value());
+    if (node.destination) appendDestination(output, *node.destination);
+    appendNumber(output, node.children.size());
+    for (const auto& child : node.children) appendAtomicNode(output, child);
 }
 
 } // namespace
@@ -88,6 +119,16 @@ std::string PlanSignature::settings(const UserSettings& settings) {
 
 // 규칙 내용 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
 std::string PlanSignature::rules(const RuleSet& rules) {
+    if (rules.schemaVersion == 3) {
+        std::string output = "nookbit-rules-v3";
+        append(output, rules.id);
+        append(output, rules.version);
+        appendNumber(output, rules.nodes.size());
+        for (const auto& node : rules.nodes) appendAtomicNode(output, node);
+        appendNumber(output, rules.globalOtherwise.has_value());
+        if (rules.globalOtherwise) appendDestination(output, *rules.globalOtherwise);
+        return output;
+    }
     if (rules.schemaVersion == 2) {
         std::string output = "nookbit-rules-v2";
         append(output, rules.id);

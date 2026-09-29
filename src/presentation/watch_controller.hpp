@@ -93,6 +93,8 @@ public:
     Q_INVOKABLE void addProposalToPending();
     /// 현재 제안을 닫고 같은 파일 상태에서는 다시 묻지 않는 함수.
     Q_INVOKABLE void dismissProposal();
+    /// 분류 규칙 저장 후 이전 제안을 지우고 새 규칙으로 다시 평가하는 함수.
+    void rulesChanged();
 
 signals:
     void settingsChanged();

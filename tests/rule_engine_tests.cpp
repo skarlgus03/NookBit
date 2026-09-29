@@ -202,6 +202,70 @@ void testOrderedTreeAndOtherwise() {
            "changing sibling order must invalidate saved plans");
 }
 
+// v3에서 노드별 단일 조건을 자식 경로의 AND로 평가하는지 검사하는 함수.
+void testAtomicConditionTree() {
+    nookbit::RuleSet rules;
+    rules.id = "atomic";
+    rules.version = "v3";
+    rules.schemaVersion = 3;
+    nookbit::RuleNode large;
+    large.id = "larger-than-five";
+    large.atomicCondition = nookbit::SizePredicate{
+        nookbit::SizeComparison::GreaterThan, 5 * 1024 * 1024};
+    nookbit::RuleNode image;
+    image.id = "image-extension";
+    image.atomicCondition = nookbit::ExtensionPredicate{{"png", "jpg"}};
+    image.destination = nookbit::RuleDestination{L"Pictures", std::nullopt};
+    large.children = {image};
+    nookbit::RuleNode name;
+    name.id = "named-report";
+    name.atomicCondition = nookbit::NameContainsPredicate{"report"};
+    name.destination = nookbit::RuleDestination{L"Reports", std::nullopt};
+    rules.nodes = {large, name};
+
+    nookbit::RuleEngine engine;
+    auto file = sampleFile();
+    file.absolutePath = L"C:/Input/Photo.PNG";
+    file.relativePath = L"Photo.PNG";
+    file.extension = "PNG";
+    file.fingerprint.size = 5 * 1024 * 1024;
+    auto decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                                  utcMillis(2026, 9, 29));
+    expect(decision && !decision.value(), "greater-than must exclude exact threshold");
+    rules.nodes[0].atomicCondition = nookbit::SizePredicate{
+        nookbit::SizeComparison::AtLeast, 5 * 1024 * 1024};
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                             utcMillis(2026, 9, 29));
+    expect(decision && decision.value() &&
+               decision.value()->matchedRuleId == "image-extension",
+           "size and extension along one path must both match");
+    file.extension = "exe";
+    file.relativePath = L"report.exe";
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                             utcMillis(2026, 9, 29));
+    expect(decision && !decision.value(),
+           "matching parent must not backtrack to later name sibling");
+    rules.nodes[0].enabled = false;
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                             utcMillis(2026, 9, 29));
+    expect(decision && decision.value() && decision.value()->matchedRuleId == "named-report",
+           "name-contains condition must match a root when earlier root is disabled");
+    nookbit::RuleNode age;
+    age.id = "old-files";
+    age.atomicCondition = nookbit::ModifiedAgePredicate{nookbit::AgeComparison::AtLeast, 7};
+    age.destination = nookbit::RuleDestination{L"Old", std::nullopt};
+    rules.nodes = {age};
+    file.fingerprint.modifiedUtcMs = utcMillis(2026, 9, 20);
+    decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
+                             utcMillis(2026, 9, 29));
+    expect(decision && decision.value() && decision.value()->matchedRuleId == "old-files",
+           "modified-age condition must match elapsed whole days");
+    const auto signature = nookbit::PlanSignature::rules(rules);
+    std::get<nookbit::ModifiedAgePredicate>(*rules.nodes[0].atomicCondition).days = 8;
+    expect(nookbit::PlanSignature::rules(rules) != signature,
+           "changing a v3 condition must invalidate a saved plan");
+}
+
 } // namespace
 
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
@@ -210,6 +274,7 @@ int main() {
     testConditionsAndNoMatch();
     testUnsafeDestination();
     testOrderedTreeAndOtherwise();
+    testAtomicConditionTree();
     if (failures == 0) {
         std::cout << "All rule-engine tests passed.\n";
         return 0;
