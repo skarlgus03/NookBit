@@ -907,7 +907,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · 드래그: 부모/형제 스냅 · Ctrl+드래그: 스냅 끄기 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
+            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · Ctrl+드래그: 부모/형제 스냅 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
             color: page.mutedText
             font.pixelSize: 12
             wrapMode: Text.WordWrap
@@ -1268,7 +1268,7 @@ Item {
                                         if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return
                                         moved = true
                                         page.updateDraggedPositions(modelData.id, startPositions, dx, dy,
-                                                                    !(mouse.modifiers & Qt.ControlModifier))
+                                                                    (mouse.modifiers & Qt.ControlModifier) !== 0)
                                     }
                                     onReleased: {
                                         if (moved) page.commitDraggedBlocks()
