@@ -511,6 +511,7 @@ ApplicationWindow {
     RuleEditorPage {
         id: ruleEditorPage
         objectName: "ruleEditorPage"
+        oldEditorFormDirty: root.ruleFormDirty || root.globalFormDirty
         anchors.fill: parent
         anchors.leftMargin: navigation.width
         visible: root.currentPage === 1

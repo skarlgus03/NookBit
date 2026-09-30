@@ -8,8 +8,11 @@ Item {
     signal openCurrentEditor()
     signal editorDraftReplaced()
 
-    readonly property int blockWidth: 226
-    readonly property int blockHeight: 112
+    property bool oldEditorFormDirty: false
+    property int fontPresetIndex: 1
+    readonly property int nodeFontSize: [11, 13, 16][fontPresetIndex]
+    readonly property int blockWidth: [206, 226, 262][fontPresetIndex]
+    readonly property int blockHeight: [102, 112, 132][fontPresetIndex]
     property bool darkMode: false
     readonly property color pageColor: darkMode ? "#161a22" : "#f5f5f2"
     readonly property color surfaceColor: darkMode ? "#202633" : "#ffffff"
@@ -83,6 +86,11 @@ Item {
     property real panX: 0
     property real panY: 0
     property int connectionStyle: 0
+    readonly property color rootBorderColor: darkMode ? "#f5ca69" : "#a46b12"
+    property bool altHeld: false
+    property int hoveredEdgeIndex: -1
+    property real hoverX: 0
+    property real hoverY: 0
     property real addMenuWorldX: 0
     property real addMenuWorldY: 0
     property var copiedBlocks: []
@@ -95,6 +103,11 @@ Item {
     function selectOnly(id) {
         selectedIds = id < 0 ? [] : [id]
         selectedId = id
+    }
+
+    // 파일 입력 바로 아래에 연결된 최상위 조건 블록인지 확인하는 함수.
+    function isRootBlock(id) {
+        return edges.some(edge => edge.from === 1 && edge.to === id)
     }
 
     // Shift+클릭으로 노드를 다중 선택에 더하거나 빼는 함수.
@@ -175,13 +188,28 @@ Item {
             if (page.stagedGraph) {
                 const layoutSaved = ruleEditor.saveGraphLayout(page.blocks, page.edges)
                 page.loadGraphFromDraft()
-                if (!layoutSaved)
-                    page.statusText = qsTr("규칙은 저장됐지만 노드 위치는 저장하지 못했어요.")
+                page.statusText = layoutSaved
+                    ? qsTr("규칙과 노드 위치를 모두 저장했어요.")
+                    : qsTr("규칙은 저장됐지만 노드 위치는 저장하지 못했어요.")
             } else if (page.graphDirty) {
                 page.statusText = qsTr("규칙 저장본이 바뀌었어요. 화면의 미저장 그래프는 유지했으니 필요하면 다시 불러오세요.")
             } else {
                 page.loadGraphFromDraft()
             }
+        }
+    }
+
+    // 그래프를 검증한 뒤 규칙 초안과 노드 위치를 한 번에 저장하는 함수.
+    function saveAll() {
+        if (!ruleEditor.importGraph(blocks, edges)) {
+            statusText = ruleEditor.message
+            return
+        }
+        editorDraftReplaced()
+        stagedGraph = true
+        if (!ruleEditor.save()) {
+            stagedGraph = false
+            statusText = ruleEditor.message
         }
     }
 
@@ -296,14 +324,14 @@ Item {
     function colorFor(type) {
         if (darkMode) {
             switch (type) {
-            case "start": return "#40566f"
-            case "extension": return "#3c617f"
-            case "size": return "#69617b"
-            case "name": return "#645b83"
-            case "age": return "#616b79"
-            case "otherwise": return "#53606f"
-            case "destination": return "#406b80"
-            case "exclude": return "#6d556f"
+            case "start": return "#24624d"
+            case "extension": return "#286c9c"
+            case "size": return "#986126"
+            case "name": return "#7750a2"
+            case "age": return "#237c83"
+            case "otherwise": return "#596575"
+            case "destination": return "#39734c"
+            case "exclude": return "#944b68"
             }
             return "#53677e"
         }
@@ -545,16 +573,18 @@ Item {
     function finishConnectionAt(x, y) {
         if (connectingFrom < 0)
             return
+        const sourceId = connectingFrom
+        connectingFrom = -1
         draggingConnection = false
         lineCanvas.requestPaint()
         for (const block of blocks) {
             if (block.type !== "start" && Math.abs(x - block.x) < 28 &&
                 Math.abs(y - (block.y + blockHeight / 2)) < 28) {
-                connectBlocks(connectingFrom, block.id)
+                connectBlocks(sourceId, block.id)
                 return
             }
         }
-        statusText = qsTr("연결할 블록의 왼쪽 점까지 끌거나, 그 점을 클릭해 주세요.")
+        statusText = qsTr("연결점 밖에 놓아 선 연결을 취소했어요.")
         lineCanvas.requestPaint()
     }
 
@@ -573,18 +603,6 @@ Item {
         for (const id of removed) delete next[id]
         livePositions = next
         statusText = qsTr("블록과 연결선을 화면에서 제거했어요.")
-        lineCanvas.requestPaint()
-    }
-
-    // 선택한 블록들로 들어오거나 나가는 선만 제거하는 함수.
-    function disconnectSelectedBlock() {
-        if (selectedIds.length === 0)
-            return
-        edges = edges.filter(edge => !selectedIds.includes(edge.from) &&
-                                     !selectedIds.includes(edge.to))
-        connectingFrom = -1
-        draggingConnection = false
-        statusText = qsTr("선택한 블록의 연결선을 해제했어요.")
         lineCanvas.requestPaint()
     }
 
@@ -609,8 +627,82 @@ Item {
         lineCanvas.requestPaint()
     }
 
+    // 화면의 한 점에서 선분까지의 거리를 구하는 함수.
+    function distanceToSegment(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1
+        const dy = y2 - y1
+        const lengthSquared = dx * dx + dy * dy
+        const fraction = lengthSquared > 0
+            ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared)) : 0
+        return Math.hypot(px - (x1 + fraction * dx), py - (y1 + fraction * dy))
+    }
+
+    // 커서에 가장 가까운 연결선을 찾아 Alt 강조 대상으로 정하는 함수.
+    function edgeAt(screenX, screenY) {
+        let nearest = -1
+        let distance = 12
+        for (let index = 0; index < edges.length; ++index) {
+            const edge = edges[index]
+            const source = blockForId(edge.from)
+            const target = blockForId(edge.to)
+            if (!source || !target) continue
+            const a = positionFor(source)
+            const b = positionFor(target)
+            const from = screenPoint(a.x + blockWidth, a.y + blockHeight / 2)
+            const to = screenPoint(b.x, b.y + blockHeight / 2)
+            let current = Infinity
+            if (connectionStyle === 1) {
+                current = distanceToSegment(screenX, screenY, from.x, from.y, to.x, to.y)
+            } else {
+                const bend = Math.max(65, Math.abs(to.x - from.x) * 0.45)
+                let previousX = from.x
+                let previousY = from.y
+                for (let step = 1; step <= 24; ++step) {
+                    const t = step / 24
+                    const inverse = 1 - t
+                    const x = inverse * inverse * inverse * from.x +
+                        3 * inverse * inverse * t * (from.x + bend) +
+                        3 * inverse * t * t * (to.x - bend) + t * t * t * to.x
+                    const y = inverse * inverse * inverse * from.y +
+                        3 * inverse * inverse * t * from.y +
+                        3 * inverse * t * t * to.y + t * t * t * to.y
+                    current = Math.min(current, distanceToSegment(
+                        screenX, screenY, previousX, previousY, x, y))
+                    previousX = x
+                    previousY = y
+                }
+            }
+            if (current < distance) {
+                nearest = index
+                distance = current
+            }
+        }
+        return nearest
+    }
+
+    // Alt를 누르는 동안 커서 아래 선만 강조하도록 갱신하는 함수.
+    function updateHoveredEdge(screenX, screenY) {
+        hoverX = screenX
+        hoverY = screenY
+        const next = altHeld ? edgeAt(screenX, screenY) : -1
+        if (next !== hoveredEdgeIndex) {
+            hoveredEdgeIndex = next
+            lineCanvas.requestPaint()
+        }
+    }
+
+    // 강조된 연결선 하나만 그래프에서 제거하는 함수.
+    function disconnectHoveredEdge() {
+        if (hoveredEdgeIndex < 0 || hoveredEdgeIndex >= edges.length) return false
+        edges = edges.filter((edge, index) => index !== hoveredEdgeIndex)
+        hoveredEdgeIndex = -1
+        statusText = qsTr("선 하나를 끊었어요. 연결을 다시 잇거나 저장본을 다시 열 수 있어요.")
+        lineCanvas.requestPaint()
+        return true
+    }
+
     // 선택한 직선·곡선 방식으로 연결선과 드래그 중인 선을 그리는 함수.
-    function drawEdge(context, x1, y1, x2, y2, temporary) {
+    function drawEdge(context, x1, y1, x2, y2, temporary, highlighted) {
         const bend = Math.max(65, Math.abs(x2 - x1) * 0.45)
         context.beginPath()
         context.moveTo(x1, y1)
@@ -618,10 +710,11 @@ Item {
             context.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2)
         else
             context.lineTo(x2, y2)
-        context.lineWidth = Math.max(1, (temporary ? 4 : 4.5) * zoom)
+        context.lineWidth = highlighted ? 8 : Math.max(1, (temporary ? 4 : 4.5) * zoom)
         context.lineCap = "round"
-        context.strokeStyle = temporary ? (darkMode ? "#b2c9e6" : "#718e78")
-                                        : (darkMode ? "#86aad6" : "#4e765d")
+        context.strokeStyle = highlighted ? "#f5c542"
+            : temporary ? (darkMode ? "#b2c9e6" : "#718e78")
+                        : (darkMode ? "#86aad6" : "#4e765d")
         context.stroke()
     }
 
@@ -630,9 +723,11 @@ Item {
         inspectorValue.text = block ? block.value : ""
     }
     onDarkModeChanged: lineCanvas.requestPaint()
+    onAltHeldChanged: updateHoveredEdge(hoverX, hoverY)
     onPanXChanged: lineCanvas.requestPaint()
     onPanYChanged: lineCanvas.requestPaint()
     onZoomChanged: lineCanvas.requestPaint()
+    onFontPresetIndexChanged: lineCanvas.requestPaint()
 
     Rectangle {
         anchors.fill: parent
@@ -658,12 +753,20 @@ Item {
                 onClicked: page.darkMode = !page.darkMode
             }
             ThemeButton {
-                text: qsTr("현재 작동하는 규칙 편집기")
-                onClicked: page.openCurrentEditor()
+                text: qsTr("전체 저장")
+                font.bold: true
+                onClicked: {
+                    if (ruleEditor.dirty || page.oldEditorFormDirty) confirmSave.open()
+                    else page.saveAll()
+                }
             }
             ThemeButton {
-                text: qsTr("그래프 → 규칙 초안")
-                onClicked: confirmImport.open()
+                text: qsTr("저장본 다시 열기")
+                onClicked: confirmReload.open()
+            }
+            ThemeButton {
+                text: qsTr("기존 편집기")
+                onClicked: page.openCurrentEditor()
             }
         }
 
@@ -717,6 +820,10 @@ Item {
                 text: qsTr("노드 전체 보기")
                 onClicked: page.fitAllNodes()
             }
+            ThemeButton {
+                text: qsTr("글씨: %1").arg([qsTr("작게"), qsTr("보통"), qsTr("크게")][page.fontPresetIndex])
+                onClicked: page.fontPresetIndex = (page.fontPresetIndex + 1) % 3
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("%1%").arg(Math.round(page.zoom * 100))
@@ -726,7 +833,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("빈 곳 우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
+            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
             color: page.mutedText
             font.pixelSize: 12
             wrapMode: Text.WordWrap
@@ -751,7 +858,10 @@ Item {
                     clip: true
                     focus: true
                     Keys.onPressed: (event) => {
-                        if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
+                        if (event.key === Qt.Key_Alt) {
+                            page.altHeld = true
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
                             page.removeSelectedBlock()
                             event.accepted = true
                         } else if (event.modifiers & Qt.ControlModifier) {
@@ -763,6 +873,15 @@ Item {
                                 event.accepted = true
                             }
                         }
+                    }
+                    Keys.onReleased: (event) => {
+                        if (event.key === Qt.Key_Alt) {
+                            page.altHeld = false
+                            event.accepted = true
+                        }
+                    }
+                    onActiveFocusChanged: {
+                        if (!activeFocus) page.altHeld = false
                     }
                     onWidthChanged: lineCanvas.requestPaint()
                     onHeightChanged: lineCanvas.requestPaint()
@@ -803,7 +922,8 @@ Item {
                                     context.lineTo(width, y)
                                     context.stroke()
                                 }
-                                for (const edge of page.edges) {
+                                for (let index = 0; index < page.edges.length; ++index) {
+                                    const edge = page.edges[index]
                                     const source = page.blockForId(edge.from)
                                     const target = page.blockForId(edge.to)
                                     if (source && target) {
@@ -813,7 +933,8 @@ Item {
                                                                       sourcePos.y + page.blockHeight / 2)
                                         const to = page.screenPoint(targetPos.x,
                                                                     targetPos.y + page.blockHeight / 2)
-                                        page.drawEdge(context, from.x, from.y, to.x, to.y, false)
+                                        page.drawEdge(context, from.x, from.y, to.x, to.y,
+                                                      false, page.altHeld && index === page.hoveredEdgeIndex)
                                     }
                                 }
                                 if (page.connectingFrom >= 0 && page.draggingConnection) {
@@ -823,7 +944,7 @@ Item {
                                         const from = page.screenPoint(sourcePos.x + page.blockWidth,
                                                                       sourcePos.y + page.blockHeight / 2)
                                         const to = page.screenPoint(page.pointerX, page.pointerY)
-                                        page.drawEdge(context, from.x, from.y, to.x, to.y, true)
+                                        page.drawEdge(context, from.x, from.y, to.x, to.y, true, false)
                                     }
                                 }
                             }
@@ -833,8 +954,14 @@ Item {
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton
                             preventStealing: true
+                            property bool breakingEdge: false
                             onPressed: (mouse) => {
                                 canvasViewport.forceActiveFocus()
+                                if (mouse.modifiers & Qt.AltModifier)
+                                    page.hoveredEdgeIndex = page.edgeAt(mouse.x, mouse.y)
+                                breakingEdge = (mouse.modifiers & Qt.AltModifier) &&
+                                    page.disconnectHoveredEdge()
+                                if (breakingEdge) return
                                 page.marqueeStartX = mouse.x
                                 page.marqueeStartY = mouse.y
                                 page.marqueeEndX = mouse.x
@@ -842,11 +969,15 @@ Item {
                                 page.marqueeActive = true
                             }
                             onPositionChanged: (mouse) => {
-                                if (!pressed) return
+                                if (!pressed || breakingEdge) return
                                 page.marqueeEndX = mouse.x
                                 page.marqueeEndY = mouse.y
                             }
                             onReleased: (mouse) => {
+                                if (breakingEdge) {
+                                    breakingEdge = false
+                                    return
+                                }
                                 page.marqueeEndX = mouse.x
                                 page.marqueeEndY = mouse.y
                                 if (Math.abs(mouse.x - page.marqueeStartX) < 4 &&
@@ -857,7 +988,10 @@ Item {
                                     page.finishMarquee((mouse.modifiers & Qt.ShiftModifier) !== 0)
                                 }
                             }
-                            onCanceled: page.marqueeActive = false
+                            onCanceled: {
+                                breakingEdge = false
+                                page.marqueeActive = false
+                            }
                         }
 
                         Repeater {
@@ -876,14 +1010,17 @@ Item {
                                 radius: 12
                                 color: page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
-                                border.width: page.selectedIds.includes(modelData.id) ? 3 : 1
-                                border.color: page.selectedIds.includes(modelData.id) ? page.colorFor(modelData.type) : page.borderColor
+                                border.width: page.isRootBlock(modelData.id) ? 4
+                                    : page.selectedIds.includes(modelData.id) ? 3 : 1
+                                border.color: page.isRootBlock(modelData.id) ? page.rootBorderColor
+                                    : page.selectedIds.includes(modelData.id)
+                                      ? page.colorFor(modelData.type) : page.borderColor
 
                                 Rectangle {
                                     id: cardHeader
                                     x: 1; y: 1
                                     width: parent.width - 2
-                                    height: 37
+                                    height: Math.round(page.blockHeight * 0.33)
                                     radius: 11
                                     color: page.colorFor(modelData.type)
                                     Label {
@@ -892,6 +1029,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: page.titleFor(modelData.type)
                                         font.bold: true
+                                        font.pixelSize: page.nodeFontSize + 1
                                         color: "#ffffff"
                                     }
                                     Rectangle {
@@ -905,6 +1043,7 @@ Item {
                                             anchors.centerIn: parent
                                             text: page.orderFor(modelData.id)
                                             font.bold: true
+                                            font.pixelSize: page.nodeFontSize
                                             color: page.colorFor(modelData.type)
                                         }
                                     }
@@ -916,6 +1055,7 @@ Item {
                                     anchors.margins: 12
                                     text: page.displayValue(modelData)
                                     elide: Text.ElideRight
+                                    font.pixelSize: page.nodeFontSize
                                     color: page.primaryText
                                 }
                                 Label {
@@ -924,7 +1064,7 @@ Item {
                                     anchors.margins: 10
                                     text: modelData.type === "destination" ? qsTr("도착")
                                           : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
-                                    font.pixelSize: 11
+                                    font.pixelSize: Math.max(10, page.nodeFontSize - 2)
                                     color: page.mutedText
                                 }
                                 MouseArea {
@@ -1097,6 +1237,25 @@ Item {
                         }
                     }
                 }
+
+                MouseArea {
+                    anchors.fill: parent
+                    visible: page.altHeld
+                    acceptedButtons: Qt.NoButton
+                    hoverEnabled: true
+                    onEntered: {
+                        const point = mapToItem(canvasViewport, mouseX, mouseY)
+                        page.updateHoveredEdge(point.x, point.y)
+                    }
+                    onPositionChanged: (mouse) => {
+                        const point = mapToItem(canvasViewport, mouse.x, mouse.y)
+                        page.updateHoveredEdge(point.x, point.y)
+                    }
+                    onExited: {
+                        page.hoveredEdgeIndex = -1
+                        lineCanvas.requestPaint()
+                    }
+                }
             }
 
             Frame {
@@ -1125,7 +1284,7 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: page.selectedIds.length > 1
-                              ? qsTr("%1개 블록 선택됨 · 함께 이동하거나 연결 해제·제거할 수 있어요.").arg(page.selectedIds.length)
+                              ? qsTr("%1개 블록 선택됨 · 함께 이동하거나 Delete로 제거할 수 있어요.").arg(page.selectedIds.length)
                               : page.selectedBlock ? page.titleFor(page.selectedBlock.type)
                                                    : qsTr("블록을 선택하세요")
                         wrapMode: Text.WordWrap
@@ -1210,48 +1369,6 @@ Item {
                             onClicked: page.moveSelectedOrder(1)
                         }
                     }
-                    Label {
-                        Layout.fillWidth: true
-                        text: qsTr("선을 잇기: 블록 오른쪽 점을 다른 블록의 왼쪽 점으로 끌어 놓으세요.")
-                        wrapMode: Text.WordWrap
-                        color: page.mutedText
-                    }
-                    ThemeButton {
-                        Layout.fillWidth: true
-                        text: qsTr("선택 블록의 선 끊기")
-                        enabled: page.selectedIds.length > 0
-                        onClicked: page.disconnectSelectedBlock()
-                    }
-                    ThemeButton {
-                        Layout.fillWidth: true
-                        text: qsTr("블록 제거")
-                        enabled: page.selectedIds.some(id => id !== 1)
-                        onClicked: page.removeSelectedBlock()
-                    }
-                    ThemeButton {
-                        Layout.fillWidth: true
-                        text: qsTr("연결 취소")
-                        enabled: page.connectingFrom >= 0
-                        onClicked: {
-                            page.connectingFrom = -1
-                            page.draggingConnection = false
-                            lineCanvas.requestPaint()
-                        }
-                    }
-                    ThemeButton {
-                        Layout.fillWidth: true
-                        text: qsTr("노드 위치 저장")
-                        enabled: !ruleEditor.dirty
-                        onClicked: {
-                            ruleEditor.saveGraphLayout(page.blocks, page.edges)
-                            page.statusText = ruleEditor.message
-                        }
-                    }
-                    ThemeButton {
-                        Layout.fillWidth: true
-                        text: qsTr("저장된 규칙 다시 열기")
-                        onClicked: confirmReload.open()
-                    }
                     }
                 }
             }
@@ -1313,11 +1430,11 @@ Item {
     }
 
     Dialog {
-        id: confirmImport
+        id: confirmSave
         modal: true
         anchors.centerIn: parent
         width: Math.min(page.width - 40, 420)
-        title: qsTr("그래프를 규칙 초안으로 변환")
+        title: qsTr("기존 편집기의 초안을 교체할까요?")
         standardButtons: Dialog.NoButton
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
@@ -1332,23 +1449,17 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: page.primaryText
-                text: qsTr("현재 편집 중인 규칙 초안을 이 그래프로 교체합니다. 실제 규칙 파일은 저장 버튼을 누르기 전까지 바뀌지 않아요.")
+                text: qsTr("기존 편집기에서 저장하지 않은 초안을 현재 그래프로 교체하고, 규칙과 노드 위치를 함께 저장합니다.")
             }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                ThemeButton { text: qsTr("취소"); onClicked: confirmImport.close() }
+                ThemeButton { text: qsTr("취소"); onClicked: confirmSave.close() }
                 ThemeButton {
-                    text: qsTr("검증하고 초안으로")
+                    text: qsTr("전체 저장")
                     onClicked: {
-                        confirmImport.close()
-                        const valid = ruleEditor.importGraph(page.blocks, page.edges)
-                        page.statusText = ruleEditor.message
-                        if (valid) {
-                            page.stagedGraph = true
-                            page.editorDraftReplaced()
-                            page.statusText += qsTr(" 위의 기존 편집기 버튼으로 내용을 확인해 주세요.")
-                        }
+                        confirmSave.close()
+                        page.saveAll()
                     }
                 }
             }
