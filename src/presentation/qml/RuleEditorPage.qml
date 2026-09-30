@@ -80,6 +80,8 @@ Item {
     property real pointerX: 0
     property real pointerY: 0
     property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
     property int connectionStyle: 0
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
     property var selectedBlock: selectedIds.length === 1 ? blockForId(selectedId) : null
@@ -108,8 +110,9 @@ Item {
         const bottom = Math.max(marqueeStartY, marqueeEndY)
         const hits = blocks.filter(block => {
             const pos = positionFor(block)
-            return pos.x < right && pos.x + blockWidth > left &&
-                   pos.y < bottom && pos.y + blockHeight > top
+            const screen = screenPoint(pos.x, pos.y)
+            return screen.x < right && screen.x + blockWidth * zoom > left &&
+                   screen.y < bottom && screen.y + blockHeight * zoom > top
         }).map(block => block.id)
         const next = addToSelection ? selectedIds.concat(hits.filter(id => !selectedIds.includes(id))) : hits
         selectedIds = next
@@ -147,6 +150,7 @@ Item {
                      ? qsTr("기존 규칙에 종착점 없는 가지가 %1개 있어요. 목적지나 정리 제외를 연결해 주세요.").arg(restored.incompleteLeaves)
                      : qsTr("저장된 규칙을 노드 화면에 불러왔어요.")
         lineCanvas.requestPaint()
+        Qt.callLater(function() { page.fitAllNodes() })
     }
 
     Component.onCompleted: loadGraphFromDraft()
@@ -222,37 +226,50 @@ Item {
         return livePositions[block.id] || block
     }
 
-    // 블록의 오른쪽 끝에 여백을 더해 필요한 작업 공간 너비를 구하는 함수.
-    function logicalWidth() {
-        let right = 0
-        for (const block of blocks)
-            right = Math.max(right, positionFor(block).x + blockWidth)
-        return Math.max(canvasFlick.width / zoom, Math.ceil((right + 260) / 160) * 160)
+    // 화면 좌표를 경계 없는 작업 공간 좌표로 바꾸는 함수.
+    function worldPoint(screenX, screenY) {
+        return { x: (screenX - panX) / zoom, y: (screenY - panY) / zoom }
     }
 
-    // 블록의 아래쪽 끝에 여백을 더해 필요한 작업 공간 높이를 구하는 함수.
-    function logicalHeight() {
-        let bottom = 0
-        for (const block of blocks)
-            bottom = Math.max(bottom, positionFor(block).y + blockHeight)
-        return Math.max(canvasFlick.height / zoom, Math.ceil((bottom + 220) / 160) * 160)
+    // 작업 공간 좌표를 화면 좌표로 바꾸는 함수.
+    function screenPoint(worldX, worldY) {
+        return { x: panX + worldX * zoom, y: panY + worldY * zoom }
     }
 
-    // 휠 위치를 기준으로 작업 공간을 확대하거나 축소하는 함수.
+    // 휠 아래의 작업 공간 위치를 유지하며 확대하거나 축소하는 함수.
     function zoomAt(delta, viewportX, viewportY) {
         if (delta === 0)
             return
         const oldZoom = zoom
-        const nextZoom = Math.max(0.5, Math.min(2.0, oldZoom * Math.pow(1.12, delta / 120)))
+        const nextZoom = Math.max(0.05, Math.min(2.5, oldZoom * Math.pow(1.12, delta / 120)))
         if (nextZoom === oldZoom)
             return
-        const worldX = (canvasFlick.contentX + viewportX) / oldZoom
-        const worldY = (canvasFlick.contentY + viewportY) / oldZoom
+        const worldX = (viewportX - panX) / oldZoom
+        const worldY = (viewportY - panY) / oldZoom
         zoom = nextZoom
-        canvasFlick.contentX = Math.max(0, Math.min(canvasFlick.contentWidth - canvasFlick.width,
-                                                   worldX * nextZoom - viewportX))
-        canvasFlick.contentY = Math.max(0, Math.min(canvasFlick.contentHeight - canvasFlick.height,
-                                                   worldY * nextZoom - viewportY))
+        panX = viewportX - worldX * nextZoom
+        panY = viewportY - worldY * nextZoom
+    }
+
+    // 모든 노드가 보이도록 화면 위치와 확대율만 맞추는 함수.
+    function fitAllNodes() {
+        if (blocks.length === 0 || canvasViewport.width <= 0 || canvasViewport.height <= 0)
+            return
+        let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+        for (const block of blocks) {
+            const pos = positionFor(block)
+            left = Math.min(left, pos.x)
+            top = Math.min(top, pos.y)
+            right = Math.max(right, pos.x + blockWidth)
+            bottom = Math.max(bottom, pos.y + blockHeight)
+        }
+        const margin = 80
+        zoom = Math.max(0.05, Math.min(2.5,
+            Math.min((canvasViewport.width - margin * 2) / Math.max(1, right - left),
+                     (canvasViewport.height - margin * 2) / Math.max(1, bottom - top))))
+        panX = (canvasViewport.width - (left + right) * zoom) / 2
+        panY = (canvasViewport.height - (top + bottom) * zoom) / 2
+        lineCanvas.requestPaint()
     }
 
     // 종류에 따라 블록 제목을 정하는 함수.
@@ -307,8 +324,8 @@ Item {
         }
         const block = {
             id: nextId++, type: type,
-            x: canvasFlick.contentX / zoom + 120 + (blocks.length % 3) * 42,
-            y: canvasFlick.contentY / zoom + 110 + (blocks.length % 3) * 38,
+            x: (canvasViewport.width * 0.5 - panX) / zoom + (blocks.length % 3) * 42,
+            y: (canvasViewport.height * 0.5 - panY) / zoom + (blocks.length % 3) * 38,
             value: examples[type],
             comparison: type === "size" ? "greaterThan" : "atLeast",
             unit: "MiB"
@@ -524,8 +541,8 @@ Item {
         connectingFrom = -1
         draggingConnection = false
         zoom = 1.0
-        canvasFlick.contentX = 0
-        canvasFlick.contentY = 0
+        panX = 0
+        panY = 0
         statusText = qsTr("예시 그래프를 다시 불러왔어요.")
         lineCanvas.requestPaint()
     }
@@ -539,7 +556,7 @@ Item {
             context.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2)
         else
             context.lineTo(x2, y2)
-        context.lineWidth = temporary ? 4 : 4.5
+        context.lineWidth = Math.max(1, (temporary ? 4 : 4.5) * zoom)
         context.lineCap = "round"
         context.strokeStyle = temporary ? (darkMode ? "#b2c9e6" : "#718e78")
                                         : (darkMode ? "#86aad6" : "#4e765d")
@@ -551,6 +568,9 @@ Item {
         inspectorValue.text = block ? block.value : ""
     }
     onDarkModeChanged: lineCanvas.requestPaint()
+    onPanXChanged: lineCanvas.requestPaint()
+    onPanYChanged: lineCanvas.requestPaint()
+    onZoomChanged: lineCanvas.requestPaint()
 
     Rectangle {
         anchors.fill: parent
@@ -659,6 +679,10 @@ Item {
                     lineCanvas.requestPaint()
                 }
             }
+            ThemeButton {
+                text: qsTr("노드 전체 보기")
+                onClicked: page.fitAllNodes()
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("좌드래그: 선택  ·  우드래그: 화면 이동  ·  Shift+클릭: 추가 선택  ·  휠: 확대/축소  ·  %1%").arg(Math.round(page.zoom * 100))
@@ -678,15 +702,13 @@ Item {
                 color: page.canvasColor
                 border.color: page.borderColor
 
-                Flickable {
-                    id: canvasFlick
+                Item {
+                    id: canvasViewport
                     anchors.fill: parent
                     anchors.margins: 1
                     clip: true
-                    contentWidth: canvasSurface.width * page.zoom
-                    contentHeight: canvasSurface.height * page.zoom
-                    boundsBehavior: Flickable.StopAtBounds
-                    interactive: false
+                    onWidthChanged: lineCanvas.requestPaint()
+                    onHeightChanged: lineCanvas.requestPaint()
 
                     WheelHandler {
                         target: null
@@ -695,13 +717,6 @@ Item {
                         onWheel: (event) => page.zoomAt(event.angleDelta.y,
                                                          point.position.x, point.position.y)
                     }
-
-                    Item {
-                        id: canvasSurface
-                        width: page.logicalWidth()
-                        height: page.logicalHeight()
-                        scale: page.zoom
-                        transformOrigin: Item.TopLeft
 
                         Canvas {
                             id: lineCanvas
@@ -714,13 +729,18 @@ Item {
                                 context.fillRect(0, 0, width, height)
                                 context.strokeStyle = page.gridColor
                                 context.lineWidth = 1
-                                for (let x = 0; x <= width; x += 40) {
+                                let gridStep = 40 * page.zoom
+                                while (gridStep < 24) gridStep *= 2
+                                while (gridStep > 96) gridStep /= 2
+                                const gridX = ((page.panX % gridStep) + gridStep) % gridStep
+                                const gridY = ((page.panY % gridStep) + gridStep) % gridStep
+                                for (let x = gridX; x <= width; x += gridStep) {
                                     context.beginPath()
                                     context.moveTo(x, 0)
                                     context.lineTo(x, height)
                                     context.stroke()
                                 }
-                                for (let y = 0; y <= height; y += 40) {
+                                for (let y = gridY; y <= height; y += gridStep) {
                                     context.beginPath()
                                     context.moveTo(0, y)
                                     context.lineTo(width, y)
@@ -732,18 +752,21 @@ Item {
                                     if (source && target) {
                                         const sourcePos = page.positionFor(source)
                                         const targetPos = page.positionFor(target)
-                                        page.drawEdge(context, sourcePos.x + page.blockWidth,
-                                                      sourcePos.y + page.blockHeight / 2,
-                                                      targetPos.x, targetPos.y + page.blockHeight / 2, false)
+                                        const from = page.screenPoint(sourcePos.x + page.blockWidth,
+                                                                      sourcePos.y + page.blockHeight / 2)
+                                        const to = page.screenPoint(targetPos.x,
+                                                                    targetPos.y + page.blockHeight / 2)
+                                        page.drawEdge(context, from.x, from.y, to.x, to.y, false)
                                     }
                                 }
                                 if (page.connectingFrom >= 0 && page.draggingConnection) {
                                     const source = page.blockForId(page.connectingFrom)
                                     if (source) {
                                         const sourcePos = page.positionFor(source)
-                                        page.drawEdge(context, sourcePos.x + page.blockWidth,
-                                                      sourcePos.y + page.blockHeight / 2,
-                                                      page.pointerX, page.pointerY, true)
+                                        const from = page.screenPoint(sourcePos.x + page.blockWidth,
+                                                                      sourcePos.y + page.blockHeight / 2)
+                                        const to = page.screenPoint(page.pointerX, page.pointerY)
+                                        page.drawEdge(context, from.x, from.y, to.x, to.y, true)
                                     }
                                 }
                             }
@@ -784,10 +807,14 @@ Item {
                             delegate: Rectangle {
                                 id: blockCard
                                 required property var modelData
-                                x: page.positionFor(modelData).x
-                                y: page.positionFor(modelData).y
+                                x: page.screenPoint(page.positionFor(modelData).x,
+                                                    page.positionFor(modelData).y).x
+                                y: page.screenPoint(page.positionFor(modelData).x,
+                                                    page.positionFor(modelData).y).y
                                 width: page.blockWidth
                                 height: page.blockHeight
+                                scale: page.zoom
+                                transformOrigin: Item.TopLeft
                                 radius: 12
                                 color: page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
@@ -861,7 +888,8 @@ Item {
                                         }
                                         if (!page.selectedIds.includes(modelData.id))
                                             page.selectOnly(modelData.id)
-                                        const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                        const screen = mapToItem(canvasViewport, mouse.x, mouse.y)
+                                        const point = page.worldPoint(screen.x, screen.y)
                                         pressWorldX = point.x
                                         pressWorldY = point.y
                                         const starts = ({})
@@ -873,7 +901,8 @@ Item {
                                     }
                                     onPositionChanged: (mouse) => {
                                         if (!pressed || !dragAllowed) return
-                                        const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                        const screen = mapToItem(canvasViewport, mouse.x, mouse.y)
+                                        const point = page.worldPoint(screen.x, screen.y)
                                         const dx = point.x - pressWorldX
                                         const dy = point.y - pressWorldY
                                         if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return
@@ -882,10 +911,7 @@ Item {
                                         for (const id of page.selectedIds) {
                                             const start = startPositions[id]
                                             if (!start) continue
-                                            next[id] = {
-                                                x: Math.max(20, Math.min(canvasSurface.width - page.blockWidth - 20, start.x + dx)),
-                                                y: Math.max(20, Math.min(canvasSurface.height - page.blockHeight - 20, start.y + dy))
-                                            }
+                                            next[id] = { x: start.x + dx, y: start.y + dy }
                                         }
                                         page.livePositions = next
                                         lineCanvas.requestPaint()
@@ -942,21 +968,24 @@ Item {
                                         onPressed: (mouse) => {
                                             page.connectingFrom = modelData.id
                                             page.draggingConnection = true
-                                            const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                            const screen = mapToItem(canvasViewport, mouse.x, mouse.y)
+                                            const point = page.worldPoint(screen.x, screen.y)
                                             page.pointerX = point.x
                                             page.pointerY = point.y
                                             lineCanvas.requestPaint()
                                         }
                                         onPositionChanged: (mouse) => {
                                             if (page.connectingFrom === modelData.id && page.draggingConnection) {
-                                                const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                                const screen = mapToItem(canvasViewport, mouse.x, mouse.y)
+                                                const point = page.worldPoint(screen.x, screen.y)
                                                 page.pointerX = point.x
                                                 page.pointerY = point.y
                                                 lineCanvas.requestPaint()
                                             }
                                         }
                                         onReleased: (mouse) => {
-                                            const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                            const screen = mapToItem(canvasViewport, mouse.x, mouse.y)
+                                            const point = page.worldPoint(screen.x, screen.y)
                                             page.finishConnectionAt(point.x, point.y)
                                         }
                                     }
@@ -974,7 +1003,6 @@ Item {
                             border.color: page.buttonFocusColor
                             border.width: 2
                         }
-                    }
                 }
 
                 MouseArea {
@@ -986,10 +1014,8 @@ Item {
                     onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
                     onPositionChanged: (mouse) => {
                         if (!pressed) return
-                        canvasFlick.contentX = Math.max(0, Math.min(canvasFlick.contentWidth - canvasFlick.width,
-                                                                     canvasFlick.contentX + lastX - mouse.x))
-                        canvasFlick.contentY = Math.max(0, Math.min(canvasFlick.contentHeight - canvasFlick.height,
-                                                                     canvasFlick.contentY + lastY - mouse.y))
+                        page.panX += mouse.x - lastX
+                        page.panY += mouse.y - lastY
                         lastX = mouse.x
                         lastY = mouse.y
                     }

@@ -322,8 +322,8 @@ QHash<QString, QPointF> readGraphPositions(const QString& path, const std::strin
         if (!xValue.isDouble() || !yValue.isDouble()) continue;
         const double x = xValue.toDouble();
         const double y = yValue.toDouble();
-        if (std::isfinite(x) && std::isfinite(y) && x >= 0 && y >= 0 &&
-            x <= 100000 && y <= 100000) positions.insert(it.key(), QPointF(x, y));
+        if (std::isfinite(x) && std::isfinite(y) && std::abs(x) <= 10000000 &&
+            std::abs(y) <= 10000000) positions.insert(it.key(), QPointF(x, y));
     }
     return positions;
 }
@@ -780,7 +780,7 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
         const double x = block.value(QStringLiteral("x")).toDouble(&validX);
         const double y = block.value(QStringLiteral("y")).toDouble(&validY);
         if (!validX || !validY || !std::isfinite(x) || !std::isfinite(y) ||
-            x < 0 || y < 0 || x > 100000 || y > 100000) {
+            std::abs(x) > 10000000 || std::abs(y) > 10000000) {
             message_ = QStringLiteral("노드 좌표가 올바르지 않아 배치를 저장하지 못했어요.");
             emit changed();
             return false;

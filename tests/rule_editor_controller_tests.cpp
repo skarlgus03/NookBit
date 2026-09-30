@@ -213,7 +213,7 @@ void testGraphRoundTripAndLayout() {
     expect(movedIndex >= 0, "root rule should have a matching graph block");
     if (movedIndex < 0) return;
     auto moved = blocks.at(movedIndex).toMap();
-    moved.insert(QStringLiteral("x"), 777);
+    moved.insert(QStringLiteral("x"), -777);
     blocks.replace(movedIndex, moved);
     QFile rulesFile(rulesPath);
     expect(rulesFile.open(QIODevice::ReadOnly), "rule file should be readable before layout save");
@@ -230,7 +230,7 @@ void testGraphRoundTripAndLayout() {
         const auto item = block.toMap();
         if (item.value("ruleId").toString() ==
                 QString::fromStdString(initial.value().nodes[0].id) &&
-            item.value("x").toInt() == 777) positionRestored = true;
+            item.value("x").toInt() == -777) positionRestored = true;
     }
     expect(positionRestored, "saved node position should survive reopening the editor");
 }
