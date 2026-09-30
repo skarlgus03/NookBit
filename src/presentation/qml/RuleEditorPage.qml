@@ -1266,20 +1266,27 @@ Item {
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.top: cardHeader.bottom
-                                    anchors.margins: 8
+                                    // 연결점의 클릭 영역이 카드 안쪽까지 들어오므로 본문은 그 밖에서 시작한다.
+                                    anchors.leftMargin: 28
+                                    anchors.rightMargin: modelData.type === "destination" ||
+                                                         modelData.type === "exclude" ? 12 : 28
+                                    anchors.topMargin: 7
                                     text: page.displayValue(modelData)
                                     elide: Text.ElideRight
                                     font.pixelSize: page.nodeFontSize
+                                    font.weight: Font.DemiBold
                                     color: page.primaryText
                                 }
                                 Label {
                                     visible: modelData.type !== "start"
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
-                                    anchors.margins: 8
+                                    anchors.rightMargin: 12
+                                    anchors.bottomMargin: 8
                                     text: modelData.type === "destination" ? qsTr("도착")
                                           : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
                                     font.pixelSize: Math.max(10, page.nodeFontSize - 2)
+                                    font.weight: Font.Medium
                                     color: page.mutedText
                                 }
                                 MouseArea {
