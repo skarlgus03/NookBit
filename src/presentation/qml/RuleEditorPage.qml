@@ -86,7 +86,6 @@ Item {
     property real panX: 0
     property real panY: 0
     property int connectionStyle: 0
-    readonly property color rootBorderColor: darkMode ? "#f5ca69" : "#a46b12"
     property bool altHeld: false
     property int hoveredEdgeIndex: -1
     property real hoverX: 0
@@ -1013,10 +1012,8 @@ Item {
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
                                 border.width: modelData.type === "start"
                                     ? (page.selectedIds.includes(modelData.id) ? 5 : 3)
-                                    : page.isRootBlock(modelData.id) ? 4
                                     : page.selectedIds.includes(modelData.id) ? 3 : 1
                                 border.color: modelData.type === "start" ? "#55b89a"
-                                    : page.isRootBlock(modelData.id) ? page.rootBorderColor
                                     : page.selectedIds.includes(modelData.id)
                                       ? page.colorFor(modelData.type) : page.borderColor
 
@@ -1067,10 +1064,13 @@ Item {
                                     Label {
                                         anchors.left: parent.left
                                         anchors.leftMargin: page.orderFor(modelData.id) > 0 ? 42 : 12
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: rootBadge.visible ? 60 : 10
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: page.titleFor(modelData.type)
                                         font.bold: true
                                         font.pixelSize: page.nodeFontSize + 1
+                                        elide: Text.ElideRight
                                         color: "#ffffff"
                                     }
                                     Rectangle {
@@ -1085,6 +1085,25 @@ Item {
                                             text: page.orderFor(modelData.id)
                                             font.bold: true
                                             font.pixelSize: page.nodeFontSize
+                                            color: page.colorFor(modelData.type)
+                                        }
+                                    }
+                                    // 파일 입력에 직접 연결된 조건을 테두리 대신 작은 배지로 표시한다.
+                                    Rectangle {
+                                        id: rootBadge
+                                        visible: page.isRootBlock(modelData.id)
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 43
+                                        height: 23
+                                        radius: 11
+                                        color: "#ffffff"
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: qsTr("루트")
+                                            font.bold: true
+                                            font.pixelSize: Math.max(10, page.nodeFontSize - 2)
                                             color: page.colorFor(modelData.type)
                                         }
                                     }
