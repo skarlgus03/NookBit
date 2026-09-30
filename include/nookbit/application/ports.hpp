@@ -123,6 +123,16 @@ public:
     [[nodiscard]] virtual Result<RuleSet> load() const = 0;
 };
 
+/// 외부 규칙 파일을 현재 저장본과 분리해 읽고 검증하는 계약.
+class IRuleSetFileReader {
+public:
+    /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
+    virtual ~IRuleSetFileReader() = default;
+    /// 지정한 파일을 읽고 검증된 규칙 묶음을 반환하는 함수.
+    [[nodiscard]] virtual Result<RuleSet> loadFile(
+        const std::filesystem::path& path) const = 0;
+};
+
 /// 사용자가 편집한 규칙 트리를 저장하는 별도 계약.
 class IRuleSetWriter {
 public:

@@ -75,7 +75,8 @@ int main(int argc, char* argv[]) {
     }
     nookbit::RuleEditorController ruleEditor(
         previewRules, previewRules, nullptr, &previewRules,
-        verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")));
+        verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
+        &previewRules);
     nookbit::FilesystemScanner previewScanner;
     nookbit::RuleEngine previewRuleEngine;
     nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));

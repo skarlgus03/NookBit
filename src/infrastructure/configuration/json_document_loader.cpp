@@ -179,12 +179,21 @@ Result<QJsonObject> readObject(const QString& path, const std::string& role) {
         });
     }
     QJsonParseError parseError;
-    const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    const QByteArray contents = file.readAll();
+    const auto document = QJsonDocument::fromJson(contents, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        const QByteArray beforeError = contents.left(parseError.offset);
+        const int line = beforeError.count('\n') + 1;
+        const int column = QString::fromUtf8(beforeError.mid(beforeError.lastIndexOf('\n') + 1)).size() + 1;
         return Result<QJsonObject>::failure({
-            role + ".parse_failed", "Invalid JSON object: " + path.toStdString(),
+            role + ".parse_failed",
+            (QStringLiteral("line %1, column %2: %3")
+                .arg(line).arg(column).arg(parseError.errorString())).toStdString(),
         });
     }
+    if (!document.isObject()) return Result<QJsonObject>::failure({
+        role + ".parse_failed", "root: Expected a JSON object.",
+    });
     return Result<QJsonObject>::success(document.object());
 }
 

@@ -193,48 +193,67 @@ Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object) {
         "rules.condition_invalid", "A node must contain exactly one condition kind and its input."});
 }
 
-// v3 형제 목록에서 조건 하나·else 하나·리프 목적지 제약을 검사하며 읽는 함수.
+// 의미 검증 오류에 JSON 노드 경로를 붙여 문제 위치를 보여주는 함수.
+Error atRuleLocation(const QString& location, Error error) {
+    error.message = (location + QStringLiteral(": ") +
+                     QString::fromStdString(error.message)).toStdString();
+    return error;
+}
+
+// 조건·형제·리프 제약을 확인하며 노드 위치가 포함된 오류를 반환하는 함수.
 Result<std::vector<RuleNode>> convertAtomicNodes(const QJsonArray& array,
                                                   std::set<std::string>& ids,
-                                                  int depth, int& nodeCount) {
+                                                  int depth, int& nodeCount,
+                                                  const QString& location) {
     if (depth > 32 || nodeCount + array.size() > 1000) return Result<std::vector<RuleNode>>::failure({
-        "rules.tree_too_large", "Rule tree exceeds its depth or node limit."});
+        "rules.tree_too_large",
+        (location + QStringLiteral(": Rule tree exceeds its depth or node limit.")).toStdString()});
     std::vector<RuleNode> nodes;
     bool foundOtherwise = false;
-    for (const auto& entry : array) {
+    for (int index = 0; index < array.size(); ++index) {
+        const auto entry = array.at(index);
+        const QString nodePath = location + QLatin1Char('[') +
+                                 QString::number(index) + QLatin1Char(']');
         const auto object = entry.toObject();
         RuleNode node;
         node.id = object.value(QStringLiteral("id")).toString().toStdString();
         node.enabled = object.value(QStringLiteral("enabled")).toBool();
         node.otherwise = object.value(QStringLiteral("otherwise")).toBool();
-        if (!ids.insert(node.id).second) return Result<std::vector<RuleNode>>::failure({
-            "rules.duplicate_id", "Each rule node must have a unique ID."});
+        if (!ids.insert(node.id).second) return Result<std::vector<RuleNode>>::failure(
+            atRuleLocation(nodePath + QStringLiteral(".id"),
+                           {"rules.duplicate_id", "Duplicate rule ID: " + node.id}));
         if (node.otherwise) {
             if (foundOtherwise || object.contains(QStringLiteral("when")))
-                return Result<std::vector<RuleNode>>::failure({
-                    "rules.invalid_otherwise", "Each level allows one else node without a condition."});
+                return Result<std::vector<RuleNode>>::failure(atRuleLocation(
+                    nodePath + QStringLiteral(".otherwise"),
+                    {"rules.invalid_otherwise", "Each level allows one else node without a condition."}));
             foundOtherwise = true;
         } else {
             if (!object.contains(QStringLiteral("when")))
-                return Result<std::vector<RuleNode>>::failure({
-                    "rules.condition_missing", "A normal rule node needs one condition."});
+                return Result<std::vector<RuleNode>>::failure(atRuleLocation(
+                    nodePath + QStringLiteral(".when"),
+                    {"rules.condition_missing", "A normal rule node needs one condition."}));
             auto condition = convertAtomicCondition(object.value(QStringLiteral("when")).toObject());
-            if (!condition) return Result<std::vector<RuleNode>>::failure(condition.error());
+            if (!condition) return Result<std::vector<RuleNode>>::failure(
+                atRuleLocation(nodePath + QStringLiteral(".when"), condition.error()));
             node.atomicCondition = std::move(condition.value());
         }
         const auto children = object.value(QStringLiteral("children")).toArray();
         if (!children.isEmpty() && object.contains(QStringLiteral("destination")))
-            return Result<std::vector<RuleNode>>::failure({
-                "rules.internal_destination", "Only a leaf node may have a destination."});
+            return Result<std::vector<RuleNode>>::failure(atRuleLocation(
+                nodePath + QStringLiteral(".destination"),
+                {"rules.internal_destination", "Only a leaf node may have a destination."}));
         if (object.contains(QStringLiteral("exclude")) &&
             (object.contains(QStringLiteral("destination")) || !children.isEmpty()))
-            return Result<std::vector<RuleNode>>::failure({
-                "rules.invalid_exclude", "An excluded leaf cannot have a destination or children."});
+            return Result<std::vector<RuleNode>>::failure(atRuleLocation(
+                nodePath + QStringLiteral(".exclude"),
+                {"rules.invalid_exclude", "An excluded leaf cannot have a destination or children."}));
         node.exclude = object.value(QStringLiteral("exclude")).toBool();
         if (object.contains(QStringLiteral("destination")))
             node.destination = convertDestination(object.value(QStringLiteral("destination")).toObject());
         ++nodeCount;
-        auto descendants = convertAtomicNodes(children, ids, depth + 1, nodeCount);
+        auto descendants = convertAtomicNodes(children, ids, depth + 1, nodeCount,
+                                               nodePath + QStringLiteral(".children"));
         if (!descendants) return Result<std::vector<RuleNode>>::failure(descendants.error());
         node.children = std::move(descendants.value());
         nodes.push_back(std::move(node));
@@ -612,7 +631,7 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
         int nodeCount = 0;
         auto nodes = result.schemaVersion == 3
             ? convertAtomicNodes(loaded.value().value(QStringLiteral("nodes")).toArray(),
-                                 ids, 0, nodeCount)
+                                 ids, 0, nodeCount, QStringLiteral("$.nodes"))
             : convertNodes(loaded.value().value(QStringLiteral("nodes")).toArray(),
                            ids, 0, nodeCount);
         if (!nodes) return Result<RuleSet>::failure(nodes.error());
@@ -640,6 +659,12 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
         result.rules.push_back(std::move(rule.value()));
     }
     return Result<RuleSet>::success(std::move(result));
+}
+
+// 외부 규칙 파일을 별도의 읽기 전용 저장소로 열어 검증하는 함수.
+Result<RuleSet> JsonRuleSetRepository::loadFile(const std::filesystem::path& path) const {
+    JsonRuleSetRepository imported(QString::fromStdWString(path.wstring()), schemaPath_);
+    return imported.load();
 }
 
 // v2 또는 v3 규칙 트리를 검사하고 기존 파일을 보호하며 JSON으로 저장하는 함수.

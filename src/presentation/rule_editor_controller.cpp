@@ -475,7 +475,14 @@ RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetW
 RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                                            QObject* parent, IRuleSetMigrator* migrator,
                                            QString graphLayoutPath)
-    : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator),
+    : RuleEditorController(reader, writer, parent, migrator,
+                           std::move(graphLayoutPath), nullptr) {}
+
+// 외부 파일 검증 계약까지 함께 받아 편집 초안을 만드는 생성자.
+RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
+                                           QObject* parent, IRuleSetMigrator* migrator,
+                                           QString graphLayoutPath, IRuleSetFileReader* fileReader)
+    : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator), fileReader_(fileReader),
       graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
 
 // 현재 초안의 모든 노드를 화면 표시 순서로 반환하는 함수.
@@ -732,11 +739,72 @@ bool RuleEditorController::importGraph(const QVariantList& blocks, const QVarian
     return true;
 }
 
+// 선택한 로컬 파일을 검증하고 오류 위치를 돌려주며 성공할 때만 초안을 바꾸는 함수.
+QVariantMap RuleEditorController::importJsonFile(const QUrl& fileUrl) {
+    if (!fileReader_ || !fileUrl.isLocalFile()) {
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("location"), QStringLiteral("파일")},
+                {QStringLiteral("reason"), QStringLiteral("로컬 JSON 파일만 불러올 수 있어요.")}};
+    }
+    const auto result = fileReader_->loadFile(
+        std::filesystem::path(fileUrl.toLocalFile().toStdWString()));
+    if (!result) {
+        const QString detail = QString::fromStdString(result.error().message);
+        const qsizetype separator = detail.indexOf(QStringLiteral(": "));
+        const bool hasLocation = separator >= 0 &&
+            (detail.startsWith(QLatin1Char('$')) || detail.startsWith(QStringLiteral("line ")) ||
+             detail.startsWith(QStringLiteral("root:")));
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("location"), hasLocation ? detail.left(separator)
+                                                          : QStringLiteral("규칙 파일")},
+                {QStringLiteral("reason"), hasLocation ? detail.mid(separator + 2) : detail},
+                {QStringLiteral("code"), QString::fromStdString(result.error().code)}};
+    }
+    if (result.value().schemaVersion != 3) {
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("location"), QStringLiteral("$.schemaVersion")},
+                {QStringLiteral("reason"), QStringLiteral("v3 형식의 규칙 파일만 불러올 수 있어요.")}};
+    }
+    const auto previewGraph = graphForRules(result.value(), {});
+    const auto checkedGraph = graphRules(previewGraph.value(QStringLiteral("blocks")).toList(),
+                                         previewGraph.value(QStringLiteral("edges")).toList());
+    if (!checkedGraph) {
+        const QString detail = QString::fromStdString(checkedGraph.error().message);
+        const qsizetype separator = detail.indexOf(QStringLiteral(": "));
+        QString location = separator >= 0 ? detail.left(separator) : QStringLiteral("규칙 트리");
+        if (location.startsWith(QStringLiteral("노드 "))) {
+            const int graphId = location.mid(3).toInt();
+            for (const auto& item : previewGraph.value(QStringLiteral("blocks")).toList()) {
+                const auto block = item.toMap();
+                if (block.value(QStringLiteral("id")).toInt() != graphId) continue;
+                const QString ruleId = block.value(QStringLiteral("ruleId"),
+                                      block.value(QStringLiteral("parentRuleId"))).toString();
+                if (!ruleId.isEmpty()) location = QStringLiteral("규칙 ID: %1").arg(ruleId);
+                break;
+            }
+        }
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("location"), location},
+                {QStringLiteral("reason"), separator >= 0 ? detail.mid(separator + 2) : detail}};
+    }
+    draft_ = result.value();
+    loaded_ = true;
+    legacyRules_ = false;
+    dirty_ = true;
+    importedDraft_ = true;
+    message_ = QStringLiteral("외부 규칙을 편집 초안으로 불러왔어요. 전체 저장 전까지 적용되지 않습니다.");
+    emit changed();
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("location"), QString()},
+            {QStringLiteral("reason"), QString()}};
+}
+
 // 현재 규칙 초안을 별도 배치 파일의 좌표와 합쳐 화면 그래프로 반환하는 함수.
 QVariantMap RuleEditorController::graph() const {
     if (!loaded_) return QVariantMap{{QStringLiteral("valid"), false},
                                      {QStringLiteral("message"), message_}};
-    return graphForRules(draft_, readGraphPositions(graphLayoutPath_, draft_.id));
+    return graphForRules(draft_, importedDraft_ ? QHash<QString, QPointF>{}
+                                                : readGraphPositions(graphLayoutPath_, draft_.id));
 }
 
 // 노드 ID별 좌표만 규칙 파일과 독립된 JSON 파일에 원자적으로 저장하는 함수.
@@ -813,6 +881,7 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
 // 저장하지 않은 초안을 버리고 활성 규칙 파일을 다시 읽는 함수.
 void RuleEditorController::reload() {
     const auto result = reader_.load();
+    importedDraft_ = false;
     legacyRules_ = result && result.value().schemaVersion == 2;
     if (!result || result.value().schemaVersion != 3) {
         loaded_ = false;
@@ -861,6 +930,7 @@ bool RuleEditorController::save() {
         return false;
     }
     dirty_ = false;
+    importedDraft_ = false;
     message_ = QStringLiteral("규칙을 저장했어요. 새 미리보기에 적용됩니다.");
     emit changed();
     emit rulesSaved();

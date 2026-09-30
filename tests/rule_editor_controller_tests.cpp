@@ -3,7 +3,11 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
+#include <QUrl>
 
 #include <cstdlib>
 #include <iostream>
@@ -75,6 +79,125 @@ void testDraftAndSave() {
     expect(!editor.dirty() && editor.detail(QStringLiteral("0")).value(
                QStringLiteral("destination")).toString() == QStringLiteral("Pictures/Edited"),
            "reload should discard unsafe draft");
+}
+
+// 외부 JSON 오류는 위치를 알리고 성공한 후보만 미저장 초안에 반영하는지 검사하는 함수.
+void testJsonFileImport() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "temporary import directory should exist");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "import fixture should load");
+    if (!initial) return;
+    const QString activePath = directory.filePath(QStringLiteral("active.json"));
+    nookbit::JsonRuleSetRepository active(activePath, schema);
+    expect(active.save(initial.value()).hasValue(), "active import fixture should initialize");
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active);
+    const QString candidatePath = directory.filePath(QStringLiteral("candidate.json"));
+    const QUrl candidateUrl = QUrl::fromLocalFile(candidatePath);
+
+    QFile candidate(candidatePath);
+    expect(candidate.open(QIODevice::WriteOnly), "invalid candidate should open for writing");
+    candidate.write("{\n  \"schemaVersion\": 3,\n  \"nodes\": [\n");
+    candidate.close();
+    const auto syntax = editor.importJsonFile(candidateUrl);
+    expect(!syntax.value("ok").toBool() && syntax.value("location").toString().contains("line") &&
+               !editor.dirty(), "syntax error should give a line and preserve the draft");
+
+    QJsonObject object{{QStringLiteral("schemaVersion"), 3}};
+    expect(candidate.open(QIODevice::WriteOnly | QIODevice::Truncate),
+           "schema candidate should open for writing");
+    candidate.write(QJsonDocument(object).toJson());
+    candidate.close();
+    const auto schemaError = editor.importJsonFile(candidateUrl);
+    expect(!schemaError.value("ok").toBool() &&
+               schemaError.value("location").toString().contains("ruleSetId") && !editor.dirty(),
+           "schema error should identify the missing field without changing the draft");
+
+    QFile sample(projectPath("resources/rules/default.v3.json"));
+    expect(sample.open(QIODevice::ReadOnly), "sample JSON should open");
+    object = QJsonDocument::fromJson(sample.readAll()).object();
+    sample.close();
+    const QJsonObject validBase = object;
+    auto nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto duplicate = nodes.at(1).toObject();
+    duplicate.insert(QStringLiteral("id"), nodes.at(0).toObject().value(QStringLiteral("id")));
+    nodes.replace(1, duplicate);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(candidate.open(QIODevice::WriteOnly | QIODevice::Truncate),
+           "duplicate candidate should open for writing");
+    candidate.write(QJsonDocument(object).toJson());
+    candidate.close();
+    const auto duplicateError = editor.importJsonFile(candidateUrl);
+    expect(!duplicateError.value("ok").toBool() &&
+               duplicateError.value("location").toString() == QStringLiteral("$.nodes[1].id") &&
+               !editor.dirty(), "semantic error should identify the duplicate node");
+
+    expect(editor.edit(QStringLiteral("0"), QStringLiteral("images"), true,
+                       QStringLiteral("extension"), QString(), QStringLiteral("png, jpg"),
+                       QStringLiteral("MiB"), QStringLiteral("Draft/Only")),
+           "unsaved draft should be editable before a failed import");
+    const auto failedOverDraft = editor.importJsonFile(candidateUrl);
+    expect(!failedOverDraft.value("ok").toBool() && editor.dirty() &&
+               editor.detail(QStringLiteral("0")).value("destination").toString() ==
+                   QStringLiteral("Draft/Only"),
+           "failed import must preserve an existing unsaved draft");
+
+    object = validBase;
+    nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto unfinished = nodes.at(0).toObject();
+    unfinished.remove(QStringLiteral("destination"));
+    nodes.replace(0, unfinished);
+    object.insert(QStringLiteral("nodes"), nodes);
+    expect(candidate.open(QIODevice::WriteOnly | QIODevice::Truncate),
+           "unfinished candidate should open for writing");
+    candidate.write(QJsonDocument(object).toJson());
+    candidate.close();
+    const auto unfinishedError = editor.importJsonFile(candidateUrl);
+    expect(!unfinishedError.value("ok").toBool() &&
+               unfinishedError.value("location").toString() == QStringLiteral("규칙 ID: images") &&
+               editor.detail(QStringLiteral("0")).value("destination").toString() ==
+                   QStringLiteral("Draft/Only"),
+           "rule without a terminal should fail import before replacing the draft");
+
+    object = validBase;
+    nodes = object.value(QStringLiteral("nodes")).toArray();
+    auto image = nodes.at(0).toObject();
+    auto destination = image.value(QStringLiteral("destination")).toObject();
+    destination.insert(QStringLiteral("path"), QStringLiteral("Imported/Images"));
+    image.insert(QStringLiteral("destination"), destination);
+    nodes.replace(0, image);
+    object.insert(QStringLiteral("nodes"), nodes);
+    object.insert(QStringLiteral("globalOtherwise"), QJsonObject{
+        {QStringLiteral("path"), QStringLiteral("Unsorted")},
+        {QStringLiteral("collisionPolicy"), QStringLiteral("inherit")}});
+    expect(candidate.open(QIODevice::WriteOnly | QIODevice::Truncate),
+           "valid candidate should open for writing");
+    candidate.write(QJsonDocument(object).toJson());
+    candidate.close();
+    const auto imported = editor.importJsonFile(candidateUrl);
+    const auto storedBeforeSave = active.load();
+    expect(imported.value("ok").toBool() && editor.dirty() &&
+               editor.detail(QStringLiteral("0")).value("destination").toString() ==
+                   QStringLiteral("Imported/Images") &&
+               storedBeforeSave && storedBeforeSave.value().nodes[0].destination->relativePath ==
+                   std::filesystem::path(L"Pictures/{yyyy}/{MM}"),
+           "valid import should change only the editable draft");
+    const auto importedGraph = editor.graph();
+    expect(importedGraph.value("valid").toBool() &&
+               editor.importGraph(importedGraph.value("blocks").toList(),
+                                  importedGraph.value("edges").toList()),
+           "imported JSON should round-trip through the graph editor before saving");
+    expect(editor.save(), "imported draft should save only after explicit confirmation");
+    const auto storedAfterSave = active.load();
+    expect(storedAfterSave && storedAfterSave.value().nodes[0].destination->relativePath ==
+               std::filesystem::path(L"Imported/Images") &&
+               storedAfterSave.value().globalOtherwise &&
+               storedAfterSave.value().globalOtherwise->relativePath ==
+                   std::filesystem::path(L"Unsorted"),
+           "explicit save should apply the imported rules");
 }
 
 // 내부 가지와 지역·전체 예외를 저장할 수 있는지 확인하는 함수.
@@ -240,6 +363,7 @@ void testGraphRoundTripAndLayout() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testDraftAndSave();
+    testJsonFileImport();
     testNestedAndFallback();
     testGraphImport();
     testGraphRoundTripAndLayout();

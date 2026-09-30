@@ -6,6 +6,7 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QUrl>
 
 namespace nookbit {
 
@@ -26,6 +27,10 @@ public:
     RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                          QObject* parent, IRuleSetMigrator* migrator,
                          QString graphLayoutPath = {});
+    /// 외부 파일 검증 계약까지 받아 편집 초안을 만드는 생성자.
+    RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
+                         QObject* parent, IRuleSetMigrator* migrator,
+                         QString graphLayoutPath, IRuleSetFileReader* fileReader);
 
     /// 화면에 표시할 깊이 우선 규칙 목록을 반환하는 함수.
     [[nodiscard]] QVariantList nodes() const;
@@ -55,6 +60,8 @@ public:
     Q_INVOKABLE bool remove(const QString& path);
     /// 노드 화면의 연결과 입력을 검사한 뒤 편집 초안으로 변환하는 함수.
     Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
+    /// 외부 v3 JSON을 검증하고 성공한 경우에만 편집 초안으로 불러오는 함수.
+    Q_INVOKABLE QVariantMap importJsonFile(const QUrl& fileUrl);
     /// 현재 규칙 초안을 노드와 연결선으로 펼쳐 반환하는 함수.
     Q_INVOKABLE QVariantMap graph() const;
     /// 현재 노드 배치를 분류 규칙과 별도 파일에 저장하는 함수.
@@ -76,12 +83,14 @@ private:
     IRuleSetRepository& reader_;
     IRuleSetWriter& writer_;
     IRuleSetMigrator* migrator_;
+    IRuleSetFileReader* fileReader_;
     QString graphLayoutPath_;
     RuleSet draft_;
     QString message_;
     bool loaded_{false};
     bool legacyRules_{false};
     bool dirty_{false};
+    bool importedDraft_{false};
 };
 
 } // namespace nookbit

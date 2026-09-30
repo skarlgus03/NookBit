@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import QtQuick.Templates as T
 
 Item {
@@ -162,6 +163,8 @@ Item {
     property var copiedEdges: []
     property int pasteCount: 0
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
+    property string importErrorLocation: ""
+    property string importErrorReason: ""
     property var selectedBlock: selectedIds.length === 1 ? blockForId(selectedId) : null
 
     // 단일 선택을 만들고 상세 설정 대상을 맞추는 함수.
@@ -882,6 +885,14 @@ Item {
             ThemeButton {
                 text: page.darkMode ? qsTr("밝은 화면") : qsTr("어두운 화면")
                 onClicked: page.darkMode = !page.darkMode
+            }
+            ThemeButton {
+                text: qsTr("JSON 불러오기")
+                onClicked: {
+                    if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
+                        confirmImportReplace.open()
+                    else importFileDialog.open()
+                }
             }
             ThemeButton {
                 text: qsTr("전체 저장")
@@ -1729,6 +1740,100 @@ Item {
                         page.editorDraftReplaced()
                     }
                 }
+            }
+        }
+    }
+
+    FileDialog {
+        id: importFileDialog
+        title: qsTr("분류 규칙 JSON 불러오기")
+        nameFilters: [qsTr("JSON 파일 (*.json)")]
+        fileMode: FileDialog.OpenFile
+        onAccepted: {
+            const result = ruleEditor.importJsonFile(selectedFile)
+            if (!result.ok) {
+                page.importErrorLocation = result.location
+                page.importErrorReason = result.reason
+                importErrorDialog.open()
+                return
+            }
+            page.editorDraftReplaced()
+            page.loadGraphFromDraft()
+            page.statusText = qsTr("검증을 통과한 JSON을 편집 초안으로 불러왔어요. 전체 저장 전까지 현재 규칙은 바뀌지 않아요.")
+        }
+    }
+
+    Dialog {
+        id: confirmImportReplace
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 430)
+        title: qsTr("편집 중인 초안을 교체할까요?")
+        standardButtons: Dialog.NoButton
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: page.primaryText
+                text: qsTr("새 JSON이 검증에 성공하면 현재 미저장 초안을 교체합니다. 검증 실패나 파일 선택 취소 시에는 그대로 유지해요.")
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ThemeButton { text: qsTr("취소"); onClicked: confirmImportReplace.close() }
+                ThemeButton {
+                    text: qsTr("파일 선택")
+                    onClicked: {
+                        confirmImportReplace.close()
+                        importFileDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: importErrorDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 520)
+        title: qsTr("규칙 파일 검증 실패")
+        standardButtons: Dialog.Close
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("문제 위치: %1").arg(page.importErrorLocation)
+                color: page.primaryText
+                wrapMode: Text.WrapAnywhere
+                font.bold: true
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("원인: %1").arg(page.importErrorReason)
+                color: page.primaryText
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("기존 규칙과 편집 초안은 변경하지 않았어요.")
+                color: page.mutedText
+                wrapMode: Text.WordWrap
             }
         }
     }

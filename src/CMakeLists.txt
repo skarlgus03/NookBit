@@ -43,7 +43,7 @@ else()
 endif()
 
 if(NOOKBIT_BUILD_QT_APP)
-  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Qml Quick Sql)
+  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Qml Quick QuickDialogs2 Sql)
 
   if(Qt6_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
@@ -100,8 +100,22 @@ if(NOOKBIT_BUILD_QT_APP)
       Qt6::Gui
       Qt6::Qml
       Qt6::Quick
+      Qt6::QuickDialogs2
       Qt6::Sql
     )
+    if(WIN32)
+      find_program(NOOKBIT_WINDEPLOYQT NAMES windeployqt windeployqt6
+        HINTS "${Qt6_DIR}/../../../bin")
+    endif()
+    if(NOOKBIT_WINDEPLOYQT)
+      add_custom_command(TARGET nookbit POST_BUILD
+        COMMAND "${NOOKBIT_WINDEPLOYQT}"
+          $<$<CONFIG:Debug>:--debug>$<$<NOT:$<CONFIG:Debug>>:--release>
+          --no-translations --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/presentation/qml
+          $<TARGET_FILE:nookbit>
+        COMMENT "Deploying Qt runtime and QML imports for NookBit"
+        VERBATIM)
+    endif()
   else()
     message(STATUS "Qt 6.5+ not found: building the tested C++ core only")
   endif()
