@@ -12,7 +12,7 @@ ApplicationWindow {
     property bool globalFormDirty: false
     readonly property bool editorDark: currentPage === 1 && ruleEditorPage.darkMode
 
-    // 탐색 버튼의 배경과 글자색을 테마에 맞춰 함께 그리는 버튼.
+    // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
     component NavigationButton: Button {
         id: navButton
         contentItem: Text {
@@ -25,9 +25,12 @@ ApplicationWindow {
         background: Rectangle {
             radius: 7
             color: root.editorDark
-                   ? (navButton.highlighted ? "#3e5270" : navButton.hovered ? "#364357" : "#2b3546")
-                   : (navButton.highlighted ? "#dce9db" : navButton.hovered ? "#e6eee5" : "#f3f5f1")
-            border.color: root.editorDark ? "#3d4757" : "#d9dfd4"
+                   ? (navButton.highlighted ? "#3e5270" : "#2b3546")
+                   : (navButton.highlighted ? "#dce9db" : "#f3f5f1")
+            border.color: navButton.hovered || navButton.visualFocus || navButton.down
+                          ? (root.editorDark ? "#86aad6" : "#7da58a")
+                          : (root.editorDark ? "#3d4757" : "#d9dfd4")
+            border.width: navButton.hovered || navButton.visualFocus || navButton.down ? 2 : 1
         }
     }
 

@@ -19,7 +19,7 @@ Item {
     readonly property color gridColor: darkMode ? "#2a3241" : "#e8ede7"
     readonly property color nodeColor: darkMode ? "#252d3b" : "#ffffff"
     readonly property color buttonColor: darkMode ? "#303b4d" : "#f3f5f1"
-    readonly property color buttonHoverColor: darkMode ? "#3d4c62" : "#e6eee5"
+    readonly property color buttonFocusColor: darkMode ? "#86aad6" : "#7da58a"
     palette.window: pageColor
     palette.windowText: primaryText
     palette.button: buttonColor
@@ -29,7 +29,7 @@ Item {
     palette.highlight: darkMode ? "#55769f" : "#80a88a"
     palette.highlightedText: "#ffffff"
 
-    // 운영체제 기본 버튼 색과 글자색이 엇갈리지 않게 그리는 버튼.
+    // 마우스를 올려도 배경과 글자색은 유지하고 테두리만 강조하는 버튼.
     component ThemeButton: Button {
         id: themedButton
         contentItem: Text {
@@ -43,8 +43,12 @@ Item {
         }
         background: Rectangle {
             radius: 7
-            color: themedButton.down || themedButton.hovered ? page.buttonHoverColor : page.buttonColor
-            border.color: page.borderColor
+            color: page.buttonColor
+            border.color: themedButton.enabled &&
+                          (themedButton.hovered || themedButton.visualFocus || themedButton.down)
+                          ? page.buttonFocusColor : page.borderColor
+            border.width: themedButton.enabled &&
+                          (themedButton.hovered || themedButton.visualFocus || themedButton.down) ? 2 : 1
         }
     }
     property var blocks: [
