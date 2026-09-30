@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Templates as T
 
 ApplicationWindow {
     id: root
@@ -13,8 +14,10 @@ ApplicationWindow {
     readonly property bool editorDark: currentPage === 1 && ruleEditorPage.darkMode
 
     // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
-    component NavigationButton: Button {
+    component NavigationButton: T.Button {
         id: navButton
+        padding: 8
+        implicitHeight: Math.max(36, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: navButton.text
             font: navButton.font

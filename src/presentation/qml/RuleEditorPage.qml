@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Templates as T
 
 Item {
     id: page
@@ -30,8 +31,11 @@ Item {
     palette.highlightedText: "#ffffff"
 
     // 마우스를 올려도 배경과 글자색은 유지하고 테두리만 강조하는 버튼.
-    component ThemeButton: Button {
+    component ThemeButton: T.Button {
         id: themedButton
+        padding: 8
+        implicitWidth: Math.max(80, contentItem.implicitWidth + leftPadding + rightPadding)
+        implicitHeight: Math.max(36, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: themedButton.text
             font: themedButton.font
