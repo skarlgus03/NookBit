@@ -12,7 +12,7 @@ Item {
     property int fontPresetIndex: 1
     readonly property int nodeFontSize: [11, 13, 16][fontPresetIndex]
     readonly property int blockWidth: [206, 226, 262][fontPresetIndex]
-    readonly property int blockHeight: [102, 112, 132][fontPresetIndex]
+    readonly property int blockHeight: [82, 90, 104][fontPresetIndex]
     property bool darkMode: false
     readonly property color pageColor: darkMode ? "#161a22" : "#f5f5f2"
     readonly property color surfaceColor: darkMode ? "#202633" : "#ffffff"
@@ -437,6 +437,27 @@ Item {
         lineCanvas.requestPaint()
     }
 
+    // 선택한 일반 노드를 세로 한 줄에 고르게 배치하되 규칙 검사 순서는 바꾸지 않는 함수.
+    function alignSelectedVertically() {
+        const chosen = blocks.filter(block => selectedIds.includes(block.id) && block.type !== "start")
+        if (chosen.length < 2) {
+            statusText = qsTr("세로 정렬할 블록을 두 개 이상 선택해 주세요.")
+            return
+        }
+        chosen.sort((a, b) => a.y - b.y || a.id - b.id)
+        const xs = chosen.map(block => block.x).sort((a, b) => a - b)
+        const targetX = Math.round(xs[Math.floor(xs.length / 2)])
+        const topY = Math.min(...chosen.map(block => block.y))
+        const positions = ({})
+        chosen.forEach((block, index) => {
+            positions[block.id] = { x: targetX, y: topY + index * (blockHeight + 24) }
+        })
+        blocks = blocks.map(block => positions[block.id]
+                            ? Object.assign({}, block, positions[block.id]) : block)
+        statusText = qsTr("선택한 블록을 세로로 정렬했어요. 규칙 검사 순서는 그대로예요.")
+        lineCanvas.requestPaint()
+    }
+
     // 선택한 블록의 실제 조건 입력값을 그래프에서 바꾸는 함수.
     function updateValue(id, value) {
         blocks = blocks.map(block => block.id === id
@@ -820,6 +841,11 @@ Item {
                 onClicked: page.fitAllNodes()
             }
             ThemeButton {
+                text: qsTr("선택 세로 정렬")
+                enabled: page.selectedIds.filter(id => id !== 1).length >= 2
+                onClicked: page.alignSelectedVertically()
+            }
+            ThemeButton {
                 text: qsTr("글씨: %1").arg([qsTr("작게"), qsTr("보통"), qsTr("크게")][page.fontPresetIndex])
                 onClicked: page.fontPresetIndex = (page.fontPresetIndex + 1) % 3
             }
@@ -832,7 +858,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
+            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
             color: page.mutedText
             font.pixelSize: 12
             wrapMode: Text.WordWrap
@@ -864,7 +890,10 @@ Item {
                             page.removeSelectedBlock()
                             event.accepted = true
                         } else if (event.modifiers & Qt.ControlModifier) {
-                            if (event.key === Qt.Key_C) {
+                            if ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_L) {
+                                page.alignSelectedVertically()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_C) {
                                 page.copySelectedBlocks()
                                 event.accepted = true
                             } else if (event.key === Qt.Key_V) {
@@ -1058,7 +1087,7 @@ Item {
                                     visible: modelData.type !== "start"
                                     x: 1; y: 1
                                     width: parent.width - 2
-                                    height: Math.round(page.blockHeight * 0.33)
+                                    height: Math.round(page.blockHeight * 0.35)
                                     radius: 11
                                     color: page.colorFor(modelData.type)
                                     Label {
@@ -1075,8 +1104,9 @@ Item {
                                     }
                                     Rectangle {
                                         visible: page.orderFor(modelData.id) > 0
-                                        x: 9; y: 6
-                                        width: 25; height: 25
+                                        x: 9
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 25; height: 24
                                         radius: 7
                                         color: "#ffffff"
                                         opacity: 0.94
@@ -1113,7 +1143,7 @@ Item {
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.top: cardHeader.bottom
-                                    anchors.margins: 12
+                                    anchors.margins: 8
                                     text: page.displayValue(modelData)
                                     elide: Text.ElideRight
                                     font.pixelSize: page.nodeFontSize
@@ -1123,7 +1153,7 @@ Item {
                                     visible: modelData.type !== "start"
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
-                                    anchors.margins: 10
+                                    anchors.margins: 8
                                     text: modelData.type === "destination" ? qsTr("도착")
                                           : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
                                     font.pixelSize: Math.max(10, page.nodeFontSize - 2)
