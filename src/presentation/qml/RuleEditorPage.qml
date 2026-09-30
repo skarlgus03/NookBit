@@ -58,6 +58,68 @@ Item {
                           (themedButton.hovered || themedButton.visualFocus || themedButton.down) ? 2 : 1
         }
     }
+
+    // 테마 색을 유지하며 열거형 선택지를 하나의 드롭다운으로 보여주는 컨트롤.
+    component ThemeComboBox: T.ComboBox {
+        id: themedCombo
+        implicitWidth: 104
+        implicitHeight: 36
+        padding: 8
+        contentItem: Text {
+            leftPadding: 10
+            rightPadding: 28
+            text: themedCombo.displayText
+            color: page.primaryText
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        indicator: Text {
+            x: themedCombo.width - width - 11
+            anchors.verticalCenter: parent.verticalCenter
+            text: "▾"
+            font.pixelSize: 15
+            color: page.primaryText
+        }
+        background: Rectangle {
+            radius: 7
+            color: page.buttonColor
+            border.color: themedCombo.hovered || themedCombo.visualFocus || themedCombo.pressed
+                          ? page.buttonFocusColor : page.borderColor
+            border.width: themedCombo.hovered || themedCombo.visualFocus || themedCombo.pressed ? 2 : 1
+        }
+        delegate: T.ItemDelegate {
+            width: themedCombo.width - 2
+            height: 34
+            text: themedCombo.textAt(index)
+            highlighted: themedCombo.highlightedIndex === index
+            contentItem: Text {
+                text: parent.text
+                color: page.primaryText
+                leftPadding: 10
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                color: parent.hovered || parent.highlighted
+                       ? (page.darkMode ? "#394b62" : "#e5eee7") : page.surfaceColor
+            }
+        }
+        popup: T.Popup {
+            y: themedCombo.height + 2
+            width: themedCombo.width
+            implicitHeight: themedCombo.count * 34 + 2
+            padding: 1
+            contentItem: ListView {
+                clip: true
+                model: themedCombo.delegateModel
+                currentIndex: themedCombo.highlightedIndex
+            }
+            background: Rectangle {
+                radius: 7
+                color: page.surfaceColor
+                border.color: page.borderColor
+            }
+        }
+    }
     property var blocks: [
         { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
         { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MiB" },
@@ -869,19 +931,11 @@ Item {
                 onClicked: page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2)
             }
             Label { text: qsTr("연결선 모양"); color: page.primaryText }
-            ThemeButton {
-                text: qsTr("곡선")
-                font.bold: page.connectionStyle === 0
-                onClicked: {
-                    page.connectionStyle = 0
-                    lineCanvas.requestPaint()
-                }
-            }
-            ThemeButton {
-                text: qsTr("직선")
-                font.bold: page.connectionStyle === 1
-                onClicked: {
-                    page.connectionStyle = 1
+            ThemeComboBox {
+                model: [qsTr("곡선"), qsTr("직선")]
+                currentIndex: page.connectionStyle
+                onActivated: (index) => {
+                    page.connectionStyle = index
                     lineCanvas.requestPaint()
                 }
             }
@@ -894,9 +948,11 @@ Item {
                 enabled: page.selectedIds.filter(id => id !== 1).length >= 2
                 onClicked: page.alignSelectedVertically()
             }
-            ThemeButton {
-                text: qsTr("글씨: %1").arg([qsTr("작게"), qsTr("보통"), qsTr("크게")][page.fontPresetIndex])
-                onClicked: page.fontPresetIndex = (page.fontPresetIndex + 1) % 3
+            Label { text: qsTr("글씨 크기"); color: page.primaryText }
+            ThemeComboBox {
+                model: [qsTr("작게"), qsTr("보통"), qsTr("크게")]
+                currentIndex: page.fontPresetIndex
+                onActivated: (index) => page.fontPresetIndex = index
             }
             Item { Layout.fillWidth: true }
             Label {
