@@ -68,6 +68,10 @@ Item {
         { from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }
     ]
     property var livePositions: ({})
+    property bool snapXActive: false
+    property bool snapYActive: false
+    property real snapGuideX: 0
+    property real snapGuideY: 0
     property int nextId: 5
     property bool graphDirty: false
     property bool stagedGraph: false
@@ -434,6 +438,51 @@ Item {
                                 y: Math.round(positions[block.id].y)
                             }) : block)
         livePositions = ({})
+        snapXActive = false
+        snapYActive = false
+        lineCanvas.requestPaint()
+    }
+
+    // 드래그 중 부모와 높이, 형제와 가로 위치가 가까우면 선택 묶음을 함께 붙이는 함수.
+    function updateDraggedPositions(primaryId, starts, dx, dy, snapEnabled) {
+        let adjustedX = dx
+        let adjustedY = dy
+        snapXActive = false
+        snapYActive = false
+        const origin = starts[primaryId]
+        const incoming = edges.find(edge => edge.to === primaryId)
+        if (snapEnabled && origin && incoming) {
+            const threshold = 12 / zoom
+            const parent = blockForId(incoming.from)
+            if (parent && !selectedIds.includes(parent.id)) {
+                const parentY = positionFor(parent).y
+                if (Math.abs(origin.y + dy - parentY) <= threshold) {
+                    adjustedY = parentY - origin.y
+                    snapGuideY = parentY
+                    snapYActive = true
+                }
+            }
+            let closestX = threshold
+            for (const edge of edges) {
+                if (edge.from !== incoming.from || selectedIds.includes(edge.to)) continue
+                const sibling = blockForId(edge.to)
+                if (!sibling) continue
+                const siblingX = positionFor(sibling).x
+                const distance = Math.abs(origin.x + dx - siblingX)
+                if (distance <= closestX) {
+                    closestX = distance
+                    adjustedX = siblingX - origin.x
+                    snapGuideX = siblingX
+                    snapXActive = true
+                }
+            }
+        }
+        const next = ({})
+        for (const id of selectedIds) {
+            const start = starts[id]
+            if (start) next[id] = { x: start.x + adjustedX, y: start.y + adjustedY }
+        }
+        livePositions = next
         lineCanvas.requestPaint()
     }
 
@@ -858,7 +907,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
+            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · 드래그: 부모/형제 스냅 · Ctrl+드래그: 스냅 끄기 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
             color: page.mutedText
             font.pixelSize: 12
             wrapMode: Text.WordWrap
@@ -949,6 +998,24 @@ Item {
                                     context.moveTo(0, y)
                                     context.lineTo(width, y)
                                     context.stroke()
+                                }
+                                if (page.snapXActive || page.snapYActive) {
+                                    context.strokeStyle = page.darkMode ? "#6ed5c1" : "#238b79"
+                                    context.lineWidth = 2
+                                    if (page.snapXActive) {
+                                        const guideX = page.screenPoint(page.snapGuideX, 0).x
+                                        context.beginPath()
+                                        context.moveTo(guideX, 0)
+                                        context.lineTo(guideX, height)
+                                        context.stroke()
+                                    }
+                                    if (page.snapYActive) {
+                                        const guideY = page.screenPoint(0, page.snapGuideY + page.blockHeight / 2).y
+                                        context.beginPath()
+                                        context.moveTo(0, guideY)
+                                        context.lineTo(width, guideY)
+                                        context.stroke()
+                                    }
                                 }
                                 for (let index = 0; index < page.edges.length; ++index) {
                                     const edge = page.edges[index]
@@ -1172,6 +1239,8 @@ Item {
                                     onPressed: (mouse) => {
                                         canvasViewport.forceActiveFocus()
                                         moved = false
+                                        page.snapXActive = false
+                                        page.snapYActive = false
                                         dragAllowed = !(mouse.modifiers & Qt.ShiftModifier)
                                         if (!dragAllowed) {
                                             page.toggleSelection(modelData.id)
@@ -1198,14 +1267,8 @@ Item {
                                         const dy = point.y - pressWorldY
                                         if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return
                                         moved = true
-                                        const next = ({})
-                                        for (const id of page.selectedIds) {
-                                            const start = startPositions[id]
-                                            if (!start) continue
-                                            next[id] = { x: start.x + dx, y: start.y + dy }
-                                        }
-                                        page.livePositions = next
-                                        lineCanvas.requestPaint()
+                                        page.updateDraggedPositions(modelData.id, startPositions, dx, dy,
+                                                                    !(mouse.modifiers & Qt.ControlModifier))
                                     }
                                     onReleased: {
                                         if (moved) page.commitDraggedBlocks()
@@ -1215,6 +1278,8 @@ Item {
                                     }
                                     onCanceled: {
                                         page.livePositions = ({})
+                                        page.snapXActive = false
+                                        page.snapYActive = false
                                         lineCanvas.requestPaint()
                                         dragAllowed = false
                                     }
