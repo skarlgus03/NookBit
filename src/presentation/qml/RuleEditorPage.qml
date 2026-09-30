@@ -1007,17 +1007,58 @@ Item {
                                 height: page.blockHeight
                                 scale: page.zoom
                                 transformOrigin: Item.TopLeft
-                                radius: 12
-                                color: page.nodeColor
+                                radius: modelData.type === "start" ? height / 2 : 12
+                                color: modelData.type === "start"
+                                       ? (page.darkMode ? "#214b45" : "#e1f2e8") : page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
-                                border.width: page.isRootBlock(modelData.id) ? 4
+                                border.width: modelData.type === "start"
+                                    ? (page.selectedIds.includes(modelData.id) ? 5 : 3)
+                                    : page.isRootBlock(modelData.id) ? 4
                                     : page.selectedIds.includes(modelData.id) ? 3 : 1
-                                border.color: page.isRootBlock(modelData.id) ? page.rootBorderColor
+                                border.color: modelData.type === "start" ? "#55b89a"
+                                    : page.isRootBlock(modelData.id) ? page.rootBorderColor
                                     : page.selectedIds.includes(modelData.id)
                                       ? page.colorFor(modelData.type) : page.borderColor
 
+                                // 유일한 파일 입력은 조건 카드와 구별되는 캡슐형 시작점으로 표시한다.
+                                Row {
+                                    visible: modelData.type === "start"
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 18
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 11
+                                    Rectangle {
+                                        width: 42
+                                        height: 42
+                                        radius: 21
+                                        color: page.darkMode ? "#55b89a" : "#317b61"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: "▶"
+                                            font.pixelSize: page.nodeFontSize + 5
+                                            color: "#ffffff"
+                                        }
+                                    }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 4
+                                        Label {
+                                            text: qsTr("파일 입력")
+                                            font.bold: true
+                                            font.pixelSize: page.nodeFontSize + 3
+                                            color: page.darkMode ? "#f2fff9" : "#21523f"
+                                        }
+                                        Label {
+                                            text: qsTr("모든 분류의 시작점")
+                                            font.pixelSize: Math.max(10, page.nodeFontSize - 2)
+                                            color: page.darkMode ? "#b7dece" : "#477663"
+                                        }
+                                    }
+                                }
                                 Rectangle {
                                     id: cardHeader
+                                    visible: modelData.type !== "start"
                                     x: 1; y: 1
                                     width: parent.width - 2
                                     height: Math.round(page.blockHeight * 0.33)
@@ -1049,6 +1090,7 @@ Item {
                                     }
                                 }
                                 Label {
+                                    visible: modelData.type !== "start"
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.top: cardHeader.bottom
@@ -1059,6 +1101,7 @@ Item {
                                     color: page.primaryText
                                 }
                                 Label {
+                                    visible: modelData.type !== "start"
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     anchors.margins: 10
@@ -1152,13 +1195,14 @@ Item {
                                 Rectangle {
                                     id: outputPort
                                     visible: modelData.type !== "destination" && modelData.type !== "exclude"
-                                    x: parent.width - 8
-                                    y: parent.height / 2 - 8
-                                    width: 16; height: 16
-                                    radius: 8
+                                    x: parent.width - width / 2
+                                    y: parent.height / 2 - height / 2
+                                    width: modelData.type === "start" ? 22 : 16
+                                    height: width
+                                    radius: width / 2
                                     color: page.hasOutgoing(modelData.id)
                                            ? page.colorFor(modelData.type) : page.nodeColor
-                                    border.width: 2
+                                    border.width: modelData.type === "start" ? 3 : 2
                                     border.color: page.colorFor(modelData.type)
                                     MouseArea {
                                         anchors.fill: parent
@@ -1287,6 +1331,13 @@ Item {
                               ? qsTr("%1개 블록 선택됨 · 함께 이동하거나 Delete로 제거할 수 있어요.").arg(page.selectedIds.length)
                               : page.selectedBlock ? page.titleFor(page.selectedBlock.type)
                                                    : qsTr("블록을 선택하세요")
+                        wrapMode: Text.WordWrap
+                        color: page.mutedText
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "start"
+                        text: qsTr("파일 입력은 하나만 존재하는 시작점이에요. 위치를 옮기거나 오른쪽 연결점에서 조건을 이어 갈 수 있어요.")
                         wrapMode: Text.WordWrap
                         color: page.mutedText
                     }
