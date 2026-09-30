@@ -69,6 +69,12 @@ Item {
     property bool graphDirty: false
     property bool stagedGraph: false
     property int selectedId: -1
+    property var selectedIds: []
+    property bool marqueeActive: false
+    property real marqueeStartX: 0
+    property real marqueeStartY: 0
+    property real marqueeEndX: 0
+    property real marqueeEndY: 0
     property int connectingFrom: -1
     property bool draggingConnection: false
     property real pointerX: 0
@@ -76,13 +82,47 @@ Item {
     property real zoom: 1.0
     property int connectionStyle: 0
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
-    property var selectedBlock: blockForId(selectedId)
+    property var selectedBlock: selectedIds.length === 1 ? blockForId(selectedId) : null
+
+    // 단일 선택을 만들고 상세 설정 대상을 맞추는 함수.
+    function selectOnly(id) {
+        selectedIds = id < 0 ? [] : [id]
+        selectedId = id
+    }
+
+    // Shift+클릭으로 노드를 다중 선택에 더하거나 빼는 함수.
+    function toggleSelection(id) {
+        const next = selectedIds.slice()
+        const index = next.indexOf(id)
+        if (index < 0) next.push(id)
+        else next.splice(index, 1)
+        selectedIds = next
+        selectedId = next.length === 1 ? next[0] : -1
+    }
+
+    // 선택 박스에 닿는 노드를 고르고 Shift를 누르면 기존 선택과 합치는 함수.
+    function finishMarquee(addToSelection) {
+        const left = Math.min(marqueeStartX, marqueeEndX)
+        const right = Math.max(marqueeStartX, marqueeEndX)
+        const top = Math.min(marqueeStartY, marqueeEndY)
+        const bottom = Math.max(marqueeStartY, marqueeEndY)
+        const hits = blocks.filter(block => {
+            const pos = positionFor(block)
+            return pos.x < right && pos.x + blockWidth > left &&
+                   pos.y < bottom && pos.y + blockHeight > top
+        }).map(block => block.id)
+        const next = addToSelection ? selectedIds.concat(hits.filter(id => !selectedIds.includes(id))) : hits
+        selectedIds = next
+        selectedId = next.length === 1 ? next[0] : -1
+        marqueeActive = false
+    }
 
     // 현재 편집 초안의 규칙을 노드와 선으로 다시 펼치는 함수.
     function loadGraphFromDraft() {
         const restored = ruleEditor.graph()
         if (!restored.valid) {
-            selectedId = -1
+            selectOnly(-1)
+            marqueeActive = false
             blocks = [{ id: 1, type: "start", x: 70, y: 220, value: "정리할 파일" }]
             edges = []
             livePositions = ({})
@@ -93,7 +133,8 @@ Item {
             lineCanvas.requestPaint()
             return
         }
-        selectedId = -1
+        selectOnly(-1)
+        marqueeActive = false
         connectingFrom = -1
         draggingConnection = false
         livePositions = ({})
@@ -214,16 +255,6 @@ Item {
                                                    worldY * nextZoom - viewportY))
     }
 
-    // 블록을 끄는 동안 선도 즉시 따라오게 화면 위치를 기록하는 함수.
-    function noteLivePosition(id, x, y) {
-        if (id === undefined)
-            return
-        const next = Object.assign({}, livePositions)
-        next[id] = { x: x, y: y }
-        livePositions = next
-        lineCanvas.requestPaint()
-    }
-
     // 종류에 따라 블록 제목을 정하는 함수.
     function titleFor(type) {
         switch (type) {
@@ -283,19 +314,20 @@ Item {
             unit: "MiB"
         }
         blocks = blocks.concat([block])
-        selectedId = block.id
+        selectOnly(block.id)
         statusText = qsTr("블록을 추가했어요. 블록을 끌어 위치를 바꾸고, 오른쪽 점을 왼쪽 점에 연결해 보세요.")
         lineCanvas.requestPaint()
     }
 
-    // 드래그가 끝난 블록의 위치를 임시 그래프에 반영하는 함수.
-    function moveBlock(id, x, y) {
-        blocks = blocks.map(block => block.id === id
-                            ? Object.assign({}, block, { x: Math.round(x), y: Math.round(y) })
-                            : block)
-        const next = Object.assign({}, livePositions)
-        delete next[id]
-        livePositions = next
+    // 선택한 노드들의 드래그 위치를 한 번에 임시 그래프에 반영하는 함수.
+    function commitDraggedBlocks() {
+        const positions = livePositions
+        blocks = blocks.map(block => positions[block.id]
+                            ? Object.assign({}, block, {
+                                x: Math.round(positions[block.id].x),
+                                y: Math.round(positions[block.id].y)
+                            }) : block)
+        livePositions = ({})
         lineCanvas.requestPaint()
     }
 
@@ -447,29 +479,30 @@ Item {
         lineCanvas.requestPaint()
     }
 
-    // 선택한 블록과 이어진 선을 임시 그래프에서 제거하는 함수.
+    // 선택한 블록들과 이어진 선을 임시 그래프에서 함께 제거하는 함수.
     function removeSelectedBlock() {
-        if (selectedId < 0 || selectedId === 1)
+        const removed = selectedIds.filter(id => id !== 1)
+        if (removed.length === 0)
             return
-        const removed = selectedId
-        blocks = blocks.filter(block => block.id !== removed)
-        edges = edges.filter(edge => edge.from !== removed && edge.to !== removed)
-        selectedId = -1
-        if (connectingFrom === removed)
+        blocks = blocks.filter(block => !removed.includes(block.id))
+        edges = edges.filter(edge => !removed.includes(edge.from) && !removed.includes(edge.to))
+        selectOnly(-1)
+        if (removed.includes(connectingFrom))
             connectingFrom = -1
         draggingConnection = false
         const next = Object.assign({}, livePositions)
-        delete next[removed]
+        for (const id of removed) delete next[id]
         livePositions = next
         statusText = qsTr("블록과 연결선을 화면에서 제거했어요.")
         lineCanvas.requestPaint()
     }
 
-    // 선택한 블록으로 들어오거나 나가는 선만 제거하는 함수.
+    // 선택한 블록들로 들어오거나 나가는 선만 제거하는 함수.
     function disconnectSelectedBlock() {
-        if (selectedId < 0)
+        if (selectedIds.length === 0)
             return
-        edges = edges.filter(edge => edge.from !== selectedId && edge.to !== selectedId)
+        edges = edges.filter(edge => !selectedIds.includes(edge.from) &&
+                                     !selectedIds.includes(edge.to))
         connectingFrom = -1
         draggingConnection = false
         statusText = qsTr("선택한 블록의 연결선을 해제했어요.")
@@ -487,7 +520,7 @@ Item {
         edges = [{ from: 1, to: 2 }, { from: 2, to: 3 }, { from: 3, to: 4 }]
         nextId = 5
         livePositions = ({})
-        selectedId = -1
+        selectOnly(-1)
         connectingFrom = -1
         draggingConnection = false
         zoom = 1.0
@@ -628,7 +661,7 @@ Item {
             }
             Item { Layout.fillWidth: true }
             Label {
-                text: qsTr("빈 곳 드래그: 이동  ·  휠: 확대/축소  ·  %1%").arg(Math.round(page.zoom * 100))
+                text: qsTr("좌드래그: 선택  ·  우드래그: 화면 이동  ·  Shift+클릭: 추가 선택  ·  휠: 확대/축소  ·  %1%").arg(Math.round(page.zoom * 100))
                 color: page.mutedText
             }
         }
@@ -653,6 +686,7 @@ Item {
                     contentWidth: canvasSurface.width * page.zoom
                     contentHeight: canvasSurface.height * page.zoom
                     boundsBehavior: Flickable.StopAtBounds
+                    interactive: false
 
                     WheelHandler {
                         target: null
@@ -715,22 +749,50 @@ Item {
                             }
                         }
 
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            onPressed: (mouse) => {
+                                page.marqueeStartX = mouse.x
+                                page.marqueeStartY = mouse.y
+                                page.marqueeEndX = mouse.x
+                                page.marqueeEndY = mouse.y
+                                page.marqueeActive = true
+                            }
+                            onPositionChanged: (mouse) => {
+                                if (!pressed) return
+                                page.marqueeEndX = mouse.x
+                                page.marqueeEndY = mouse.y
+                            }
+                            onReleased: (mouse) => {
+                                page.marqueeEndX = mouse.x
+                                page.marqueeEndY = mouse.y
+                                if (Math.abs(mouse.x - page.marqueeStartX) < 4 &&
+                                    Math.abs(mouse.y - page.marqueeStartY) < 4) {
+                                    if (!(mouse.modifiers & Qt.ShiftModifier)) page.selectOnly(-1)
+                                    page.marqueeActive = false
+                                } else {
+                                    page.finishMarquee((mouse.modifiers & Qt.ShiftModifier) !== 0)
+                                }
+                            }
+                            onCanceled: page.marqueeActive = false
+                        }
+
                         Repeater {
                             model: page.blocks
                             delegate: Rectangle {
                                 id: blockCard
                                 required property var modelData
-                                x: modelData.x
-                                y: modelData.y
+                                x: page.positionFor(modelData).x
+                                y: page.positionFor(modelData).y
                                 width: page.blockWidth
                                 height: page.blockHeight
                                 radius: 12
                                 color: page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
-                                border.width: page.selectedId === modelData.id ? 2 : 1
-                                border.color: page.selectedId === modelData.id ? page.colorFor(modelData.type) : page.borderColor
-                                onXChanged: page.noteLivePosition(modelData.id, x, y)
-                                onYChanged: page.noteLivePosition(modelData.id, x, y)
+                                border.width: page.selectedIds.includes(modelData.id) ? 3 : 1
+                                border.color: page.selectedIds.includes(modelData.id) ? page.colorFor(modelData.type) : page.borderColor
 
                                 Rectangle {
                                     id: cardHeader
@@ -781,19 +843,63 @@ Item {
                                     color: page.mutedText
                                 }
                                 MouseArea {
+                                    id: blockDragArea
                                     anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton
                                     preventStealing: true
-                                    drag.target: blockCard
-                                    drag.minimumX: 20
-                                    drag.maximumX: canvasSurface.width - blockCard.width - 20
-                                    drag.minimumY: 20
-                                    drag.maximumY: canvasSurface.height - blockCard.height - 20
-                                    onPressed: page.selectedId = modelData.id
-                                    onClicked: page.selectedId = modelData.id
+                                    property real pressWorldX: 0
+                                    property real pressWorldY: 0
+                                    property var startPositions: ({})
+                                    property bool dragAllowed: false
+                                    property bool moved: false
+                                    onPressed: (mouse) => {
+                                        moved = false
+                                        dragAllowed = !(mouse.modifiers & Qt.ShiftModifier)
+                                        if (!dragAllowed) {
+                                            page.toggleSelection(modelData.id)
+                                            return
+                                        }
+                                        if (!page.selectedIds.includes(modelData.id))
+                                            page.selectOnly(modelData.id)
+                                        const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                        pressWorldX = point.x
+                                        pressWorldY = point.y
+                                        const starts = ({})
+                                        for (const id of page.selectedIds) {
+                                            const block = page.blockForId(id)
+                                            if (block) starts[id] = { x: block.x, y: block.y }
+                                        }
+                                        startPositions = starts
+                                    }
+                                    onPositionChanged: (mouse) => {
+                                        if (!pressed || !dragAllowed) return
+                                        const point = mapToItem(canvasSurface, mouse.x, mouse.y)
+                                        const dx = point.x - pressWorldX
+                                        const dy = point.y - pressWorldY
+                                        if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return
+                                        moved = true
+                                        const next = ({})
+                                        for (const id of page.selectedIds) {
+                                            const start = startPositions[id]
+                                            if (!start) continue
+                                            next[id] = {
+                                                x: Math.max(20, Math.min(canvasSurface.width - page.blockWidth - 20, start.x + dx)),
+                                                y: Math.max(20, Math.min(canvasSurface.height - page.blockHeight - 20, start.y + dy))
+                                            }
+                                        }
+                                        page.livePositions = next
+                                        lineCanvas.requestPaint()
+                                    }
                                     onReleased: {
-                                        if (Math.round(blockCard.x) !== modelData.x ||
-                                            Math.round(blockCard.y) !== modelData.y)
-                                            page.moveBlock(modelData.id, blockCard.x, blockCard.y)
+                                        if (moved) page.commitDraggedBlocks()
+                                        else if (dragAllowed && page.selectedIds.length > 1)
+                                            page.selectOnly(modelData.id)
+                                        dragAllowed = false
+                                    }
+                                    onCanceled: {
+                                        page.livePositions = ({})
+                                        lineCanvas.requestPaint()
+                                        dragAllowed = false
                                     }
                                 }
                                 Rectangle {
@@ -814,7 +920,7 @@ Item {
                                             if (page.connectingFrom >= 0)
                                                 page.connectBlocks(page.connectingFrom, modelData.id)
                                             else
-                                                page.selectedId = modelData.id
+                                                page.selectOnly(modelData.id)
                                         }
                                     }
                                 }
@@ -857,6 +963,35 @@ Item {
                                 }
                             }
                         }
+
+                        Rectangle {
+                            visible: page.marqueeActive
+                            x: Math.min(page.marqueeStartX, page.marqueeEndX)
+                            y: Math.min(page.marqueeStartY, page.marqueeEndY)
+                            width: Math.abs(page.marqueeEndX - page.marqueeStartX)
+                            height: Math.abs(page.marqueeEndY - page.marqueeStartY)
+                            color: page.darkMode ? "#335b85b8" : "#3380a88a"
+                            border.color: page.buttonFocusColor
+                            border.width: 2
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    preventStealing: true
+                    property real lastX: 0
+                    property real lastY: 0
+                    onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) return
+                        canvasFlick.contentX = Math.max(0, Math.min(canvasFlick.contentWidth - canvasFlick.width,
+                                                                     canvasFlick.contentX + lastX - mouse.x))
+                        canvasFlick.contentY = Math.max(0, Math.min(canvasFlick.contentHeight - canvasFlick.height,
+                                                                     canvasFlick.contentY + lastY - mouse.y))
+                        lastX = mouse.x
+                        lastY = mouse.y
                     }
                 }
             }
@@ -886,8 +1021,10 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: page.selectedBlock ? page.titleFor(page.selectedBlock.type)
-                                                 : qsTr("블록을 선택하세요")
+                        text: page.selectedIds.length > 1
+                              ? qsTr("%1개 블록 선택됨 · 함께 이동하거나 연결 해제·제거할 수 있어요.").arg(page.selectedIds.length)
+                              : page.selectedBlock ? page.titleFor(page.selectedBlock.type)
+                                                   : qsTr("블록을 선택하세요")
                         wrapMode: Text.WordWrap
                         color: page.mutedText
                     }
@@ -979,13 +1116,13 @@ Item {
                     ThemeButton {
                         Layout.fillWidth: true
                         text: qsTr("선택 블록의 선 끊기")
-                        enabled: page.selectedBlock !== null
+                        enabled: page.selectedIds.length > 0
                         onClicked: page.disconnectSelectedBlock()
                     }
                     ThemeButton {
                         Layout.fillWidth: true
                         text: qsTr("블록 제거")
-                        enabled: page.selectedBlock !== null && page.selectedId !== 1
+                        enabled: page.selectedIds.some(id => id !== 1)
                         onClicked: page.removeSelectedBlock()
                     }
                     ThemeButton {
