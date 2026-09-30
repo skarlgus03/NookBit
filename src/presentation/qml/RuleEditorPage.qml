@@ -83,6 +83,11 @@ Item {
     property real panX: 0
     property real panY: 0
     property int connectionStyle: 0
+    property real addMenuWorldX: 0
+    property real addMenuWorldY: 0
+    property var copiedBlocks: []
+    property var copiedEdges: []
+    property int pasteCount: 0
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
     property var selectedBlock: selectedIds.length === 1 ? blockForId(selectedId) : null
 
@@ -315,8 +320,18 @@ Item {
         return "#647069"
     }
 
-    // 팔레트에서 고른 종류의 임시 블록을 화면에 추가하는 함수.
-    function addBlock(type) {
+    // 화면의 지정 위치에서 블록 추가 메뉴를 열고 삽입 좌표를 기억하는 함수.
+    function openAddMenu(screenX, screenY) {
+        const point = worldPoint(screenX, screenY)
+        addMenuWorldX = point.x
+        addMenuWorldY = point.y
+        addNodeMenu.x = Math.max(0, Math.min(screenX, canvasViewport.width - addNodeMenu.width))
+        addNodeMenu.y = Math.max(0, Math.min(screenY, canvasViewport.height - addNodeMenu.height))
+        addNodeMenu.open()
+    }
+
+    // 우클릭 메뉴에서 고른 종류의 임시 블록을 기억한 위치에 추가하는 함수.
+    function addBlock(type, worldX, worldY) {
         const examples = {
             extension: "png, jpg", size: "5", name: "report",
             age: "7", otherwise: "조건 없음", destination: "Pictures",
@@ -324,8 +339,8 @@ Item {
         }
         const block = {
             id: nextId++, type: type,
-            x: (canvasViewport.width * 0.5 - panX) / zoom + (blocks.length % 3) * 42,
-            y: (canvasViewport.height * 0.5 - panY) / zoom + (blocks.length % 3) * 38,
+            x: worldX,
+            y: worldY,
             value: examples[type],
             comparison: type === "size" ? "greaterThan" : "atLeast",
             unit: "MiB"
@@ -333,6 +348,53 @@ Item {
         blocks = blocks.concat([block])
         selectOnly(block.id)
         statusText = qsTr("블록을 추가했어요. 블록을 끌어 위치를 바꾸고, 오른쪽 점을 왼쪽 점에 연결해 보세요.")
+        lineCanvas.requestPaint()
+    }
+
+    // 선택한 시작 노드 이외의 블록과 그 사이 연결선만 내부 복사본으로 보관하는 함수.
+    function copySelectedBlocks() {
+        const chosen = blocks.filter(block => selectedIds.includes(block.id) && block.type !== "start")
+        if (chosen.length === 0) {
+            statusText = qsTr("복사할 블록을 먼저 선택해 주세요. 파일 입력 블록은 복사할 수 없어요.")
+            return
+        }
+        const ids = chosen.map(block => block.id)
+        copiedBlocks = chosen.map(block => Object.assign({}, block))
+        copiedEdges = edges.filter(edge => ids.includes(edge.from) && ids.includes(edge.to))
+                           .map(edge => Object.assign({}, edge))
+        pasteCount = 0
+        statusText = qsTr("블록 %1개를 복사했어요. Ctrl+V로 화면 가운데에 붙여넣으세요.").arg(chosen.length)
+    }
+
+    // 내부 복사본의 노드 ID를 새로 만들고 연결 관계를 유지한 채 붙여넣는 함수.
+    function pasteCopiedBlocks() {
+        if (copiedBlocks.length === 0) {
+            statusText = qsTr("붙여넣을 블록이 없어요. 먼저 Ctrl+C로 복사해 주세요.")
+            return
+        }
+        const left = Math.min(...copiedBlocks.map(block => block.x))
+        const top = Math.min(...copiedBlocks.map(block => block.y))
+        const center = worldPoint(canvasViewport.width / 2, canvasViewport.height / 2)
+        const shift = pasteCount * 32 / zoom
+        const idMap = ({})
+        const created = copiedBlocks.map(block => {
+            const copy = Object.assign({}, block, {
+                id: nextId++, x: center.x + block.x - left + shift,
+                y: center.y + block.y - top + shift
+            })
+            delete copy.ruleId
+            delete copy.parentRuleId
+            idMap[block.id] = copy.id
+            return copy
+        })
+        const copiedConnections = copiedEdges.map(edge => ({ from: idMap[edge.from],
+                                                               to: idMap[edge.to] }))
+        blocks = blocks.concat(created)
+        edges = edges.concat(copiedConnections)
+        selectedIds = created.map(block => block.id)
+        selectedId = selectedIds.length === 1 ? selectedIds[0] : -1
+        pasteCount += 1
+        statusText = qsTr("블록 %1개를 붙여넣었어요. 분류 규칙에 적용하려면 연결과 값을 확인해 주세요.").arg(created.length)
         lineCanvas.requestPaint()
     }
 
@@ -607,7 +669,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: qsTr("조건 블록을 놓고, 일치한 다음 검사할 블록을 선으로 연결하세요.")
+            text: qsTr("캔버스에서 우클릭해 블록을 추가하고, 오른쪽 점에서 다음 블록의 왼쪽 점으로 선을 연결하세요.")
             color: page.mutedText
         }
 
@@ -627,41 +689,13 @@ Item {
             }
         }
 
-        Frame {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 102
-            padding: 10
-            background: Rectangle { radius: 10; color: page.surfaceColor; border.color: page.borderColor }
-            Column {
-                anchors.fill: parent
-                spacing: 6
-                Label { text: qsTr("블록 추가"); font.bold: true; color: page.primaryText }
-                Flow {
-                    width: parent.width
-                    spacing: 6
-                    Repeater {
-                        model: [
-                            { type: "extension", title: qsTr("확장자") },
-                            { type: "size", title: qsTr("크기") },
-                            { type: "name", title: qsTr("이름 포함") },
-                            { type: "age", title: qsTr("수정 경과일") },
-                            { type: "otherwise", title: qsTr("그 외") },
-                            { type: "destination", title: qsTr("목적지") },
-                            { type: "exclude", title: qsTr("정리 제외") }
-                        ]
-                        delegate: ThemeButton {
-                            required property var modelData
-                            text: "+ " + modelData.title
-                            onClicked: page.addBlock(modelData.type)
-                        }
-                    }
-                }
-            }
-        }
-
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
+            ThemeButton {
+                text: qsTr("+ 블록 추가")
+                onClicked: page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2)
+            }
             Label { text: qsTr("연결선 모양"); color: page.primaryText }
             ThemeButton {
                 text: qsTr("곡선")
@@ -685,9 +719,17 @@ Item {
             }
             Item { Layout.fillWidth: true }
             Label {
-                text: qsTr("좌드래그: 선택  ·  우드래그: 화면 이동  ·  Shift+클릭: 추가 선택  ·  휠: 확대/축소  ·  %1%").arg(Math.round(page.zoom * 100))
+                text: qsTr("%1%").arg(Math.round(page.zoom * 100))
                 color: page.mutedText
             }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("빈 곳 우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
+            color: page.mutedText
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
         }
 
         RowLayout {
@@ -707,6 +749,21 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 1
                     clip: true
+                    focus: true
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
+                            page.removeSelectedBlock()
+                            event.accepted = true
+                        } else if (event.modifiers & Qt.ControlModifier) {
+                            if (event.key === Qt.Key_C) {
+                                page.copySelectedBlocks()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_V) {
+                                page.pasteCopiedBlocks()
+                                event.accepted = true
+                            }
+                        }
+                    }
                     onWidthChanged: lineCanvas.requestPaint()
                     onHeightChanged: lineCanvas.requestPaint()
 
@@ -777,6 +834,7 @@ Item {
                             acceptedButtons: Qt.LeftButton
                             preventStealing: true
                             onPressed: (mouse) => {
+                                canvasViewport.forceActiveFocus()
                                 page.marqueeStartX = mouse.x
                                 page.marqueeStartY = mouse.y
                                 page.marqueeEndX = mouse.x
@@ -880,6 +938,7 @@ Item {
                                     property bool dragAllowed: false
                                     property bool moved: false
                                     onPressed: (mouse) => {
+                                        canvasViewport.forceActiveFocus()
                                         moved = false
                                         dragAllowed = !(mouse.modifiers & Qt.ShiftModifier)
                                         if (!dragAllowed) {
@@ -1006,18 +1065,36 @@ Item {
                 }
 
                 MouseArea {
+                    id: rightPanArea
                     anchors.fill: parent
                     acceptedButtons: Qt.RightButton
                     preventStealing: true
+                    property real pressX: 0
+                    property real pressY: 0
                     property real lastX: 0
                     property real lastY: 0
-                    onPressed: (mouse) => { lastX = mouse.x; lastY = mouse.y }
+                    property bool dragged: false
+                    onPressed: (mouse) => {
+                        canvasViewport.forceActiveFocus()
+                        pressX = lastX = mouse.x
+                        pressY = lastY = mouse.y
+                        dragged = false
+                    }
                     onPositionChanged: (mouse) => {
                         if (!pressed) return
+                        if (!dragged && Math.abs(mouse.x - pressX) < 5 &&
+                            Math.abs(mouse.y - pressY) < 5) return
+                        dragged = true
                         page.panX += mouse.x - lastX
                         page.panY += mouse.y - lastY
                         lastX = mouse.x
                         lastY = mouse.y
+                    }
+                    onReleased: (mouse) => {
+                        if (!dragged) {
+                            const point = mapToItem(canvasViewport, mouse.x, mouse.y)
+                            page.openAddMenu(point.x, point.y)
+                        }
                     }
                 }
             }
@@ -1185,6 +1262,53 @@ Item {
             text: page.statusText
             color: page.darkMode ? "#a9c5e9" : "#42634b"
             elide: Text.ElideRight
+        }
+    }
+
+    Popup {
+        id: addNodeMenu
+        parent: canvasViewport
+        width: 208
+        padding: 8
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            radius: 9
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: Column {
+            spacing: 4
+            Label {
+                width: parent.width
+                leftPadding: 8
+                bottomPadding: 5
+                text: qsTr("블록 추가")
+                font.bold: true
+                color: page.primaryText
+            }
+            Repeater {
+                model: [
+                    { type: "extension", title: qsTr("확장자") },
+                    { type: "size", title: qsTr("크기") },
+                    { type: "name", title: qsTr("이름 포함") },
+                    { type: "age", title: qsTr("수정 경과일") },
+                    { type: "otherwise", title: qsTr("그 외") },
+                    { type: "destination", title: qsTr("목적지") },
+                    { type: "exclude", title: qsTr("정리 제외") }
+                ]
+                delegate: ThemeButton {
+                    required property var modelData
+                    width: addNodeMenu.width - addNodeMenu.leftPadding - addNodeMenu.rightPadding
+                    text: "+ " + modelData.title
+                    onClicked: {
+                        page.addBlock(modelData.type, page.addMenuWorldX, page.addMenuWorldY)
+                        addNodeMenu.close()
+                        canvasViewport.forceActiveFocus()
+                    }
+                }
+            }
         }
     }
 
