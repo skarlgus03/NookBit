@@ -23,6 +23,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QMetaObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
@@ -149,9 +150,15 @@ int main(int argc, char* argv[]) {
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
+        QObject* editorPage = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
+        QObject* ruleTestPanel = editorPage
+            ? editorPage->findChild<QObject*>(QStringLiteral("ruleTestPanel")) : nullptr;
         const bool ready = !engine.rootObjects().isEmpty() &&
-                           engine.rootObjects().first()->findChild<QObject*>(
-                               QStringLiteral("ruleEditorPage")) != nullptr &&
+                           editorPage != nullptr && ruleTestPanel != nullptr &&
+                           QMetaObject::invokeMethod(ruleTestPanel, "open") &&
+                           ruleTestPanel->property("opened").toBool() &&
+                           QMetaObject::invokeMethod(ruleTestPanel, "close") &&
                            bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));

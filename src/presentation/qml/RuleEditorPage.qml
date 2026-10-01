@@ -275,6 +275,14 @@ Item {
         lineCanvas.requestPaint()
     }
 
+    // 떠 있는 시험 패널이 캔버스 밖으로 넘어가지 않도록 위치를 제한하는 함수.
+    function clampRuleTestPanel() {
+        ruleTestPanel.x = Math.max(0, Math.min(ruleTestPanel.x,
+                                               canvasViewport.width - ruleTestPanel.width))
+        ruleTestPanel.y = Math.max(0, Math.min(ruleTestPanel.y,
+                                               canvasViewport.height - ruleTestPanel.height))
+    }
+
     Component.onCompleted: loadGraphFromDraft()
     onBlocksChanged: {
         graphDirty = true
@@ -934,7 +942,7 @@ Item {
             }
             ThemeButton {
                 text: qsTr("규칙 테스트")
-                onClicked: ruleTestDialog.open()
+                onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
             }
             ThemeButton {
                 text: qsTr("JSON 불러오기")
@@ -1077,8 +1085,14 @@ Item {
                     onActiveFocusChanged: {
                         if (!activeFocus) page.altHeld = false
                     }
-                    onWidthChanged: lineCanvas.requestPaint()
-                    onHeightChanged: lineCanvas.requestPaint()
+                    onWidthChanged: {
+                        lineCanvas.requestPaint()
+                        if (ruleTestPanel.opened) page.clampRuleTestPanel()
+                    }
+                    onHeightChanged: {
+                        lineCanvas.requestPaint()
+                        if (ruleTestPanel.opened) page.clampRuleTestPanel()
+                    }
 
                     WheelHandler {
                         target: null
@@ -1759,15 +1773,22 @@ Item {
         }
     }
 
-    Dialog {
-        id: ruleTestDialog
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(page.width - 40, 520)
-        title: qsTr("규칙 테스트 · 파일은 이동하지 않아요")
-        standardButtons: Dialog.NoButton
-        palette.window: page.surfaceColor
-        palette.windowText: page.primaryText
+    Popup {
+        id: ruleTestPanel
+        objectName: "ruleTestPanel"
+        parent: canvasViewport
+        x: 18
+        y: 18
+        width: Math.max(1, Math.min(canvasViewport.width - 20, 420))
+        padding: 14
+        modal: false
+        dim: false
+        focus: false
+        closePolicy: Popup.CloseOnEscape
+        onOpened: page.clampRuleTestPanel()
+        onHeightChanged: {
+            if (opened) page.clampRuleTestPanel()
+        }
         background: Rectangle {
             radius: 10
             color: page.surfaceColor
@@ -1775,6 +1796,51 @@ Item {
         }
         contentItem: ColumnLayout {
             spacing: 12
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 38
+                color: "transparent"
+                MouseArea {
+                    id: testPanelHandle
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.SizeAllCursor
+                    property real pressX: 0
+                    property real pressY: 0
+                    onPressed: (mouse) => {
+                        pressX = mouse.x
+                        pressY = mouse.y
+                    }
+                    onPositionChanged: (mouse) => {
+                        if (!pressed) return
+                        const point = mapToItem(canvasViewport, mouse.x, mouse.y)
+                        ruleTestPanel.x = Math.max(0, Math.min(
+                            point.x - pressX, canvasViewport.width - ruleTestPanel.width))
+                        ruleTestPanel.y = Math.max(0, Math.min(
+                            point.y - pressY, canvasViewport.height - ruleTestPanel.height))
+                    }
+                }
+                RowLayout {
+                    anchors.fill: parent
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("규칙 테스트")
+                        font.bold: true
+                        color: page.primaryText
+                    }
+                    ThemeButton {
+                        text: "×"
+                        implicitWidth: 36
+                        onClicked: ruleTestPanel.close()
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("파일은 이동하지 않아요 · 제목을 잡고 창을 옮길 수 있어요")
+                color: page.mutedText
+                wrapMode: Text.WordWrap
+            }
             RowLayout {
                 ThemeButton {
                     text: qsTr("실제 파일")
@@ -1786,8 +1852,6 @@ Item {
                     font.bold: page.testMode === 1
                     onClicked: page.testMode = 1
                 }
-                Item { Layout.fillWidth: true }
-                ThemeButton { text: qsTr("닫기"); onClicked: ruleTestDialog.close() }
             }
             Rectangle {
                 Layout.fillWidth: true
