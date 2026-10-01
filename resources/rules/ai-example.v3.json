@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 3,
+  "ruleSetId": "ai-example",
+  "version": "2026-10-01T00:00:00Z",
+  "nodes": [
+    {
+      "id": "large-files",
+      "enabled": true,
+      "when": { "type": "size", "comparison": "greaterThan", "bytes": 20971520 },
+      "destination": { "path": "LargeFiles", "collisionPolicy": "inherit" }
+    },
+    {
+      "id": "pictures",
+      "enabled": true,
+      "when": { "type": "extension", "values": ["png", "jpg"] },
+      "children": [
+        {
+          "id": "screenshots",
+          "enabled": true,
+          "when": { "type": "nameContains", "text": "Screenshot" },
+          "destination": { "path": "Pictures/Screenshots", "collisionPolicy": "rename" }
+        },
+        {
+          "id": "other-pictures",
+          "enabled": true,
+          "otherwise": true,
+          "destination": { "path": "Pictures/Other", "collisionPolicy": "inherit" }
+        }
+      ]
+    },
+    {
+      "id": "ignore-temp",
+      "enabled": true,
+      "when": { "type": "extension", "values": ["tmp"] },
+      "exclude": true
+    }
+  ]
+}

@@ -200,6 +200,44 @@ void testJsonFileImport() {
            "explicit save should apply the imported rules");
 }
 
+// AI 작성 안내서의 예제 규칙이 실제 편집기에 가져와지는지 검사하는 함수.
+void testAiAuthoringExample() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "temporary AI example directory should exist");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "AI example test should load default rules");
+    if (!initial) return;
+    nookbit::JsonRuleSetRepository active(directory.filePath(QStringLiteral("rules.json")), schema);
+    expect(active.save(initial.value()).hasValue(), "AI example test should initialize active rules");
+
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active);
+    const auto result = editor.importJsonFile(QUrl::fromLocalFile(
+        projectPath("resources/rules/ai-example.v3.json")));
+    const auto stored = active.load();
+    expect(result.value("ok").toBool() && editor.dirty() &&
+               editor.graph().value("valid").toBool() && editor.nodes().size() == 5 &&
+               stored && stored.value().id == "default",
+           "AI example should import as a valid unsaved draft without changing active rules");
+
+    QFile guide(projectPath("docs/ai-rule-authoring-v3.md"));
+    QFile example(projectPath("resources/rules/ai-example.v3.json"));
+    expect(guide.open(QIODevice::ReadOnly) && example.open(QIODevice::ReadOnly),
+           "AI guide and example should be readable");
+    if (!guide.isOpen() || !example.isOpen()) return;
+    const auto text = guide.readAll();
+    const auto start = text.indexOf("```json\n");
+    const auto end = text.indexOf("\n```", start + 8);
+    expect(start >= 0 && end > start, "AI guide should contain one complete JSON example");
+    if (start < 0 || end <= start) return;
+    const auto embedded = QJsonDocument::fromJson(text.mid(start + 8, end - start - 8));
+    const auto fixture = QJsonDocument::fromJson(example.readAll());
+    expect(embedded.isObject() && embedded == fixture,
+           "AI guide's embedded JSON should match its validated fixture");
+}
+
 // 내부 가지와 지역·전체 예외를 저장할 수 있는지 확인하는 함수.
 void testNestedAndFallback() {
     QTemporaryDir directory;
@@ -364,6 +402,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testDraftAndSave();
     testJsonFileImport();
+    testAiAuthoringExample();
     testNestedAndFallback();
     testGraphImport();
     testGraphRoundTripAndLayout();

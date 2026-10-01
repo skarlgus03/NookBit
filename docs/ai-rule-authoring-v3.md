@@ -1,0 +1,79 @@
+# NookBit rule-tree v3: AI authoring contract
+
+Give this document to an AI assistant when asking it to draft a NookBit classification rule file. The assistant's output must be **one JSON object only**, with no Markdown fence, explanation, or comments. Import the result in NookBit to run the app's validation before saving it. This contract describes the format accepted by the current rule editor; the [JSON Schema](../schemas/rules-tree-v3.schema.json) is an additional structural reference.
+
+## Output shape
+
+The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
+
+Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain exactly one `when` condition. An else node has `"otherwise": true` instead of `when`; at most one else node is allowed in each sibling array. Put it last for readability. A node either has a nonempty `children` array, is a leaf with `destination`, or is a leaf with `"exclude": true`. An internal node must not have `destination` or `exclude`. A leaf must not omit its terminal action, even if `globalOtherwise` exists. Do not add unlisted fields.
+
+Supported `when` objects (use exactly the keys shown for the selected type):
+
+| Purpose | Object | Notes |
+| --- | --- | --- |
+| Extension | `{"type":"extension","values":["png","jpg"]}` | Nonempty, unique alphanumeric extensions without leading dots; lower-case is recommended. |
+| Filename contains text | `{"type":"nameContains","text":"Screenshot"}` | Nonempty substring of the full filename, including its extension; ASCII letters are case-insensitive. |
+| File size | `{"type":"size","comparison":"greaterThan","bytes":5242880}` | Integer bytes from 0 to 9007199254740991. Comparisons: `greaterThan`, `atLeast`, `lessThan`, `atMost`. 1 MiB = 1048576 bytes. |
+| Time since modification | `{"type":"modifiedAgeDays","comparison":"atLeast","days":30}` | Nonnegative whole days; comparisons: `atLeast`, `lessThan`. This is modification time, not creation time. |
+
+For each destination use `{"path":"Pictures/{yyyy}/{MM}","collisionPolicy":"inherit"}`. `path` is a nonempty path **relative to the organizing root**. Never use a drive letter, absolute/UNC path, or `..` segment. The only supported date tokens are `{yyyy}` and `{MM}`, expanded from the file's modification date. `collisionPolicy` is required and is one of `inherit`, `rename`, `skip`, `abort`. `inherit` uses the user's configured default. If no date folders are wanted, use a plain path such as `Pictures`.
+
+`globalOtherwise`, if present, is a destination object of the same shape. It applies only when traversal finds neither a destination nor an explicit exclusion. If omitted, an unmatched file remains unclassified in the pending list. `"exclude": true` is an explicit do-not-move result, not a destination named “Unclassified”; it takes precedence over `globalOtherwise`.
+
+## Evaluation rules
+
+At each level, NookBit checks enabled ordinary siblings in array order and selects the **first** matching condition. If none matches, it selects the enabled `otherwise` sibling, if any. It then repeats this process among the selected node's children. Parent and child conditions therefore compose as AND. Once a sibling is selected, a miss among its children does **not** retry later siblings of the parent. A local `otherwise` child can catch that miss. If no child matches and `globalOtherwise` is absent, the file remains unclassified. Disabled nodes are ignored.
+
+Put more specific or higher-priority rules before broad ones. For example, a root “over 20 MiB” rule before a root “PNG/JPG” rule sends a 25 MiB PNG to the large-files destination. To express “PNG/JPG over 5 MiB,” use an extension node with a size child (or the reverse), not two conditions inside one node. Do not invent unsupported conditions such as creation date, regex, MIME type, or arbitrary expressions.
+
+## Complete example
+
+This example is also stored as [ai-example.v3.json](../resources/rules/ai-example.v3.json). A file over 20 MiB is handled first; smaller PNG/JPG screenshots go to `Pictures/Screenshots`, other PNG/JPG files to `Pictures/Other`, and TMP files are explicitly excluded. Other files remain unclassified.
+
+```json
+{
+  "schemaVersion": 3,
+  "ruleSetId": "ai-example",
+  "version": "2026-10-01T00:00:00Z",
+  "nodes": [
+    {
+      "id": "large-files",
+      "enabled": true,
+      "when": { "type": "size", "comparison": "greaterThan", "bytes": 20971520 },
+      "destination": { "path": "LargeFiles", "collisionPolicy": "inherit" }
+    },
+    {
+      "id": "pictures",
+      "enabled": true,
+      "when": { "type": "extension", "values": ["png", "jpg"] },
+      "children": [
+        {
+          "id": "screenshots",
+          "enabled": true,
+          "when": { "type": "nameContains", "text": "Screenshot" },
+          "destination": { "path": "Pictures/Screenshots", "collisionPolicy": "rename" }
+        },
+        {
+          "id": "other-pictures",
+          "enabled": true,
+          "otherwise": true,
+          "destination": { "path": "Pictures/Other", "collisionPolicy": "inherit" }
+        }
+      ]
+    },
+    {
+      "id": "ignore-temp",
+      "enabled": true,
+      "when": { "type": "extension", "values": ["tmp"] },
+      "exclude": true
+    }
+  ]
+}
+```
+
+## Prompt to pair with this contract
+
+> Create one NookBit rule-tree v3 JSON object for the classification requirements below. Follow the attached authoring contract exactly. Choose a clear root and sibling order, one condition per node, unique IDs, and an explicit destination or exclusion at every leaf. Do not invent conditions. If a requirement cannot be expressed, ask about it before producing JSON. Output JSON only. Requirements: [describe desired classification here]
+
+The app checks JSON syntax, Schema constraints, and additional tree/editor constraints on import. A successful import replaces only the **unsaved editor draft**; the user must choose **Save All** to make it active. Importing or saving rules does not move files. Preview and file-operation approval remain separate steps.
