@@ -33,7 +33,8 @@ public:
     RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                          QObject* parent, IRuleSetMigrator* migrator,
                          QString graphLayoutPath, IRuleSetFileReader* fileReader,
-                         TestRuleUseCase* ruleTester = nullptr);
+                         TestRuleUseCase* ruleTester = nullptr,
+                         IRuleSetFileWriter* fileWriter = nullptr);
 
     /// 화면에 표시할 깊이 우선 규칙 목록을 반환하는 함수.
     [[nodiscard]] QVariantList nodes() const;
@@ -65,6 +66,9 @@ public:
     Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
     /// 외부 v3 JSON을 검증하고 성공한 경우에만 편집 초안으로 불러오는 함수.
     Q_INVOKABLE QVariantMap importJsonFile(const QUrl& fileUrl);
+    /// 현재 화면 그래프를 검증해 활성 규칙을 바꾸지 않고 별도 JSON으로 내보내는 함수.
+    Q_INVOKABLE QVariantMap exportGraph(const QVariantList& blocks, const QVariantList& edges,
+                                        const QUrl& fileUrl) const;
     /// 화면 그래프를 저장하지 않고 실제 파일 또는 가상 메타데이터로 시험하는 함수.
     Q_INVOKABLE QVariantMap testGraph(const QVariantList& blocks, const QVariantList& edges,
                                       const QUrl& fileUrl, const QString& fileName,
@@ -92,6 +96,7 @@ private:
     IRuleSetMigrator* migrator_;
     IRuleSetFileReader* fileReader_;
     TestRuleUseCase* ruleTester_;
+    IRuleSetFileWriter* fileWriter_;
     QString graphLayoutPath_;
     RuleSet draft_;
     QString message_;

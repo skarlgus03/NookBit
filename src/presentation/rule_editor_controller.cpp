@@ -483,9 +483,11 @@ RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetW
 RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                                            QObject* parent, IRuleSetMigrator* migrator,
                                            QString graphLayoutPath, IRuleSetFileReader* fileReader,
-                                           TestRuleUseCase* ruleTester)
+                                           TestRuleUseCase* ruleTester,
+                                           IRuleSetFileWriter* fileWriter)
     : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator), fileReader_(fileReader),
-      ruleTester_(ruleTester), graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
+      ruleTester_(ruleTester), fileWriter_(fileWriter),
+      graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
 
 // 현재 초안의 모든 노드를 화면 표시 순서로 반환하는 함수.
 QVariantList RuleEditorController::nodes() const {
@@ -799,6 +801,27 @@ QVariantMap RuleEditorController::importJsonFile(const QUrl& fileUrl) {
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("location"), QString()},
             {QStringLiteral("reason"), QString()}};
+}
+
+// 현재 화면 그래프를 검증한 후 활성 규칙과 초안을 바꾸지 않고 JSON 파일로 저장하는 함수.
+QVariantMap RuleEditorController::exportGraph(const QVariantList& blocks,
+                                              const QVariantList& edges,
+                                              const QUrl& fileUrl) const {
+    if (!loaded_ || !fileWriter_) return {{QStringLiteral("ok"), false},
+        {QStringLiteral("error"), QStringLiteral("현재 규칙을 내보낼 수 없어요.")}};
+    if (!fileUrl.isLocalFile()) return {{QStringLiteral("ok"), false},
+        {QStringLiteral("error"), QStringLiteral("로컬 JSON 파일만 내보낼 수 있어요.")}};
+    const auto checked = graphRules(blocks, edges);
+    if (!checked) return {{QStringLiteral("ok"), false},
+        {QStringLiteral("error"), QString::fromStdString(checked.error().message)}};
+    RuleSet exported = draft_;
+    exported.schemaVersion = 3;
+    exported.nodes = std::move(checked.value());
+    const auto saved = fileWriter_->saveFile(
+        std::filesystem::path(fileUrl.toLocalFile().toStdWString()), exported);
+    if (!saved) return {{QStringLiteral("ok"), false},
+        {QStringLiteral("error"), QString::fromStdString(saved.error().message)}};
+    return {{QStringLiteral("ok"), true}};
 }
 
 // 미저장 그래프를 검증한 뒤 선택 파일 또는 가상 파일의 분류 경로만 계산하는 함수.

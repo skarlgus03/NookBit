@@ -8,7 +8,7 @@ namespace nookbit {
 
 /// 분류 규칙 JSON을 검증한 뒤 코어 규칙 모델로 변환하는 저장소.
 class JsonRuleSetRepository final : public IRuleSetRepository, public IRuleSetFileReader,
-                                    public IRuleSetWriter,
+                                    public IRuleSetFileWriter, public IRuleSetWriter,
                                     public IRuleSetMigrator {
 public:
     /// 읽을 규칙 파일과 검증 Schema 경로를 지정하는 생성자.
@@ -23,6 +23,10 @@ public:
     /// 외부 JSON을 같은 Schema로 검사하되 현재 저장본은 건드리지 않는 함수.
     [[nodiscard]] Result<RuleSet> loadFile(
         const std::filesystem::path& path) const override;
+
+    /// 현재 활성 규칙 파일은 보호하면서 별도 JSON 파일에 내보내는 함수.
+    [[nodiscard]] Result<void> saveFile(
+        const std::filesystem::path& path, const RuleSet& rules) const override;
 
     /// v2 또는 v3 규칙 트리를 검사하고 JSON 파일에 원자적으로 저장하는 함수.
     [[nodiscard]] Result<void> save(const RuleSet& rules) const override;

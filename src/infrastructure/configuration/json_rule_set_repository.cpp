@@ -667,6 +667,28 @@ Result<RuleSet> JsonRuleSetRepository::loadFile(const std::filesystem::path& pat
     return imported.load();
 }
 
+// 활성 규칙 파일과 같은 대상을 거부하고 기존 검증·원자적 저장 절차를 재사용하는 함수.
+Result<void> JsonRuleSetRepository::saveFile(const std::filesystem::path& path,
+                                             const RuleSet& rules) const {
+    const QFileInfo target(QString::fromStdWString(path.wstring()));
+    const QFileInfo active(rulesPath_);
+    if (!target.isAbsolute() || target.isDir()) return Result<void>::failure({
+        "rules.export_path_invalid", "Export requires an absolute local file path."});
+#ifdef _WIN32
+    constexpr auto pathCase = Qt::CaseInsensitive;
+#else
+    constexpr auto pathCase = Qt::CaseSensitive;
+#endif
+    const auto sameName = QDir::cleanPath(target.absoluteFilePath()).compare(
+        QDir::cleanPath(active.absoluteFilePath()), pathCase) == 0;
+    const auto sameExistingFile = target.exists() && active.exists() &&
+        target.canonicalFilePath().compare(active.canonicalFilePath(), pathCase) == 0;
+    if (sameName || sameExistingFile) return Result<void>::failure({
+        "rules.export_active_path", "Cannot export over the active rule file."});
+    JsonRuleSetRepository exported(target.absoluteFilePath(), schemaPath_, legacySchemaPath_);
+    return exported.save(rules);
+}
+
 // v2 또는 v3 규칙 트리를 검사하고 기존 파일을 보호하며 JSON으로 저장하는 함수.
 Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
     if ((rules.schemaVersion != 2 && rules.schemaVersion != 3) || !rules.rules.empty()) {

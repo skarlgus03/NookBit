@@ -165,6 +165,7 @@ Item {
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
     property string importErrorLocation: ""
     property string importErrorReason: ""
+    property string exportErrorReason: ""
     property int testMode: 0
     property url testFileUrl: ""
     property var testResult: ({})
@@ -945,12 +946,9 @@ Item {
                 onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
             }
             ThemeButton {
-                text: qsTr("JSON 불러오기")
-                onClicked: {
-                    if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
-                        confirmImportReplace.open()
-                    else importFileDialog.open()
-                }
+                id: jsonFileButton
+                text: qsTr("JSON 파일 ▾")
+                onClicked: jsonFileMenu.visible ? jsonFileMenu.close() : jsonFileMenu.open()
             }
             ThemeButton {
                 text: qsTr("전체 저장")
@@ -1736,6 +1734,44 @@ Item {
         }
     }
 
+    Popup {
+        id: jsonFileMenu
+        parent: jsonFileButton
+        x: 0
+        y: jsonFileButton.height + 4
+        width: 170
+        padding: 8
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            radius: 9
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 4
+            ThemeButton {
+                Layout.fillWidth: true
+                text: qsTr("JSON 불러오기")
+                onClicked: {
+                    jsonFileMenu.close()
+                    if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
+                        confirmImportReplace.open()
+                    else importFileDialog.open()
+                }
+            }
+            ThemeButton {
+                Layout.fillWidth: true
+                text: qsTr("JSON 내보내기")
+                onClicked: {
+                    jsonFileMenu.close()
+                    exportFileDialog.open()
+                }
+            }
+        }
+    }
+
     Dialog {
         id: confirmSave
         modal: true
@@ -2032,6 +2068,45 @@ Item {
             page.editorDraftReplaced()
             page.loadGraphFromDraft()
             page.statusText = qsTr("검증을 통과한 JSON을 편집 초안으로 불러왔어요. 전체 저장 전까지 현재 규칙은 바뀌지 않아요.")
+        }
+    }
+
+    FileDialog {
+        id: exportFileDialog
+        title: qsTr("현재 그래프를 JSON으로 내보내기")
+        nameFilters: [qsTr("JSON 파일 (*.json)")]
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "json"
+        onAccepted: {
+            const result = ruleEditor.exportGraph(page.blocks, page.edges, selectedFile)
+            if (!result.ok) {
+                page.exportErrorReason = result.error
+                exportErrorDialog.open()
+                return
+            }
+            page.statusText = qsTr("현재 그래프를 JSON으로 내보냈어요. 앱에 적용된 규칙과 편집 초안은 바뀌지 않았어요.")
+        }
+    }
+
+    Dialog {
+        id: exportErrorDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 480)
+        title: qsTr("JSON 내보내기 실패")
+        standardButtons: Dialog.Close
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: Label {
+            width: parent.width
+            text: page.exportErrorReason
+            color: page.primaryText
+            wrapMode: Text.WordWrap
         }
     }
 

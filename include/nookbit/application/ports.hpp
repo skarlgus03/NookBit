@@ -143,6 +143,16 @@ public:
         const std::filesystem::path& path) const = 0;
 };
 
+/// 활성 규칙을 변경하지 않고 별도 JSON 파일로 내보내는 계약.
+class IRuleSetFileWriter {
+public:
+    /// 내보내기 구현체를 인터페이스 포인터로 정리하는 소멸자.
+    virtual ~IRuleSetFileWriter() = default;
+    /// 지정한 로컬 파일에 검증된 규칙 묶음을 저장하는 함수.
+    [[nodiscard]] virtual Result<void> saveFile(
+        const std::filesystem::path& path, const RuleSet& rules) const = 0;
+};
+
 /// 사용자가 편집한 규칙 트리를 저장하는 별도 계약.
 class IRuleSetWriter {
 public:

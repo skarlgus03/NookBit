@@ -203,6 +203,58 @@ void testJsonFileImport() {
            "explicit save should apply the imported rules");
 }
 
+// 현재 미저장 그래프를 별도 JSON으로 내보내되 활성 규칙은 보호하는지 검사하는 함수.
+void testJsonGraphExport() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "temporary export directory should exist");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "export test should load default rules");
+    if (!initial) return;
+    const auto activePath = directory.filePath(QStringLiteral("active.json"));
+    nookbit::JsonRuleSetRepository active(activePath, schema);
+    expect(active.save(initial.value()).hasValue(), "export test should initialize active rules");
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active,
+                                        nullptr, &active);
+    const auto graph = editor.graph();
+    auto blocks = graph.value("blocks").toList();
+    const auto edges = graph.value("edges").toList();
+    for (auto& item : blocks) {
+        auto block = item.toMap();
+        if (block.value("type").toString() != QStringLiteral("destination") ||
+            block.value("parentRuleId").toString() != QStringLiteral("pdf-documents")) continue;
+        block.insert(QStringLiteral("value"), QStringLiteral("Documents/ExportOnly"));
+        item = block;
+    }
+    const auto exportPath = directory.filePath(QStringLiteral("exported.json"));
+    const auto exported = editor.exportGraph(blocks, edges, QUrl::fromLocalFile(exportPath));
+    const auto exportedRules = active.loadFile(std::filesystem::path(exportPath.toStdWString()));
+    const auto activeRules = active.load();
+    expect(exported.value("ok").toBool() && exportedRules && activeRules &&
+               exportedRules.value().nodes[1].destination->relativePath ==
+                   std::filesystem::path(L"Documents/ExportOnly") &&
+               activeRules.value().nodes[1].destination->relativePath ==
+                   std::filesystem::path(L"Documents/PDF") && !editor.dirty(),
+           "export should serialize unsaved graph without applying it");
+
+    const auto activeTarget = editor.exportGraph(blocks, edges, QUrl::fromLocalFile(activePath));
+    const auto afterRejectedExport = active.load();
+    expect(!activeTarget.value("ok").toBool() &&
+               afterRejectedExport &&
+               afterRejectedExport.value().nodes[1].destination->relativePath ==
+                   std::filesystem::path(L"Documents/PDF"),
+           "export must not overwrite the active rule file");
+    auto invalidEdges = edges;
+    invalidEdges.removeLast();
+    const auto invalidPath = directory.filePath(QStringLiteral("invalid.json"));
+    const auto invalid = editor.exportGraph(blocks, invalidEdges,
+                                            QUrl::fromLocalFile(invalidPath));
+    expect(!invalid.value("ok").toBool() && !QFile::exists(invalidPath),
+           "invalid graph should not create an export file");
+}
+
 // AI 작성 안내서의 예제 규칙이 실제 편집기에 가져와지는지 검사하는 함수.
 void testAiAuthoringExample() {
     QTemporaryDir directory;
@@ -492,6 +544,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testDraftAndSave();
     testJsonFileImport();
+    testJsonGraphExport();
     testAiAuthoringExample();
     testRuleGraphTesting();
     testNestedAndFallback();
