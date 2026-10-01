@@ -7,6 +7,7 @@ add_library(nookbit_core STATIC
   application/use_cases/plan_signature.cpp
   application/use_cases/verify_saved_plan_use_case.cpp
   application/use_cases/evaluate_watch_folder_use_case.cpp
+  application/use_cases/test_rule_use_case.cpp
   modules/rules/rule_engine.cpp
   modules/watch/watch_evaluator.cpp
   modules/planner/collision_resolver.cpp

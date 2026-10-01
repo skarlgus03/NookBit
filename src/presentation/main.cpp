@@ -10,6 +10,7 @@
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "application/use_cases/approve_plan_use_case.hpp"
+#include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
@@ -73,12 +74,13 @@ int main(int argc, char* argv[]) {
         const auto initial = defaults.load();
         if (initial) previewRules.save(initial.value());
     }
+    nookbit::FilesystemScanner previewScanner;
+    nookbit::RuleEngine previewRuleEngine;
+    nookbit::TestRuleUseCase testRule(previewScanner, previewRuleEngine);
     nookbit::RuleEditorController ruleEditor(
         previewRules, previewRules, nullptr, &previewRules,
         verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
-        &previewRules);
-    nookbit::FilesystemScanner previewScanner;
-    nookbit::RuleEngine previewRuleEngine;
+        &previewRules, &testRule);
     nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));
     nookbit::QtPlanHasher previewHasher;
     nookbit::CreatePreviewUseCase createPreview(

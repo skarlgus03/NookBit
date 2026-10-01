@@ -10,6 +10,8 @@
 
 namespace nookbit {
 
+class TestRuleUseCase;
+
 /// 저장 전 규칙 초안을 보관하고 트리 편집을 화면에 제공하는 컨트롤러.
 class RuleEditorController final : public QObject {
     Q_OBJECT
@@ -30,7 +32,8 @@ public:
     /// 외부 파일 검증 계약까지 받아 편집 초안을 만드는 생성자.
     RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                          QObject* parent, IRuleSetMigrator* migrator,
-                         QString graphLayoutPath, IRuleSetFileReader* fileReader);
+                         QString graphLayoutPath, IRuleSetFileReader* fileReader,
+                         TestRuleUseCase* ruleTester = nullptr);
 
     /// 화면에 표시할 깊이 우선 규칙 목록을 반환하는 함수.
     [[nodiscard]] QVariantList nodes() const;
@@ -62,6 +65,10 @@ public:
     Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
     /// 외부 v3 JSON을 검증하고 성공한 경우에만 편집 초안으로 불러오는 함수.
     Q_INVOKABLE QVariantMap importJsonFile(const QUrl& fileUrl);
+    /// 화면 그래프를 저장하지 않고 실제 파일 또는 가상 메타데이터로 시험하는 함수.
+    Q_INVOKABLE QVariantMap testGraph(const QVariantList& blocks, const QVariantList& edges,
+                                      const QUrl& fileUrl, const QString& fileName,
+                                      const QString& sizeBytes, const QString& ageDays) const;
     /// 현재 규칙 초안을 노드와 연결선으로 펼쳐 반환하는 함수.
     Q_INVOKABLE QVariantMap graph() const;
     /// 현재 노드 배치를 분류 규칙과 별도 파일에 저장하는 함수.
@@ -84,6 +91,7 @@ private:
     IRuleSetWriter& writer_;
     IRuleSetMigrator* migrator_;
     IRuleSetFileReader* fileReader_;
+    TestRuleUseCase* ruleTester_;
     QString graphLayoutPath_;
     RuleSet draft_;
     QString message_;

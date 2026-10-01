@@ -201,10 +201,13 @@ const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const File
 
 // 선택한 리프의 목적지를 파일별 분류 결과로 변환하는 함수.
 Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const RuleSet& rules,
-                                                  std::int64_t nowUtcMs) {
+                                                  std::int64_t nowUtcMs,
+                                                  std::vector<std::string>* selectedIds = nullptr) {
     const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs, rules.schemaVersion);
+    if (node && selectedIds) selectedIds->push_back(node->id);
     while (node && !node->children.empty()) {
         node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion);
+        if (node && selectedIds) selectedIds->push_back(node->id);
     }
     if (node && node->exclude) {
         return Result<std::optional<RuleDecision>>::success(RuleDecision{
@@ -265,6 +268,18 @@ Result<std::optional<RuleDecision>> RuleEngine::decide(
         selected->collisionPolicy,
     };
     return Result<std::optional<RuleDecision>>::success(std::move(decision));
+}
+
+// 실제 분류 함수와 같은 선택 절차를 써서 결과와 선택된 가지를 함께 반환하는 함수.
+Result<RuleTrace> RuleEngine::trace(const FileFact& file, const RuleSet& rules,
+                                   std::int64_t nowUtcMs) const {
+    if (rules.schemaVersion != 3) return Result<RuleTrace>::failure({
+        "rules.schema_version", "Rule testing requires a v3 rule tree."});
+    RuleTrace trace;
+    auto decision = treeDecision(file, rules, nowUtcMs, &trace.selectedNodeIds);
+    if (!decision) return Result<RuleTrace>::failure(decision.error());
+    trace.decision = std::move(decision.value());
+    return Result<RuleTrace>::success(std::move(trace));
 }
 
 } // namespace nookbit

@@ -80,6 +80,12 @@ struct RuleDecision {
     bool excluded{false};
 };
 
+/// 규칙 시험 결과와 실제로 선택된 노드 ID의 순서를 표현한다.
+struct RuleTrace {
+    std::optional<RuleDecision> decision;
+    std::vector<std::string> selectedNodeIds;
+};
+
 /// JSON 분류 규칙 하나를 코어에서 사용할 수 있게 표현한다.
 struct ClassificationRule {
     std::string id;

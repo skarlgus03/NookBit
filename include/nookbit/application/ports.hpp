@@ -48,6 +48,16 @@ public:
         std::int64_t nowUtcMs) const = 0;
 };
 
+class IRuleTracer {
+public:
+    /// 규칙 경로 검사 구현체를 인터페이스 포인터로 정리하는 소멸자.
+    virtual ~IRuleTracer() = default;
+
+    /// 실제 분류와 같은 방식으로 판단하고 선택된 노드 경로를 반환하는 함수.
+    [[nodiscard]] virtual Result<RuleTrace> trace(const FileFact& file, const RuleSet& rules,
+                                                  std::int64_t nowUtcMs) const = 0;
+};
+
 class IPlanner {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.

@@ -202,7 +202,7 @@ void testOrderedTreeAndOtherwise() {
            "changing sibling order must invalidate saved plans");
 }
 
-// v3에서 노드별 단일 조건을 자식 경로의 AND로 평가하는지 검사하는 함수.
+// v3의 단일 조건과 선택 경로를 자식 경로의 AND로 평가하는지 검사하는 함수.
 void testAtomicConditionTree() {
     nookbit::RuleSet rules;
     rules.id = "atomic";
@@ -239,12 +239,22 @@ void testAtomicConditionTree() {
     expect(decision && decision.value() &&
                decision.value()->matchedRuleId == "image-extension",
            "size and extension along one path must both match");
+    auto trace = engine.trace(file, rules, utcMillis(2026, 9, 29));
+    expect(trace && trace.value().selectedNodeIds ==
+               std::vector<std::string>{"larger-than-five", "image-extension"} &&
+               trace.value().decision && trace.value().decision->matchedRuleId ==
+                   decision.value()->matchedRuleId,
+           "rule test trace should match the production decision and selected path");
     file.extension = "exe";
     file.relativePath = L"report.exe";
     decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
                              utcMillis(2026, 9, 29));
     expect(decision && !decision.value(),
            "matching parent must not backtrack to later name sibling");
+    trace = engine.trace(file, rules, utcMillis(2026, 9, 29));
+    expect(trace && !trace.value().decision &&
+               trace.value().selectedNodeIds == std::vector<std::string>{"larger-than-five"},
+           "trace should retain the selected parent without backtracking");
     rules.nodes[0].enabled = false;
     decision = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch,
                              utcMillis(2026, 9, 29));

@@ -16,6 +16,7 @@
 - SQLite 초기 스키마와 WAL 설정
 - 버전이 있는 settings/rules JSON Schema와 예제
 - AI로 v3 분류 규칙 JSON을 작성할 때 사용할 [영어 작성 규격](docs/ai-rule-authoring-v3.md)과 [검증용 예제](resources/rules/ai-example.v3.json)
+- 규칙 편집 화면에서 실제 파일 하나 또는 가상 메타데이터로 미저장 그래프를 이동 없이 시험하고 선택 경로를 강조하는 기능
 - Qt를 이용한 설정·분류 규칙 JSON 읽기 및 Schema 검증 (현재 코어 모델에 필요한 값만 추출)
 - 확장자·파일명 패턴·크기·수정 후 경과 일수로 판단하는 RuleEngine (우선순위와 다중 일치 정책 적용)
 - 순서대로 첫 일치 가지를 따르고 같은 높이의 else·전체 예외를 지원하는 트리 규칙 v3 백엔드 ([형식과 동작](docs/rule-tree-v3.md))

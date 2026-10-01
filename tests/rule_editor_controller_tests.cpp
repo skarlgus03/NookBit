@@ -1,5 +1,8 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "presentation/rule_editor_controller.hpp"
+#include "application/use_cases/test_rule_use_case.hpp"
+#include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "modules/rules/rule_engine.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -213,7 +216,10 @@ void testAiAuthoringExample() {
     nookbit::JsonRuleSetRepository active(directory.filePath(QStringLiteral("rules.json")), schema);
     expect(active.save(initial.value()).hasValue(), "AI example test should initialize active rules");
 
-    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active);
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::TestRuleUseCase tester(scanner, engine);
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active, &tester);
     const auto result = editor.importJsonFile(QUrl::fromLocalFile(
         projectPath("resources/rules/ai-example.v3.json")));
     const auto stored = active.load();
@@ -221,6 +227,26 @@ void testAiAuthoringExample() {
                editor.graph().value("valid").toBool() && editor.nodes().size() == 5 &&
                stored && stored.value().id == "default",
            "AI example should import as a valid unsaved draft without changing active rules");
+    const auto graph = editor.graph();
+    const auto blocks = graph.value("blocks").toList();
+    const auto edges = graph.value("edges").toList();
+    const auto screenshot = editor.testGraph(blocks, edges, {},
+        QStringLiteral("Screenshot.png"), QStringLiteral("1024"), QStringLiteral("0"));
+    expect(screenshot.value("destination").toString() ==
+               QStringLiteral("Pictures/Screenshots") &&
+               screenshot.value("path").toList().size() == 2,
+           "nested rule test should show both selected conditions");
+    const auto otherPicture = editor.testGraph(blocks, edges, {},
+        QStringLiteral("holiday.jpg"), QStringLiteral("1024"), QStringLiteral("0"));
+    expect(otherPicture.value("destination").toString() ==
+               QStringLiteral("Pictures/Other") &&
+               otherPicture.value("path").toList().size() == 2,
+           "rule test should follow a local otherwise branch");
+    const auto excluded = editor.testGraph(blocks, edges, {},
+        QStringLiteral("cache.tmp"), QStringLiteral("0"), QStringLiteral("0"));
+    expect(excluded.value("outcome").toString() == QStringLiteral("excluded") &&
+               excluded.value("path").toList().size() == 1,
+           "rule test should distinguish explicit exclusion from unmatched input");
 
     QFile guide(projectPath("docs/ai-rule-authoring-v3.md"));
     QFile example(projectPath("resources/rules/ai-example.v3.json"));
@@ -236,6 +262,70 @@ void testAiAuthoringExample() {
     const auto fixture = QJsonDocument::fromJson(example.readAll());
     expect(embedded.isObject() && embedded == fixture,
            "AI guide's embedded JSON should match its validated fixture");
+}
+
+// 저장 전 그래프를 실제 파일과 가상 메타데이터로 안전하게 시험하는 함수.
+void testRuleGraphTesting() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "temporary rule test directory should exist");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(
+        projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "rule test should load default rules");
+    if (!initial) return;
+    nookbit::JsonRuleSetRepository active(directory.filePath(QStringLiteral("rules.json")), schema);
+    expect(active.save(initial.value()).hasValue(), "rule test should initialize active rules");
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::TestRuleUseCase tester(scanner, engine);
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active, &tester);
+    const auto graph = editor.graph();
+    const auto blocks = graph.value("blocks").toList();
+    const auto edges = graph.value("edges").toList();
+
+    const auto synthetic = editor.testGraph(blocks, edges, {}, QStringLiteral("sample.pdf"),
+                                            QStringLiteral("10485760"), QStringLiteral("30"));
+    expect(synthetic.value("ok").toBool() &&
+               synthetic.value("outcome").toString() == QStringLiteral("destination") &&
+               synthetic.value("destination").toString() == QStringLiteral("Documents/PDF") &&
+               synthetic.value("path").toList().size() == 1,
+           "synthetic metadata should follow the unsaved graph and report its path");
+    auto unsavedBlocks = blocks;
+    for (auto& item : unsavedBlocks) {
+        auto block = item.toMap();
+        if (block.value("type").toString() != QStringLiteral("destination") ||
+            block.value("parentRuleId").toString() != QStringLiteral("pdf-documents")) continue;
+        block.insert(QStringLiteral("value"), QStringLiteral("Documents/TestOnly"));
+        item = block;
+    }
+    const auto unsaved = editor.testGraph(unsavedBlocks, edges, {}, QStringLiteral("sample.pdf"),
+                                          QStringLiteral("1"), QStringLiteral("0"));
+    const auto activeAfterTest = active.load();
+    expect(unsaved.value("destination").toString() == QStringLiteral("Documents/TestOnly") &&
+               activeAfterTest && activeAfterTest.value().nodes[1].destination->relativePath ==
+                   std::filesystem::path(L"Documents/PDF"),
+           "testing an unsaved graph should not change the active rules");
+
+    QFile selected(directory.filePath(QStringLiteral("actual.pdf")));
+    expect(selected.open(QIODevice::WriteOnly), "actual test file should open");
+    selected.write("test metadata");
+    selected.close();
+    const auto actual = editor.testGraph(blocks, edges, QUrl::fromLocalFile(selected.fileName()),
+                                         {}, {}, {});
+    expect(actual.value("ok").toBool() &&
+               actual.value("destination").toString() == QStringLiteral("Documents/PDF") &&
+               selected.exists(), "selected file should be classified without being moved");
+
+    const auto unmatched = editor.testGraph(blocks, edges, {}, QStringLiteral("sample.tmp"),
+                                            QStringLiteral("0"), QStringLiteral("0"));
+    expect(unmatched.value("ok").toBool() &&
+               unmatched.value("outcome").toString() == QStringLiteral("unclassified"),
+           "unmatched file should stay unclassified");
+    const auto invalid = editor.testGraph(blocks, edges, {}, QStringLiteral("bad/name.pdf"),
+                                          QStringLiteral("0"), QStringLiteral("0"));
+    expect(!invalid.value("ok").toBool() && !editor.dirty(),
+           "invalid metadata should fail without changing the rule draft");
 }
 
 // 내부 가지와 지역·전체 예외를 저장할 수 있는지 확인하는 함수.
@@ -403,6 +493,7 @@ int main(int argc, char* argv[]) {
     testDraftAndSave();
     testJsonFileImport();
     testAiAuthoringExample();
+    testRuleGraphTesting();
     testNestedAndFallback();
     testGraphImport();
     testGraphRoundTripAndLayout();

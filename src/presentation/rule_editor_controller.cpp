@@ -1,4 +1,5 @@
 #include "presentation/rule_editor_controller.hpp"
+#include "application/use_cases/test_rule_use_case.hpp"
 
 #include <QDateTime>
 #include <QDir>
@@ -481,9 +482,10 @@ RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetW
 // 외부 파일 검증 계약까지 함께 받아 편집 초안을 만드는 생성자.
 RuleEditorController::RuleEditorController(IRuleSetRepository& reader, IRuleSetWriter& writer,
                                            QObject* parent, IRuleSetMigrator* migrator,
-                                           QString graphLayoutPath, IRuleSetFileReader* fileReader)
+                                           QString graphLayoutPath, IRuleSetFileReader* fileReader,
+                                           TestRuleUseCase* ruleTester)
     : QObject(parent), reader_(reader), writer_(writer), migrator_(migrator), fileReader_(fileReader),
-      graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
+      ruleTester_(ruleTester), graphLayoutPath_(std::move(graphLayoutPath)) { reload(); }
 
 // 현재 초안의 모든 노드를 화면 표시 순서로 반환하는 함수.
 QVariantList RuleEditorController::nodes() const {
@@ -797,6 +799,67 @@ QVariantMap RuleEditorController::importJsonFile(const QUrl& fileUrl) {
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("location"), QString()},
             {QStringLiteral("reason"), QString()}};
+}
+
+// 미저장 그래프를 검증한 뒤 선택 파일 또는 가상 파일의 분류 경로만 계산하는 함수.
+QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QVariantList& edges,
+                                            const QUrl& fileUrl, const QString& fileName,
+                                            const QString& sizeBytes, const QString& ageDays) const {
+    if (!loaded_ || !ruleTester_) return {{QStringLiteral("ok"), false},
+                          {QStringLiteral("error"), QStringLiteral("규칙을 먼저 불러와 주세요.")}};
+    const auto checked = graphRules(blocks, edges);
+    if (!checked) return {{QStringLiteral("ok"), false},
+                          {QStringLiteral("error"), QString::fromStdString(checked.error().message)}};
+
+    const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+    FileFact fact;
+    std::optional<std::filesystem::path> selectedPath;
+    if (!fileUrl.isEmpty()) {
+        if (!fileUrl.isLocalFile()) return {{QStringLiteral("ok"), false},
+            {QStringLiteral("error"), QStringLiteral("로컬 파일 하나만 시험할 수 있어요.")}};
+        selectedPath = std::filesystem::path(fileUrl.toLocalFile().toStdWString());
+    } else {
+        const auto name = fileName.trimmed();
+        bool sizeValid = false;
+        bool ageValid = false;
+        const auto bytes = sizeBytes.trimmed().toULongLong(&sizeValid);
+        const auto days = ageDays.trimmed().toLongLong(&ageValid);
+        if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..") ||
+            name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\')) ||
+            !sizeValid || bytes > 9007199254740991ULL || !ageValid || days < 0 || days > 36500) {
+            return {{QStringLiteral("ok"), false},
+                    {QStringLiteral("error"), QStringLiteral(
+                        "파일 이름, 크기(B), 수정 후 경과일(0~36500)을 확인해 주세요.")}};
+        }
+        fact.relativePath = std::filesystem::path(name.toStdWString());
+        fact.fingerprint.size = bytes;
+        fact.fingerprint.modifiedUtcMs = nowMs - days * 86400000LL;
+    }
+
+    RuleSet rules = draft_;
+    rules.schemaVersion = 3;
+    rules.nodes = checked.value();
+    const auto trace = selectedPath
+        ? ruleTester_->testSelectedFile(*selectedPath, rules, nowMs)
+        : ruleTester_->testMetadata(fact, rules, nowMs);
+    if (!trace) return {{QStringLiteral("ok"), false},
+                        {QStringLiteral("error"), QString::fromStdString(trace.error().message)}};
+
+    QVariantList path;
+    for (const auto& id : trace.value().selectedNodeIds)
+        path.append(QString::fromStdString(id));
+    const auto& decision = trace.value().decision;
+    const QString outcome = !decision ? QStringLiteral("unclassified")
+        : decision->excluded ? QStringLiteral("excluded") : QStringLiteral("destination");
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("outcome"), outcome},
+            {QStringLiteral("matchedRuleId"), decision
+                ? QString::fromStdString(decision->matchedRuleId) : QString()},
+            {QStringLiteral("destination"), decision && !decision->excluded
+                ? QString::fromStdWString(decision->destinationRelativePath.wstring()) : QString()},
+            {QStringLiteral("path"), path},
+            {QStringLiteral("fileName"), fileUrl.isEmpty() ? fileName.trimmed()
+                : fileUrl.fileName()}};
 }
 
 // 현재 규칙 초안을 별도 배치 파일의 좌표와 합쳐 화면 그래프로 반환하는 함수.

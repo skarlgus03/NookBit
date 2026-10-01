@@ -165,6 +165,11 @@ Item {
     property string statusText: qsTr("예시 그래프입니다. 블록을 이동하거나 연결을 바꿔 보세요.")
     property string importErrorLocation: ""
     property string importErrorReason: ""
+    property int testMode: 0
+    property url testFileUrl: ""
+    property var testResult: ({})
+    property string testError: ""
+    property var testTraceBlockIds: []
     property var selectedBlock: selectedIds.length === 1 ? blockForId(selectedId) : null
 
     // 단일 선택을 만들고 상세 설정 대상을 맞추는 함수.
@@ -239,14 +244,54 @@ Item {
         Qt.callLater(function() { page.fitAllNodes() })
     }
 
+    // 현재 그래프를 저장하지 않은 채 입력 파일의 분류 결과와 선택 경로를 시험하는 함수.
+    function runRuleTest() {
+        if (testMode === 0 && testFileUrl.toString() === "") {
+            testError = qsTr("먼저 시험할 파일 하나를 선택하거나 놓아 주세요.")
+            testResult = ({})
+            testTraceBlockIds = []
+            return
+        }
+        const result = ruleEditor.testGraph(blocks, edges,
+                                            testMode === 0 ? testFileUrl : "",
+                                            testNameField.text, testSizeField.text,
+                                            testAgeField.text)
+        testResult = result
+        testError = result.ok ? "" : result.error
+        testTraceBlockIds = []
+        if (!result.ok) return
+        const ids = [1]
+        for (const ruleId of result.path) {
+            const block = blocks.find(item => (item.ruleId || ("graph-" + item.id)) === ruleId)
+            if (block) ids.push(block.id)
+        }
+        if (result.outcome !== "unclassified" && result.path.length > 0) {
+            const lastRule = result.path[result.path.length - 1]
+            const terminal = blocks.find(item => item.parentRuleId === lastRule &&
+                (item.type === "destination" || item.type === "exclude"))
+            if (terminal) ids.push(terminal.id)
+        }
+        testTraceBlockIds = ids
+        lineCanvas.requestPaint()
+    }
+
     Component.onCompleted: loadGraphFromDraft()
     onBlocksChanged: {
         graphDirty = true
         stagedGraph = false
+        testTraceBlockIds = []
+        testResult = ({})
     }
     onEdgesChanged: {
         graphDirty = true
         stagedGraph = false
+        testTraceBlockIds = []
+        testResult = ({})
+    }
+    onTestModeChanged: {
+        testResult = ({})
+        testError = ""
+        testTraceBlockIds = []
     }
 
     Connections {
@@ -836,7 +881,7 @@ Item {
     }
 
     // 선택한 직선·곡선 방식으로 연결선과 드래그 중인 선을 그리는 함수.
-    function drawEdge(context, x1, y1, x2, y2, temporary, highlighted) {
+    function drawEdge(context, x1, y1, x2, y2, temporary, highlighted, tested) {
         const bend = Math.max(65, Math.abs(x2 - x1) * 0.45)
         context.beginPath()
         context.moveTo(x1, y1)
@@ -844,9 +889,9 @@ Item {
             context.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2)
         else
             context.lineTo(x2, y2)
-        context.lineWidth = highlighted ? 8 : Math.max(1, (temporary ? 4 : 4.5) * zoom)
+        context.lineWidth = highlighted || tested ? 8 : Math.max(1, (temporary ? 4 : 4.5) * zoom)
         context.lineCap = "round"
-        context.strokeStyle = highlighted ? "#f5c542"
+        context.strokeStyle = highlighted ? "#f5c542" : tested ? "#27b9a5"
             : temporary ? (darkMode ? "#b2c9e6" : "#718e78")
                         : (darkMode ? "#86aad6" : "#4e765d")
         context.stroke()
@@ -862,6 +907,7 @@ Item {
     onPanYChanged: lineCanvas.requestPaint()
     onZoomChanged: lineCanvas.requestPaint()
     onFontPresetIndexChanged: lineCanvas.requestPaint()
+    onTestTraceBlockIdsChanged: lineCanvas.requestPaint()
 
     Rectangle {
         anchors.fill: parent
@@ -885,6 +931,10 @@ Item {
             ThemeButton {
                 text: page.darkMode ? qsTr("밝은 화면") : qsTr("어두운 화면")
                 onClicked: page.darkMode = !page.darkMode
+            }
+            ThemeButton {
+                text: qsTr("규칙 테스트")
+                onClicked: ruleTestDialog.open()
             }
             ThemeButton {
                 text: qsTr("JSON 불러오기")
@@ -1096,7 +1146,9 @@ Item {
                                         const to = page.screenPoint(targetPos.x,
                                                                     targetPos.y + page.blockHeight / 2)
                                         page.drawEdge(context, from.x, from.y, to.x, to.y,
-                                                      false, page.altHeld && index === page.hoveredEdgeIndex)
+                                                      false, page.altHeld && index === page.hoveredEdgeIndex,
+                                                      page.testTraceBlockIds.includes(edge.from) &&
+                                                      page.testTraceBlockIds.includes(edge.to))
                                     }
                                 }
                                 if (page.connectingFrom >= 0 && page.draggingConnection) {
@@ -1106,7 +1158,7 @@ Item {
                                         const from = page.screenPoint(sourcePos.x + page.blockWidth,
                                                                       sourcePos.y + page.blockHeight / 2)
                                         const to = page.screenPoint(page.pointerX, page.pointerY)
-                                        page.drawEdge(context, from.x, from.y, to.x, to.y, true, false)
+                                        page.drawEdge(context, from.x, from.y, to.x, to.y, true, false, false)
                                     }
                                 }
                             }
@@ -1173,10 +1225,12 @@ Item {
                                 color: modelData.type === "start"
                                        ? (page.darkMode ? "#214b45" : "#e1f2e8") : page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
-                                border.width: modelData.type === "start"
+                                border.width: page.testTraceBlockIds.includes(modelData.id) ? 4
+                                    : modelData.type === "start"
                                     ? (page.selectedIds.includes(modelData.id) ? 5 : 3)
                                     : page.selectedIds.includes(modelData.id) ? 3 : 1
-                                border.color: modelData.type === "start" ? "#55b89a"
+                                border.color: page.testTraceBlockIds.includes(modelData.id) ? "#27b9a5"
+                                    : modelData.type === "start" ? "#55b89a"
                                     : page.selectedIds.includes(modelData.id)
                                       ? page.colorFor(modelData.type) : page.borderColor
 
@@ -1702,6 +1756,160 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    Dialog {
+        id: ruleTestDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(page.width - 40, 520)
+        title: qsTr("규칙 테스트 · 파일은 이동하지 않아요")
+        standardButtons: Dialog.NoButton
+        palette.window: page.surfaceColor
+        palette.windowText: page.primaryText
+        background: Rectangle {
+            radius: 10
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            RowLayout {
+                ThemeButton {
+                    text: qsTr("실제 파일")
+                    font.bold: page.testMode === 0
+                    onClicked: page.testMode = 0
+                }
+                ThemeButton {
+                    text: qsTr("가상 파일")
+                    font.bold: page.testMode === 1
+                    onClicked: page.testMode = 1
+                }
+                Item { Layout.fillWidth: true }
+                ThemeButton { text: qsTr("닫기"); onClicked: ruleTestDialog.close() }
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 100
+                visible: page.testMode === 0
+                radius: 8
+                color: page.canvasColor
+                border.color: page.borderColor
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    Label {
+                        Layout.fillWidth: true
+                        text: page.testFileUrl.toString() === ""
+                              ? qsTr("시험할 파일 하나를 여기에 놓거나 선택하세요")
+                              : page.testFileUrl.toString()
+                        color: page.primaryText
+                        elide: Text.ElideMiddle
+                    }
+                    ThemeButton {
+                        text: qsTr("파일 선택")
+                        onClicked: ruleTestFileDialog.open()
+                    }
+                }
+                DropArea {
+                    anchors.fill: parent
+                    onDropped: (drop) => {
+                        if (drop.urls.length !== 1) {
+                            page.testError = qsTr("로컬 파일 하나만 놓아 주세요.")
+                            return
+                        }
+                        page.testFileUrl = drop.urls[0]
+                        page.testError = ""
+                        page.testResult = ({})
+                        page.testTraceBlockIds = []
+                    }
+                }
+            }
+            GridLayout {
+                visible: page.testMode === 1
+                Layout.fillWidth: true
+                columns: 2
+                Label { text: qsTr("파일 이름"); color: page.primaryText }
+                TextField {
+                    id: testNameField
+                    Layout.fillWidth: true
+                    text: "example.png"
+                    placeholderText: qsTr("확장자를 포함한 이름")
+                    onTextEdited: { page.testResult = ({}); page.testTraceBlockIds = [] }
+                }
+                Label { text: qsTr("파일 크기 (B)"); color: page.primaryText }
+                TextField {
+                    id: testSizeField
+                    Layout.fillWidth: true
+                    text: "1048576"
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    onTextEdited: { page.testResult = ({}); page.testTraceBlockIds = [] }
+                }
+                Label { text: qsTr("수정 후 경과일"); color: page.primaryText }
+                TextField {
+                    id: testAgeField
+                    Layout.fillWidth: true
+                    text: "0"
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    onTextEdited: { page.testResult = ({}); page.testTraceBlockIds = [] }
+                }
+            }
+            ThemeButton {
+                Layout.fillWidth: true
+                text: qsTr("이 규칙으로 시험")
+                onClicked: page.runRuleTest()
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: page.testError !== ""
+                text: page.testError
+                color: page.darkMode ? "#ffb5ad" : "#a72e2e"
+                wrapMode: Text.WordWrap
+            }
+            ColumnLayout {
+                visible: page.testResult.ok === true
+                Layout.fillWidth: true
+                spacing: 5
+                Label {
+                    Layout.fillWidth: true
+                    font.bold: true
+                    color: page.primaryText
+                    text: page.testResult.outcome === "destination"
+                          ? qsTr("목적지: %1").arg(page.testResult.destination)
+                          : page.testResult.outcome === "excluded"
+                            ? qsTr("결과: 정리 제외") : qsTr("결과: 미분류")
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    color: page.mutedText
+                    text: page.testResult.matchedRuleId === "global-otherwise"
+                          ? qsTr("선택 경로: 파일 입력 → 전체 예외")
+                          : page.testResult.path && page.testResult.path.length > 0
+                          ? qsTr("선택 경로: 파일 입력 → %1").arg(page.testResult.path.join(" → "))
+                          : qsTr("선택 경로: 파일 입력 → 일치하는 규칙 없음")
+                    wrapMode: Text.WordWrap
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("현재 화면의 미저장 그래프를 시험합니다. 파일을 변경하거나 규칙을 저장하지 않습니다.")
+                color: page.mutedText
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
+    FileDialog {
+        id: ruleTestFileDialog
+        title: qsTr("시험할 파일 선택")
+        fileMode: FileDialog.OpenFile
+        onAccepted: {
+            page.testFileUrl = selectedFile
+            page.testError = ""
+            page.testResult = ({})
+            page.testTraceBlockIds = []
         }
     }
 
