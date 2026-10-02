@@ -181,6 +181,17 @@ struct MoveStep {
     StepStatus status{StepStatus::Planned};
 };
 
+/// 화면에서 파일별 분류 결과를 구분하는 미리보기 전용 상태.
+enum class PreviewDisposition { Planned, CollisionSkipped, Unmatched, Excluded };
+
+/// 실행 계획과 별개로 미분류·제외까지 보여주는 일시적인 파일별 판단 결과.
+struct PreviewFileOutcome {
+    std::filesystem::path source;
+    std::optional<std::filesystem::path> destination;
+    std::string matchedRuleId;
+    PreviewDisposition disposition{PreviewDisposition::Unmatched};
+};
+
 struct OperationPlan {
     PlanId id;
     RuleSetVersion ruleSetVersion;
@@ -188,6 +199,8 @@ struct OperationPlan {
     std::string rulesRevision;
     std::string planHash;
     std::vector<MoveStep> steps;
+    // 화면 표시 전용이며 승인 서명이나 SQLite 실행 기록에는 포함하지 않는다.
+    std::vector<PreviewFileOutcome> previewOutcomes;
     std::vector<Error> warnings;
     PlanStatus status{PlanStatus::Draft};
 };

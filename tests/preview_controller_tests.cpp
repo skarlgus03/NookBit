@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QHash>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -168,6 +169,83 @@ void testSavedEditorRulesReachMainPreview() {
                "new preview should use the rule saved by the editor");
     }
     expect(QFile::exists(source), "rule-to-preview test must not move the source");
+}
+
+// 기본 페이지가 이동·충돌·미분류·제외를 파일마다 구분해 표시하는지 검사하는 함수.
+void testEveryPreviewOutcomeIsVisible() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "preview outcome directory should exist");
+    if (!directory.isValid()) return;
+
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    expect(QDir().mkpath(home + QStringLiteral("/Pictures")),
+           "preview outcome destination should exist");
+    for (const auto& name : {QStringLiteral("photo.jpg"), QStringLiteral("already.jpg"),
+                             QStringLiteral("notes.txt"), QStringLiteral("ignore.tmp")}) {
+        QFile source(directory.filePath(name));
+        expect(source.open(QIODevice::WriteOnly), "preview outcome source should open");
+        if (!source.isOpen()) return;
+        source.write("source bytes");
+    }
+    QFile occupied(home + QStringLiteral("/Pictures/already.jpg"));
+    expect(occupied.open(QIODevice::WriteOnly), "collision fixture should open");
+    if (!occupied.isOpen()) return;
+    occupied.write("existing bytes");
+    occupied.close();
+
+    nookbit::RuleSet rules;
+    rules.id = "preview-outcomes";
+    rules.version = "2026-10-02T00:00:00Z";
+    rules.schemaVersion = 3;
+    nookbit::RuleNode images;
+    images.id = "images";
+    images.atomicCondition = nookbit::ExtensionPredicate{{"jpg"}};
+    images.destination = nookbit::RuleDestination{L"Pictures", nookbit::CollisionPolicy::Skip};
+    nookbit::RuleNode excluded;
+    excluded.id = "ignore-temp";
+    excluded.atomicCondition = nookbit::ExtensionPredicate{{"tmp"}};
+    excluded.exclude = true;
+    rules.nodes = {images, excluded};
+
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto rulesPath = directory.filePath(QStringLiteral("rules.json"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    PreviewWorkflow workflow(rulesPath, schema, appData);
+    expect(workflow.rules.save(rules).hasValue(), "preview outcome rules should save");
+    nookbit::PendingFilesModel pending;
+    for (const auto& name : {QStringLiteral("photo.jpg"), QStringLiteral("already.jpg"),
+                             QStringLiteral("notes.txt"), QStringLiteral("ignore.tmp")}) {
+        pending.addUrl(QUrl::fromLocalFile(directory.filePath(name)));
+    }
+    nookbit::PreviewController controller(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, rulesPath, schema, appData, home);
+    controller.createPreview(home);
+    expect(controller.steps().size() == 2 && controller.outcomes().size() == 4,
+           "all four decisions should appear without adding non-moves to executable steps");
+    QHash<QString, QVariantMap> rows;
+    for (const auto& value : controller.outcomes()) {
+        const auto row = value.toMap();
+        rows.insert(row.value(QStringLiteral("fileName")).toString(), row);
+    }
+    expect(rows.value(QStringLiteral("photo.jpg")).value(QStringLiteral("statusKey")) == "planned" &&
+               !rows.value(QStringLiteral("photo.jpg")).value(QStringLiteral("destination")).toString().isEmpty(),
+           "matched file should show its proposed destination");
+    expect(rows.value(QStringLiteral("already.jpg")).value(QStringLiteral("statusKey")) == "skipped" &&
+               rows.value(QStringLiteral("already.jpg")).value(QStringLiteral("reason")).toString().contains(
+                   QStringLiteral("같은 이름")),
+           "colliding file should explain why it stays put");
+    expect(rows.value(QStringLiteral("notes.txt")).value(QStringLiteral("statusKey")) == "unmatched" &&
+               rows.value(QStringLiteral("notes.txt")).value(QStringLiteral("destination")).toString().isEmpty(),
+           "unmatched file should show no destination");
+    expect(rows.value(QStringLiteral("ignore.tmp")).value(QStringLiteral("statusKey")) == "excluded" &&
+               rows.value(QStringLiteral("ignore.tmp")).value(QStringLiteral("rule")) == "ignore-temp",
+           "explicitly excluded file should show its matching rule");
+    expect(controller.warnings().isEmpty(),
+           "expected unmatched and excluded results should not repeat as generic warnings");
+    expect(QFile::exists(directory.filePath(QStringLiteral("photo.jpg"))) &&
+               QFile::exists(directory.filePath(QStringLiteral("already.jpg"))),
+           "preview outcome display must not move files");
 }
 
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
@@ -871,6 +949,7 @@ void testRecoveryCasesInController() {
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    testEveryPreviewOutcomeIsVisible();
     testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();
     testTreeRulesReachPreview();

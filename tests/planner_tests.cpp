@@ -198,6 +198,12 @@ void testUnmatchedPolicy() {
     const auto left = planner.buildPlan(snapshot.value(), settings, rules);
     expect(left.hasValue() && left.value().steps.empty() && !left.value().warnings.empty(),
            "leave-in-place should keep an unmatched file out of steps with a warning");
+    if (left) {
+        expect(left.value().previewOutcomes.size() == 1 &&
+                   left.value().previewOutcomes.front().disposition == nookbit::PreviewDisposition::Unmatched &&
+                   !left.value().previewOutcomes.front().destination,
+               "unmatched file should have a structured non-move preview result");
+    }
     settings.unmatchedPolicy = nookbit::UnmatchedPolicy::Abort;
     const auto aborted = planner.buildPlan(snapshot.value(), settings, rules);
     expect(!aborted.hasValue() && aborted.error().code == "plan.unmatched_file",
@@ -236,6 +242,12 @@ void testExplicitExclusion() {
     expect(plan && plan.value().steps.empty() && !plan.value().warnings.empty() &&
                plan.value().warnings.front().code == "plan.excluded_file",
            "explicit exclusion should skip movement without triggering unmatched abort");
+    if (plan) {
+        expect(plan.value().previewOutcomes.size() == 1 &&
+                   plan.value().previewOutcomes.front().disposition == nookbit::PreviewDisposition::Excluded &&
+                   plan.value().previewOutcomes.front().matchedRuleId == "skip-jpg",
+               "excluded file should identify the rule without creating a move step");
+    }
     expect(std::filesystem::exists(source), "excluded source must remain untouched");
 }
 

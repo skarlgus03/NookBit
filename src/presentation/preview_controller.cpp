@@ -52,6 +52,9 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
 // 화면에 표시할 파일별 이동 초안을 반환하는 함수.
 QVariantList PreviewController::steps() const { return steps_; }
 
+// 분류되지 않았거나 제외된 파일까지 포함한 미리보기 행을 반환하는 함수.
+QVariantList PreviewController::outcomes() const { return outcomes_; }
+
 // 화면에 표시할 검사 경고를 반환하는 함수.
 QStringList PreviewController::warnings() const { return warnings_; }
 
@@ -135,12 +138,54 @@ void PreviewController::createPreview(const QString& destinationRoot) {
                                                   : QStringLiteral("예정"));
         steps_.append(row);
     }
+    int plannedCount = 0;
+    int skippedCount = 0;
+    int unmatchedCount = 0;
+    int excludedCount = 0;
+    for (const auto& outcome : result.value().previewOutcomes) {
+        QVariantMap row;
+        row.insert(QStringLiteral("fileName"), displayPath(outcome.source.filename()));
+        row.insert(QStringLiteral("source"), displayPath(outcome.source));
+        row.insert(QStringLiteral("destination"), outcome.destination
+            ? displayPath(*outcome.destination) : QString());
+        const auto ruleId = QString::fromStdString(outcome.matchedRuleId);
+        row.insert(QStringLiteral("rule"), ruleId);
+        switch (outcome.disposition) {
+        case PreviewDisposition::Planned:
+            ++plannedCount;
+            row.insert(QStringLiteral("status"), QStringLiteral("이동 예정"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("planned"));
+            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에 일치했어요.").arg(ruleId));
+            break;
+        case PreviewDisposition::CollisionSkipped:
+            ++skippedCount;
+            row.insert(QStringLiteral("status"), QStringLiteral("충돌로 건너뜀"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("skipped"));
+            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에 일치했지만 목적지에 같은 이름의 파일이 있어 이동하지 않아요.").arg(ruleId));
+            break;
+        case PreviewDisposition::Unmatched:
+            ++unmatchedCount;
+            row.insert(QStringLiteral("status"), QStringLiteral("미분류"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("unmatched"));
+            row.insert(QStringLiteral("reason"), QStringLiteral("일치하는 규칙이 없어 대기 목록에 남아요."));
+            break;
+        case PreviewDisposition::Excluded:
+            ++excludedCount;
+            row.insert(QStringLiteral("status"), QStringLiteral("제외"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
+            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
+            break;
+        }
+        outcomes_.append(row);
+    }
     for (const auto& warning : result.value().warnings) {
+        if (warning.code == "plan.unmatched_file" || warning.code == "plan.excluded_file") continue;
         warnings_.append(QString::fromStdString(warning.message));
     }
     hasPreview_ = true;
-    message_ = QStringLiteral("미리보기 %1건, 경고 %2건. 실제 파일은 변경하지 않았어요.")
-                   .arg(steps_.size()).arg(warnings_.size());
+    message_ = QStringLiteral("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
+                   .arg(plannedCount).arg(skippedCount).arg(unmatchedCount)
+                   .arg(excludedCount).arg(warnings_.size());
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
 }
@@ -309,9 +354,10 @@ void PreviewController::refreshLastUndoAfterHistoryRollback(const QString& planI
 
 // 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
 void PreviewController::clear() {
-    if (steps_.isEmpty() && warnings_.isEmpty() && message_.isEmpty() &&
+    if (steps_.isEmpty() && outcomes_.isEmpty() && warnings_.isEmpty() && message_.isEmpty() &&
         !hasPreview_ && !hasFrozenPlan_ && !draft_ && !approval_) return;
     steps_.clear();
+    outcomes_.clear();
     warnings_.clear();
     message_.clear();
     hasPreview_ = false;
@@ -325,6 +371,7 @@ void PreviewController::clear() {
 // 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
 void PreviewController::showError(const QString& message) {
     steps_.clear();
+    outcomes_.clear();
     warnings_.clear();
     hasPreview_ = false;
     hasFrozenPlan_ = false;

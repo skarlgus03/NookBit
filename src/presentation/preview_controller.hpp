@@ -24,6 +24,7 @@ namespace nookbit {
 class PreviewController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList steps READ steps NOTIFY previewChanged)
+    Q_PROPERTY(QVariantList outcomes READ outcomes NOTIFY previewChanged)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY previewChanged)
     Q_PROPERTY(QString message READ message NOTIFY previewChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
@@ -51,6 +52,9 @@ public:
 
     /// 화면에 표시할 파일별 이동 초안을 반환하는 함수.
     [[nodiscard]] QVariantList steps() const;
+
+    /// 이동하지 않는 파일까지 포함한 파일별 미리보기 판단을 반환하는 함수.
+    [[nodiscard]] QVariantList outcomes() const;
 
     /// 화면에 표시할 검사 경고를 반환하는 함수.
     [[nodiscard]] QStringList warnings() const;
@@ -133,6 +137,7 @@ private:
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;
     QVariantList steps_;
+    QVariantList outcomes_;
     QStringList warnings_;
     QString message_;
     bool hasPreview_{false};

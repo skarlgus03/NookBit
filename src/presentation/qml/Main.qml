@@ -469,36 +469,70 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: previewController.steps
-                    delegate: ColumnLayout {
+                    spacing: 8
+                    model: previewController.outcomes
+                    delegate: Rectangle {
                         required property var modelData
                         width: previewList.width
-                        spacing: 2
-                        Label {
-                            Layout.fillWidth: true
-                            text: modelData.fileName + "  ·  " + modelData.status + "  ·  " + modelData.rule
-                            font.bold: true
-                            elide: Text.ElideMiddle
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: modelData.destination
-                            color: "#67716a"
-                            elide: Text.ElideMiddle
+                        height: previewRow.implicitHeight + 20
+                        radius: 10
+                        color: modelData.statusKey === "planned" ? "#f3f9f2" : "#f7f7f4"
+                        border.color: modelData.statusKey === "planned" ? "#b9d8b9" : "#ddddda"
+                        ColumnLayout {
+                            id: previewRow
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 10
+                            spacing: 3
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.fileName
+                                    font.bold: true
+                                    elide: Text.ElideMiddle
+                                }
+                                Label {
+                                    text: modelData.status
+                                    font.bold: true
+                                    color: modelData.statusKey === "planned" ? "#327542" : "#805b2c"
+                                }
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.reason
+                                color: "#344039"
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("원본: ") + modelData.source
+                                color: "#67716a"
+                                elide: Text.ElideMiddle
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.destination.length > 0
+                                      ? qsTr("예상 목적지: ") + modelData.destination
+                                      : qsTr("이동하지 않음 · 원본 유지")
+                                color: "#67716a"
+                                elide: Text.ElideMiddle
+                            }
                         }
                     }
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    visible: previewController.steps.length === 0
-                    text: qsTr("이동 대상으로 분류된 파일이 없어요.")
+                    visible: previewController.outcomes.length === 0
+                    text: qsTr("표시할 파일별 검사 결과가 없어요. 위의 경고를 확인해 주세요.")
                     color: "#7b817a"
                 }
                 Label {
                     Layout.fillWidth: true
                     visible: previewController.warnings.length > 0
-                    text: qsTr("경고: ") + previewController.warnings.join("\n")
+                    text: qsTr("추가 경고: ") + previewController.warnings.join("\n")
                     color: "#9b5c23"
                     wrapMode: Text.WordWrap
                 }

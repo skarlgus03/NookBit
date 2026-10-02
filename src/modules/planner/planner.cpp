@@ -113,6 +113,8 @@ Result<OperationPlan> Planner::buildPlan(
                 "plan.unmatched_file", "A selected file was left out of the preview: " +
                     utf8Path(file.absolutePath),
             });
+            plan.previewOutcomes.push_back({file.absolutePath, std::nullopt, {},
+                                            PreviewDisposition::Unmatched});
             continue;
         }
 
@@ -122,6 +124,8 @@ Result<OperationPlan> Planner::buildPlan(
                 "plan.excluded_file", "A selected file was explicitly excluded: " +
                     utf8Path(file.absolutePath),
             });
+            plan.previewOutcomes.push_back({file.absolutePath, std::nullopt,
+                                            chosen.matchedRuleId, PreviewDisposition::Excluded});
             continue;
         }
         if (!isSafeRelativeDestination(chosen.destinationRelativePath)) {
@@ -170,6 +174,10 @@ Result<OperationPlan> Planner::buildPlan(
             if (!finalSafety) return Result<OperationPlan>::failure(finalSafety.error());
             reservedDestinations.insert(pathKey(step.destination));
         }
+        plan.previewOutcomes.push_back({
+            step.source, step.destination, step.matchedRuleId,
+            resolved ? PreviewDisposition::Planned : PreviewDisposition::CollisionSkipped,
+        });
         plan.steps.push_back(std::move(step));
     }
     return Result<OperationPlan>::success(std::move(plan));
