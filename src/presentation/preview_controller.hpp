@@ -32,6 +32,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool hasMovableSteps READ hasMovableSteps NOTIFY previewChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
+    Q_PROPERTY(QString activeRuleLabel READ activeRuleLabel NOTIFY activeRuleChanged)
 
 public:
     /// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
@@ -73,6 +74,12 @@ public:
     /// 처음 제안할 정리 목적지 루트를 반환하는 함수.
     [[nodiscard]] QString defaultDestinationRoot() const;
 
+    /// 현재 저장되어 실제 미리보기에 적용되는 규칙의 이름과 버전을 반환하는 함수.
+    [[nodiscard]] QString activeRuleLabel() const;
+
+    /// 저장된 규칙을 다시 읽어 적용 중인 규칙 표시와 낡은 미리보기를 갱신하는 함수.
+    void refreshActiveRules();
+
     /// 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
     Q_INVOKABLE void createPreview(const QString& destinationRoot);
 
@@ -99,6 +106,7 @@ public:
 
 signals:
     void previewChanged();
+    void activeRuleChanged();
     void recoveryReconcileRequested();
 
 private:
@@ -118,6 +126,7 @@ private:
     IHistoryRepository& history_;
     std::filesystem::path appDataRoot_;
     QString defaultDestinationRoot_;
+    QString activeRuleLabel_;
     QString previewHomeRoot_;
     std::optional<OperationPlan> draft_;
     std::optional<ApprovalRecord> approval_;

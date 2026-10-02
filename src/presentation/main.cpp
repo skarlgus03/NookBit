@@ -115,7 +115,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&previewController, &nookbit::PreviewController::recoveryReconcileRequested,
                      &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
-                     &previewController, &nookbit::PreviewController::clear);
+                     &previewController, &nookbit::PreviewController::refreshActiveRules);
     recoveryController.setRecoveryNotice(recoveryNotice);
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         recoveryController.refreshRecoveryCases();

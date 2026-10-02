@@ -156,6 +156,13 @@ ApplicationWindow {
             color: "#5a5a56"
         }
 
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("현재 적용 중인 규칙: ") + previewController.activeRuleLabel
+            color: "#426349"
+            elide: Text.ElideMiddle
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Label {
@@ -432,7 +439,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             text: previewController.message.length > 0
                   ? previewController.message
-                  : qsTr("기본 규칙: 사진 → Pictures/연도/월, PDF → Documents/PDF")
+                  : qsTr("저장된 규칙으로 미리보기를 만듭니다. 편집 중인 초안은 전체 저장 후 적용돼요.")
             color: "#426349"
             wrapMode: Text.WordWrap
         }

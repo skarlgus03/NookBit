@@ -46,6 +46,7 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
       defaultDestinationRoot_(std::move(defaultDestinationRoot)) {
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::rowsRemoved, this, [this] { clear(); });
+    refreshActiveRules();
 }
 
 // 화면에 표시할 파일별 이동 초안을 반환하는 함수.
@@ -76,9 +77,26 @@ bool PreviewController::canUndo() const noexcept { return undoPlanId_.has_value(
 // 처음 제안할 정리 목적지 루트를 반환하는 함수.
 QString PreviewController::defaultDestinationRoot() const { return defaultDestinationRoot_; }
 
+// 사용자 저장본을 화면에 표시할 짧은 규칙 식별자로 반환하는 함수.
+QString PreviewController::activeRuleLabel() const { return activeRuleLabel_; }
+
+// 저장된 규칙을 다시 읽고 이전 규칙으로 만든 미리보기를 무효화하는 함수.
+void PreviewController::refreshActiveRules() {
+    const auto loaded = rules_.load();
+    const auto label = loaded
+        ? QStringLiteral("%1 · %2").arg(QString::fromStdString(loaded.value().id),
+                                          QString::fromStdString(loaded.value().version))
+        : QStringLiteral("읽기 실패: %1").arg(QString::fromStdString(loaded.error().message));
+    if (activeRuleLabel_ != label) {
+        activeRuleLabel_ = label;
+        emit activeRuleChanged();
+    }
+    clear();
+}
+
 // 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
 void PreviewController::createPreview(const QString& destinationRoot) {
-    clear();
+    refreshActiveRules();
     if (pendingFiles_.count() == 0) {
         showError(QStringLiteral("먼저 파일을 대기 목록에 추가해 주세요."));
         return;

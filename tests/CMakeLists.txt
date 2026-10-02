@@ -118,6 +118,8 @@ if(TARGET nookbit_json_config)
 
   add_executable(nookbit_preview_controller_tests
     preview_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/rule_editor_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/rule_editor_controller.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/preview_controller.hpp

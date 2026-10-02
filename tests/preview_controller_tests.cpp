@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/preview_controller.hpp"
+#include "presentation/rule_editor_controller.hpp"
 #include "presentation/history_controller.hpp"
 #include "presentation/recovery_controller.hpp"
 #include "application/use_cases/plan_signature.hpp"
@@ -106,6 +107,68 @@ struct PreviewWorkflow {
         : PreviewWorkflow(projectPath("resources/rules/default.example.json"),
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
+
+// 편집 초안은 정리에 영향이 없고 전체 저장한 규칙만 다음 미리보기에 적용되는지 검사하는 함수.
+void testSavedEditorRulesReachMainPreview() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "rule-to-preview directory should be available");
+    if (!directory.isValid()) return;
+
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "rule-to-preview source should open");
+    if (!file.isOpen()) return;
+    file.write("preview only");
+    file.close();
+
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    expect(initial.hasValue(), "default v3 rules should load");
+    if (!initial) return;
+
+    const auto activePath = directory.filePath(QStringLiteral("rules.json"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    PreviewWorkflow workflow(activePath, schema, appData);
+    expect(workflow.rules.save(initial.value()).hasValue(), "active v3 rules should initialize");
+    nookbit::RuleEditorController editor(workflow.rules, workflow.rules);
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController preview(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, activePath, schema, appData, home);
+    QObject::connect(&editor, &nookbit::RuleEditorController::rulesSaved,
+                     &preview, &nookbit::PreviewController::refreshActiveRules);
+    pending.addUrl(QUrl::fromLocalFile(source));
+
+    const auto originalLabel = preview.activeRuleLabel();
+    expect(originalLabel.contains(QStringLiteral("default")),
+           "main page should identify the active saved rule set");
+    expect(editor.edit(QStringLiteral("0"), QStringLiteral("images"), true,
+                       QStringLiteral("extension"), QString(), QStringLiteral("jpg"),
+                       QStringLiteral("MiB"), QStringLiteral("Pictures/Edited")),
+           "editor draft should change the image destination");
+    preview.createPreview(home);
+    expect(preview.steps().size() == 1, "unsaved draft should still make an active-rule preview");
+    if (preview.steps().size() == 1) {
+        expect(!preview.steps().front().toMap().value(QStringLiteral("destination")).toString()
+                    .contains(QStringLiteral("Pictures/Edited")),
+               "unsaved draft must not affect the main preview");
+    }
+
+    expect(editor.save(), "editor should save the new active rules");
+    expect(!preview.hasPreview(), "saving rules should invalidate the old preview");
+    expect(preview.activeRuleLabel() != originalLabel,
+           "main page should refresh the applied rule version after save");
+    preview.createPreview(home);
+    expect(preview.steps().size() == 1, "saved rules should make a new preview");
+    if (preview.steps().size() == 1) {
+        expect(preview.steps().front().toMap().value(QStringLiteral("destination")).toString()
+                    .contains(QStringLiteral("Pictures/Edited")),
+               "new preview should use the rule saved by the editor");
+    }
+    expect(QFile::exists(source), "rule-to-preview test must not move the source");
+}
 
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
 void testPreviewFromPendingFiles() {
@@ -801,6 +864,7 @@ void testRecoveryCasesInController() {
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();
     testTreeRulesReachPreview();
     testChangedFileCannotBeFrozen();
