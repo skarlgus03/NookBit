@@ -107,6 +107,7 @@ public:
 signals:
     void previewChanged();
     void activeRuleChanged();
+    void destinationRootAccepted(const QString& root);
     void recoveryReconcileRequested();
 
 private:

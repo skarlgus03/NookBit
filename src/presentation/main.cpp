@@ -27,6 +27,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QTimer>
 #include <QUrl>
 
@@ -43,6 +44,14 @@ int main(int argc, char* argv[]) {
     nookbit::PendingFilesModel pendingFiles;
     const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
+    QSettings uiPreferences;
+    const auto rememberedDestination = verifyUi
+        ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
+    const QFileInfo rememberedInfo(rememberedDestination);
+    const auto defaultDestination = rememberedInfo.isAbsolute() &&
+                                    !QDir(rememberedInfo.absoluteFilePath()).isRoot()
+        ? rememberedInfo.absoluteFilePath() : fallbackDestination;
     const auto databasePath = QDir(appData).filePath(QStringLiteral("history.sqlite"));
     const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
     QString recoveryNotice;
@@ -102,12 +111,19 @@ int main(int argc, char* argv[]) {
         rulesPath,
         treeSchema,
         std::filesystem::path(appData.toStdWString()),
-        QDir(documents).filePath(QStringLiteral("NookBit Organized")),
+        defaultDestination,
         nullptr, legacyTreeSchema);
+    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted,
+                     &application, [&uiPreferences, verifyUi](const QString& root) {
+        if (verifyUi) return;
+        // 성공한 미리보기의 목적지만 다음 실행의 기본 경로로 기억하는 함수.
+        uiPreferences.setValue(QStringLiteral("destinationRoot"), root);
+        uiPreferences.sync();
+    });
     nookbit::RecoveryController recoveryController(history);
     nookbit::HistoryController historyController(
         history, std::filesystem::path(appData.toStdWString()),
-        QDir(documents).filePath(QStringLiteral("NookBit Organized")));
+        defaultDestination);
     QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                      &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     QObject::connect(&historyController, &nookbit::HistoryController::recoveryRefreshRequested,

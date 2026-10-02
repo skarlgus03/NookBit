@@ -142,6 +142,7 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     message_ = QStringLiteral("미리보기 %1건, 경고 %2건. 실제 파일은 변경하지 않았어요.")
                    .arg(steps_.size()).arg(warnings_.size());
     emit previewChanged();
+    emit destinationRootAccepted(previewHomeRoot_);
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.

@@ -195,9 +195,16 @@ void testPreviewFromPendingFiles() {
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
         std::filesystem::path(appData.toStdWString()), home);
+    QString acceptedDestination;
+    QObject::connect(&controller, &nookbit::PreviewController::destinationRootAccepted,
+                     &controller, [&acceptedDestination](const QString& root) {
+        acceptedDestination = root;
+    });
     controller.createPreview(home);
 
     expect(controller.hasPreview(), "preview should be available");
+    expect(acceptedDestination == home,
+           "successful preview should offer its destination as the next default");
     expect(controller.steps().size() == 1, "image should create one planned step");
     if (controller.steps().size() == 1) {
         const auto step = controller.steps().at(0).toMap();

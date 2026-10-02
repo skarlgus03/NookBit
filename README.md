@@ -51,7 +51,7 @@ Qt Creator에서는 저장소 루트의 `CMakeLists.txt`를 열고 MSVC x64 Qt K
 
 ## 데이터와 규칙
 
-앱은 운영체제가 지정한 사용자 앱 데이터 위치(`QStandardPaths::AppDataLocation`)에 활성 규칙 `rules.json`, 그래프 배치 `rule-graph-layout.json`, 감시 설정 `watch.json`, 작업 기록 `history.sqlite`를 저장한다. 첫 실행에 활성 규칙이 없으면 내장된 [기본 v3 규칙](resources/rules/default.v3.json)을 복사한다. 기본 정리 목적지는 사용자의 문서 폴더 아래 `NookBit Organized`다. 대기 목록은 현재 실행 중에만 유지된다.
+앱은 운영체제가 지정한 사용자 앱 데이터 위치(`QStandardPaths::AppDataLocation`)에 활성 규칙 `rules.json`, 그래프 배치 `rule-graph-layout.json`, 감시 설정 `watch.json`, 작업 기록 `history.sqlite`를 저장한다. 첫 실행에 활성 규칙이 없으면 내장된 [기본 v3 규칙](resources/rules/default.v3.json)을 복사한다. 정리 목적지는 처음에는 사용자의 문서 폴더 아래 `NookBit Organized`이며, 이후에는 **마지막으로 미리보기에 성공한 목적지**를 이 PC의 사용자 설정에 기억해 다음 실행 때 채운다. 대기 목록은 현재 실행 중에만 유지된다.
 
 v3 분류 규칙은 **노드 하나에 조건 한 종류**를 둔다. 자식은 조건을 이어 붙이고, 형제는 배열 순서대로 검사해 첫 일치 가지를 선택한다. 선택한 가지에서 더 내려갈 수 없어도 이전 형제로 돌아가지는 않는다. 어느 가지도 최종 목적지에 도달하지 못하면 전체 예외가 없는 한 미분류로 남는다. 명시적 제외는 이동하지 않는 별도 결과다. 목적지는 정리 루트에 대한 상대 경로다.
 
