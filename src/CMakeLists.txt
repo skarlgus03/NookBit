@@ -83,6 +83,9 @@ if(NOOKBIT_BUILD_QT_APP)
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)
     target_include_directories(nookbit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    file(TO_CMAKE_PATH "${NOOKBIT_DEV_DESTINATION_ROOT}" NOOKBIT_DEV_DESTINATION_PATH)
+    target_compile_definitions(nookbit PRIVATE
+      NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
 
     qt_add_qml_module(nookbit
       URI NookBit

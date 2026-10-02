@@ -38,3 +38,5 @@ ctest --preset dev
 ```
 
 UI 변경 시에는 직접 실행해서 사용자 흐름도 확인한다. `ctest`의 QML 스모크 테스트는 화면이 시작되는지 보는 검사이지, 모든 UI 동작을 대신하지 않는다. 문제가 생기면 사용한 Qt Kit, CMake 구성 명령, 실패한 테스트 이름과 재현 절차를 PR에 남긴다.
+
+개발 중 정리 목적지를 고정하려면 `cmake --preset dev -DNOOKBIT_DEV_DESTINATION_ROOT="D:/NookBitTest"`처럼 로컬 빌드에 지정하고 재빌드한다. 이 값은 사용자 기억값보다 우선하며 Git에 공유되지 않는다. 다시 사용자 설정을 사용하려면 같은 옵션에 빈 문자열을 지정한다. 실행 파일에 `--print-default-destination`을 붙이면 창을 열지 않고 실제 시작 기본 경로를 확인할 수 있다.

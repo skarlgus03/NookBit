@@ -28,6 +28,7 @@
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QSettings>
+#include <QTextStream>
 #include <QTimer>
 #include <QUrl>
 
@@ -48,10 +49,17 @@ int main(int argc, char* argv[]) {
     QSettings uiPreferences;
     const auto rememberedDestination = verifyUi
         ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
-    const QFileInfo rememberedInfo(rememberedDestination);
+    const auto developmentDestination = QString::fromUtf8(NOOKBIT_DEV_DESTINATION_ROOT);
+    // 로컬 개발 빌드에서 고정한 경로가 있으면 사용자 기억값보다 우선하는 기본 경로.
+    const QFileInfo rememberedInfo(developmentDestination.isEmpty()
+        ? rememberedDestination : developmentDestination);
     const auto defaultDestination = rememberedInfo.isAbsolute() &&
                                     !QDir(rememberedInfo.absoluteFilePath()).isRoot()
         ? rememberedInfo.absoluteFilePath() : fallbackDestination;
+    if (QCoreApplication::arguments().contains(QStringLiteral("--print-default-destination"))) {
+        QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
+        return EXIT_SUCCESS;
+    }
     const auto databasePath = QDir(appData).filePath(QStringLiteral("history.sqlite"));
     const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
     QString recoveryNotice;
