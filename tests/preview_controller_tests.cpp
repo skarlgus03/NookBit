@@ -248,6 +248,91 @@ void testEveryPreviewOutcomeIsVisible() {
            "preview outcome display must not move files");
 }
 
+// 공통 충돌 정책이 승인·실행까지 전달되고 규칙의 개별 설정이 우선하는지 검사하는 함수.
+void testCommonCollisionPolicyWorkflow() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "collision policy directory should exist");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    expect(QDir().mkpath(home + QStringLiteral("/Pictures")), "collision target should exist");
+    const auto occupiedPath = home + QStringLiteral("/Pictures/photo.jpg");
+    for (const auto& path : {source, occupiedPath}) {
+        QFile file(path);
+        expect(file.open(QIODevice::WriteOnly), "collision fixture should open");
+        if (!file.isOpen()) return;
+        file.write(path == source ? "source bytes" : "existing bytes");
+    }
+
+    nookbit::RuleSet rules;
+    rules.id = "collision-inheritance";
+    rules.version = "2026-10-02T00:00:00Z";
+    rules.schemaVersion = 3;
+    nookbit::RuleNode images;
+    images.id = "images";
+    images.atomicCondition = nookbit::ExtensionPredicate{{"jpg"}};
+    images.destination = nookbit::RuleDestination{L"Pictures", std::nullopt};
+    rules.nodes = {images};
+    const auto rulesPath = directory.filePath(QStringLiteral("rules.json"));
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    PreviewWorkflow workflow(rulesPath, schema, appData);
+    expect(workflow.rules.save(rules).hasValue(), "inherited collision rules should save");
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    nookbit::PreviewController controller(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, rulesPath, schema, appData, home);
+
+    controller.createPreview(home);
+    const auto renamedPath = home + QStringLiteral("/Pictures/photo (1).jpg");
+    expect(controller.steps().size() == 1 &&
+               QDir::fromNativeSeparators(controller.steps().front().toMap().value(
+                   QStringLiteral("destination")).toString()) == renamedPath,
+           "default rename policy should propose a free filename");
+    controller.freezePreview();
+    controller.approvePlan();
+    expect(controller.hasApprovedPlan(), "rename preview should be approvable");
+
+    controller.setCollisionPolicy(QStringLiteral("skip"));
+    expect(!controller.hasPreview() && !controller.hasFrozenPlan() && !controller.hasApprovedPlan(),
+           "changing policy should invalidate the old draft and approval");
+    controller.createPreview(home);
+    expect(controller.hasPreview() && !controller.hasMovableSteps() &&
+               controller.outcomes().size() == 1 &&
+               controller.outcomes().front().toMap().value(QStringLiteral("statusKey")).toString() ==
+                   QStringLiteral("skipped"),
+           "inherited skip policy should keep a colliding file in place");
+
+    controller.setCollisionPolicy(QStringLiteral("abort"));
+    controller.createPreview(home);
+    expect(!controller.hasPreview() && controller.message().contains(QStringLiteral("충돌")) &&
+               QFile::exists(source),
+           "inherited abort policy should stop before any file movement");
+
+    rules.nodes.front().destination->collisionPolicy = nookbit::CollisionPolicy::Rename;
+    expect(workflow.rules.save(rules).hasValue(), "explicit collision policy should save");
+    controller.refreshActiveRules();
+    controller.createPreview(home);
+    expect(controller.hasMovableSteps(), "rule-specific rename should override common abort");
+    controller.freezePreview();
+    expect(controller.hasFrozenPlan() && controller.verifySavedPlan(),
+           "selected common policy should remain consistent through freeze and verification");
+    controller.approvePlan();
+    expect(controller.hasApprovedPlan(), "overridden rule should be approvable with common abort");
+#ifdef _WIN32
+    controller.moveApprovedFile();
+    expect(!QFile::exists(source) && QFile::exists(renamedPath) && QFile::exists(occupiedPath),
+           "execution should preserve the occupied file and use the rule-specific renamed destination");
+    QFile occupied(occupiedPath);
+    expect(occupied.open(QIODevice::ReadOnly) && occupied.readAll() == "existing bytes",
+           "collision handling must preserve existing destination contents");
+    occupied.close();
+    controller.undoLastMove();
+    expect(QFile::exists(source) && !QFile::exists(renamedPath), "policy workflow should remain undoable");
+#endif
+}
+
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
 void testPreviewFromPendingFiles() {
     QTemporaryDir directory;
@@ -949,6 +1034,7 @@ void testRecoveryCasesInController() {
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    testCommonCollisionPolicyWorkflow();
     testEveryPreviewOutcomeIsVisible();
     testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();

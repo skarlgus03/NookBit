@@ -121,6 +121,17 @@ int main(int argc, char* argv[]) {
         std::filesystem::path(appData.toStdWString()),
         defaultDestination,
         nullptr, legacyTreeSchema);
+    if (!verifyUi) {
+        previewController.setCollisionPolicy(uiPreferences.value(
+            QStringLiteral("collisionPolicy"), QStringLiteral("rename")).toString());
+    }
+    QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged,
+                     &application, [&uiPreferences, &previewController, verifyUi] {
+        if (verifyUi) return;
+        // 선택한 공통 충돌 정책을 사용자 설정에 저장하는 함수.
+        uiPreferences.setValue(QStringLiteral("collisionPolicy"), previewController.collisionPolicy());
+        uiPreferences.sync();
+    });
     QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted,
                      &application, [&uiPreferences, verifyUi](const QString& root) {
         if (verifyUi) return;

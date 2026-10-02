@@ -371,6 +371,30 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
+            Label { text: qsTr("같은 이름의 파일이 있으면"); color: "#232323" }
+            ComboBox {
+                textRole: "label"
+                valueRole: "key"
+                model: [
+                    { label: qsTr("이름 변경"), key: "rename" },
+                    { label: qsTr("건너뛰기"), key: "skip" },
+                    { label: qsTr("작업 중단"), key: "abort" }
+                ]
+                currentIndex: previewController.collisionPolicy === "skip" ? 1
+                              : previewController.collisionPolicy === "abort" ? 2 : 0
+                onActivated: previewController.collisionPolicy = currentValue
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정을 우선해요.")
+                color: "#67716a"
+                wrapMode: Text.WordWrap
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
 
             Label {
                 text: qsTr("정리할 위치")

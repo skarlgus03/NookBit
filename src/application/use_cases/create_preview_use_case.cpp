@@ -51,6 +51,9 @@ Result<OperationPlan> CreatePreviewUseCase::execute(
         settings = std::move(loaded.value());
     }
     if (!request.destinationRoot.empty()) settings.homeRoot = request.destinationRoot;
+    if (request.defaultCollisionPolicy) {
+        settings.defaultCollisionPolicy = *request.defaultCollisionPolicy;
+    }
 
     auto rules = rules_.load();
     if (!rules) {

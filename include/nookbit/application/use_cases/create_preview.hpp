@@ -10,6 +10,7 @@ struct CreatePreviewRequest {
     RuleSetVersion ruleSetVersion;
     std::vector<std::filesystem::path> selectedFiles;
     std::filesystem::path destinationRoot;
+    std::optional<CollisionPolicy> defaultCollisionPolicy;
 };
 
 /// 파일을 변경하지 않고 정리 계획을 생성하는 입력 인터페이스.

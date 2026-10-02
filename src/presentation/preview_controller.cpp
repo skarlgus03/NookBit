@@ -83,6 +83,28 @@ QString PreviewController::defaultDestinationRoot() const { return defaultDestin
 // 사용자 저장본을 화면에 표시할 짧은 규칙 식별자로 반환하는 함수.
 QString PreviewController::activeRuleLabel() const { return activeRuleLabel_; }
 
+// 규칙이 기본값을 상속할 때 적용할 충돌 정책의 저장 키를 반환하는 함수.
+QString PreviewController::collisionPolicy() const {
+    switch (collisionPolicy_) {
+    case CollisionPolicy::Skip: return QStringLiteral("skip");
+    case CollisionPolicy::Abort: return QStringLiteral("abort");
+    default: return QStringLiteral("rename");
+    }
+}
+
+// 유효한 정책만 적용하고 낡은 미리보기·승인을 무효화하는 함수.
+void PreviewController::setCollisionPolicy(const QString& policy) {
+    CollisionPolicy next;
+    if (policy == QStringLiteral("rename")) next = CollisionPolicy::Rename;
+    else if (policy == QStringLiteral("skip")) next = CollisionPolicy::Skip;
+    else if (policy == QStringLiteral("abort")) next = CollisionPolicy::Abort;
+    else return;
+    if (collisionPolicy_ == next) return;
+    collisionPolicy_ = next;
+    clear();
+    emit collisionPolicyChanged();
+}
+
 // 저장된 규칙을 다시 읽고 이전 규칙으로 만든 미리보기를 무효화하는 함수.
 void PreviewController::refreshActiveRules() {
     const auto loaded = rules_.load();
@@ -112,6 +134,7 @@ void PreviewController::createPreview(const QString& destinationRoot) {
 
     CreatePreviewRequest request;
     request.destinationRoot = std::filesystem::path(homeInfo.absoluteFilePath().toStdWString());
+    request.defaultCollisionPolicy = collisionPolicy_;
     const auto paths = pendingFiles_.filePaths();
     request.selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) {
@@ -120,6 +143,10 @@ void PreviewController::createPreview(const QString& destinationRoot) {
 
     const auto result = createPreview_.execute(request);
     if (!result) {
+        if (result.error().code == "collision.abort") {
+            showError(QStringLiteral("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
+            return;
+        }
         showError(QStringLiteral("미리보기를 만들지 못했어요: %1")
                       .arg(QString::fromStdString(result.error().message)));
         return;
@@ -198,6 +225,7 @@ void PreviewController::freezePreview() {
     }
     UserSettings settings;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selectedFiles;
     const auto paths = pendingFiles_.filePaths();
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
@@ -224,6 +252,7 @@ bool PreviewController::verifySavedPlan() {
     }
     UserSettings settings;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selectedFiles;
     const auto paths = pendingFiles_.filePaths();
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
@@ -251,6 +280,7 @@ void PreviewController::approvePlan() {
     }
     UserSettings settings;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
     const auto paths = pendingFiles_.filePaths();
     std::vector<std::filesystem::path> selectedFiles;
     selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
@@ -285,7 +315,7 @@ void PreviewController::moveApprovedFile() {
         emit previewChanged();
         return;
     }
-    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()));
+    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()), collisionPolicy_);
     SafeExecutor executor(settings, verifySavedPlan_, scanner_, hasher_, history_, appDataRoot_);
     const auto result = executor.execute(loaded.value(), *approval_, selectedFiles);
     if (!result) {

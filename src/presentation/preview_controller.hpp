@@ -34,6 +34,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
     Q_PROPERTY(QString activeRuleLabel READ activeRuleLabel NOTIFY activeRuleChanged)
+    Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
 
 public:
     /// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
@@ -81,6 +82,12 @@ public:
     /// 현재 저장되어 실제 미리보기에 적용되는 규칙의 이름과 버전을 반환하는 함수.
     [[nodiscard]] QString activeRuleLabel() const;
 
+    /// 규칙이 기본값을 상속할 때 적용할 공통 충돌 정책을 반환하는 함수.
+    [[nodiscard]] QString collisionPolicy() const;
+
+    /// 공통 충돌 정책을 바꾸고 이전 정책으로 만든 계획·승인을 지우는 함수.
+    void setCollisionPolicy(const QString& policy);
+
     /// 저장된 규칙을 다시 읽어 적용 중인 규칙 표시와 낡은 미리보기를 갱신하는 함수.
     void refreshActiveRules();
 
@@ -111,6 +118,7 @@ public:
 signals:
     void previewChanged();
     void activeRuleChanged();
+    void collisionPolicyChanged();
     void destinationRootAccepted(const QString& root);
     void recoveryReconcileRequested();
 
@@ -132,6 +140,7 @@ private:
     std::filesystem::path appDataRoot_;
     QString defaultDestinationRoot_;
     QString activeRuleLabel_;
+    CollisionPolicy collisionPolicy_{CollisionPolicy::Rename};
     QString previewHomeRoot_;
     std::optional<OperationPlan> draft_;
     std::optional<ApprovalRecord> approval_;
