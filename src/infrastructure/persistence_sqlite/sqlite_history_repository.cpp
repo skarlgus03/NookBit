@@ -1,4 +1,5 @@
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_schema.hpp"
 
 #include <QDateTime>
 #include <QDir>
@@ -181,10 +182,6 @@ Result<void> SqliteHistoryRepository::ensureOpen() const {
     if (databasePath_.isEmpty() || !QFileInfo(databasePath_).isAbsolute()) {
         return Result<void>::failure({"history.path_invalid", "Database path must be absolute."});
     }
-    QFile migration(migrationPath_);
-    if (!migration.open(QIODevice::ReadOnly)) {
-        return Result<void>::failure({"history.migration_missing", "Cannot read SQLite schema."});
-    }
     if (!QDir().mkpath(QFileInfo(databasePath_).absolutePath())) {
         return Result<void>::failure({"history.directory_failed", "Cannot create app-data directory."});
     }
@@ -194,13 +191,9 @@ Result<void> SqliteHistoryRepository::ensureOpen() const {
         return Result<void>::failure({"history.open_failed", database_.lastError().text().toStdString()});
     }
 
-    const auto statements = QString::fromUtf8(migration.readAll()).split(';', Qt::SkipEmptyParts);
-    for (const auto& statement : statements) {
-        if (statement.trimmed().isEmpty()) continue;
-        QSqlQuery query(database_);
-        if (!query.exec(statement)) return sqlFailure("history.migration_failed", query);
-    }
-    return Result<void>::success();
+    const auto migrated = migrateHistorySchema(database_, migrationPath_);
+    if (!migrated) database_.close();
+    return migrated;
 }
 
 // Planned 계획과 단계들을 한 트랜잭션에 저장하는 함수.

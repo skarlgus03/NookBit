@@ -1,0 +1,326 @@
+#include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_schema.hpp"
+#include "application/use_cases/plan_signature.hpp"
+
+#include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
+
+namespace nookbit {
+namespace {
+
+// 단계 값을 DB에서 안정적으로 읽고 쓸 문자열로 변환하는 함수.
+QString phaseName(TransferPhase phase) {
+    switch (phase) {
+    case TransferPhase::Prepared: return "prepared";
+    case TransferPhase::CopyIntent: return "copy_intent";
+    case TransferPhase::StagingCreated: return "staging_created";
+    case TransferPhase::CopyVerified: return "copy_verified";
+    case TransferPhase::CommitIntent: return "commit_intent";
+    case TransferPhase::DestinationCommitted: return "destination_committed";
+    case TransferPhase::SourceRemoveIntent: return "source_remove_intent";
+    case TransferPhase::SourceRemoved: return "source_removed";
+    case TransferPhase::Completed: return "completed";
+    case TransferPhase::Failed: return "failed";
+    case TransferPhase::Cancelled: return "cancelled";
+    case TransferPhase::NeedsRecovery: return "needs_recovery";
+    }
+    return {};
+}
+
+// DB의 알려진 단계만 enum으로 복원하는 함수.
+std::optional<TransferPhase> parsePhase(const QString& text) {
+    for (int value = 0; value <= static_cast<int>(TransferPhase::NeedsRecovery); ++value) {
+        const auto phase = static_cast<TransferPhase>(value);
+        if (phaseName(phase) == text) return phase;
+    }
+    return std::nullopt;
+}
+
+// 정밀도 손실 없이 파일 지문을 JSON으로 저장하는 함수.
+QString encodeFingerprint(const FileFingerprint& fingerprint) {
+    QJsonObject object{{"size", QString::number(fingerprint.size)},
+                       {"modifiedUtcMs", QString::number(fingerprint.modifiedUtcMs)},
+                       {"volumeId", QString::fromStdString(fingerprint.volumeId.value_or(""))},
+                       {"fileId", QString::fromStdString(fingerprint.fileId.value_or(""))}};
+    if (fingerprint.sha256) object.insert("sha256", QString::fromStdString(*fingerprint.sha256));
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+// JSON의 숫자·객체 ID·해시를 검증하고 파일 지문을 읽는 함수.
+std::optional<FileFingerprint> decodeFingerprint(const QString& json) {
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(json.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) return std::nullopt;
+    const auto object = document.object();
+    bool sizeOk = false, timeOk = false;
+    FileFingerprint result;
+    result.size = object.value("size").toString().toULongLong(&sizeOk);
+    result.modifiedUtcMs = object.value("modifiedUtcMs").toString().toLongLong(&timeOk);
+    result.volumeId = object.value("volumeId").toString().toStdString();
+    result.fileId = object.value("fileId").toString().toStdString();
+    if (!sizeOk || !timeOk || result.volumeId->empty() || result.fileId->empty()) return std::nullopt;
+    if (object.contains("sha256")) {
+        result.sha256 = object.value("sha256").toString().toStdString();
+        if (!PlanSignature::isSha256Hex(*result.sha256)) return std::nullopt;
+    }
+    return result;
+}
+
+// 없는 지문은 SQL NULL, 있는 지문은 검증 가능한 JSON으로 바꾸는 함수.
+QVariant optionalFingerprint(const std::optional<FileFingerprint>& fingerprint) {
+    return fingerprint ? QVariant(encodeFingerprint(*fingerprint)) : QVariant();
+}
+
+// 오류 정보를 SQL에 저장할 JSON 또는 NULL로 바꾸는 함수.
+QVariant encodeError(const std::optional<Error>& error) {
+    if (!error) return {};
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{"code", QString::fromStdString(error->code)},
+        {"message", QString::fromStdString(error->message)}}).toJson(QJsonDocument::Compact));
+}
+
+// SQL NULL의 QVariant 형식 차이와 실제 문자열 차이를 구분하는 함수.
+bool sameNullable(const QVariant& stored, const QVariant& expected) {
+    return stored.isNull() && expected.isNull() ? true :
+        !stored.isNull() && !expected.isNull() && stored.toString() == expected.toString();
+}
+
+// 경로를 일관된 Windows/Qt 문자열로 정규화하는 함수.
+QString pathText(const std::filesystem::path& path) {
+    return QDir::cleanPath(QString::fromStdWString(path.wstring()));
+}
+
+// DB 경로와 시도 경로가 같은지 대소문자 차이 없이 비교하는 함수.
+bool samePath(const QString& stored, const std::filesystem::path& path) {
+    return QString::compare(QDir::cleanPath(stored), pathText(path), Qt::CaseInsensitive) == 0;
+}
+
+} // namespace
+
+// 기존 이력과 공유할 DB 및 초기 마이그레이션 경로를 받는 생성자.
+SqliteTransferJournal::SqliteTransferJournal(QString databasePath, QString migrationPath)
+    : databasePath_(std::move(databasePath)), migrationPath_(std::move(migrationPath)),
+      connectionName_(QUuid::createUuid().toString(QUuid::WithoutBraces)) {}
+
+// 자신이 연 연결만 닫는 소멸자.
+SqliteTransferJournal::~SqliteTransferJournal() {
+    database_.close();
+    database_ = {};
+    QSqlDatabase::removeDatabase(connectionName_);
+}
+
+// 연결을 열고 공유 Schema를 지원 버전까지 이행하는 함수.
+Result<void> SqliteTransferJournal::ensureOpen() const {
+    if (database_.isOpen()) return Result<void>::success();
+    if (!QFileInfo(databasePath_).isAbsolute() || !QDir().mkpath(QFileInfo(databasePath_).absolutePath()))
+        return Result<void>::failure({"transfer.database_path", "Cannot prepare the transfer journal location."});
+    if (!database_.isValid()) database_ = QSqlDatabase::addDatabase("QSQLITE", connectionName_);
+    database_.setDatabaseName(databasePath_);
+    if (!database_.open()) return Result<void>::failure({"transfer.database_open", database_.lastError().text().toStdString()});
+    const auto migrated = migrateHistorySchema(database_, migrationPath_);
+    if (!migrated) database_.close();
+    return migrated;
+}
+
+// 현재 트랜잭션에 단계별 증거 이벤트를 추가하는 함수.
+Result<void> SqliteTransferJournal::appendSnapshot(const TransferAttempt& attempt) const {
+    QSqlQuery event(database_);
+    event.prepare("INSERT INTO transfer_events(attempt_id, occurred_at, phase, staging_fingerprint_json, destination_fingerprint_json, error_json) VALUES(?,?,?,?,?,?)");
+    event.addBindValue(QString::fromStdString(attempt.id));
+    event.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    event.addBindValue(phaseName(attempt.phase));
+    event.addBindValue(optionalFingerprint(attempt.stagingFingerprint));
+    event.addBindValue(optionalFingerprint(attempt.destinationFingerprint));
+    event.addBindValue(encodeError(attempt.error));
+    if (!event.exec()) return Result<void>::failure({"transfer.event_failed", event.lastError().text().toStdString()});
+    return Result<void>::success();
+}
+
+// 실행 중인 단계에 연결된 새 시도를 기록하는 함수.
+Result<void> SqliteTransferJournal::begin(const TransferAttempt& attempt) {
+    const auto valid = TransferValidation::validateNew(attempt);
+    if (!valid) return valid;
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", database_.lastError().text().toStdString()});
+    QSqlQuery owner(database_);
+    owner.prepare("SELECT s.source_path,s.destination_path,s.fingerprint_json,s.status,p.status FROM steps s JOIN plans p ON p.id=s.plan_id WHERE s.id=? AND s.plan_id=?");
+    owner.addBindValue(QString::fromStdString(attempt.stepId));
+    owner.addBindValue(QString::fromStdString(attempt.planId));
+    const bool forward = attempt.direction == TransferDirection::Forward;
+    bool ownershipValid = owner.exec() && owner.next();
+    if (ownershipValid) {
+        const auto source = decodeFingerprint(owner.value(2).toString());
+        ownershipValid = samePath(owner.value(forward ? 0 : 1).toString(), attempt.source) &&
+            samePath(owner.value(forward ? 1 : 0).toString(), attempt.destination) && source &&
+            TransferValidation::sameContent(*source, attempt.sourceFingerprint) &&
+            (!forward || (TransferValidation::sameObject(*source, attempt.sourceFingerprint) &&
+                source->modifiedUtcMs == attempt.sourceFingerprint.modifiedUtcMs)) &&
+            owner.value(3).toString() == (forward ? "intent_recorded" : "rollback_intent_recorded") &&
+            owner.value(4).toString() == (forward ? "executing" : "rolling_back");
+    }
+    owner.finish();
+    if (!ownershipValid) {
+        database_.rollback();
+        return Result<void>::failure({"transfer.owner_invalid", "Attempt paths and source must match the active plan step."});
+    }
+    QSqlQuery existing(database_);
+    existing.prepare("SELECT id FROM transfer_attempts WHERE step_id=? AND (phase NOT IN ('completed','failed','cancelled') OR (direction=? AND phase='completed')) LIMIT 1");
+    existing.addBindValue(QString::fromStdString(attempt.stepId));
+    existing.addBindValue(forward ? "forward" : "rollback");
+    if (!existing.exec() || existing.next()) {
+        database_.rollback();
+        return Result<void>::failure({"transfer.attempt_conflict", "This step already has an unresolved or completed transfer."});
+    }
+    existing.finish();
+    QSqlQuery insert(database_);
+    insert.prepare("INSERT INTO transfer_attempts(id,plan_id,step_id,direction,source_path,destination_path,staging_path,source_fingerprint_json,phase,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+    insert.addBindValue(QString::fromStdString(attempt.id));
+    insert.addBindValue(QString::fromStdString(attempt.planId));
+    insert.addBindValue(QString::fromStdString(attempt.stepId));
+    insert.addBindValue(forward ? "forward" : "rollback");
+    insert.addBindValue(pathText(attempt.source));
+    insert.addBindValue(pathText(attempt.destination));
+    insert.addBindValue(pathText(attempt.staging));
+    insert.addBindValue(encodeFingerprint(attempt.sourceFingerprint));
+    insert.addBindValue(phaseName(attempt.phase));
+    const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    insert.addBindValue(now);
+    insert.addBindValue(now);
+    if (!insert.exec()) {
+        const auto error = insert.lastError().text().toStdString();
+        database_.rollback();
+        return Result<void>::failure({"transfer.insert_failed", error});
+    }
+    const auto event = appendSnapshot(attempt);
+    if (!event || !database_.commit()) {
+        database_.rollback();
+        return event ? Result<void>::failure({"transfer.commit_failed", database_.lastError().text().toStdString()}) : event;
+    }
+    return Result<void>::success();
+}
+
+// 이벤트를 순서대로 재생해 마지막 스냅샷을 검증·복원하는 함수.
+Result<TransferAttempt> SqliteTransferJournal::load(const std::string& attemptId) const {
+    const auto opened = ensureOpen();
+    if (!opened) return Result<TransferAttempt>::failure(opened.error());
+    if (!database_.transaction()) return Result<TransferAttempt>::failure({"transfer.transaction_failed", database_.lastError().text().toStdString()});
+    const auto result = readAttempt(attemptId);
+    if (!result || !database_.commit()) {
+        database_.rollback();
+        return result ? Result<TransferAttempt>::failure({"transfer.commit_failed", database_.lastError().text().toStdString()}) : result;
+    }
+    return result;
+}
+
+// 이미 열린 트랜잭션 안에서 스냅샷과 이벤트를 함께 읽는 함수.
+Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& attemptId) const {
+    QSqlQuery row(database_);
+    row.prepare("SELECT plan_id,step_id,direction,source_path,destination_path,staging_path,source_fingerprint_json,phase,staging_fingerprint_json,destination_fingerprint_json,error_json FROM transfer_attempts WHERE id=?");
+    row.addBindValue(QString::fromStdString(attemptId));
+    if (!row.exec() || !row.next()) return Result<TransferAttempt>::failure({"transfer.not_found", "Cannot read the transfer attempt."});
+    TransferAttempt result;
+    result.id = attemptId;
+    result.planId = row.value(0).toString().toStdString();
+    result.stepId = row.value(1).toString().toStdString();
+    if (row.value(2).toString() != "forward" && row.value(2).toString() != "rollback")
+        return Result<TransferAttempt>::failure({"transfer.record_invalid", "Unknown transfer direction."});
+    result.direction = row.value(2).toString() == "forward" ? TransferDirection::Forward : TransferDirection::Rollback;
+    result.source = std::filesystem::path(row.value(3).toString().toStdWString());
+    result.destination = std::filesystem::path(row.value(4).toString().toStdWString());
+    result.staging = std::filesystem::path(row.value(5).toString().toStdWString());
+    const auto source = decodeFingerprint(row.value(6).toString());
+    if (!source) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Invalid recorded source fingerprint."});
+    result.sourceFingerprint = *source;
+    const auto valid = TransferValidation::validateNew(result);
+    if (!valid) return Result<TransferAttempt>::failure(valid.error());
+    QSqlQuery events(database_);
+    events.prepare("SELECT phase,staging_fingerprint_json,destination_fingerprint_json,error_json FROM transfer_events WHERE attempt_id=? ORDER BY id");
+    events.addBindValue(QString::fromStdString(attemptId));
+    if (!events.exec() || !events.next() || events.value(0).toString() != "prepared" ||
+        !events.value(1).isNull() || !events.value(2).isNull() || !events.value(3).isNull())
+        return Result<TransferAttempt>::failure({"transfer.record_invalid", "Missing or invalid initial transfer event."});
+    while (events.next()) {
+        const auto phase = parsePhase(events.value(0).toString());
+        if (!phase) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Unknown transfer event phase."});
+        TransferUpdate update{result.phase, *phase};
+        if (*phase == TransferPhase::StagingCreated || *phase == TransferPhase::CopyVerified) {
+            update.stagingFingerprint = decodeFingerprint(events.value(1).toString());
+            if (!update.stagingFingerprint) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Invalid staging evidence."});
+        } else if (!sameNullable(events.value(1), optionalFingerprint(result.stagingFingerprint))) {
+            return Result<TransferAttempt>::failure({"transfer.record_invalid", "Staging evidence changed outside its phase."});
+        }
+        if (*phase == TransferPhase::DestinationCommitted) {
+            update.destinationFingerprint = decodeFingerprint(events.value(2).toString());
+            if (!update.destinationFingerprint) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Invalid destination evidence."});
+        } else if (!sameNullable(events.value(2), optionalFingerprint(result.destinationFingerprint))) {
+            return Result<TransferAttempt>::failure({"transfer.record_invalid", "Destination evidence changed outside its phase."});
+        }
+        if (!events.value(3).isNull()) {
+            const auto error = QJsonDocument::fromJson(events.value(3).toString().toUtf8()).object();
+            update.error = Error{error.value("code").toString().toStdString(), error.value("message").toString().toStdString()};
+        }
+        const auto next = TransferValidation::advance(result, update);
+        if (!next) return Result<TransferAttempt>::failure(next.error());
+        result = next.value();
+    }
+    if (row.value(7).toString() != phaseName(result.phase) ||
+        !sameNullable(row.value(8), optionalFingerprint(result.stagingFingerprint)) ||
+        !sameNullable(row.value(9), optionalFingerprint(result.destinationFingerprint)) || !sameNullable(row.value(10), encodeError(result.error)))
+        return Result<TransferAttempt>::failure({"transfer.record_invalid", "Transfer snapshot disagrees with its events."});
+    return Result<TransferAttempt>::success(std::move(result));
+}
+
+// 예상 상태·증거를 검사하고 스냅샷과 이벤트를 함께 기록하는 함수.
+Result<void> SqliteTransferJournal::advance(const std::string& attemptId, const TransferUpdate& update) {
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", database_.lastError().text().toStdString()});
+    const auto current = readAttempt(attemptId);
+    if (!current) { database_.rollback(); return Result<void>::failure(current.error()); }
+    const auto next = TransferValidation::advance(current.value(), update);
+    if (!next) { database_.rollback(); return Result<void>::failure(next.error()); }
+    QSqlQuery change(database_);
+    change.prepare("UPDATE transfer_attempts SET phase=?,staging_fingerprint_json=?,destination_fingerprint_json=?,error_json=?,updated_at=? WHERE id=? AND phase=?");
+    change.addBindValue(phaseName(next.value().phase));
+    change.addBindValue(optionalFingerprint(next.value().stagingFingerprint));
+    change.addBindValue(optionalFingerprint(next.value().destinationFingerprint));
+    change.addBindValue(encodeError(next.value().error));
+    change.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    change.addBindValue(QString::fromStdString(attemptId));
+    change.addBindValue(phaseName(update.expectedPhase));
+    if (!change.exec() || change.numRowsAffected() != 1) {
+        database_.rollback();
+        return Result<void>::failure({"transfer.phase_conflict", "Cannot update the expected transfer phase."});
+    }
+    const auto event = appendSnapshot(next.value());
+    if (!event || !database_.commit()) {
+        database_.rollback();
+        return event ? Result<void>::failure({"transfer.commit_failed", database_.lastError().text().toStdString()}) : event;
+    }
+    return Result<void>::success();
+}
+
+// 한 단계에 속한 시도를 생성 순서대로 읽는 함수.
+Result<std::vector<TransferAttempt>> SqliteTransferJournal::forStep(const StepId& stepId) const {
+    const auto opened = ensureOpen();
+    if (!opened) return Result<std::vector<TransferAttempt>>::failure(opened.error());
+    QSqlQuery rows(database_);
+    rows.prepare("SELECT id FROM transfer_attempts WHERE step_id=? ORDER BY rowid");
+    rows.addBindValue(QString::fromStdString(stepId));
+    if (!rows.exec()) return Result<std::vector<TransferAttempt>>::failure({"transfer.read_failed", rows.lastError().text().toStdString()});
+    std::vector<TransferAttempt> result;
+    while (rows.next()) {
+        const auto attempt = load(rows.value(0).toString().toStdString());
+        if (!attempt) return Result<std::vector<TransferAttempt>>::failure(attempt.error());
+        result.push_back(attempt.value());
+    }
+    return Result<std::vector<TransferAttempt>>::success(std::move(result));
+}
+
+} // namespace nookbit

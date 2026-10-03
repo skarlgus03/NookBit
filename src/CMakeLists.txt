@@ -8,6 +8,7 @@ add_library(nookbit_core STATIC
   application/use_cases/verify_saved_plan_use_case.cpp
   application/use_cases/evaluate_watch_folder_use_case.cpp
   application/use_cases/test_rule_use_case.cpp
+  application/use_cases/transfer_validation.cpp
   modules/rules/rule_engine.cpp
   modules/watch/watch_evaluator.cpp
   modules/planner/collision_resolver.cpp
@@ -62,6 +63,8 @@ if(NOOKBIT_BUILD_QT_APP)
     add_library(nookbit_history STATIC
       infrastructure/cryptography/qt_plan_hasher.cpp
       infrastructure/persistence_sqlite/sqlite_history_repository.cpp
+      infrastructure/persistence_sqlite/sqlite_schema.cpp
+      infrastructure/persistence_sqlite/sqlite_transfer_journal.cpp
     )
     target_include_directories(nookbit_history PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(nookbit_history PUBLIC nookbit_core Qt6::Core Qt6::Sql)

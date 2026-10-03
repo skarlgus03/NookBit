@@ -8,5 +8,6 @@
     <file alias="rules-tree-v3.schema.json">../schemas/rules-tree-v3.schema.json</file>
     <file alias="watch.schema.json">../schemas/watch.schema.json</file>
     <file alias="001_initial.sql">../src/infrastructure/persistence_sqlite/migrations/001_initial.sql</file>
+    <file alias="002_transfer_journal.sql">../src/infrastructure/persistence_sqlite/migrations/002_transfer_journal.sql</file>
   </qresource>
 </RCC>

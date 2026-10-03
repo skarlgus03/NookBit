@@ -144,6 +144,18 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_executable(nookbit_safe_executor_tests safe_executor_tests.cpp)
+  add_executable(nookbit_transfer_journal_tests transfer_journal_tests.cpp)
+  target_include_directories(nookbit_transfer_journal_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_transfer_journal_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_transfer_journal_tests PRIVATE nookbit_history Qt6::Core Qt6::Sql)
+  add_test(NAME nookbit_transfer_journal_tests COMMAND nookbit_transfer_journal_tests)
+  if(MSVC)
+    target_compile_options(nookbit_transfer_journal_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  if(WIN32)
+    set_tests_properties(nookbit_transfer_journal_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   target_include_directories(nookbit_safe_executor_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(nookbit_safe_executor_tests PRIVATE
     NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
