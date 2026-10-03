@@ -363,7 +363,11 @@ void testInterruptedBatchNeedsManualReview() {
     expect(scenario.history.appendEvent(
                nookbit::StepStatusChanged{plan.id, firstStep.id, nookbit::StepStatus::Applied}).hasValue(),
            "batch-recovery first application should be recorded");
-    nookbit::RecoveryService recovery(scenario.history, scenario.scanner, scenario.hasher);
+    nookbit::SqliteHistoryRepository restartedHistory(
+        scenario.databasePath, projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    nookbit::FilesystemScanner restartedScanner;
+    nookbit::QtPlanHasher restartedHasher;
+    nookbit::RecoveryService recovery(restartedHistory, restartedScanner, restartedHasher);
     auto reconciled = recovery.reconcile();
     expect(reconciled.hasValue() && reconciled.value().needsAttention.size() == 1,
            "interrupted batch should require user review");

@@ -6,6 +6,7 @@
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/filesystem/recovery_service.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
@@ -58,9 +59,11 @@ public:
     }
 };
 
-// 두 번째 단계에서 기록 실패나 목적지 충돌을 재현하는 저장소.
+// 이동 의도 기록 도중 실패·충돌·파일 변경을 재현하는 저장소.
 class FailingIntentHistory final : public nookbit::IHistoryRepository {
 public:
+    QString changedSource;
+    QString changedRollbackDestination;
     // 실제 SQLite 저장소를 테스트 대리자로 받는 생성자.
     explicit FailingIntentHistory(nookbit::SqliteHistoryRepository& backing,
                                   QString collisionDestination = {})
@@ -76,21 +79,36 @@ public:
         return backing_.saveApproval(approval);
     }
 
-    // 두 번째 이동 의도에서 오류 또는 목적지 충돌을 주입하는 함수.
+    // 이동·되돌리기 의도를 기록할 때 테스트용 오류나 파일 변경을 주입하는 함수.
     [[nodiscard]] nookbit::Result<void> appendEvent(const nookbit::DomainEvent& event) override {
         if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
             changed && changed->status == nookbit::StepStatus::IntentRecorded && ++intents_ == 2) {
-            if (collisionDestination_.isEmpty()) {
+            if (!changedSource.isEmpty()) {
+                QFile source(changedSource);
+                if (!source.open(QIODevice::WriteOnly) || source.write("changed source") != 14) {
+                    return nookbit::Result<void>::failure({"test.source_failed", "Cannot change the source fixture."});
+                }
+            } else if (collisionDestination_.isEmpty()) {
                 return nookbit::Result<void>::failure({
                     "test.intent_failed", "Injected second-step journal failure.",
                 });
+            } else {
+                QFile collision(collisionDestination_);
+                if (!collision.open(QIODevice::WriteOnly) || collision.write("occupant") != 8) {
+                    return nookbit::Result<void>::failure({
+                        "test.collision_failed", "Cannot create second-step collision fixture.",
+                    });
+                }
             }
-            QFile collision(collisionDestination_);
-            if (!collision.open(QIODevice::WriteOnly) || collision.write("occupant") != 8) {
-                return nookbit::Result<void>::failure({
-                    "test.collision_failed", "Cannot create second-step collision fixture.",
-                });
+        }
+        if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
+            changed && changed->status == nookbit::StepStatus::RollbackIntentRecorded &&
+            !changedRollbackDestination.isEmpty()) {
+            QFile destination(changedRollbackDestination);
+            if (!destination.open(QIODevice::WriteOnly) || destination.write("changed destination") != 19) {
+                return nookbit::Result<void>::failure({"test.undo_failed", "Cannot change the undo fixture."});
             }
+            changedRollbackDestination.clear();
         }
         return backing_.appendEvent(event);
     }
@@ -272,6 +290,29 @@ void testApprovedSingleFileMoveAndUndo() {
            "blocked undo must not overwrite either file");
     expect(QFile::remove(source), "test undo collision fixture should be removed");
 
+    FailingIntentHistory changingUndoHistory(history);
+    changingUndoHistory.changedRollbackDestination = destination;
+    nookbit::SafeExecutor changingUndo(settings, scanner, hasher, changingUndoHistory,
+                                      std::filesystem::path(appData.toStdWString()));
+    const auto changedUndo = changingUndo.rollback(frozen.value().id);
+    expect(!changedUndo && changedUndo.error().code == "rollback.needs_recovery" &&
+               !QFile::exists(source) && readFile(destination) == QByteArray("changed destination"),
+           "destination changed during undo intent must stay put without restoring unapproved bytes");
+    const auto interruptedUndo = history.loadPlan(frozen.value().id);
+    expect(interruptedUndo && interruptedUndo.value().status == nookbit::PlanStatus::NeedsRecovery,
+           "interrupted undo must require review");
+    expect(writeFile(destination, original), "undo fixture original bytes should be restored manually");
+    QFile destinationFile(destination);
+    expect(destinationFile.open(QIODevice::ReadWrite), "undo fixture should reopen for timestamp restoration");
+    if (destinationFile.isOpen()) {
+        expect(destinationFile.setFileTime(originalModified, QFileDevice::FileModificationTime),
+               "undo fixture timestamp should be restored manually");
+        destinationFile.close();
+    }
+    nookbit::RecoveryService recovery(history, scanner, hasher);
+    expect(recovery.resolveCase(frozen.value().id).hasValue(),
+           "manually restored destination should allow record-only recovery");
+
     const auto undone = executor.rollback(frozen.value().id);
     expect(undone.hasValue(), "completed move should be undoable");
     expect(QFile::exists(source) && !QFile::exists(destination),
@@ -283,7 +324,7 @@ void testApprovedSingleFileMoveAndUndo() {
 }
 
 // 두 번째 단계의 기록 실패나 목적지 충돌 뒤 첫 이동을 되돌리는지 검사하는 함수.
-void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
+void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool sourceChanged = false) {
     QTemporaryDir directory;
     expect(directory.isValid(), "batch-failure directory should be available");
     if (!directory.isValid()) return;
@@ -339,6 +380,7 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
     const auto secondDestination = QString::fromStdWString(approved.value().steps.at(1).destination.wstring());
     FailingIntentHistory failingHistory(history,
         destinationCollision ? secondDestination : QString());
+    if (sourceChanged) failingHistory.changedSource = second;
     nookbit::VerifySavedPlanUseCase executionVerifier(
         rules, scanner, planner, hasher, failingHistory);
     nookbit::SafeExecutor executor(settings, executionVerifier, scanner, hasher, failingHistory,
@@ -352,11 +394,14 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision) {
                (destinationCollision ? readFile(secondDestination) == QByteArray("occupant")
                                      : !QFile::exists(secondDestination)),
            "batch compensation should restore both original paths");
+    expect(readFile(first) == QByteArray("first bytes") &&
+               readFile(second) == QByteArray(sourceChanged ? "changed source" : "second bytes"),
+           "changed source must stay at its original path without undoing external edits");
     auto saved = history.loadPlan(frozen.value().id);
     expect(saved.hasValue() && saved.value().status == nookbit::PlanStatus::Failed &&
                saved.value().steps.at(0).status == nookbit::StepStatus::RolledBack &&
                saved.value().steps.at(1).status ==
-                   (destinationCollision ? nookbit::StepStatus::Failed : nookbit::StepStatus::Planned),
+                   (destinationCollision || sourceChanged ? nookbit::StepStatus::Failed : nookbit::StepStatus::Planned),
            "batch journal should record rollback and unstarted step");
 }
 
@@ -387,6 +432,7 @@ int main(int argc, char* argv[]) {
     testApprovedSingleFileMoveAndUndo();
     testBatchFailureRollsBackEarlierMove(false);
     testBatchFailureRollsBackEarlierMove(true);
+    testBatchFailureRollsBackEarlierMove(false, true);
     if (failures == 0) {
         std::cout << "All safe-executor tests passed.\n";
         return 0;

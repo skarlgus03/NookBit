@@ -108,6 +108,24 @@ Result<void> SafeExecutor::execute(
                 "execute.batch_rolled_back", "A file could not start; earlier moves were undone.",
             });
         }
+        // 앞선 이동이나 의도 기록 중 바뀐 파일은 옮기지 않는 최종 검사.
+        if (probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches) {
+            auto failedStep = history_.appendEvent(
+                StepStatusChanged{plan.id, step->id, StepStatus::Failed});
+            if (!failedStep) return failedStep;
+            if (appliedSteps.empty()) {
+                auto failedPlan = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Failed});
+                if (!failedPlan) return failedPlan;
+                return Result<void>::failure({
+                    "execute.source_changed", "A source changed immediately before its move; it was not moved.",
+                });
+            }
+            auto rolled = rollbackAppliedSteps(saved, appliedSteps, PlanStatus::Failed, true);
+            if (!rolled) return rolled;
+            return Result<void>::failure({
+                "execute.batch_rolled_back", "A source changed; earlier moves were undone and this source was not moved.",
+            });
+        }
         auto moved = WindowsFileMover::moveNoReplace(step->source, step->destination);
         if (!moved) {
             const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
@@ -208,6 +226,14 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     if (!started) return started;
     for (auto iterator = applied.rbegin(); iterator != applied.rend(); ++iterator) {
         const auto* step = *iterator;
+        auto intent = history_.appendEvent(
+            StepStatusChanged{plan.id, step->id, StepStatus::RollbackIntentRecorded});
+        if (!intent) {
+            auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return intent;
+        }
+        // 되돌리기 의도까지 기록한 뒤 실제 이동 직전에 두 위치를 다시 검사한다.
         if (probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
             probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
             auto marked = markNeedsRecovery(plan.id);
@@ -215,13 +241,6 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             return Result<void>::failure({
                 "rollback.needs_recovery", "A file changed during undo; review is required.",
             });
-        }
-        auto intent = history_.appendEvent(
-            StepStatusChanged{plan.id, step->id, StepStatus::RollbackIntentRecorded});
-        if (!intent) {
-            auto marked = markNeedsRecovery(plan.id);
-            if (!marked) return marked;
-            return intent;
         }
         auto moved = WindowsFileMover::moveNoReplace(step->destination, step->source);
         if (!moved ||

@@ -3,6 +3,10 @@
 #include "presentation/rule_editor_controller.hpp"
 #include "presentation/history_controller.hpp"
 #include "presentation/recovery_controller.hpp"
+#include "presentation/watch_controller.hpp"
+#include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "infrastructure/configuration/json_watch_settings_repository.hpp"
+#include "infrastructure/configuration/json_pending_files_repository.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
@@ -108,6 +112,83 @@ struct PreviewWorkflow {
         : PreviewWorkflow(projectPath("resources/rules/default.example.json"),
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
+
+// 감시 제안도 기존 대기 목록·고정·확인·이동·저장 흐름을 따르는지 검사하는 함수.
+void testWatchedFilesUseNormalSortWorkflow() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "watch integration fixture should exist");
+    if (!directory.isValid()) return;
+    const auto incoming = directory.filePath(QStringLiteral("incoming"));
+    expect(QDir().mkpath(incoming), "watched folder should exist");
+    const auto first = QDir(incoming).filePath(QStringLiteral("first.jpg"));
+    const auto second = QDir(incoming).filePath(QStringLiteral("second.jpg"));
+    for (const auto& path : {first, second}) {
+        QFile file(path);
+        expect(file.open(QIODevice::WriteOnly), "watched fixture should open");
+        if (!file.isOpen()) return;
+        file.write("watched bytes");
+    }
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    PreviewWorkflow workflow(appData);
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController preview(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"), appData, home);
+    nookbit::JsonPendingFilesRepository queue(directory.filePath(QStringLiteral("pending-files.json")));
+    // 실제 앱처럼 목록 변경 때 전체 경로만 저장하는 함수.
+    QObject::connect(&pending, &nookbit::PendingFilesModel::countChanged, &pending, [&] {
+        std::vector<std::filesystem::path> paths;
+        for (const auto& path : pending.filePaths()) paths.emplace_back(path.toStdWString());
+        expect(queue.save(paths).hasValue(), "watched queue should persist");
+    });
+    pending.addUrl(QUrl::fromLocalFile(first));
+    preview.createPreview(home);
+    expect(preview.hasPreview(), "manual first file should have a draft");
+    nookbit::JsonWatchSettingsRepository watchSettings(
+        directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
+    nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, workflow.ruleEngine, workflow.rules);
+    nookbit::WatchController watch(pending, watchSettings, evaluate, incoming);
+    watch.saveSettings(incoming, true, false, 10, false, true, 2, false, 1, false, 1, {});
+    watch.checkNow();
+    expect(watch.proposalVisible() && pending.count() == 1 && preview.hasPreview(),
+           "proposal alone must not alter the queue or authorize movement");
+    watch.addProposalToPending();
+    expect(pending.count() == 2 && !preview.hasPreview() && !preview.hasApprovedPlan() &&
+               QFile::exists(first) && QFile::exists(second),
+           "acceptance must deduplicate, invalidate the old draft, and only register paths");
+    const auto queued = queue.load();
+    expect(queued && queued.value().size() == 2, "accepted watched files should survive restart");
+    preview.confirmSort();
+    expect(QFile::exists(first) && QFile::exists(second), "watched queue must not bypass confirmation preparation");
+    preview.createPreview(home);
+    expect(preview.prepareSort() && preview.confirmationSteps().size() == 2 &&
+               !preview.hasApprovedPlan() && QFile::exists(first) && QFile::exists(second),
+           "watched files must use the same frozen confirmation workflow");
+#ifdef _WIN32
+    QFile changed(second);
+    expect(changed.open(QIODevice::Append), "watched file should reopen after confirmation preparation");
+    if (!changed.isOpen()) return;
+    changed.write(" edited");
+    changed.close();
+    preview.confirmSort();
+    const auto failedQueue = queue.load();
+    expect(!preview.hasPreview() && !preview.hasApprovedPlan() && pending.count() == 2 &&
+               QFile::exists(first) && QFile::exists(second) && failedQueue && failedQueue.value().size() == 2,
+           "failed watched confirmation must preserve both queue entries on disk and both source files");
+    preview.createPreview(home);
+    expect(preview.prepareSort(), "changed watched file needs a fresh preview and confirmation");
+    preview.confirmSort();
+    expect(!QFile::exists(first) && !QFile::exists(second) && pending.count() == 0 && preview.canUndo(),
+           "explicit confirmation should move watched files and remove their queue entries");
+    const auto afterMove = queue.load();
+    expect(afterMove && afterMove.value().empty(), "moved watched files must not return in the saved queue");
+    preview.undoLastMove();
+    expect(QFile::exists(first) && QFile::exists(second), "watched sort must remain undoable");
+#endif
+}
 
 // 편집 초안은 정리에 영향이 없고 전체 저장한 규칙만 다음 미리보기에 적용되는지 검사하는 함수.
 void testSavedEditorRulesReachMainPreview() {
@@ -1101,6 +1182,7 @@ void testRecoveryCasesInController() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testCommonCollisionPolicyWorkflow();
+    testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();
     testSavedEditorRulesReachMainPreview();
