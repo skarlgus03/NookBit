@@ -1,6 +1,6 @@
 # Cross-volume transfer design
 
-상태: 전송 자료형·상태 검증·SQLite 기록 기반과 Windows 임시 복사/검증 일꾼은 구현했다. 최종 파일 확정·원본 제거·다른 볼륨 되돌리기는 아직 구현하거나 활성화하지 않았다. 현재 앱 실행기는 같은 볼륨의 덮어쓰기 없는 이름 변경만 지원한다.
+상태: 전송 자료형·상태 검증·SQLite 기록 기반, Windows 임시 복사/검증·최종 이름 확정과 이를 기록에 연결하는 유스케이스를 구현했다. 원본 제거·다른 볼륨 되돌리기는 아직 구현하거나 활성화하지 않았다. 현재 앱 실행기는 같은 볼륨의 덮어쓰기 없는 이름 변경만 지원한다.
 
 ## 현재 구현된 기반
 
@@ -11,17 +11,30 @@
 - SQLite 이행: 버전순 마이그레이션, 실패 시 해당 이행 롤백, 지원 버전보다 높은 DB의 쓰기 거부.
 - `transfer_journal_tests.cpp`: 정상 단계 전이, 잘못된 순서·증거·중복·낡은 갱신 거부, 정방향/역방향 별도 기록, 재시작 복원, 이벤트 저장 실패 원자성, 이전 DB·해시 보존, 이행 실패/재시도·더 높은 버전 거부를 검사한다.
 
-`StagingCreated`는 임시 파일 생성 후 객체 ID를 기록하는 별도 단계다. 현재 저널의 `Completed`는 호출자가 보고한 전송 시도의 기록 상태이지 실제 파일 이동 완료를 보증하지 않는다. 기존 `StepStatus`·계획 완료를 자동 갱신하지 않는다. 원본 제거 권한도 제공하지 않는다. 파일 일꾼의 검증 결과와 저널·상위 단계 완료를 결합하는 작업은 후속 구현에서 수행한다. 계획 서명 v2·최종 확정/원본 제거 세션·복구 처리는 아직 남아 있다.
+`StagingCreated`는 임시 파일 생성 후 객체 ID를 기록하는 별도 단계다. 현재 저널의 `Completed`는 호출자가 보고한 전송 시도의 기록 상태이지 실제 파일 이동 완료를 보증하지 않는다. 기존 `StepStatus`·계획 완료를 자동 갱신하지 않는다. 원본 제거 권한도 제공하지 않는다. 파일 일꾼·저널·상위 이동 완료를 결합하는 작업은 후속 구현에서 수행한다. 계획 서명 v2·원본 제거 세션·복구 처리는 아직 남아 있다.
 
 ### 임시 복사 일꾼의 현재 범위
 
-- `application/staged_copy.hpp`의 포트와 `WindowsStagedCopy` 어댑터를 추가했다. SQLite·UI를 모르며 최종 이름 변경·삭제 API를 제공하지 않는다. 아직 앱 실행기에 연결하지 않았다.
+- `application/staged_copy.hpp`의 포트와 `WindowsStagedCopy` 어댑터를 추가했다. SQLite·UI를 모르며 원본 삭제 API를 제공하지 않는다. 검증된 세션만 임시 파일을 같은 부모의 최종 이름으로 확정할 수 있다. 아직 앱 실행기에 연결하지 않았다.
 - 볼륨 조회는 없는 경로의 가까운 기존 조상에서 일련번호·볼륨 GUID·파일 시스템을 읽고 폴더를 만들지 않는다. 세션은 기존 부모 폴더만 받으며, 원본과 부모 경로를 핸들로 보호한다. 잠금 불가·경로 접근 불가도 실패다.
 - `open`은 원본 객체 ID·크기·수정 시각·SHA-256과 지원 범위를 검사하고 `CREATE_NEW`로 빈 임시 파일을 만든다. 호출자는 반환된 `createdFingerprint`를 `StagingCreated`로 저장한 뒤 `copyAndVerify`를 호출해야 한다. 기록 실패 시 복사를 진행하지 않는다.
 - 복사는 1MiB 버퍼로 한 번만 수행하며 flush 후 임시 파일을 다시 읽어 해시를 계산한다. 원본도 다시 검증하고 생성/수정 시각·기본 속성을 보존·검사한다. 대상 ACL은 대상 폴더에서 상속한다.
 - 실패·취소·세션 해제 시 원본이나 임시 파일을 자동 삭제하지 않는다. 빈 파일 생성 뒤 지문 조회가 실패한 경우도 파일명으로 소유권을 추정하지 않는다. 향후 저널 기반 복구가 다뤄야 한다.
 - 현재는 고정 로컬 NTFS의 일반 단일 링크 파일만 받는다. ADS·EFS·재분석 지점·오프라인/회수 속성·압축·희소 파일·부모 재분석 지점(폴더 마운트 포함)은 거부한다. 압축/희소 처리와 제거 권한은 별도 설계 전까지 제공하지 않는다.
-- 이번 실제 파일 테스트는 한 볼륨의 임시 폴더에서 복사 원시 작업만 검사했다. 두 드라이브 전송 완료·공간 부족·읽기/쓰기 장애·볼륨 분리·DB 경계 연동은 아직 검증하지 않았다.
+- 이번 실제 파일 테스트는 한 볼륨의 임시 폴더에서 복사·확정 원시 작업과 DB 경계 연동을 검사했다. 두 드라이브 전송 완료·공간 부족·실제 읽기/쓰기 장애·볼륨 분리는 아직 검증하지 않았다.
+
+### 복사본 확정과 기록 연결
+
+`CommitTransferCopyUseCase`는 외부에서 주입받은 복사·저널 포트로 `Prepared → CopyIntent → StagingCreated → CopyVerified → CommitIntent → DestinationCommitted`를 수행한다. 파일 일꾼끼리 직접 호출하거나 SQLite를 파일 일꾼 내부에서 사용하는 구조는 아니다. 승인·경로 정책·계획 서명 v2 검증을 대체하는 진입점이 아니며, 실제 앱 흐름에서는 아직 호출하지 않는다.
+
+- 모든 파일 작업은 앞선 의도/증거 저장 성공 뒤에만 수행한다. 생성 지문 기록 실패에는 복사를 시작하지 않고, 확정 의도 기록 실패에는 이름을 바꾸지 않는다.
+- 세션의 `commitNoReplace`는 복사 검증 성공 후 한 번만 허용한다. 원본·임시 파일 내용과 기본 메타데이터를 재검사하고 보유한 임시 파일 핸들의 `FileRenameInfo`로 같은 부모 안에서만 이름을 바꾼다. `ReplaceIfExists=FALSE`이며 최종 경로의 기존 파일을 덮어쓰지 않는다. 확정 후 flush와 객체·내용·메타데이터를 재검사한다.
+- Windows `DELETE` 접근 권한은 임시 파일 핸들의 이름 변경에 필요해 그 핸들에만 부여한다. 원본 핸들에는 부여하지 않으며 파일 제거/삭제 예약 API는 사용하지 않는다. 이 접근 권한과 프로그램의 원본 삭제 허가는 다른 개념이다.
+- 읽기 전용·숨김 원본의 테스트에서 NTFS 이름 변경이 보관 속성을 추가하는 것을 확인했다. 확정 뒤 보존할 기본 메타데이터를 재적용하고 검사하여 이 변경도 처리한다. 재적용 실패는 원본을 유지한 채 복구 필요로 남긴다.
+- 취소는 확정 의도 기록 전까지만 반영한다. 확정 의도 기록 뒤에는 결과 판정과 기록을 끝내고, 불확실한 결과를 단순 취소로 숨기지 않는다.
+- 생성 실패는 생성 뒤 지문 조회 실패일 수도 있어 보수적으로 `NeedsRecovery`로 남긴다. 복사 실패/취소는 `Failed`/`Cancelled`로 기록하고 원본·부분 복사본을 보존한다. 기록 실패·확정 오류·확정 후 결과 저장 실패는 `NeedsRecovery`를 시도한다. 복구 필요 기록도 실패하면 오류를 반환하며 마지막 미해결 단계가 재시도를 막는다.
+- 성공 반환은 `DestinationCommitted`이지 `Completed`가 아니다. 원본은 그대로 있고 상위 `StepStatus`·계획은 실행 중이다. 이 유스케이스 종료 시 핸들은 닫히며 원본 제거 단계로 자동 이어지지 않는다. 향후 전체 전송 조율에서는 검증부터 원본 제거까지 세션 수명·권한을 별도로 통합해야 한다.
+- `commit_transfer_copy_tests.cpp`는 실제 SQLite 재열기와 임시 NTFS 파일로 정상 확정, 각 저장 경계의 실패, 지속적인 DB 쓰기 실패, 확정 직후 API 오류 주입, 이름 충돌, 취소, 중복/미해결 시도 거부와 원본 보존을 검사한다. OS 강제 종료·전원 차단·두 볼륨의 전체 전송 시험은 아니다.
 
 ## 목표와 첫 지원 범위
 
@@ -121,3 +134,5 @@
 다른 볼륨의 `MOVEFILE_COPY_ALLOWED`는 복사·삭제로 구현되며, 원본 삭제에 실패해도 API 성공을 반환할 수 있다. 이 반환값만으로 NookBit의 이동 완료를 판단하지 않는다. 다른 볼륨 이동의 권한 상속 차이도 지원 범위에 반영한다. [Microsoft: MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw).
 
 핸들의 읽기/쓰기/삭제 공유와 접근 권한은 Windows 계약에 맞게 정하며, 충돌 시 기존 파일을 강제로 조작하지 않는다. [Microsoft: CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [Microsoft: SetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle). 데이터 flush는 명시적으로 확인한다. [Microsoft: FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
+
+최종 이름 확정은 `FileRenameInfo`의 `ReplaceIfExists=FALSE` 계약을 사용한다. [Microsoft: FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info).

@@ -4,7 +4,7 @@
 
 namespace nookbit {
 
-/// 삭제·최종 이름 변경 권한 없이 로컬 NTFS의 임시 복사를 수행하는 어댑터.
+/// 원본 제거 API 없이 로컬 NTFS의 임시 복사·검증·최종 이름 확정을 수행하는 어댑터.
 class WindowsStagedCopy final : public IStagedCopy {
 public:
     /// 기존 경로의 볼륨과 지원 여부를 조회하는 함수.

@@ -6,7 +6,9 @@
 #define NOMINMAX
 #include <Windows.h>
 #include <bcrypt.h>
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <vector>
 
 namespace nookbit {
@@ -30,7 +32,8 @@ struct Handle {
 
 // 우회 경로·대체 스트림·네트워크 경로를 받지 않는 함수.
 bool validPath(const std::filesystem::path& path) {
-    if (!path.is_absolute() || path.root_name().wstring().size() != 2) return false;
+    if (!path.is_absolute() || path.root_name().wstring().size() != 2 ||
+        path.native().find(wchar_t{}) != std::wstring::npos) return false;
     for (const auto& part : path.relative_path()) {
         const auto text = part.wstring();
         if (text == L".." || text == L"." || text.find(L':') != std::wstring::npos ||
@@ -167,13 +170,18 @@ public:
     FileFingerprint expected, created;
     FILE_BASIC_INFO metadata{};
     std::filesystem::path sourcePath;
+    std::filesystem::path stagingPath;
+    std::optional<FileFingerprint> verifiedCopy;
     bool attempted{false};
+    bool commitAttempted{false};
 
     // 열린 파일의 소유권과 복사 전 증거를 받는 함수.
     Session(std::vector<Handle> locks, Handle input, Handle output, FileFingerprint fp,
-            FileFingerprint initial, FILE_BASIC_INFO basic, std::filesystem::path path)
+            FileFingerprint initial, FILE_BASIC_INFO basic, std::filesystem::path path,
+            std::filesystem::path temporary)
         : parents(std::move(locks)), source(std::move(input)), staging(std::move(output)),
-          expected(std::move(fp)), created(std::move(initial)), metadata(basic), sourcePath(std::move(path)) {}
+          expected(std::move(fp)), created(std::move(initial)), metadata(basic), sourcePath(std::move(path)),
+          stagingPath(std::move(temporary)) {}
 
     // 빈 임시 파일의 객체 지문을 반환하는 함수.
     const FileFingerprint& createdFingerprint() const override { return created; }
@@ -246,7 +254,86 @@ public:
         if (!TransferValidation::sameObject(created, verified.value()) ||
             !TransferValidation::sameContent(expected, verified.value()))
             return Result<FileFingerprint>::failure({"transfer.verification", "Staging verification failed"});
+        verifiedCopy = verified.value();
         return verified;
+    }
+
+    // 보유한 임시 파일 핸들로 이름을 바꾸고 최종 파일의 내용·객체를 재검증하는 함수.
+    Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) override {
+        if (!verifiedCopy || std::exchange(commitAttempted, true))
+            return Result<FileFingerprint>::failure({"transfer.commit_state", "A verified unused session is required"});
+        const auto parent = stagingPath.parent_path().lexically_normal().wstring();
+        const auto targetParent = destination.parent_path().lexically_normal().wstring();
+        const auto temporary = stagingPath.lexically_normal().wstring();
+        const auto target = destination.lexically_normal().wstring();
+        if (!validPath(destination) || destination.filename().empty() ||
+            CompareStringOrdinal(parent.c_str(), -1, targetParent.c_str(), -1, TRUE) != CSTR_EQUAL ||
+            CompareStringOrdinal(temporary.c_str(), -1, target.c_str(), -1, TRUE) == CSTR_EQUAL)
+            return Result<FileFingerprint>::failure({"transfer.commit_path", "Commit needs a distinct name in the same parent"});
+        const auto sourceCheck = ordinarySource(source.value, sourcePath);
+        const auto stagingCheck = ordinarySource(staging.value, stagingPath);
+        if (!sourceCheck || !stagingCheck)
+            return Result<FileFingerprint>::failure(!sourceCheck ? sourceCheck.error() : stagingCheck.error());
+        const auto inputHash = digest(source.value, {});
+        const auto copyHash = digest(staging.value, {});
+        auto input = fingerprint(source.value);
+        auto output = fingerprint(staging.value);
+        if (!inputHash || !copyHash || !input || !output)
+            return Result<FileFingerprint>::failure({"transfer.commit_check", "Cannot revalidate before commit"});
+        input.value().sha256 = inputHash.value();
+        output.value().sha256 = copyHash.value();
+        if (!sameFingerprint(expected, input.value()) || !sameFingerprint(*verifiedCopy, output.value()))
+            return Result<FileFingerprint>::failure({"transfer.commit_changed", "Source or staging changed before commit"});
+        FILE_BASIC_INFO inputBasic{}, outputBasic{};
+        const DWORD preservedAttributes = metadata.FileAttributes & (FILE_ATTRIBUTE_READONLY |
+            FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        const DWORD expectedAttributes = preservedAttributes ? preservedAttributes : FILE_ATTRIBUTE_NORMAL;
+        if (!GetFileInformationByHandleEx(source.value, FileBasicInfo, &inputBasic, sizeof(inputBasic)) ||
+            !GetFileInformationByHandleEx(staging.value, FileBasicInfo, &outputBasic, sizeof(outputBasic)) ||
+            inputBasic.CreationTime.QuadPart != metadata.CreationTime.QuadPart ||
+            inputBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
+            inputBasic.FileAttributes != metadata.FileAttributes ||
+            outputBasic.CreationTime.QuadPart != metadata.CreationTime.QuadPart ||
+            outputBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
+            outputBasic.FileAttributes != expectedAttributes)
+            return Result<FileFingerprint>::failure({"transfer.commit_changed", "Source or staging metadata changed before commit"});
+        const auto name = destination.lexically_normal().wstring();
+        const size_t bytes = offsetof(FILE_RENAME_INFO, FileName) + (name.size() + 1) * sizeof(wchar_t);
+        if (bytes > MAXDWORD)
+            return Result<FileFingerprint>::failure({"transfer.commit_path", "Destination path too long"});
+        std::vector<uint64_t> storage((bytes + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
+        auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
+        rename->ReplaceIfExists = FALSE;
+        rename->RootDirectory = nullptr;
+        rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
+        std::copy(name.begin(), name.end(), rename->FileName);
+        if (!SetFileInformationByHandle(staging.value, FileRenameInfo, rename, static_cast<DWORD>(bytes)))
+            return Result<FileFingerprint>::failure(failure("transfer.commit_rename"));
+        // NTFS 이름 변경이 보관 속성을 추가할 수 있어 승인 당시 보존 정책을 다시 적용한다.
+        FILE_BASIC_INFO preserve = metadata;
+        preserve.LastAccessTime.QuadPart = 0;
+        preserve.ChangeTime.QuadPart = 0;
+        preserve.FileAttributes = expectedAttributes;
+        if (!SetFileInformationByHandle(staging.value, FileBasicInfo, &preserve, sizeof(preserve)))
+            return Result<FileFingerprint>::failure(failure("transfer.commit_metadata"));
+        // 이름 변경 뒤 오류는 확정 전 실패와 구별해 상위 계층에서 복구 필요로 남긴다.
+        if (!FlushFileBuffers(staging.value))
+            return Result<FileFingerprint>::failure(failure("transfer.commit_flush"));
+        const auto finalCheck = ordinarySource(staging.value, destination);
+        if (!finalCheck) return Result<FileFingerprint>::failure(finalCheck.error());
+        const auto finalHash = digest(staging.value, {});
+        auto final = fingerprint(staging.value);
+        FILE_BASIC_INFO finalBasic{};
+        if (!finalHash || !final ||
+            !GetFileInformationByHandleEx(staging.value, FileBasicInfo, &finalBasic, sizeof(finalBasic)))
+            return Result<FileFingerprint>::failure({"transfer.commit_verify", "Cannot verify renamed file"});
+        final.value().sha256 = finalHash.value();
+        if (!sameFingerprint(*verifiedCopy, final.value()) ||
+            finalBasic.CreationTime.QuadPart != metadata.CreationTime.QuadPart ||
+            finalBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
+            finalBasic.FileAttributes != expectedAttributes)
+            return Result<FileFingerprint>::failure({"transfer.commit_verify", "Renamed file differs from verified copy"});
+        return final;
     }
 };
 } // namespace
@@ -307,13 +394,14 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
     fp.value().sha256 = hash.value();
     if (!sameFingerprint(expected, fp.value()))
         return Return::failure({"transfer.source_changed", "Source no longer matches approved evidence"});
-    Handle output(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+    // DELETE 권한은 앱이 만든 임시 파일의 이름 변경에만 사용하며 제거 API는 제공하지 않는다.
+    Handle output(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (output.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.staging_create"));
     const auto initial = fingerprint(output.value);
     if (!initial) return Return::failure(initial.error());
     return Return::success(std::make_unique<Session>(std::move(locks), std::move(input), std::move(output),
-        expected, initial.value(), basic, source));
+        expected, initial.value(), basic, source, staging));
 }
 } // namespace nookbit
 #else

@@ -25,6 +25,8 @@ public:
     /// 한 번만 복사하고 내용을 재검증하며 취소·실패 시에도 원본을 유지하는 함수.
     [[nodiscard]] virtual Result<FileFingerprint> copyAndVerify(
         const std::function<bool()>& cancelled = {}) = 0;
+    /// 검증된 임시 파일만 같은 부모의 최종 이름으로 덮어쓰기 없이 확정하는 함수.
+    [[nodiscard]] virtual Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) = 0;
 };
 
 class IStagedCopy {

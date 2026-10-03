@@ -139,12 +139,27 @@ int main(int argc, char** argv) {
         expect(!MoveFileW(parent.c_str(), (root / "renamed-parent").c_str()), "parent rename blocked");
         const auto result = attributeSession.value()->copyAndVerify();
         expect(bool(result), "readonly attributes copied and verified");
+        const auto committed = attributeSession.value()->commitNoReplace(parent / "final");
+        if (!committed) std::cerr << committed.error().code << ": " << committed.error().message << '\n';
+        expect(bool(committed), "readonly verified copy renamed without losing attributes");
         attributeSession.value().reset();
-        expect(GetFileAttributesW((parent / "stage").c_str()) == (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN), "attributes preserved on disk");
-        expect(SetFileAttributesW((parent / "stage").c_str(), FILE_ATTRIBUTE_NORMAL), "unlock fixture staging cleanup");
+        const auto copiedPath = std::filesystem::exists(parent / "final") ? parent / "final" : parent / "stage";
+        expect(GetFileAttributesW(copiedPath.c_str()) == (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN), "attributes preserved on disk");
+        expect(SetFileAttributesW(copiedPath.c_str(), FILE_ATTRIBUTE_NORMAL), "unlock fixture staging cleanup");
     }
     expect(SetFileAttributesW((parent / "source").c_str(), FILE_ATTRIBUTE_NORMAL), "unlock fixture source cleanup");
     expect(MoveFileW(parent.c_str(), (root / "renamed-parent").c_str()), "parent unlocked after session closes");
+    const auto commitSource = root / "commit-source";
+    write(commitSource, "commit contents");
+    auto commit = worker.open(commitSource, fingerprint(commitSource), root / "commit-stage");
+    expect(bool(commit), "direct commit session");
+    if (commit) {
+        expect(!commit.value()->commitNoReplace(root / "commit-final"), "unverified commit rejected");
+        expect(commit.value()->copyAndVerify().hasValue(), "copy after premature commit rejection");
+        const auto result = commit.value()->commitNoReplace(root / "commit-final");
+        expect(bool(result), "direct verified rename succeeds");
+        expect(!commit.value()->commitNoReplace(root / "another-final"), "commit cannot run twice");
+    }
 #else
     nookbit::WindowsStagedCopy worker;
     expect(!worker.inspectVolume("/tmp"), "unsupported platform rejected");
