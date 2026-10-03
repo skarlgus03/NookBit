@@ -17,6 +17,8 @@ public:
     [[nodiscard]] Result<void> begin(const TransferAttempt& attempt) override;
     /// 예상 상태·증거를 검사하고 스냅샷과 이벤트를 함께 기록하는 함수.
     [[nodiscard]] Result<void> advance(const std::string& attemptId, const TransferUpdate& update) override;
+    /// 정방향 전송 완료와 상위 단계·계획 기록을 한 트랜잭션으로 저장하는 함수.
+    [[nodiscard]] Result<void> completeForward(const std::string& attemptId) override;
     /// 이벤트를 순서대로 재생해 마지막 스냅샷을 검증·복원하는 함수.
     [[nodiscard]] Result<TransferAttempt> load(const std::string& attemptId) const override;
     /// 한 단계에 속한 시도를 생성 순서대로 읽는 함수.

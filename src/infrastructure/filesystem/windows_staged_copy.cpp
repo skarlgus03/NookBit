@@ -1,5 +1,6 @@
 #include "windows_staged_copy.hpp"
 #include "windows_transfer_file_inspector.hpp"
+#include "windows_transfer_source_removal.hpp"
 #include "file_identity.hpp"
 #include <nookbit/domain/transfer.hpp>
 
@@ -337,7 +338,102 @@ public:
         return final;
     }
 };
+// 최종 파일을 보호한 상태에서 승인 원본 핸들만 제거하는 세션.
+class RemovalSession final : public ITransferRemovalSession {
+    std::vector<Handle> parents_;
+    Handle source_, destination_;
+    TransferAttempt attempt_;
+    bool attempted_{false};
+public:
+    // 보호 핸들과 확정된 전송 증거를 소유하는 함수.
+    RemovalSession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt)
+        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)) {}
+    // 두 파일의 지원 범위·객체 ID·내용·수정 시각을 보유 핸들로 재검증하는 함수.
+    Result<void> verify() override {
+        if (source_.value == INVALID_HANDLE_VALUE) return Result<void>::failure({"transfer.removal_state", "Source handle closed"});
+        for (const auto& pair : {std::pair{source_.value, attempt_.source}, std::pair{destination_.value, attempt_.destination}}) {
+            const auto supported = ordinarySource(pair.first, pair.second);
+            if (!supported) return supported;
+            const auto hash = digest(pair.first, {});
+            const auto actual = fingerprint(pair.first);
+            if (!hash || !actual) return Result<void>::failure(!hash ? hash.error() : actual.error());
+            auto hashed = actual.value();
+            hashed.sha256 = hash.value();
+            const auto& expected = pair.first == source_.value ? attempt_.sourceFingerprint : *attempt_.destinationFingerprint;
+            if (!sameFingerprint(expected, hashed))
+                return Result<void>::failure({"transfer.removal_changed", "Source or final copy changed; neither file removed"});
+        }
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(source_.value, &info)) return Result<void>::failure(failure("transfer.removal_stat"));
+        if (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+            return Result<void>::failure({"transfer.removal_readonly", "Read-only source is retained; attributes are not forced"});
+        FILE_BASIC_INFO sourceBasic{}, finalBasic{};
+        const DWORD flags = info.dwFileAttributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
+            FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        if (!GetFileInformationByHandleEx(source_.value, FileBasicInfo, &sourceBasic, sizeof(sourceBasic)) ||
+            !GetFileInformationByHandleEx(destination_.value, FileBasicInfo, &finalBasic, sizeof(finalBasic)) ||
+            sourceBasic.CreationTime.QuadPart != finalBasic.CreationTime.QuadPart ||
+            sourceBasic.LastWriteTime.QuadPart != finalBasic.LastWriteTime.QuadPart ||
+            finalBasic.FileAttributes != (flags ? flags : FILE_ATTRIBUTE_NORMAL))
+            return Result<void>::failure({"transfer.removal_metadata", "Source and final metadata differ; source retained"});
+        if (GetFileAttributesW(attempt_.staging.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
+            return Result<void>::failure({"transfer.removal_staging", "Staging path is not provably absent"});
+        return Result<void>::success();
+    }
+    // 제거 직전 재검증하고 핸들 기반 제거·닫기·실제 부재를 한 번 확인하는 함수.
+    Result<void> removeVerifiedSource() override {
+        if (std::exchange(attempted_, true)) return Result<void>::failure({"transfer.removal_reused", "Removal already attempted"});
+        const auto checked = verify();
+        if (!checked) return checked;
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        if (!SetFileInformationByHandle(source_.value, FileDispositionInfo, &disposition, sizeof(disposition)))
+            return Result<void>::failure(failure("transfer.removal_failed"));
+        if (!CloseHandle(source_.value)) return Result<void>::failure(failure("transfer.removal_close"));
+        source_.value = INVALID_HANDLE_VALUE;
+        if (GetFileAttributesW(attempt_.source.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
+            return Result<void>::failure({"transfer.removal_uncertain", "Source absence is not confirmed; final copy retained"});
+        const auto finalHash = digest(destination_.value, {});
+        const auto final = fingerprint(destination_.value);
+        if (!finalHash || !final) return Result<void>::failure({"transfer.removal_final_unavailable", "Cannot confirm retained final copy"});
+        auto actual = final.value();
+        actual.sha256 = finalHash.value();
+        if (!sameFingerprint(*attempt_.destinationFingerprint, actual))
+            return Result<void>::failure({"transfer.removal_final_changed", "Final copy verification failed after source removal"});
+        return Result<void>::success();
+    }
+};
 } // namespace
+
+// 확정 증거가 있는 두 파일만 독점 보호하는 함수.
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt& attempt) {
+    using Return = Result<std::unique_ptr<ITransferRemovalSession>>;
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared;
+    initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
+    const auto evidence = TransferValidation::advance(attempt, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
+    if (attempt.direction != TransferDirection::Forward || !TransferValidation::validateNew(initial) || !evidence ||
+        !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
+        TransferValidation::sameObject(attempt.sourceFingerprint, *attempt.destinationFingerprint))
+        return Return::failure({"transfer.removal_evidence", "Forward committed copy evidence with distinct objects required"});
+    std::vector<Handle> parents;
+    for (const auto& path : {attempt.source, attempt.destination}) {
+        const auto locked = lockParents(path, parents);
+        if (!locked) return Return::failure(locked.error());
+    }
+    Handle source(CreateFileW(attempt.source.c_str(), GENERIC_READ | DELETE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (source.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.removal_lock"));
+    Handle destination(CreateFileW(attempt.destination.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (destination.value == INVALID_HANDLE_VALUE)
+        return Return::failure(failure("transfer.removal_lock"));
+    for (const auto handle : {source.value, destination.value}) {
+        const auto location = volume(handle);
+        if (!location || !location.value().localNtfs)
+            return Return::failure({"transfer.removal_volume", "Accessible local fixed NTFS required"});
+    }
+    return Return::success(std::make_unique<RemovalSession>(std::move(parents), std::move(source), std::move(destination), attempt));
+}
 
 namespace {
 // 없는 경로 끝을 제외하고 기존 안전한 조상의 볼륨을 조회하는 함수.
@@ -469,6 +565,10 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외에서는 원본 제거를 지원하지 않는 함수.
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt&) {
+    return Result<std::unique_ptr<ITransferRemovalSession>>::failure({"transfer.unsupported", "Windows only"});
+}
 // Windows 외 플랫폼에서는 읽기 전용 검사도 지원하지 않는 함수.
 TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path&) {
     TransferFileObservation result;

@@ -1,5 +1,7 @@
 #include <nookbit/application/commit_transfer_copy_use_case.hpp>
 #include <nookbit/application/inspect_transfer_recovery_use_case.hpp>
+#include <nookbit/application/finalize_transfer_use_case.hpp>
+#include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
@@ -15,6 +17,10 @@
 #include <QUuid>
 #include <fstream>
 #include <iostream>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#endif
 
 namespace {
 using namespace nookbit;
@@ -58,6 +64,17 @@ public:
         }
         const auto result = inner.advance(id, update);
         if (result) last = update.nextPhase;
+        return result;
+    }
+    // 제거 뒤 완료 트랜잭션 실패를 주입하거나 실제 저널로 전달하는 함수.
+    Result<void> completeForward(const std::string& id) override {
+        if (beforeRecord) beforeRecord(TransferPhase::Completed);
+        if (persistent || failAt == TransferPhase::Completed) {
+            failAt.reset();
+            return Result<void>::failure({"test.completion", "Injected completion failure"});
+        }
+        const auto result = inner.completeForward(id);
+        if (result) last = TransferPhase::Completed;
         return result;
     }
     // 재시작 검사를 위한 시도 복원을 전달하는 함수.
@@ -114,7 +131,7 @@ struct Fixture {
     TransferAttempt attempt;
     bool ready{};
     // 원본 파일과 서명·승인·실행 의도를 실제 DB에 저장하는 함수.
-    Fixture() {
+    explicit Fixture(bool multiple = false) {
         expect(directory.isValid(), "temporary fixture");
         const std::filesystem::path root(directory.path().toStdWString());
         write(root / "source", "original contents for transfer copy");
@@ -138,6 +155,15 @@ struct Fixture {
         step.fingerprint = attempt.sourceFingerprint;
         step.matchedRuleId = "rule";
         plan.steps.push_back(step);
+        if (multiple) {
+            auto pending = step;
+            pending.id = "pending-step";
+            pending.source = root / "pending-source";
+            pending.destination = root / "pending-destination";
+            write(pending.source, "pending contents");
+            pending.fingerprint = fingerprint(pending.source);
+            plan.steps.push_back(pending);
+        }
         QtPlanHasher hasher;
         plan.planHash = hasher.sha256(PlanSignature::approvalPayload(plan));
         ready = history.savePlan(plan).hasValue() && history.saveApproval(
@@ -419,6 +445,114 @@ void testReadOnlyTransferRecovery() {
             "untrusted plan does not inspect arbitrary paths");
     }
 }
+
+// 실제 SQLite 완료 트랜잭션에 실패 트리거를 설정하는 함수.
+void completionFault(const QString& path) {
+    const auto name = QUuid::createUuid().toString();
+    {
+        auto database = QSqlDatabase::addDatabase("QSQLITE", name);
+        database.setDatabaseName(path);
+        expect(database.open(), "completion fault DB open");
+        QSqlQuery query(database);
+        expect(query.exec("CREATE TRIGGER reject_completion BEFORE INSERT ON events WHEN NEW.event_type='plan_status_changed' AND NEW.payload_json LIKE '%completed%' BEGIN SELECT RAISE(ABORT,'injected completion failure'); END"), "completion failure trigger");
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+}
+
+// 원본 제거·실제 부재·원자적 완료와 제거 경계 실패를 실제 임시 파일로 검사하는 함수.
+void testSourceRemovalAndCompletion() {
+#ifdef _WIN32
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "removal copy fixture");
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        const auto result = finalize.execute(fixture.attempt.id);
+        if (!result) std::cerr << result.error().code << ": " << result.error().message << '\n';
+        expect(result && result.value().phase == TransferPhase::Completed, "verified source removal completes");
+        expect(!std::filesystem::exists(fixture.attempt.source), "original actually absent");
+        expect(TransferValidation::sameContent(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.destination)), "final content retained");
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        const auto attempt = fixture.journal.load(fixture.attempt.id);
+        expect(plan && plan.value().status == PlanStatus::Completed && plan.value().steps.front().status == StepStatus::Applied &&
+            attempt && attempt.value().phase == TransferPhase::Completed, "transfer step plan atomically complete");
+        expect(!finalize.execute(fixture.attempt.id), "completed removal cannot repeat");
+    }
+    {
+        Fixture fixture(true);
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "batch first copy fixture");
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(finalize.execute(fixture.attempt.id).hasValue(), "batch first file completes");
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(plan && plan.value().status == PlanStatus::Executing && plan.value().steps[0].status == StepStatus::Applied &&
+            plan.value().steps[1].status == StepStatus::Planned, "unfinished batch is not marked complete");
+        expect(std::filesystem::exists(fixture.attempt.source.parent_path() / "pending-source"), "pending source untouched");
+    }
+    for (const auto failAt : {TransferPhase::SourceRemoveIntent, TransferPhase::SourceRemoved, TransferPhase::Completed}) {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "removal failure copy fixture");
+        fixture.faults.failAt = failAt;
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(!finalize.execute(fixture.attempt.id), "removal record failure reported");
+        expect(std::filesystem::exists(fixture.attempt.source) == (failAt == TransferPhase::SourceRemoveIntent), "intent failure never removes source");
+        expect(std::filesystem::exists(fixture.attempt.destination), "all removal failures retain final copy");
+        const auto attempt = fixture.journal.load(fixture.attempt.id);
+        expect(attempt && attempt.value().phase == TransferPhase::NeedsRecovery, "removal failure needs recovery");
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(plan && plan.value().status == PlanStatus::Executing && plan.value().steps.front().status == StepStatus::IntentRecorded, "no false upper completion");
+    }
+    for (const auto scenario : {0, 1, 2, 3, 4}) {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "unsafe removal fixture");
+        const auto finalBefore = fingerprint(fixture.attempt.destination);
+        if (scenario == 0) write(fixture.attempt.source, "new source content");
+        if (scenario == 1) write(fixture.attempt.destination, "new final content");
+        if (scenario == 2) expect(SetFileAttributesW(fixture.attempt.source.c_str(), FILE_ATTRIBUTE_READONLY), "readonly source fixture");
+        HANDLE reader = INVALID_HANDLE_VALUE;
+        if (scenario == 3) reader = CreateFileW(fixture.attempt.source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (scenario == 4) write(fixture.attempt.staging, "unowned staging file");
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(!finalize.execute(fixture.attempt.id), "unsafe source removal rejected");
+        if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+        expect(std::filesystem::exists(fixture.attempt.source) && std::filesystem::exists(fixture.attempt.destination), "unsafe removal retains both files");
+        if (scenario != 1) expect(sameFingerprint(finalBefore, fingerprint(fixture.attempt.destination)), "safe final unchanged");
+        if (scenario == 2) expect(SetFileAttributesW(fixture.attempt.source.c_str(), FILE_ATTRIBUTE_NORMAL), "readonly fixture cleanup");
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "cancel removal fixture");
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(!finalize.execute(fixture.attempt.id, [] { return true; }), "cancel before removal");
+        fixture.check(TransferPhase::DestinationCommitted);
+        const auto result = finalize.execute(fixture.attempt.id, [&] { return fixture.faults.last == TransferPhase::SourceRemoveIntent; });
+        expect(result && result.value().phase == TransferPhase::Completed, "late cancellation cannot interrupt removal result recording");
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "atomic completion fixture");
+        completionFault(fixture.database);
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(!finalize.execute(fixture.attempt.id), "real SQL completion failure exposed");
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        const auto attempt = fixture.journal.load(fixture.attempt.id);
+        expect(plan && plan.value().status == PlanStatus::Executing && plan.value().steps.front().status == StepStatus::IntentRecorded &&
+            attempt && attempt.value().phase == TransferPhase::NeedsRecovery, "SQL completion failure rolls back step and plan atomically");
+        expect(!std::filesystem::exists(fixture.attempt.source) && std::filesystem::exists(fixture.attempt.destination), "post-removal SQL failure retains final copy");
+    }
+#endif
+}
 }
 
 // 실제 SQLite와 임시 NTFS 파일의 복사·확정 연동을 시험하는 함수.
@@ -429,6 +563,7 @@ int main(int argc, char** argv) {
     testJournalFailures();
     testRejectedFiles();
     testReadOnlyTransferRecovery();
+    testSourceRemovalAndCompletion();
 #endif
     return failures ? 1 : 0;
 }

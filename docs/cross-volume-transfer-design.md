@@ -1,6 +1,6 @@
 # Cross-volume transfer design
 
-상태: 전송 자료형·상태 검증·SQLite 기록 기반, Windows 임시 복사/검증·최종 이름 확정, 기록 연결과 세 위치 읽기 전용 복구 검사를 구현했다. 원본 제거·다른 볼륨 되돌리기는 아직 구현하거나 활성화하지 않았다. 현재 앱 실행기는 같은 볼륨의 덮어쓰기 없는 이름 변경만 지원한다.
+상태: 전송 자료형·SQLite 기록, Windows 임시 복사/검증·최종 확정, 세 위치 복구 검사와 정방향 원본 제거·원자적 완료 백엔드를 구현했다. 다른 볼륨 되돌리기와 실제 정리 흐름 연결은 아직 없다. 현재 앱 실행기는 같은 볼륨의 덮어쓰기 없는 이름 변경만 지원한다.
 
 ## 현재 구현된 기반
 
@@ -11,7 +11,7 @@
 - SQLite 이행: 버전순 마이그레이션, 실패 시 해당 이행 롤백, 지원 버전보다 높은 DB의 쓰기 거부.
 - `transfer_journal_tests.cpp`: 정상 단계 전이, 잘못된 순서·증거·중복·낡은 갱신 거부, 정방향/역방향 별도 기록, 재시작 복원, 이벤트 저장 실패 원자성, 이전 DB·해시 보존, 이행 실패/재시도·더 높은 버전 거부를 검사한다.
 
-`StagingCreated`는 임시 파일 생성 후 객체 ID를 기록하는 별도 단계다. 현재 저널의 `Completed`는 호출자가 보고한 전송 시도의 기록 상태이지 실제 파일 이동 완료를 보증하지 않는다. 기존 `StepStatus`·계획 완료를 자동 갱신하지 않는다. 원본 제거 권한도 제공하지 않는다. 파일 일꾼·저널·상위 이동 완료를 결합하는 작업은 후속 구현에서 수행한다. 계획 서명 v2·원본 제거 세션・복구 결과의 명시적 기록 정리는 아직 남아 있다.
+`StagingCreated`는 임시 파일 생성 후 객체 ID를 기록하는 별도 단계다. 저널의 일반 `advance`는 호출자가 보고한 단계만 저장하며 파일 작업의 성공을 자체 보증하지 않는다. 원본 제거 유스케이스는 실제 제거 결과까지 확인한 뒤 별도 `completeForward`로 전송·상위 단계·필요한 계획 완료를 원자적으로 기록한다. 계획 서명 v2·역방향 전송·복구 결과의 명시적 기록 정리는 아직 남아 있다.
 
 ### 임시 복사 일꾼의 현재 범위
 
@@ -35,6 +35,23 @@
 - 생성 실패는 생성 뒤 지문 조회 실패일 수도 있어 보수적으로 `NeedsRecovery`로 남긴다. 복사 실패/취소는 `Failed`/`Cancelled`로 기록하고 원본·부분 복사본을 보존한다. 기록 실패·확정 오류·확정 후 결과 저장 실패는 `NeedsRecovery`를 시도한다. 복구 필요 기록도 실패하면 오류를 반환하며 마지막 미해결 단계가 재시도를 막는다.
 - 성공 반환은 `DestinationCommitted`이지 `Completed`가 아니다. 원본은 그대로 있고 상위 `StepStatus`·계획은 실행 중이다. 이 유스케이스 종료 시 핸들은 닫히며 원본 제거 단계로 자동 이어지지 않는다. 향후 전체 전송 조율에서는 검증부터 원본 제거까지 세션 수명·권한을 별도로 통합해야 한다.
 - `commit_transfer_copy_tests.cpp`는 실제 SQLite 재열기와 임시 NTFS 파일로 정상 확정, 각 저장 경계의 실패, 지속적인 DB 쓰기 실패, 확정 직후 API 오류 주입, 이름 충돌, 취소, 중복/미해결 시도 거부와 원본 보존을 검사한다. OS 강제 종료·전원 차단·두 볼륨의 전체 전송 시험은 아니다.
+
+## 정방향 원본 제거와 완료
+
+`FinalizeTransferUseCase`는 `DestinationCommitted`의 정방향 시도만 처리한다. 다시 읽은 계획 서명·원본 지문·출발/도착 경로와 실행 상태를 검사하고 `ITransferSourceRemoval`의 보호 세션을 연다. 이 유스케이스와 제거 일꾼은 실제 앱 정리 버튼에 등록하지 않았다.
+
+1. 원본·최종 파일과 부모 경로를 보호하고 두 파일의 객체 ID·크기·SHA-256·수정 시각을 재검증한다. 임시 경로도 실제로 비어 있어야 한다.
+2. `SourceRemoveIntent` 저장이 성공한 뒤에만 제거 함수를 호출한다. 저장 실패와 그 이후 복구 기록 실패에도 제거를 실행하지 않는다.
+3. 제거 직전 같은 핸들로 다시 검증한다. 원본 핸들에 `FileDispositionInfo`로 제거를 요청하고 닫기 성공·정확한 원본 경로의 부재·보호된 최종 복사본을 확인한다. 일반 임의 경로 삭제나 재귀 삭제 API는 없다.
+4. `SourceRemoved`를 저장하고 `completeForward`로 전송 `Completed`·단계 `Applied`·이력 이벤트를 한 트랜잭션에 기록한다. 모든 단계가 적용/건너뜀이고 미해결 전송이 없을 때만 계획 `Completed`도 같은 트랜잭션에 저장한다. 아직 남은 단계가 있으면 계획은 실행 중이다. 승인 계획의 원본 지문은 덮어쓰지 않는다.
+
+- 복사 세션과 제거 세션은 분리되어 있다. 그 사이 파일이 바뀔 수 있으므로 제거 세션을 새로 열고 원본·최종 객체와 내용을 다시 검증한다. 제거 의도부터 제거·완료 기록까지는 같은 보호 세션을 유지한다.
+- 원본은 읽기/제거 접근, 최종 파일은 읽기 접근만 요청하고 파일 공유는 허용하지 않는다. 다른 프로세스의 기존 핸들과 충돌하거나 필요한 권한이 없으면 제거하지 않는다. ADS·다중 링크·재분석 지점 등 기존 지원 검사도 다시 적용한다.
+- 읽기 전용 원본은 속성을 강제로 바꾸지 않고 두 파일을 남겨 복구 필요로 처리한다. 로컬 고정 NTFS 일반 파일의 좁은 제거 경계만 구현했다.
+- 제거 의도 전 취소는 `DestinationCommitted`를 그대로 두고 두 파일을 보존한다. 제거 의도 뒤에는 취소 때문에 결과 판정·기록을 중단하지 않는다.
+- 제거 전 실패는 원본·최종 파일을 보존한다. 제거 예약/닫기 이후 오류는 원본이 이미 사라졌을 수도 있다. 이때 두 파일 보존을 약속하지 않으며 최종 복사본을 삭제하거나 되돌리지 않고 복구 필요로 남긴다. 결과·완료 DB 기록 실패도 성공으로 반환하지 않는다.
+- `completeForward`는 제거 결과 기록 이후만 허용하고 부모 실행 상태도 검사한다. 실제 SQLite 완료 이벤트 실패 테스트에서 전송/단계/계획 완료 전체가 롤백된다. 이후 복구 필요 기록도 실패하면 마지막 미해결 단계가 재실행을 막는다.
+- 현재 한 볼륨의 테스트 전용 임시 파일로 실제 원본 제거와 실패 경계를 확인했다. 두 볼륨 전체 전송, 역전송/배치 보상, 전원 차단, 계획 서명 v2·볼륨 GUID 승인, 앱 진입점의 작업 잠금 통합은 활성화 전에 남은 작업이다. 영구 삭제 일반 허용 설정은 바꾸지 않았다.
 
 ## 읽기 전용 전송 복구 검사
 
@@ -150,3 +167,5 @@
 핸들의 읽기/쓰기/삭제 공유와 접근 권한은 Windows 계약에 맞게 정하며, 충돌 시 기존 파일을 강제로 조작하지 않는다. [Microsoft: CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [Microsoft: SetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle). 데이터 flush는 명시적으로 확인한다. [Microsoft: FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
 
 최종 이름 확정은 `FileRenameInfo`의 `ReplaceIfExists=FALSE` 계약을 사용한다. [Microsoft: FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info).
+
+보호된 원본 제거에는 `FileDispositionInfo`를 사용하며 닫기와 실제 부재를 별도로 확인한다. [Microsoft: FILE_DISPOSITION_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_disposition_info), [Microsoft: CloseHandle](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle).

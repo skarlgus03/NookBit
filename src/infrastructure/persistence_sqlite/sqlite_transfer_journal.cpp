@@ -306,6 +306,63 @@ Result<void> SqliteTransferJournal::advance(const std::string& attemptId, const 
     return Result<void>::success();
 }
 
+// 정방향 전송·단계·필요한 계획 완료를 원자적으로 기록하는 함수.
+Result<void> SqliteTransferJournal::completeForward(const std::string& attemptId) {
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", "Cannot start completion transaction"});
+    // 모든 오류에서 동일한 완료 트랜잭션을 롤백하는 함수.
+    const auto fail = [&](const char* code) {
+        database_.rollback();
+        return Result<void>::failure({code, "Atomic transfer/step/plan completion failed"});
+    };
+    const auto current = readAttempt(attemptId);
+    if (!current || current.value().direction != TransferDirection::Forward) return fail("transfer.completion_state");
+    const auto next = TransferValidation::advance(current.value(), {TransferPhase::SourceRemoved, TransferPhase::Completed});
+    if (!next) return fail("transfer.completion_state");
+    const auto planId = QString::fromStdString(current.value().planId);
+    const auto stepId = QString::fromStdString(current.value().stepId);
+    const auto now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    QSqlQuery check(database_);
+    check.prepare("SELECT 1 FROM plans WHERE id=? AND status='executing'");
+    check.addBindValue(planId);
+    if (!check.exec() || !check.next()) return fail("transfer.completion_parent");
+    QSqlQuery change(database_);
+    change.prepare("UPDATE transfer_attempts SET phase='completed',updated_at=? WHERE id=? AND phase='source_removed'");
+    change.addBindValue(now); change.addBindValue(QString::fromStdString(attemptId));
+    if (!change.exec() || change.numRowsAffected() != 1 || !appendSnapshot(next.value())) return fail("transfer.completion_event");
+    QSqlQuery step(database_);
+    step.prepare("UPDATE steps SET status='applied' WHERE id=? AND plan_id=? AND status='intent_recorded'");
+    step.addBindValue(stepId); step.addBindValue(planId);
+    if (!step.exec() || step.numRowsAffected() != 1) return fail("transfer.completion_step");
+    // 상위 이력 서비스가 사용하는 형식으로 같은 트랜잭션의 상태 이벤트를 추가하는 함수.
+    const auto event = [&](const QString& type, const QString& status, bool forStep) {
+        QSqlQuery insert(database_);
+        insert.prepare("INSERT INTO events(plan_id,step_id,occurred_at,event_type,payload_json) VALUES(?,?,?,?,?)");
+        insert.addBindValue(planId); insert.addBindValue(forStep ? QVariant(stepId) : QVariant());
+        insert.addBindValue(now); insert.addBindValue(type);
+        insert.addBindValue(QString::fromUtf8(QJsonDocument(QJsonObject{{"status", status}}).toJson(QJsonDocument::Compact)));
+        return insert.exec();
+    };
+    if (!event("step_status_changed", "applied", true)) return fail("transfer.completion_event");
+    QSqlQuery remaining(database_);
+    remaining.prepare("SELECT COUNT(*) FROM steps WHERE plan_id=? AND status NOT IN ('applied','skipped')");
+    remaining.addBindValue(planId);
+    if (!remaining.exec() || !remaining.next()) return fail("transfer.completion_plan");
+    if (remaining.value(0).toInt() == 0) {
+        QSqlQuery unresolved(database_);
+        unresolved.prepare("SELECT COUNT(*) FROM transfer_attempts WHERE plan_id=? AND phase NOT IN ('completed','failed','cancelled')");
+        unresolved.addBindValue(planId);
+        if (!unresolved.exec() || !unresolved.next() || unresolved.value(0).toInt() != 0) return fail("transfer.completion_unresolved");
+        QSqlQuery plan(database_);
+        plan.prepare("UPDATE plans SET status='completed',completed_at=? WHERE id=? AND status='executing'");
+        plan.addBindValue(now); plan.addBindValue(planId);
+        if (!plan.exec() || plan.numRowsAffected() != 1 || !event("plan_status_changed", "completed", false)) return fail("transfer.completion_plan");
+    }
+    if (!database_.commit()) return fail("transfer.completion_commit");
+    return Result<void>::success();
+}
+
 // 한 단계에 속한 시도를 생성 순서대로 읽는 함수.
 Result<std::vector<TransferAttempt>> SqliteTransferJournal::forStep(const StepId& stepId) const {
     const auto opened = ensureOpen();

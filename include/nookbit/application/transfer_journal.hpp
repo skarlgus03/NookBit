@@ -15,6 +15,10 @@ public:
 
     /// 예상한 이전 단계가 같을 때만 증거와 다음 단계를 원자적으로 기록하는 함수.
     [[nodiscard]] virtual Result<void> advance(const std::string& attemptId, const TransferUpdate& update) = 0;
+    /// 제거 결과가 기록된 정방향 시도·단계·계획 완료를 원자적으로 확정하는 함수.
+    [[nodiscard]] virtual Result<void> completeForward(const std::string&) {
+        return Result<void>::failure({"transfer.completion_unsupported", "Atomic forward completion is unsupported"});
+    }
 
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;
