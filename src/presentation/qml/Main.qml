@@ -13,6 +13,29 @@ ApplicationWindow {
     property bool globalFormDirty: false
     readonly property bool editorDark: currentPage === 1 && ruleEditorPage.darkMode
 
+    // 저장된 감시 설정으로 입력창을 채운 뒤 별도 창을 여는 함수.
+    function openWatchSettings() {
+        watchFolderField.text = watchController.folder
+        watchEnabledCheck.checked = watchController.enabled
+        watchRecursiveCheck.checked = watchController.recursive
+        watchIntervalSpin.value = watchController.rescanIntervalMinutes
+        watchCombination.currentIndex = watchController.combineAll ? 1 : 0
+        watchCountCheck.checked = watchController.countEnabled
+        watchCountSpin.value = watchController.minimumFileCount
+        watchSizeCheck.checked = watchController.sizeEnabled
+        watchSizeSpin.value = watchController.minimumTotalMiB
+        watchAgeCheck.checked = watchController.ageEnabled
+        watchAgeSpin.value = watchController.minimumAgeMinutes
+        watchExcludeField.text = watchController.excludePatterns
+        watchDialog.open()
+    }
+
+    // 최신 작업 기록을 조회하고 별도 창을 여는 함수.
+    function openHistory() {
+        historyController.refreshHistory()
+        historyDialog.open()
+    }
+
     // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
     component NavigationButton: T.Button {
         id: navButton
@@ -113,7 +136,7 @@ ApplicationWindow {
             }
             NavigationButton {
                 width: parent.width
-                text: qsTr("파일 대기 목록")
+                text: qsTr("파일 정리")
                 highlighted: root.currentPage === 0
                 onClicked: root.currentPage = 0
             }
@@ -123,456 +146,434 @@ ApplicationWindow {
                 highlighted: root.currentPage === 1
                 onClicked: root.currentPage = 1
             }
+            NavigationButton {
+                width: parent.width
+                text: qsTr("폴더 감시")
+                highlighted: watchDialog.visible
+                onClicked: root.openWatchSettings()
+            }
+            NavigationButton {
+                width: parent.width
+                text: qsTr("작업 기록")
+                highlighted: historyDialog.visible
+                onClicked: root.openHistory()
+            }
             Label {
                 width: parent.width
                 topPadding: 14
-                text: qsTr("감시와 기록은 대기 목록 화면에서 확인할 수 있어요.")
+                text: watchController.enabled ? qsTr("폴더 감시 중") : qsTr("폴더 감시 꺼짐")
                 wrapMode: Text.WordWrap
                 color: root.editorDark ? "#aab6c7" : "#68756b"
                 font.pixelSize: 12
             }
+            NavigationButton {
+                width: parent.width
+                visible: watchController.proposalVisible
+                highlighted: true
+                text: qsTr("새 정리 제안 확인")
+                onClicked: watchProposalDialog.open()
+            }
         }
     }
 
-    ColumnLayout {
+    ScrollView {
+        id: sortingScroll
         anchors.fill: parent
         anchors.leftMargin: navigation.width + 28
         anchors.rightMargin: 28
         anchors.topMargin: 28
         anchors.bottomMargin: 28
-        spacing: 14
         visible: root.currentPage === 0
+        clip: true
+        contentWidth: availableWidth
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-        Label {
-            text: qsTr("NookBit")
-            font.pixelSize: 30
-            font.bold: true
-            color: "#232323"
-        }
+        ColumnLayout {
+            width: sortingScroll.availableWidth
+            spacing: 14
 
-        Label {
-            text: qsTr("정리할 파일을 먼저 대기 목록에 담아 주세요.")
-            font.pixelSize: 16
-            color: "#5a5a56"
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("현재 적용 중인 규칙: ") + previewController.activeRuleLabel
-            color: "#426349"
-            elide: Text.ElideMiddle
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
             Label {
-                Layout.fillWidth: true
-                text: watchController.enabled ? qsTr("폴더 감시 중 · ") + watchController.folder
-                                              : qsTr("폴더 감시 꺼짐")
-                color: "#426349"
-                elide: Text.ElideMiddle
+                text: qsTr("파일 정리")
+                font.pixelSize: 30
+                font.bold: true
+                color: "#232323"
             }
-            Button {
-                text: qsTr("폴더 감시 설정")
-                onClicked: {
-                    watchFolderField.text = watchController.folder
-                    watchEnabledCheck.checked = watchController.enabled
-                    watchRecursiveCheck.checked = watchController.recursive
-                    watchIntervalSpin.value = watchController.rescanIntervalMinutes
-                    watchCombination.currentIndex = watchController.combineAll ? 1 : 0
-                    watchCountCheck.checked = watchController.countEnabled
-                    watchCountSpin.value = watchController.minimumFileCount
-                    watchSizeCheck.checked = watchController.sizeEnabled
-                    watchSizeSpin.value = watchController.minimumTotalMiB
-                    watchAgeCheck.checked = watchController.ageEnabled
-                    watchAgeSpin.value = watchController.minimumAgeMinutes
-                    watchExcludeField.text = watchController.excludePatterns
-                    watchDialog.open()
-                }
-            }
-            Button {
-                text: qsTr("분류 규칙 편집")
-                onClicked: ruleDialog.open()
-            }
-        }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: watchController.proposalVisible ? 92 : 0
-            visible: watchController.proposalVisible
-            radius: 12
-            color: "#e8f4e5"
-            border.color: "#8ab793"
+            Label {
+                text: qsTr("정리할 파일을 먼저 대기 목록에 담아 주세요.")
+                font.pixelSize: 16
+                color: "#5a5a56"
+            }
+
             RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
+                Layout.fillWidth: true
                 Label {
                     Layout.fillWidth: true
-                    text: watchController.proposalText
-                    wrapMode: Text.WordWrap
-                    color: "#24382a"
+                    text: qsTr("현재 적용 중인 규칙: ") + previewController.activeRuleLabel
+                    color: "#426349"
+                    elide: Text.ElideMiddle
                 }
                 Button {
-                    text: qsTr("제안 확인")
-                    onClicked: watchProposalDialog.open()
-                }
-            }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            visible: recoveryController.recoveryNotice.length > 0
-            text: recoveryController.recoveryNotice
-            color: "#9b5c23"
-            wrapMode: Text.WordWrap
-        }
-
-        Button {
-            visible: recoveryController.recoveryCases.length > 0
-            text: qsTr("중단 작업 확인")
-            onClicked: {
-                recoveryController.refreshRecoveryCases()
-                recoveryDialog.open()
-            }
-        }
-
-        Rectangle {
-            id: dropZone
-            property bool dragging: false
-            Layout.fillWidth: true
-            Layout.preferredHeight: 120
-            radius: 18
-            color: dragging ? "#e8f4e5" : "#ffffff"
-            border.width: dragging ? 2 : 1
-            border.color: dragging ? "#4d8f57" : "#d8dcd5"
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 8
-
-                Label {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTr("파일을 여기로 끌어놓으세요")
-                    font.pixelSize: 19
-                    font.bold: true
-                    color: "#24382a"
-                }
-                Label {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTr("원본 파일은 이동하거나 복사하지 않습니다.")
-                    color: "#657065"
+                    text: qsTr("규칙 편집기로")
+                    onClicked: root.currentPage = 1
                 }
             }
 
-            DropArea {
-                anchors.fill: parent
-                onEntered: (drag) => {
-                    const canRegister = drag.hasUrls && (drag.supportedActions & Qt.CopyAction)
-                    dropZone.dragging = canRegister
-                    if (canRegister)
-                        drag.accept(Qt.CopyAction)
-                    else
-                        drag.accepted = false
+            Label {
+                Layout.fillWidth: true
+                visible: recoveryController.recoveryNotice.length > 0
+                text: recoveryController.recoveryNotice
+                color: "#9b5c23"
+                wrapMode: Text.WordWrap
+            }
+
+            Button {
+                visible: recoveryController.recoveryCases.length > 0
+                text: qsTr("중단 작업 확인")
+                onClicked: {
+                    recoveryController.refreshRecoveryCases()
+                    recoveryDialog.open()
                 }
-                onExited: dropZone.dragging = false
-                onDropped: (drop) => {
-                    dropZone.dragging = false
-                    if (drop.hasUrls && (drop.supportedActions & Qt.CopyAction)) {
-                        for (const url of drop.urls)
-                            pendingFiles.addUrl(url)
-                        drop.accept(Qt.CopyAction)
-                    } else {
-                        drop.accepted = false
+            }
+
+            Rectangle {
+                id: dropZone
+                property bool dragging: false
+                Layout.fillWidth: true
+                Layout.preferredHeight: 120
+                radius: 18
+                color: dragging ? "#e8f4e5" : "#ffffff"
+                border.width: dragging ? 2 : 1
+                border.color: dragging ? "#4d8f57" : "#d8dcd5"
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    Label {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("파일을 여기로 끌어놓으세요")
+                        font.pixelSize: 19
+                        font.bold: true
+                        color: "#24382a"
+                    }
+                    Label {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: qsTr("원본 파일은 이동하거나 복사하지 않습니다.")
+                        color: "#657065"
+                    }
+                }
+
+                DropArea {
+                    anchors.fill: parent
+                    onEntered: (drag) => {
+                        const canRegister = drag.hasUrls && (drag.supportedActions & Qt.CopyAction)
+                        dropZone.dragging = canRegister
+                        if (canRegister)
+                            drag.accept(Qt.CopyAction)
+                        else
+                            drag.accepted = false
+                    }
+                    onExited: dropZone.dragging = false
+                    onDropped: (drop) => {
+                        dropZone.dragging = false
+                        if (drop.hasUrls && (drop.supportedActions & Qt.CopyAction)) {
+                            for (const url of drop.urls)
+                                pendingFiles.addUrl(url)
+                            drop.accept(Qt.CopyAction)
+                        } else {
+                            drop.accepted = false
+                        }
                     }
                 }
             }
-        }
 
-        RowLayout {
-            Layout.fillWidth: true
+            RowLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    text: qsTr("1. 대기 목록")
+                    font.pixelSize: 19
+                    font.bold: true
+                    color: "#232323"
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: qsTr("%1개 대기 중").arg(pendingFiles.count)
+                    color: "#5a5a56"
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 170
+                radius: 16
+                color: "#ffffff"
+                border.color: "#deded8"
+
+                Label {
+                    anchors.centerIn: parent
+                    visible: pendingFiles.count === 0
+                    text: qsTr("아직 대기 중인 파일이 없어요.")
+                    color: "#7b817a"
+                }
+
+                ListView {
+                    id: pendingList
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    clip: true
+                    spacing: 4
+                    visible: pendingFiles.count > 0
+                    model: pendingFiles
+
+                    delegate: Rectangle {
+                        required property int index
+                        required property string fileName
+                        required property string fullPath
+                        required property bool available
+                        width: pendingList.width
+                        height: 70
+                        radius: 10
+                        color: !available ? "#fff0ec" : index % 2 === 0 ? "#f7f9f6" : "#ffffff"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 12
+                            spacing: 12
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Label {
+                                    text: available ? fileName : qsTr("[파일 없음] %1").arg(fileName)
+                                    font.bold: true
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: fullPath
+                                    color: "#67716a"
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                            }
+
+                            Button {
+                                text: qsTr("목록에서 빼기")
+                                onClicked: pendingFiles.removeAt(index)
+                            }
+                        }
+                    }
+                }
+            }
 
             Label {
-                text: qsTr("파일정리대기")
+                Layout.fillWidth: true
+                visible: pendingFiles.unavailableCount > 0
+                text: qsTr("찾을 수 없는 파일 %1개가 있어요. 해당 항목을 목록에서 빼거나 파일을 원래 위치에 돌려놓아 주세요.")
+                      .arg(pendingFiles.unavailableCount)
+                color: "#b44732"
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: pendingFiles.storageNotice.length > 0
+                text: pendingFiles.storageNotice
+                color: "#b44732"
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+                Label { text: qsTr("같은 이름의 파일이 있으면"); color: "#232323" }
+                ComboBox {
+                    textRole: "label"
+                    valueRole: "key"
+                    model: [
+                        { label: qsTr("이름 변경"), key: "rename" },
+                        { label: qsTr("건너뛰기"), key: "skip" },
+                        { label: qsTr("작업 중단"), key: "abort" }
+                    ]
+                    currentIndex: previewController.collisionPolicy === "skip" ? 1
+                                  : previewController.collisionPolicy === "abort" ? 2 : 0
+                    onActivated: previewController.collisionPolicy = currentValue
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정을 우선해요.")
+                    color: "#67716a"
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Label {
+                    text: qsTr("정리할 위치")
+                    color: "#232323"
+                }
+                TextField {
+                    id: destinationField
+                    Layout.fillWidth: true
+                    text: previewController.defaultDestinationRoot
+                    placeholderText: qsTr("정리할 폴더의 전체 경로")
+                    onTextEdited: previewController.clear()
+                }
+                Button {
+                    text: qsTr("미리보기 만들기")
+                    enabled: pendingFiles.count > 0
+                    onClicked: previewController.createPreview(destinationField.text)
+                }
+                Button {
+                    text: qsTr("정리하기")
+                    enabled: previewController.hasPreview && previewController.hasMovableSteps
+                             && !previewController.awaitingConfirmation
+                    onClicked: {
+                        if (previewController.prepareSort()) sortConfirmation.open()
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Button {
+                    text: qsTr("마지막 이동 되돌리기")
+                    enabled: previewController.canUndo
+                    onClicked: previewController.undoLastMove()
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: qsTr("중간에 실패하면 되돌리기를 시도하고, 불확실하면 확인을 요청해요.")
+                    color: "#67716a"
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: previewController.message.length > 0
+                      ? previewController.message
+                      : qsTr("저장된 규칙으로 미리보기를 만듭니다. 편집 중인 초안은 전체 저장 후 적용돼요.")
+                color: "#426349"
+                wrapMode: Text.WordWrap
+            }
+
+            Label {
+                text: qsTr("2. 분류 미리보기")
                 font.pixelSize: 19
                 font.bold: true
                 color: "#232323"
             }
-            Item { Layout.fillWidth: true }
-            Label {
-                text: qsTr("%1개 대기 중").arg(pendingFiles.count)
-                color: "#5a5a56"
-            }
-        }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 170
-            radius: 16
-            color: "#ffffff"
-            border.color: "#deded8"
-
-            Label {
-                anchors.centerIn: parent
-                visible: pendingFiles.count === 0
-                text: qsTr("아직 대기 중인 파일이 없어요.")
-                color: "#7b817a"
-            }
-
-            ListView {
-                id: pendingList
-                anchors.fill: parent
-                anchors.margins: 12
-                clip: true
-                spacing: 4
-                visible: pendingFiles.count > 0
-                model: pendingFiles
-
-                delegate: Rectangle {
-                    required property int index
-                    required property string fileName
-                    required property string fullPath
-                    required property bool available
-                    width: pendingList.width
-                    height: 70
-                    radius: 10
-                    color: !available ? "#fff0ec" : index % 2 === 0 ? "#f7f9f6" : "#ffffff"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 12
-                        spacing: 12
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 3
-                            Label {
-                                text: available ? fileName : qsTr("[파일 없음] %1").arg(fileName)
-                                font.bold: true
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                text: fullPath
-                                color: "#67716a"
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        Button {
-                            text: qsTr("목록에서 빼기")
-                            onClicked: pendingFiles.removeAt(index)
-                        }
-                    }
-                }
-            }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            visible: pendingFiles.unavailableCount > 0
-            text: qsTr("찾을 수 없는 파일 %1개가 있어요. 해당 항목을 목록에서 빼거나 파일을 원래 위치에 돌려놓아 주세요.")
-                  .arg(pendingFiles.unavailableCount)
-            color: "#b44732"
-            wrapMode: Text.WordWrap
-        }
-        Label {
-            Layout.fillWidth: true
-            visible: pendingFiles.storageNotice.length > 0
-            text: pendingFiles.storageNotice
-            color: "#b44732"
-            wrapMode: Text.WordWrap
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-            Label { text: qsTr("같은 이름의 파일이 있으면"); color: "#232323" }
-            ComboBox {
-                textRole: "label"
-                valueRole: "key"
-                model: [
-                    { label: qsTr("이름 변경"), key: "rename" },
-                    { label: qsTr("건너뛰기"), key: "skip" },
-                    { label: qsTr("작업 중단"), key: "abort" }
-                ]
-                currentIndex: previewController.collisionPolicy === "skip" ? 1
-                              : previewController.collisionPolicy === "abort" ? 2 : 0
-                onActivated: previewController.collisionPolicy = currentValue
-            }
-            Label {
+            Rectangle {
                 Layout.fillWidth: true
-                text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정을 우선해요.")
-                color: "#67716a"
-                wrapMode: Text.WordWrap
-            }
-        }
+                Layout.preferredHeight: 300
+                radius: 16
+                color: "#ffffff"
+                border.color: "#deded8"
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            Label {
-                text: qsTr("정리할 위치")
-                color: "#232323"
-            }
-            TextField {
-                id: destinationField
-                Layout.fillWidth: true
-                text: previewController.defaultDestinationRoot
-                placeholderText: qsTr("정리할 폴더의 전체 경로")
-                onTextEdited: previewController.clear()
-            }
-            Button {
-                text: qsTr("미리보기 만들기")
-                enabled: pendingFiles.count > 0
-                onClicked: previewController.createPreview(destinationField.text)
-            }
-            Button {
-                text: qsTr("정리하기")
-                enabled: previewController.hasPreview && previewController.hasMovableSteps
-                         && !previewController.awaitingConfirmation
-                onClicked: {
-                    if (previewController.prepareSort()) sortConfirmation.open()
+                Label {
+                    anchors.centerIn: parent
+                    visible: !previewController.hasPreview
+                    text: qsTr("미리보기를 만들면 예상 목적지가 여기에 표시됩니다.")
+                    color: "#7b817a"
                 }
-            }
-        }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    visible: previewController.hasPreview
+                    spacing: 6
 
-            Button {
-                text: qsTr("마지막 이동 되돌리기")
-                enabled: previewController.canUndo
-                onClicked: previewController.undoLastMove()
-            }
-            Button {
-                text: qsTr("작업 기록")
-                onClicked: {
-                    historyController.refreshHistory()
-                    historyDialog.open()
-                }
-            }
-            Item { Layout.fillWidth: true }
-            Label {
-                text: qsTr("중간에 실패하면 되돌리기를 시도하고, 불확실하면 확인을 요청해요.")
-                color: "#67716a"
-            }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: previewController.message.length > 0
-                  ? previewController.message
-                  : qsTr("저장된 규칙으로 미리보기를 만듭니다. 편집 중인 초안은 전체 저장 후 적용돼요.")
-            color: "#426349"
-            wrapMode: Text.WordWrap
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: 16
-            color: "#ffffff"
-            border.color: "#deded8"
-
-            Label {
-                anchors.centerIn: parent
-                visible: !previewController.hasPreview
-                text: qsTr("미리보기를 만들면 예상 목적지가 여기에 표시됩니다.")
-                color: "#7b817a"
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                visible: previewController.hasPreview
-                spacing: 6
-
-                ListView {
-                    id: previewList
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    spacing: 8
-                    model: previewController.outcomes
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: previewList.width
-                        height: previewRow.implicitHeight + 20
-                        radius: 10
-                        color: modelData.statusKey === "planned" ? "#f3f9f2" : "#f7f7f4"
-                        border.color: modelData.statusKey === "planned" ? "#b9d8b9" : "#ddddda"
-                        ColumnLayout {
-                            id: previewRow
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 10
-                            spacing: 3
-                            RowLayout {
-                                Layout.fillWidth: true
+                    ListView {
+                        id: previewList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 8
+                        model: previewController.outcomes
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: previewList.width
+                            height: previewRow.implicitHeight + 20
+                            radius: 10
+                            color: modelData.statusKey === "planned" ? "#f3f9f2" : "#f7f7f4"
+                            border.color: modelData.statusKey === "planned" ? "#b9d8b9" : "#ddddda"
+                            ColumnLayout {
+                                id: previewRow
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 10
+                                spacing: 3
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.fileName
+                                        font.bold: true
+                                        elide: Text.ElideMiddle
+                                    }
+                                    Label {
+                                        text: modelData.status
+                                        font.bold: true
+                                        color: modelData.statusKey === "planned" ? "#327542" : "#805b2c"
+                                    }
+                                }
                                 Label {
                                     Layout.fillWidth: true
-                                    text: modelData.fileName
-                                    font.bold: true
+                                    text: modelData.reason
+                                    color: "#344039"
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: qsTr("원본: ") + modelData.source
+                                    color: "#67716a"
                                     elide: Text.ElideMiddle
                                 }
                                 Label {
-                                    text: modelData.status
-                                    font.bold: true
-                                    color: modelData.statusKey === "planned" ? "#327542" : "#805b2c"
+                                    Layout.fillWidth: true
+                                    text: modelData.destination.length > 0
+                                          ? qsTr("예상 목적지: ") + modelData.destination
+                                          : qsTr("이동하지 않음 · 원본 유지")
+                                    color: "#67716a"
+                                    elide: Text.ElideMiddle
                                 }
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.reason
-                                color: "#344039"
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: qsTr("원본: ") + modelData.source
-                                color: "#67716a"
-                                elide: Text.ElideMiddle
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.destination.length > 0
-                                      ? qsTr("예상 목적지: ") + modelData.destination
-                                      : qsTr("이동하지 않음 · 원본 유지")
-                                color: "#67716a"
-                                elide: Text.ElideMiddle
                             }
                         }
                     }
-                }
 
-                Label {
-                    Layout.fillWidth: true
-                    visible: previewController.outcomes.length === 0
-                    text: qsTr("표시할 파일별 검사 결과가 없어요. 위의 경고를 확인해 주세요.")
-                    color: "#7b817a"
-                }
-                Label {
-                    Layout.fillWidth: true
-                    visible: previewController.warnings.length > 0
-                    text: qsTr("추가 경고: ") + previewController.warnings.join("\n")
-                    color: "#9b5c23"
-                    wrapMode: Text.WordWrap
+                    Label {
+                        Layout.fillWidth: true
+                        visible: previewController.outcomes.length === 0
+                        text: qsTr("표시할 파일별 검사 결과가 없어요. 위의 경고를 확인해 주세요.")
+                        color: "#7b817a"
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: previewController.warnings.length > 0
+                        text: qsTr("추가 경고: ") + previewController.warnings.join("\n")
+                        color: "#9b5c23"
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
-        }
 
-        Label {
-            Layout.fillWidth: true
-            text: pendingFiles.lastMessage.length > 0
-                  ? pendingFiles.lastMessage
-                  : qsTr("승인 전에는 파일을 이동하지 않습니다.")
-            color: "#426349"
-            wrapMode: Text.WordWrap
+            Label {
+                Layout.fillWidth: true
+                text: pendingFiles.lastMessage.length > 0
+                      ? pendingFiles.lastMessage
+                      : qsTr("승인 전에는 파일을 이동하지 않습니다.")
+                color: "#426349"
+                wrapMode: Text.WordWrap
+            }
         }
     }
 
@@ -965,6 +966,7 @@ ApplicationWindow {
 
     Dialog {
         id: watchDialog
+        objectName: "watchSettingsDialog"
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 720)
         height: Math.min(root.height - 32, 640)
@@ -1135,6 +1137,7 @@ ApplicationWindow {
                     onClicked: {
                         watchController.addProposalToPending()
                         watchProposalDialog.close()
+                        root.currentPage = 0
                     }
                 }
                 Button {
@@ -1150,6 +1153,7 @@ ApplicationWindow {
 
     Dialog {
         id: historyDialog
+        objectName: "historyDialog"
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 840)
         height: Math.min(root.height - 32, 600)

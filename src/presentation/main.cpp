@@ -219,11 +219,23 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
         QObject* ruleTestPanel = editorPage
             ? editorPage->findChild<QObject*>(QStringLiteral("ruleTestPanel")) : nullptr;
+        QObject* watchSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("watchSettingsDialog"));
+        QObject* historyDialog = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("historyDialog"));
         const bool ready = !engine.rootObjects().isEmpty() &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&
                            QMetaObject::invokeMethod(ruleTestPanel, "close") &&
+                           watchSettingsDialog != nullptr && historyDialog != nullptr &&
+                           QMetaObject::invokeMethod(engine.rootObjects().first(), "openWatchSettings") &&
+                           watchSettingsDialog->property("opened").toBool() &&
+                           QMetaObject::invokeMethod(watchSettingsDialog, "close") &&
+                           QMetaObject::invokeMethod(historyDialog, "open") &&
+                           historyDialog->property("opened").toBool() &&
+                           QMetaObject::invokeMethod(historyDialog, "close") &&
+                           pendingFiles.count() == 0 && !previewController.hasPreview() &&
                            bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));
