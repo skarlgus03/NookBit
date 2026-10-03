@@ -19,6 +19,10 @@ public:
     [[nodiscard]] virtual Result<void> completeForward(const std::string&) {
         return Result<void>::failure({"transfer.completion_unsupported", "Atomic forward completion is unsupported"});
     }
+    /// 역전송·되돌린 단계·필요한 계획 완료를 원자적으로 확정하는 함수.
+    [[nodiscard]] virtual Result<void> completeRollback(const std::string&) {
+        return Result<void>::failure({"transfer.completion_unsupported", "Atomic rollback completion is unsupported"});
+    }
 
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;

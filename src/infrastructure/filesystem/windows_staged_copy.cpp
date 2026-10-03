@@ -411,10 +411,10 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     const auto evidence = TransferValidation::advance(attempt, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
-    if (attempt.direction != TransferDirection::Forward || !TransferValidation::validateNew(initial) || !evidence ||
+    if (!TransferValidation::validateNew(initial) || !evidence ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         TransferValidation::sameObject(attempt.sourceFingerprint, *attempt.destinationFingerprint))
-        return Return::failure({"transfer.removal_evidence", "Forward committed copy evidence with distinct objects required"});
+        return Return::failure({"transfer.removal_evidence", "Committed copy evidence with distinct objects required"});
     std::vector<Handle> parents;
     for (const auto& path : {attempt.source, attempt.destination}) {
         const auto locked = lockParents(path, parents);

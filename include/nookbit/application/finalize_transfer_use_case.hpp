@@ -22,7 +22,7 @@ public:
     [[nodiscard]] virtual Result<std::unique_ptr<ITransferRemovalSession>> open(const TransferAttempt& attempt) = 0;
 };
 
-/// 최종 복사본이 기록된 정방향 전송의 원본 제거와 완료 기록만 조율한다.
+/// 최종 복사본이 기록된 정방향/역방향 전송 원본 제거와 완료 기록을 조율한다.
 class FinalizeTransferUseCase final {
 public:
     /// 외부에서 소유한 기록·파일 제거·계획 검증 포트를 빌려 받는 함수.

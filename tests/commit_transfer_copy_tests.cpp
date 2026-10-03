@@ -1,6 +1,7 @@
 #include <nookbit/application/commit_transfer_copy_use_case.hpp>
 #include <nookbit/application/inspect_transfer_recovery_use_case.hpp>
 #include <nookbit/application/finalize_transfer_use_case.hpp>
+#include <nookbit/application/rollback_transfer_use_case.hpp>
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
@@ -74,6 +75,17 @@ public:
             return Result<void>::failure({"test.completion", "Injected completion failure"});
         }
         const auto result = inner.completeForward(id);
+        if (result) last = TransferPhase::Completed;
+        return result;
+    }
+    // 역전송의 완료 저장 실패를 주입하거나 실제 저널로 전달하는 함수.
+    Result<void> completeRollback(const std::string& id) override {
+        if (beforeRecord) beforeRecord(TransferPhase::Completed);
+        if (persistent || failAt == TransferPhase::Completed) {
+            failAt.reset();
+            return Result<void>::failure({"test.completion", "Injected rollback completion failure"});
+        }
+        const auto result = inner.completeRollback(id);
         if (result) last = TransferPhase::Completed;
         return result;
     }
@@ -447,14 +459,16 @@ void testReadOnlyTransferRecovery() {
 }
 
 // 실제 SQLite 완료 트랜잭션에 실패 트리거를 설정하는 함수.
-void completionFault(const QString& path) {
+void completionFault(const QString& path, bool rollback = false) {
     const auto name = QUuid::createUuid().toString();
     {
         auto database = QSqlDatabase::addDatabase("QSQLITE", name);
         database.setDatabaseName(path);
         expect(database.open(), "completion fault DB open");
         QSqlQuery query(database);
-        expect(query.exec("CREATE TRIGGER reject_completion BEFORE INSERT ON events WHEN NEW.event_type='plan_status_changed' AND NEW.payload_json LIKE '%completed%' BEGIN SELECT RAISE(ABORT,'injected completion failure'); END"), "completion failure trigger");
+        const auto status = rollback ? QStringLiteral("rolled_back") : QStringLiteral("completed");
+        expect(query.exec(QStringLiteral("CREATE TRIGGER reject_completion BEFORE INSERT ON events WHEN NEW.event_type='plan_status_changed' AND NEW.payload_json LIKE '%") + status +
+            QStringLiteral("%' BEGIN SELECT RAISE(ABORT,'injected completion failure'); END")), "completion failure trigger");
         database.close();
     }
     QSqlDatabase::removeDatabase(name);
@@ -553,6 +567,70 @@ void testSourceRemovalAndCompletion() {
     }
 #endif
 }
+
+// 실제 전송 완료 기록을 가진 임시 파일만 역전송하며 실패 경계를 검사하는 함수.
+void testRollbackTransfers() {
+#ifdef _WIN32
+    for (const auto scenario : {0, 1, 2, 3, 4, 5, 6, 7}) {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "undo forward copy");
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(finalize.execute(fixture.attempt.id).hasValue(), "undo forward completion");
+        const auto moved = fingerprint(fixture.attempt.destination);
+        if (scenario == 7) completionFault(fixture.database, true);
+        if (scenario == 1) write(fixture.attempt.source, "new original-location file");
+        if (scenario == 2) write(fixture.attempt.destination, "modified moved file");
+        if (scenario == 3) fixture.faults.failAt = TransferPhase::SourceRemoveIntent;
+        if (scenario == 4) fixture.faults.failAt = TransferPhase::Completed;
+        if (scenario == 5) fixture.faults.beforeRecord = [&](TransferPhase phase) {
+            if (phase == TransferPhase::CommitIntent) write(fixture.attempt.source, "late original-location collision");
+        };
+        if (scenario == 6) {
+            std::filesystem::rename(fixture.attempt.destination, fixture.attempt.destination.parent_path() / "held-moved-file");
+            write(fixture.attempt.destination, "original contents for transfer copy");
+        }
+        WindowsTransferFileInspector files;
+        RollbackTransferUseCase undo(fixture.faults, fixture.history, fixture.worker, removal, files, hasher);
+        const auto staging = fixture.attempt.source.parent_path() / "undo-stage";
+        const auto result = undo.execute(fixture.attempt.id, "undo", staging);
+        if (scenario == 0) {
+            if (!result) std::cerr << result.error().code << ": " << result.error().message << '\n';
+            expect(result && result.value().direction == TransferDirection::Rollback && result.value().phase == TransferPhase::Completed,
+                "complete reverse transfer succeeds");
+            expect(!std::filesystem::exists(fixture.attempt.destination) && std::filesystem::exists(fixture.attempt.source), "undo restores original location");
+            expect(TransferValidation::sameContent(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)), "undo restores original contents");
+            if (result) expect(sameFingerprint(*result.value().destinationFingerprint, fingerprint(fixture.attempt.source)), "undo records new restored object identity");
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            expect(plan && plan.value().status == PlanStatus::RolledBack && plan.value().steps.front().status == StepStatus::RolledBack,
+                "undo transfer step plan atomically rolled back");
+            const auto attempts = fixture.journal.forStep(fixture.attempt.stepId);
+            expect(attempts && attempts.value().size() == 2 && attempts.value()[0].direction == TransferDirection::Forward &&
+                attempts.value()[1].direction == TransferDirection::Rollback, "separate forward and undo records retained");
+            expect(!undo.execute(fixture.attempt.id, "second-undo", staging), "completed undo cannot repeat");
+        } else {
+            expect(!result, "unsafe or failed undo never succeeds");
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            if (scenario == 1 || scenario == 2 || scenario == 6) {
+                expect(plan && plan.value().status == PlanStatus::Completed, "undo preflight rejection leaves plan unchanged");
+                expect(!std::filesystem::exists(staging), "preflight rejection creates no staging");
+                expect(std::filesystem::exists(fixture.attempt.destination), "preflight rejection retains moved file");
+            } else {
+                const auto attempt = fixture.journal.load("undo");
+                expect(attempt && attempt.value().phase == TransferPhase::NeedsRecovery, "interrupted undo needs recovery");
+                expect(plan && plan.value().status == PlanStatus::RollingBack && plan.value().steps.front().status == StepStatus::RollbackIntentRecorded,
+                    "failed undo is not marked rolled back");
+                expect(std::filesystem::exists(fixture.attempt.source), "failed undo retains restored or collision file");
+                if (scenario == 3 || scenario == 5) expect(sameFingerprint(moved, fingerprint(fixture.attempt.destination)), "pre-removal failure retains moved file");
+                if (scenario == 4 || scenario == 7) expect(!std::filesystem::exists(fixture.attempt.destination), "post-removal failure preserves restored file only");
+            }
+            if (scenario == 1 || scenario == 5) expect(fingerprint(fixture.attempt.source).sha256 ==
+                hasher.sha256(scenario == 1 ? "new original-location file" : "late original-location collision"), "undo never overwrites original-location collision");
+        }
+    }
+#endif
+}
 }
 
 // 실제 SQLite와 임시 NTFS 파일의 복사·확정 연동을 시험하는 함수.
@@ -564,6 +642,7 @@ int main(int argc, char** argv) {
     testRejectedFiles();
     testReadOnlyTransferRecovery();
     testSourceRemovalAndCompletion();
+    testRollbackTransfers();
 #endif
     return failures ? 1 : 0;
 }

@@ -12,6 +12,7 @@ add_library(nookbit_core STATIC
   application/use_cases/commit_transfer_copy_use_case.cpp
   application/use_cases/inspect_transfer_recovery_use_case.cpp
   application/use_cases/finalize_transfer_use_case.cpp
+  application/use_cases/rollback_transfer_use_case.cpp
   modules/rules/rule_engine.cpp
   modules/watch/watch_evaluator.cpp
   modules/planner/collision_resolver.cpp

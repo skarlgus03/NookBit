@@ -26,21 +26,34 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
     const auto loaded = journal_.load(attemptId);
     if (!loaded) return Result<TransferAttempt>::failure(loaded.error());
     auto state = loaded.value();
-    if (state.direction != TransferDirection::Forward || state.phase != TransferPhase::DestinationCommitted)
-        return Result<TransferAttempt>::failure({"transfer.finalize_state", "Only a recorded forward committed copy may be finalized"});
+    const bool forward = state.direction == TransferDirection::Forward;
+    if (state.phase != TransferPhase::DestinationCommitted)
+        return Result<TransferAttempt>::failure({"transfer.finalize_state", "Only a recorded committed copy may be finalized"});
     const auto plan = history_.loadPlan(state.planId);
     if (!plan) return Result<TransferAttempt>::failure(plan.error());
     const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) {
         return item.id == state.stepId;
     });
-    if (plan.value().status != PlanStatus::Executing || step == plan.value().steps.end() ||
-        step->status != StepStatus::IntentRecorded || !PlanSignature::isSha256Hex(plan.value().planHash) ||
+    if (plan.value().status != (forward ? PlanStatus::Executing : PlanStatus::RollingBack) || step == plan.value().steps.end() ||
+        step->status != (forward ? StepStatus::IntentRecorded : StepStatus::RollbackIntentRecorded) || !PlanSignature::isSha256Hex(plan.value().planHash) ||
         plan.value().planHash != hasher_.sha256(PlanSignature::approvalPayload(plan.value())) ||
-        !samePath(step->source, state.source) || !samePath(step->destination, state.destination) ||
-        !TransferValidation::sameObject(step->fingerprint, state.sourceFingerprint) ||
+        !samePath(forward ? step->source : step->destination, state.source) ||
+        !samePath(forward ? step->destination : step->source, state.destination) ||
         !TransferValidation::sameContent(step->fingerprint, state.sourceFingerprint) ||
-        step->fingerprint.modifiedUtcMs != state.sourceFingerprint.modifiedUtcMs)
+        (forward && (!TransferValidation::sameObject(step->fingerprint, state.sourceFingerprint) ||
+        step->fingerprint.modifiedUtcMs != state.sourceFingerprint.modifiedUtcMs)))
         return Result<TransferAttempt>::failure({"transfer.finalize_untrusted", "Plan, source evidence or execution state is untrusted"});
+    if (!forward) {
+        const auto attempts = journal_.forStep(state.stepId);
+        if (!attempts) return Result<TransferAttempt>::failure(attempts.error());
+        const bool origin = std::any_of(attempts.value().begin(), attempts.value().end(), [&](const TransferAttempt& item) {
+            return item.direction == TransferDirection::Forward && item.phase == TransferPhase::Completed &&
+                item.destinationFingerprint && TransferValidation::sameObject(*item.destinationFingerprint, state.sourceFingerprint) &&
+                TransferValidation::sameContent(*item.destinationFingerprint, state.sourceFingerprint) &&
+                item.destinationFingerprint->modifiedUtcMs == state.sourceFingerprint.modifiedUtcMs;
+        });
+        if (!origin) return Result<TransferAttempt>::failure({"transfer.rollback_origin", "Completed forward result does not match rollback source"});
+    }
     // 순수 계약과 저장이 성공했을 때만 로컬 단계를 갱신하는 함수.
     const auto record = [&](TransferPhase next, std::optional<Error> error = {}) -> Result<void> {
         TransferUpdate update{state.phase, next, {}, {}, error};
@@ -73,7 +86,7 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
     if (!removed) return stop(removed.error());
     const auto saved = record(TransferPhase::SourceRemoved);
     if (!saved) return stop(saved.error());
-    const auto completed = journal_.completeForward(state.id);
+    const auto completed = forward ? journal_.completeForward(state.id) : journal_.completeRollback(state.id);
     if (!completed) return stop(completed.error());
     state.phase = TransferPhase::Completed;
     return Result<TransferAttempt>::success(std::move(state));
