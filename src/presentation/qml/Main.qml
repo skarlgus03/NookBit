@@ -413,15 +413,12 @@ ApplicationWindow {
                 onClicked: previewController.createPreview(destinationField.text)
             }
             Button {
-                text: previewController.hasFrozenPlan ? qsTr("저장됨") : qsTr("계획 고정·저장")
-                enabled: previewController.hasPreview && !previewController.hasFrozenPlan
-                         && previewController.steps.length > 0
-                onClicked: previewController.freezePreview()
-            }
-            Button {
-                text: qsTr("저장 계획 검사")
-                enabled: previewController.hasFrozenPlan && !previewController.hasApprovedPlan
-                onClicked: previewController.verifySavedPlan()
+                text: qsTr("정리하기")
+                enabled: previewController.hasPreview && previewController.hasMovableSteps
+                         && !previewController.awaitingConfirmation
+                onClicked: {
+                    if (previewController.prepareSort()) sortConfirmation.open()
+                }
             }
         }
 
@@ -429,17 +426,6 @@ ApplicationWindow {
             Layout.fillWidth: true
             spacing: 12
 
-            Button {
-                text: qsTr("파일 이동 승인")
-                enabled: previewController.hasFrozenPlan && !previewController.hasApprovedPlan
-                         && previewController.hasMovableSteps
-                onClicked: previewController.approvePlan()
-            }
-            Button {
-                text: qsTr("승인한 파일들 이동")
-                enabled: previewController.hasApprovedPlan && pendingFiles.count > 0
-                onClicked: previewController.moveApprovedFile()
-            }
             Button {
                 text: qsTr("마지막 이동 되돌리기")
                 enabled: previewController.canUndo
@@ -588,6 +574,65 @@ ApplicationWindow {
             root.globalFormDirty = false
             root.collapsedRulePaths = ({})
             globalDestinationField.text = ruleEditor.globalDestination
+        }
+    }
+
+    Connections {
+        target: previewController
+        // 목록·규칙·설정 변경으로 확인이 무효화되면 창도 닫는 함수.
+        function onPreviewChanged() {
+            if (!previewController.awaitingConfirmation && sortConfirmation.visible)
+                sortConfirmation.close()
+        }
+    }
+
+    Dialog {
+        id: sortConfirmation
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 760)
+        height: Math.min(root.height - 32, 520)
+        modal: true
+        title: qsTr("파일 이동 최종 확인")
+        onClosed: previewController.cancelSort()
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("아래 %1개 파일을 이동할까요? 미분류·제외·건너뜀 파일은 그대로 둡니다.")
+                      .arg(previewController.confirmationSteps.length)
+                wrapMode: Text.WordWrap
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 10
+                model: previewController.confirmationSteps
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Column {
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: 4
+                    Label { width: parent.width; text: modelData.source; wrapMode: Text.WrapAnywhere }
+                    Label { width: parent.width; text: qsTr("→ %1").arg(modelData.destination); wrapMode: Text.WrapAnywhere }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("확인 후에도 파일과 규칙을 다시 검사해요. 변경이 있으면 새 미리보기가 필요해요.")
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                Button { text: qsTr("취소"); onClicked: sortConfirmation.close() }
+                Button {
+                    text: qsTr("확인하고 이동")
+                    enabled: previewController.awaitingConfirmation
+                    onClicked: previewController.confirmSort()
+                }
+            }
         }
     }
 

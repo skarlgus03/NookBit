@@ -217,6 +217,64 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     emit destinationRootAccepted(previewHomeRoot_);
 }
 
+// 사용자의 최종 확인을 기다리는지 반환하는 함수.
+bool PreviewController::awaitingConfirmation() const noexcept { return awaitingConfirmation_; }
+
+// 고정된 계획에서 실제 이동할 원본·목적지만 반환하는 함수.
+QVariantList PreviewController::confirmationSteps() const {
+    QVariantList rows;
+    if (!draft_ || !hasFrozenPlan_) return rows;
+    for (const auto& step : draft_->steps) {
+        if (step.status != StepStatus::Planned) continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("source"), displayPath(step.source));
+        row.insert(QStringLiteral("destination"), displayPath(step.destination));
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+// 계획을 고정·검사하고 실제 이동 없이 최종 확인을 준비하는 함수.
+bool PreviewController::prepareSort() {
+    awaitingConfirmation_ = false;
+    if (!hasPreview_ || !hasMovableSteps() || approval_) {
+        message_ = QStringLiteral("먼저 이동 예정인 파일의 미리보기를 만들어 주세요.");
+        emit previewChanged();
+        return false;
+    }
+    if (!hasFrozenPlan_) freezePreview();
+    if (!hasFrozenPlan_) return false;
+    if (!verifySavedPlan()) {
+        showError(message_);
+        return false;
+    }
+    awaitingConfirmation_ = true;
+    message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
+    emit previewChanged();
+    return true;
+}
+
+// 준비된 최종 확인을 취소하고 파일을 그대로 두는 함수.
+void PreviewController::cancelSort() {
+    if (!awaitingConfirmation_) return;
+    awaitingConfirmation_ = false;
+    message_ = QStringLiteral("정리를 취소했어요. 파일은 그대로 있어요.");
+    emit previewChanged();
+}
+
+// 사용자가 확인한 고정 계획만 다시 검사·승인하고 실행하는 함수.
+void PreviewController::confirmSort() {
+    if (!awaitingConfirmation_) return;
+    awaitingConfirmation_ = false;
+    approvePlan();
+    if (!approval_) {
+        showError(message_);
+        return;
+    }
+    moveApprovedFile();
+    if (hasPreview_) showError(message_);
+}
+
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
 void PreviewController::freezePreview() {
     if (!draft_ || !hasPreview_ || hasFrozenPlan_) {
@@ -392,6 +450,7 @@ void PreviewController::clear() {
     message_.clear();
     hasPreview_ = false;
     hasFrozenPlan_ = false;
+    awaitingConfirmation_ = false;
     draft_.reset();
     approval_.reset();
     previewHomeRoot_.clear();
@@ -405,6 +464,7 @@ void PreviewController::showError(const QString& message) {
     warnings_.clear();
     hasPreview_ = false;
     hasFrozenPlan_ = false;
+    awaitingConfirmation_ = false;
     draft_.reset();
     approval_.reset();
     previewHomeRoot_.clear();

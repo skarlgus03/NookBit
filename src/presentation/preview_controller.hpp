@@ -32,6 +32,8 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasMovableSteps READ hasMovableSteps NOTIFY previewChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
+    Q_PROPERTY(bool awaitingConfirmation READ awaitingConfirmation NOTIFY previewChanged)
+    Q_PROPERTY(QVariantList confirmationSteps READ confirmationSteps NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
     Q_PROPERTY(QString activeRuleLabel READ activeRuleLabel NOTIFY activeRuleChanged)
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
@@ -94,6 +96,21 @@ public:
     /// 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
     Q_INVOKABLE void createPreview(const QString& destinationRoot);
 
+    /// 계획을 고정·검사하고 실제 이동 없이 최종 확인을 준비하는 함수.
+    Q_INVOKABLE bool prepareSort();
+
+    /// 준비된 최종 확인을 취소하고 파일을 그대로 두는 함수.
+    Q_INVOKABLE void cancelSort();
+
+    /// 사용자가 확인한 고정 계획만 다시 검사·승인하고 실행하는 함수.
+    Q_INVOKABLE void confirmSort();
+
+    /// 사용자의 최종 확인을 기다리는지 반환하는 함수.
+    [[nodiscard]] bool awaitingConfirmation() const noexcept;
+
+    /// 고정된 계획에서 실제 이동할 원본·목적지만 반환하는 함수.
+    [[nodiscard]] QVariantList confirmationSteps() const;
+
     /// 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
     Q_INVOKABLE void freezePreview();
 
@@ -151,6 +168,7 @@ private:
     QString message_;
     bool hasPreview_{false};
     bool hasFrozenPlan_{false};
+    bool awaitingConfirmation_{false};
 };
 
 } // namespace nookbit

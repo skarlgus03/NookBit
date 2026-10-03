@@ -315,13 +315,13 @@ void testCommonCollisionPolicyWorkflow() {
     controller.refreshActiveRules();
     controller.createPreview(home);
     expect(controller.hasMovableSteps(), "rule-specific rename should override common abort");
-    controller.freezePreview();
+    expect(controller.prepareSort(), "sort action should prepare explicit confirmation");
+    expect(controller.hasFrozenPlan() && !controller.hasApprovedPlan() && QFile::exists(source),
+           "preparing confirmation must freeze without approving or moving");
     expect(controller.hasFrozenPlan() && controller.verifySavedPlan(),
            "selected common policy should remain consistent through freeze and verification");
-    controller.approvePlan();
-    expect(controller.hasApprovedPlan(), "overridden rule should be approvable with common abort");
 #ifdef _WIN32
-    controller.moveApprovedFile();
+    controller.confirmSort();
     expect(!QFile::exists(source) && QFile::exists(renamedPath) && QFile::exists(occupiedPath),
            "execution should preserve the occupied file and use the rule-specific renamed destination");
     QFile occupied(occupiedPath);
@@ -331,6 +331,64 @@ void testCommonCollisionPolicyWorkflow() {
     controller.undoLastMove();
     expect(QFile::exists(source) && !QFile::exists(renamedPath), "policy workflow should remain undoable");
 #endif
+}
+
+// 최종 확인 취소·변경 감지·중복 확인이 파일을 잘못 이동시키지 않는지 검사하는 함수.
+void testSortConfirmationSafety() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "confirmation directory should exist");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("photo.jpg"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "confirmation source should open");
+    if (!file.isOpen()) return;
+    file.write("before");
+    file.close();
+    const auto home = directory.filePath(QStringLiteral("organized"));
+    const auto appData = std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString());
+    PreviewWorkflow workflow(appData);
+    nookbit::PendingFilesModel pending;
+    pending.addUrl(QUrl::fromLocalFile(source));
+    nookbit::PreviewController controller(
+        pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history,
+        projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"), appData, home);
+    controller.confirmSort();
+    expect(QFile::exists(source) && !controller.hasApprovedPlan(),
+           "confirmation without preparation must do nothing");
+    controller.createPreview(home);
+    expect(controller.prepareSort() && controller.awaitingConfirmation(),
+           "valid preview should open confirmation");
+    expect(controller.confirmationSteps().size() == 1 &&
+               QDir::fromNativeSeparators(controller.confirmationSteps().front().toMap().value(
+                   QStringLiteral("source")).toString()) == QDir::fromNativeSeparators(source),
+           "confirmation should show the frozen source");
+    controller.cancelSort();
+    controller.confirmSort();
+    expect(!controller.awaitingConfirmation() && !controller.hasApprovedPlan() && QFile::exists(source),
+           "cancelled confirmation cannot authorize movement");
+    expect(controller.prepareSort(), "cancelled frozen plan may be rechecked and offered again");
+    expect(file.open(QIODevice::Append), "confirmation source should reopen");
+    if (!file.isOpen()) return;
+    file.write(" changed");
+    file.close();
+    controller.confirmSort();
+    expect(!controller.hasPreview() && !controller.awaitingConfirmation() &&
+               !controller.hasApprovedPlan() && QFile::exists(source) && !QFile::exists(home),
+           "changed source must invalidate confirmation without moving");
+    controller.createPreview(home);
+    expect(controller.prepareSort(), "fresh preview should prepare again");
+    controller.setCollisionPolicy(QStringLiteral("skip"));
+    controller.confirmSort();
+    expect(!controller.awaitingConfirmation() && QFile::exists(source),
+           "setting changes must invalidate pending confirmation");
+    controller.createPreview(home);
+    expect(controller.prepareSort(), "new policy preview should prepare");
+    pending.removeAt(0);
+    controller.confirmSort();
+    expect(!controller.awaitingConfirmation() && QFile::exists(source),
+           "pending list changes must invalidate confirmation");
 }
 
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.
@@ -1035,6 +1093,7 @@ void testRecoveryCasesInController() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testCommonCollisionPolicyWorkflow();
+    testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();
     testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();
