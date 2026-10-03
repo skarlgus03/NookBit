@@ -43,7 +43,9 @@ Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접
 
 미리보기는 읽기 전용 `Draft`다. `previewOutcomes`는 미분류·제외까지 화면에 설명하기 위한 일시적 판단이며, 실제 실행 대상인 `steps`와 다르다. 계획 고정 때 파일·규칙·설정을 재검사하고 파일 내용 SHA-256을 기록한다. 저장 계획 검사와 승인도 현재 상태를 다시 확인한다. 승인 기록과 실제 실행은 별도 단계다. 실행기는 덮어쓰기 없는 이동과 이벤트 기록을 사용한다. 중간 실패 때 확실한 것만 역순으로 되돌리고, 모호하면 `NeedsRecovery`로 멈춘다. 복구 화면도 확신할 수 없는 파일을 자동으로 옮기지 않는다.
 
-앱 데이터의 위치는 운영체제의 `QStandardPaths::AppDataLocation` 결과로 정한다. `rules.json`은 활성 규칙, `rule-graph-layout.json`은 그래프 표시 위치, `watch.json`은 감시 설정, `history.sqlite`는 계획·승인·실행 기록이다. 저장소 안의 `resources/rules/default.v3.json`은 첫 실행 기본값이지 사용자 규칙의 실시간 원본이 아니다. 대기 목록은 아직 메모리 상태다. 작업 중인 초안과 활성 규칙, SQLite 기록을 혼동하지 않는다.
+앱 데이터의 위치는 운영체제의 `QStandardPaths::AppDataLocation` 결과로 정한다. `rules.json`은 활성 규칙, `rule-graph-layout.json`은 그래프 표시 위치, `watch.json`은 감시 설정, `history.sqlite`는 계획·승인·실행 기록이다. 저장소 안의 `resources/rules/default.v3.json`은 첫 실행 기본값이지 사용자 규칙의 실시간 원본이 아니다. 작업 중인 초안과 활성 규칙, SQLite 기록을 혼동하지 않는다.
+
+대기 목록 저장은 `IPendingFilesRepository` 계약과 `JsonPendingFilesRepository` 구현으로 분리한다. `main.cpp`가 복원·목록 변경 신호·저장소를 연결하고 `PendingFilesModel`은 저장소를 모르며 경로와 파일 존재 상태만 표시한다. `pending-files.json` 형식은 `{ "schemaVersion": 1, "paths": ["절대 파일 경로"] }`이며 계획·승인을 담지 않는다. 문서 전체를 검증하고 크기를 16 MiB로 제한하며 저장은 `QSaveFile`의 원자적 교체를 사용한다. 손상된 문서를 읽지 못하면 원본을 보존하고 해당 실행의 자동 저장을 중지한다. 복원은 중복을 제거하되 없어진 경로를 숨기지 않는다. 파일 존재 상태는 주기적으로 확인하며 바뀌면 기존 미리보기를 무효화한다. 재시작 후 실제 이동에는 반드시 새 미리보기와 최종 확인이 필요하다.
 
 ## 기능을 추가할 때
 

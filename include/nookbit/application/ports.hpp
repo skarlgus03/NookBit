@@ -13,6 +13,19 @@
 
 namespace nookbit {
 
+/// 승인이나 이동 계획 없이 대기 파일 경로만 보관하는 저장소 계약.
+class IPendingFilesRepository {
+public:
+    /// 저장소 구현체를 안전하게 정리하는 소멸자.
+    virtual ~IPendingFilesRepository() = default;
+
+    /// 저장된 대기 경로를 파일 존재 여부와 무관하게 읽는 함수.
+    [[nodiscard]] virtual Result<std::vector<std::filesystem::path>> load() const = 0;
+
+    /// 현재 대기 경로를 한 번에 저장하는 함수.
+    [[nodiscard]] virtual Result<void> save(const std::vector<std::filesystem::path>& paths) const = 0;
+};
+
 struct ScanRequest {
     std::vector<std::filesystem::path> roots;
     bool recursive{false};

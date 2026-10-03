@@ -53,6 +53,7 @@ if(NOOKBIT_BUILD_QT_APP)
       infrastructure/configuration/json_document_loader.cpp
       infrastructure/configuration/json_settings_repository.cpp
       infrastructure/configuration/json_watch_settings_repository.cpp
+      infrastructure/configuration/json_pending_files_repository.cpp
       infrastructure/configuration/json_rule_set_repository.cpp
     )
     target_include_directories(nookbit_json_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

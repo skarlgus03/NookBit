@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <utility>
 
 namespace nookbit {
 
@@ -19,12 +20,13 @@ QVariant PendingFilesModel::data(const QModelIndex& index, int role) const {
     const auto& entry = entries_.at(index.row());
     if (role == FileNameRole) return entry.fileName;
     if (role == FullPathRole) return entry.fullPath;
+    if (role == AvailableRole) return entry.available;
     return {};
 }
 
 // QML에서 사용할 역할 이름을 반환하는 함수.
 QHash<int, QByteArray> PendingFilesModel::roleNames() const {
-    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}};
+    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}};
 }
 
 // 현재 대기 중인 파일 개수를 반환하는 함수.
@@ -43,6 +45,62 @@ QStringList PendingFilesModel::filePaths() const {
     paths.reserve(entries_.size());
     for (const auto& entry : entries_) paths.append(entry.fullPath);
     return paths;
+}
+
+// 저장 상태에 관한 별도 경고를 반환하는 함수.
+QString PendingFilesModel::storageNotice() const { return storageNotice_; }
+
+// 현재 존재하지 않거나 파일이 아닌 항목 수를 반환하는 함수.
+int PendingFilesModel::unavailableCount() const {
+    int count = 0;
+    for (const auto& entry : entries_) if (!entry.available) ++count;
+    return count;
+}
+
+// 저장소를 직접 읽지 않고 전달받은 경로로 초기 목록을 복원하는 함수.
+void PendingFilesModel::restorePaths(const QStringList& paths) {
+    QVector<Entry> restored;
+    for (const auto& path : paths) {
+        const QFileInfo info(path);
+        if (path.isEmpty() || path.contains(QChar::Null) || !info.isAbsolute() || QDir(path).isRoot()) continue;
+        const auto fullPath = QDir::cleanPath(info.absoluteFilePath());
+        bool duplicate = false;
+        for (const auto& entry : restored) {
+            if (QString::compare(entry.fullPath, fullPath, Qt::CaseInsensitive) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) restored.push_back({info.fileName(), fullPath, info.exists() && info.isFile()});
+    }
+    beginResetModel();
+    entries_ = std::move(restored);
+    endResetModel();
+    emit countChanged();
+    emit availabilityChanged();
+    if (!entries_.isEmpty()) setLastMessage(QStringLiteral("대기 파일 %1개를 복원했어요. 정리하려면 새 미리보기를 만들어 주세요.").arg(count()));
+}
+
+// 파일 존재 여부를 다시 확인하고 바뀐 항목을 알리는 함수.
+void PendingFilesModel::refreshAvailability() {
+    bool changed = false;
+    for (int row = 0; row < entries_.size(); ++row) {
+        auto& entry = entries_[row];
+        const QFileInfo info(entry.fullPath);
+        const bool available = info.exists() && info.isFile();
+        if (entry.available == available) continue;
+        entry.available = available;
+        changed = true;
+        emit dataChanged(index(row), index(row), {AvailableRole});
+    }
+    if (changed) emit availabilityChanged();
+}
+
+// 목록 저장·복원 실패 경고를 일반 등록 메시지와 분리해 표시하는 함수.
+void PendingFilesModel::setStorageNotice(const QString& notice) {
+    if (storageNotice_ == notice) return;
+    storageNotice_ = notice;
+    emit storageNoticeChanged();
 }
 
 // 로컬 파일 URL 하나를 원본 변경 없이 대기 목록에 등록하는 함수.
@@ -78,6 +136,7 @@ void PendingFilesModel::removeAt(int index) {
     entries_.removeAt(index);
     endRemoveRows();
     emit countChanged();
+    emit availabilityChanged();
     setLastMessage(QStringLiteral("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
 }
 

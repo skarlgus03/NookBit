@@ -331,10 +331,11 @@ ApplicationWindow {
                     required property int index
                     required property string fileName
                     required property string fullPath
+                    required property bool available
                     width: pendingList.width
                     height: 70
                     radius: 10
-                    color: index % 2 === 0 ? "#f7f9f6" : "#ffffff"
+                    color: !available ? "#fff0ec" : index % 2 === 0 ? "#f7f9f6" : "#ffffff"
 
                     RowLayout {
                         anchors.fill: parent
@@ -346,7 +347,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             spacing: 3
                             Label {
-                                text: fileName
+                                text: available ? fileName : qsTr("[파일 없음] %1").arg(fileName)
                                 font.bold: true
                                 elide: Text.ElideMiddle
                                 Layout.fillWidth: true
@@ -366,6 +367,22 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: pendingFiles.unavailableCount > 0
+            text: qsTr("찾을 수 없는 파일 %1개가 있어요. 해당 항목을 목록에서 빼거나 파일을 원래 위치에 돌려놓아 주세요.")
+                  .arg(pendingFiles.unavailableCount)
+            color: "#b44732"
+            wrapMode: Text.WordWrap
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: pendingFiles.storageNotice.length > 0
+            text: pendingFiles.storageNotice
+            color: "#b44732"
+            wrapMode: Text.WordWrap
         }
 
         RowLayout {

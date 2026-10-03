@@ -357,6 +357,9 @@ void testSortConfirmationSafety() {
     controller.confirmSort();
     expect(QFile::exists(source) && !controller.hasApprovedPlan(),
            "confirmation without preparation must do nothing");
+    pending.restorePaths({source});
+    expect(!controller.hasPreview() && !controller.hasFrozenPlan() && !controller.hasApprovedPlan(),
+           "restored queue must not restore any preview or authorization");
     controller.createPreview(home);
     expect(controller.prepareSort() && controller.awaitingConfirmation(),
            "valid preview should open confirmation");
@@ -389,6 +392,11 @@ void testSortConfirmationSafety() {
     controller.confirmSort();
     expect(!controller.awaitingConfirmation() && QFile::exists(source),
            "pending list changes must invalidate confirmation");
+    pending.restorePaths({source, directory.filePath(QStringLiteral("missing.jpg"))});
+    controller.createPreview(home);
+    expect(pending.count() == 2 && !controller.hasPreview() &&
+               controller.message().contains(QStringLiteral("찾을 수 없는 파일")),
+           "missing restored files must remain visible and block preview until resolved");
 }
 
 // 대기 파일이 미리보기로 이어지고 원본은 그대로 남는지 검사하는 함수.

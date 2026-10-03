@@ -12,11 +12,14 @@ class PendingFilesModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
+    Q_PROPERTY(QString storageNotice READ storageNotice NOTIFY storageNoticeChanged)
+    Q_PROPERTY(int unavailableCount READ unavailableCount NOTIFY availabilityChanged)
 
 public:
     enum Role {
         FileNameRole = Qt::UserRole + 1,
         FullPathRole,
+        AvailableRole,
     };
 
     /// 비어 있는 대기 목록을 생성하는 생성자.
@@ -40,6 +43,21 @@ public:
     /// 미리보기 요청에 넘길 대기 파일의 전체 경로를 반환하는 함수.
     [[nodiscard]] QStringList filePaths() const;
 
+    /// 저장 상태에 관한 별도 경고를 반환하는 함수.
+    [[nodiscard]] QString storageNotice() const;
+
+    /// 현재 존재하지 않거나 파일이 아닌 항목 수를 반환하는 함수.
+    [[nodiscard]] int unavailableCount() const;
+
+    /// 저장소를 직접 읽지 않고 전달받은 경로로 초기 목록을 복원하는 함수.
+    void restorePaths(const QStringList& paths);
+
+    /// 파일 존재 여부를 다시 확인하고 바뀐 항목을 알리는 함수.
+    Q_INVOKABLE void refreshAvailability();
+
+    /// 목록 저장·복원 실패 경고를 일반 등록 메시지와 분리해 표시하는 함수.
+    void setStorageNotice(const QString& notice);
+
     /// 로컬 파일 URL 하나를 원본 변경 없이 대기 목록에 등록하는 함수.
     Q_INVOKABLE void addUrl(const QUrl& url);
 
@@ -49,11 +67,14 @@ public:
 signals:
     void countChanged();
     void lastMessageChanged();
+    void storageNoticeChanged();
+    void availabilityChanged();
 
 private:
     struct Entry {
         QString fileName;
         QString fullPath;
+        bool available{true};
     };
 
     /// 화면에 보여줄 결과 문구를 갱신하는 함수.
@@ -61,6 +82,7 @@ private:
 
     QVector<Entry> entries_;
     QString lastMessage_;
+    QString storageNotice_;
 };
 
 } // namespace nookbit

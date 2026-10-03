@@ -46,6 +46,8 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
       defaultDestinationRoot_(std::move(defaultDestinationRoot)) {
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::rowsRemoved, this, [this] { clear(); });
+    connect(&pendingFiles_, &QAbstractItemModel::modelReset, this, [this] { clear(); });
+    connect(&pendingFiles_, &QAbstractItemModel::dataChanged, this, [this] { clear(); });
     refreshActiveRules();
 }
 
@@ -122,6 +124,12 @@ void PreviewController::refreshActiveRules() {
 // 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
 void PreviewController::createPreview(const QString& destinationRoot) {
     refreshActiveRules();
+    pendingFiles_.refreshAvailability();
+    if (pendingFiles_.unavailableCount() > 0) {
+        showError(QStringLiteral("찾을 수 없는 파일 %1개가 있어요. 대기 목록에서 해당 항목을 빼고 다시 미리보기를 만들어 주세요.")
+                      .arg(pendingFiles_.unavailableCount()));
+        return;
+    }
     if (pendingFiles_.count() == 0) {
         showError(QStringLiteral("먼저 파일을 대기 목록에 추가해 주세요."));
         return;

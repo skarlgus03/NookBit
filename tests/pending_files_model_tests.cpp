@@ -1,7 +1,9 @@
 #include "presentation/pending_files_model.hpp"
+#include "infrastructure/configuration/json_pending_files_repository.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QDir>
 #include <QTemporaryDir>
 
 #include <iostream>
@@ -51,12 +53,103 @@ void testPendingFilesModel() {
     expect(QFile::exists(path), "removing an entry must leave the original file intact");
 }
 
+// 목록을 재시작 복원하고 없는 파일·중복·빈 목록을 안전하게 처리하는지 검사하는 함수.
+void testPendingPersistence() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "persistence fixture should exist");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath(QStringLiteral("사진.jpg"));
+    const auto missing = directory.filePath(QStringLiteral("missing.txt"));
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "source should open");
+    if (!file.isOpen()) return;
+    file.write("original");
+    file.close();
+    const auto storage = directory.filePath(QStringLiteral("state/pending-files.json"));
+    nookbit::JsonPendingFilesRepository repository(storage);
+    expect(repository.load().hasValue() && repository.load().value().empty(),
+           "first launch should restore an empty list");
+    const std::vector<std::filesystem::path> paths{
+        std::filesystem::path(source.toStdWString()),
+        std::filesystem::path(missing.toStdWString()),
+        std::filesystem::path(source.toStdWString()),
+    };
+    expect(repository.save(paths).hasValue(), "pending snapshot should save");
+    nookbit::JsonPendingFilesRepository reopened(storage);
+    const auto loaded = reopened.load();
+    expect(loaded.hasValue() && loaded.value().size() == 3, "new repository should read saved paths");
+    if (!loaded) return;
+    QStringList restored;
+    for (const auto& path : loaded.value()) restored.append(QString::fromStdWString(path.wstring()));
+    nookbit::PendingFilesModel model;
+    model.restorePaths(restored);
+    expect(model.count() == 2 && model.unavailableCount() == 1,
+           "restoration should deduplicate while preserving missing entries");
+    expect(model.data(model.index(1), nookbit::PendingFilesModel::AvailableRole).toBool() == false,
+           "missing file should be marked unavailable");
+    expect(QFile::exists(source), "restoration must not move files");
+    model.restorePaths(restored);
+    expect(model.count() == 2, "restoration should not append duplicate snapshots");
+    QFile reappeared(missing);
+    expect(reappeared.open(QIODevice::WriteOnly), "missing fixture should reappear");
+    reappeared.close();
+    model.refreshAvailability();
+    expect(model.unavailableCount() == 0, "reappearing file should become available");
+    expect(QFile::remove(missing), "fixture should disappear again");
+    model.refreshAvailability();
+    expect(model.unavailableCount() == 1, "deleted file should become unavailable");
+    // 목록 변경 신호에만 저장을 연결해 제거한 파일이 다시 복원되지 않는지 검사하는 함수.
+    QObject::connect(&model, &nookbit::PendingFilesModel::countChanged, &model, [&] {
+        std::vector<std::filesystem::path> snapshot;
+        for (const auto& path : model.filePaths()) snapshot.emplace_back(path.toStdWString());
+        expect(repository.save(snapshot).hasValue(), "changed list should save");
+    });
+    model.removeAt(1);
+    expect(repository.load().hasValue() && repository.load().value().size() == 1,
+           "removed missing entry must not return on restart");
+    model.removeAt(0);
+    expect(repository.load().hasValue() && repository.load().value().empty(),
+           "cleared or fully moved list should remain empty after restart");
+    model.addUrl(QUrl::fromLocalFile(source));
+    expect(repository.load().hasValue() && repository.load().value().size() == 1,
+           "new registration should persist without waiting for shutdown");
+    model.setStorageNotice(QStringLiteral("save failed"));
+    model.addUrl(QUrl::fromLocalFile(source));
+    expect(model.storageNotice() == QStringLiteral("save failed"),
+           "registration messages must not hide storage errors");
+}
+
+// 깨진 문서·지원하지 않는 버전·상대 경로를 거부하고 원본 저장 파일을 보존하는지 검사하는 함수.
+void testPendingPersistenceFailures() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "failure fixture should exist"); return; }
+    const auto storage = directory.filePath(QStringLiteral("pending-files.json"));
+    nookbit::JsonPendingFilesRepository repository(storage);
+    for (const auto& bytes : {QByteArray("broken"), QByteArray("{\"schemaVersion\":2,\"paths\":[]}"),
+                             QByteArray("{\"schemaVersion\":1,\"paths\":[\"relative.txt\"]}"),
+                             QByteArray("{\"schemaVersion\":1,\"paths\":[12]}")}) {
+        QFile file(storage);
+        expect(file.open(QIODevice::WriteOnly | QIODevice::Truncate), "invalid fixture should open");
+        file.write(bytes);
+        file.close();
+        expect(!repository.load(), "invalid pending document should fail as a whole");
+        expect(file.open(QIODevice::ReadOnly) && file.readAll() == bytes,
+               "failed restoration must not modify the existing document");
+    }
+    expect(repository.save({std::filesystem::path(L"relative.txt")}).hasValue() == false,
+           "invalid snapshot must not overwrite storage");
+    nookbit::JsonPendingFilesRepository blocked(directory.path());
+    expect(!blocked.save({}), "writing to a directory must report failure");
+}
+
 } // namespace
 
 // 대기 목록 모델 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testPendingFilesModel();
+    testPendingPersistence();
+    testPendingPersistenceFailures();
     if (failures == 0) {
         std::cout << "All pending-files-model tests passed.\n";
         return 0;

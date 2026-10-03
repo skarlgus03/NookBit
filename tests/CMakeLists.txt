@@ -90,7 +90,7 @@ if(TARGET nookbit_json_config)
   )
   set_target_properties(nookbit_pending_files_model_tests PROPERTIES AUTOMOC ON)
   target_include_directories(nookbit_pending_files_model_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
-  target_link_libraries(nookbit_pending_files_model_tests PRIVATE Qt6::Core)
+  target_link_libraries(nookbit_pending_files_model_tests PRIVATE nookbit_json_config Qt6::Core)
   add_test(NAME nookbit_pending_files_model_tests COMMAND nookbit_pending_files_model_tests)
   if(WIN32)
     set_tests_properties(nookbit_pending_files_model_tests PROPERTIES
