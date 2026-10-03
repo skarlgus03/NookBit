@@ -30,11 +30,15 @@ add_library(nookbit_filesystem STATIC
   infrastructure/filesystem/operation_mutex.cpp
   infrastructure/filesystem/recovery_service.cpp
   infrastructure/filesystem/windows_file_mover.cpp
+  infrastructure/filesystem/windows_staged_copy.cpp
   infrastructure/filesystem/safe_executor.cpp
 )
 target_include_directories(nookbit_filesystem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nookbit_filesystem PUBLIC nookbit_core)
 target_compile_features(nookbit_filesystem PUBLIC cxx_std_20)
+if(WIN32)
+  target_link_libraries(nookbit_filesystem PRIVATE bcrypt)
+endif()
 
 if(MSVC)
   target_compile_options(nookbit_core PRIVATE /W4 /permissive- /utf-8)

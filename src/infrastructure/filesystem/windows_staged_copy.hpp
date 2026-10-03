@@ -1,0 +1,18 @@
+#pragma once
+
+#include <nookbit/application/staged_copy.hpp>
+
+namespace nookbit {
+
+/// 삭제·최종 이름 변경 권한 없이 로컬 NTFS의 임시 복사를 수행하는 어댑터.
+class WindowsStagedCopy final : public IStagedCopy {
+public:
+    /// 기존 경로의 볼륨과 지원 여부를 조회하는 함수.
+    [[nodiscard]] Result<TransferVolume> inspectVolume(const std::filesystem::path& path) override;
+    /// 원본과 부모 경로를 잠그고 새 임시 파일을 생성하는 함수.
+    [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> open(
+        const std::filesystem::path& source, const FileFingerprint& expected,
+        const std::filesystem::path& staging) override;
+};
+
+} // namespace nookbit
