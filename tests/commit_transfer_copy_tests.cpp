@@ -1,6 +1,9 @@
 #include <nookbit/application/commit_transfer_copy_use_case.hpp>
+#include <nookbit/application/inspect_transfer_recovery_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
+#include "infrastructure/filesystem/recovery_service.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
@@ -8,6 +11,8 @@
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
+#include <QSqlQuery>
+#include <QUuid>
 #include <fstream>
 #include <iostream>
 
@@ -257,6 +262,163 @@ void testRejectedFiles() {
         expect(sameFingerprint(existing, fingerprint(fixture.attempt.staging)), "foreign staging retained");
     }
 }
+
+// 복구 읽기 전후 비교를 위해 실제 DB의 전송 이벤트 개수를 읽는 함수.
+int eventCount(const QString& path) {
+    const auto name = QUuid::createUuid().toString();
+    int count = -1;
+    {
+        auto database = QSqlDatabase::addDatabase("QSQLITE", name);
+        database.setDatabaseName(path);
+        if (database.open()) {
+            QSqlQuery query(database);
+            if (query.exec("SELECT COUNT(*) FROM transfer_events") && query.next()) count = query.value(0).toInt();
+        }
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+    expect(count >= 0, "read event count");
+    return count;
+}
+
+// 접근 불가·다른 볼륨을 실제 파일 변경 없이 주입하는 읽기 전용 어댑터.
+class FaultInspector final : public ITransferFileInspector {
+public:
+    WindowsTransferFileInspector inner;
+    std::filesystem::path overridePath;
+    TransferFileObservation replacement;
+    int reads{};
+    // 특정 경로만 관찰값을 대체하고 나머지는 실제 파일을 검사하는 함수.
+    TransferFileObservation inspect(const std::filesystem::path& path) override {
+        ++reads;
+        return path == overridePath ? replacement : inner.inspect(path);
+    }
+};
+
+// 계획 서명 불일치 시 파일을 읽지 않는지 검사하기 위한 해시 포트.
+class WrongHasher final : public IPlanHasher {
+public:
+    // 항상 잘못된 계획 해시를 반환하는 함수.
+    std::string sha256(std::string_view) const override { return std::string(64, '0'); }
+    // 이 테스트에서는 호출되면 안 되는 파일 해시 함수.
+    Result<std::string> sha256File(const std::filesystem::path&) const override {
+        return Result<std::string>::failure({"test.unused", "Unexpected file hashing"});
+    }
+};
+
+// 복구 결과·이벤트 무변경·원본 보존을 함께 검사하는 함수.
+void inspectRecovery(Fixture& fixture, TransferRecoveryFinding expected) {
+    WindowsTransferFileInspector files;
+    QtPlanHasher hasher;
+    InspectTransferRecoveryUseCase inspect(fixture.history, fixture.journal, files, hasher);
+    const auto before = eventCount(fixture.database);
+    const auto result = inspect.execute(fixture.attempt.id);
+    if (result && result.value().finding != expected) std::cerr << result.value().reason << '\n';
+    expect(result && result.value().finding == expected, "three-location recovery classification");
+    expect(before == eventCount(fixture.database), "recovery inspection changes no journal events");
+}
+
+// 세 위치의 실제 파일 상태와 미해결 전송 기록의 읽기 전용 복구를 검사하는 함수.
+void testReadOnlyTransferRecovery() {
+    {
+        Fixture fixture;
+        expect(fixture.journal.begin(fixture.attempt).hasValue(), "prepared recovery fixture");
+        inspectRecovery(fixture, TransferRecoveryFinding::NoCopyObserved);
+        FilesystemScanner scanner;
+        QtPlanHasher hasher;
+        RecoveryService legacy(fixture.history, scanner, hasher, &fixture.journal);
+        const auto report = legacy.reconcile();
+        expect(report && report.value().reconciled == 0 && report.value().needsAttention.size() == 1,
+            "legacy recovery must not classify transfer as a failed rename");
+        const auto cases = legacy.inspectCases();
+        expect(cases && cases.value().size() == 1 && cases.value().front().transferTracked && !cases.value().front().canResolve,
+            "legacy UI cannot resolve a three-location transfer");
+        expect(!legacy.resolveCase(fixture.attempt.planId), "legacy manual resolve blocked");
+        fixture.check(TransferPhase::Prepared);
+    }
+    {
+        Fixture fixture;
+        expect(fixture.journal.begin(fixture.attempt).hasValue(), "partial begin");
+        expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::Prepared, TransferPhase::CopyIntent}).hasValue(), "partial intent");
+        auto session = fixture.worker.open(fixture.attempt.source, fixture.attempt.sourceFingerprint, fixture.attempt.staging);
+        expect(bool(session), "partial session");
+        if (session) {
+            expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::CopyIntent, TransferPhase::StagingCreated,
+                session.value()->createdFingerprint()}).hasValue(), "partial object recorded");
+            int checks{};
+            expect(!session.value()->copyAndVerify([&] { return ++checks == 2; }), "partial fixture cancellation");
+            session.value().reset();
+            inspectRecovery(fixture, TransferRecoveryFinding::PartialCopy);
+        }
+    }
+    {
+        Fixture fixture;
+        fixture.faults.failAt = TransferPhase::CommitIntent;
+        expect(!fixture.useCase.execute(fixture.attempt), "verified staging fixture");
+        inspectRecovery(fixture, TransferRecoveryFinding::VerifiedStaging);
+        expect(std::filesystem::exists(fixture.attempt.staging) && !std::filesystem::exists(fixture.attempt.destination), "inspection does not commit staging");
+    }
+    {
+        Fixture fixture;
+        fixture.faults.beforeRecord = [&](TransferPhase phase) {
+            if (phase == TransferPhase::DestinationCommitted) fixture.faults.persistent = true;
+        };
+        expect(!fixture.useCase.execute(fixture.attempt), "unrecorded final fixture");
+        inspectRecovery(fixture, TransferRecoveryFinding::CommitNotRecorded);
+        fixture.check(TransferPhase::CommitIntent);
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "committed recovery fixture");
+        inspectRecovery(fixture, TransferRecoveryFinding::CommittedSourceRetained);
+        fixture.check(TransferPhase::DestinationCommitted);
+        write(fixture.attempt.destination, "changed final content");
+        inspectRecovery(fixture, TransferRecoveryFinding::ChangedFile);
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "ownership fixture");
+        std::filesystem::rename(fixture.attempt.destination, fixture.attempt.destination.parent_path() / "held-original-copy");
+        write(fixture.attempt.destination, "original contents for transfer copy");
+        inspectRecovery(fixture, TransferRecoveryFinding::ChangedFile);
+        expect(std::filesystem::exists(fixture.attempt.destination.parent_path() / "held-original-copy"), "same-content different object is not deleted");
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "missing source fixture");
+        // 테스트가 만든 원본을 임시 폴더 안에서 보관 위치로 옮겨 '없음'만 재현한다.
+        std::filesystem::rename(fixture.attempt.source, fixture.attempt.source.parent_path() / "held-source");
+        inspectRecovery(fixture, TransferRecoveryFinding::Ambiguous);
+        expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::DestinationCommitted,
+            TransferPhase::SourceRemoveIntent}).hasValue(), "source removal intent fixture without deletion");
+        inspectRecovery(fixture, TransferRecoveryFinding::SourceAbsentAfterRemoveIntent);
+        expect(std::filesystem::exists(fixture.attempt.source.parent_path() / "held-source"), "inspection never removes held source");
+    }
+    {
+        Fixture fixture;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "fault observation fixture");
+        FaultInspector files;
+        files.overridePath = fixture.attempt.source;
+        files.replacement.presence = TransferPathPresence::Missing;
+        files.replacement.volumeId = "different-volume";
+        QtPlanHasher hasher;
+        InspectTransferRecoveryUseCase inspect(fixture.history, fixture.journal, files, hasher);
+        auto result = inspect.execute(fixture.attempt.id);
+        expect(result && result.value().source == TransferRecoveryFileState::OtherVolume &&
+            result.value().finding == TransferRecoveryFinding::Unavailable, "different volume not mistaken for missing source");
+        files.replacement = {};
+        files.replacement.error = Error{"test.offline", "Drive unavailable"};
+        result = inspect.execute(fixture.attempt.id);
+        expect(result && result.value().finding == TransferRecoveryFinding::Unavailable &&
+            !result.value().observationErrors.empty(), "unavailable reason preserved");
+        WrongHasher wrong;
+        files.reads = 0;
+        InspectTransferRecoveryUseCase untrusted(fixture.history, fixture.journal, files, wrong);
+        result = untrusted.execute(fixture.attempt.id);
+        expect(result && result.value().finding == TransferRecoveryFinding::UntrustedRecord && files.reads == 0,
+            "untrusted plan does not inspect arbitrary paths");
+    }
+}
 }
 
 // 실제 SQLite와 임시 NTFS 파일의 복사·확정 연동을 시험하는 함수.
@@ -266,6 +428,7 @@ int main(int argc, char** argv) {
     testSuccessAndCancel();
     testJournalFailures();
     testRejectedFiles();
+    testReadOnlyTransferRecovery();
 #endif
     return failures ? 1 : 0;
 }

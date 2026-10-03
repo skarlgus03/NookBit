@@ -5,6 +5,7 @@
 #include "presentation/watch_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
@@ -92,12 +93,13 @@ int main(int argc, char* argv[]) {
     if (!verifyUi) pendingAvailabilityTimer.start();
     const auto databasePath = QDir(appData).filePath(QStringLiteral("history.sqlite"));
     const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
+    nookbit::SqliteTransferJournal transferJournal(databasePath, migrationPath);
     QString recoveryNotice;
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         nookbit::SqliteHistoryRepository recoveryHistory(databasePath, migrationPath);
         nookbit::FilesystemScanner recoveryScanner;
         nookbit::QtPlanHasher recoveryHasher;
-        nookbit::RecoveryService recovery(recoveryHistory, recoveryScanner, recoveryHasher);
+        nookbit::RecoveryService recovery(recoveryHistory, recoveryScanner, recoveryHasher, &transferJournal);
         const auto result = recovery.reconcile();
         if (!result) {
             recoveryNotice = QStringLiteral("이전 작업 상태를 확인하지 못했어요: %1")
@@ -169,7 +171,7 @@ int main(int argc, char* argv[]) {
         uiPreferences.setValue(QStringLiteral("destinationRoot"), root);
         uiPreferences.sync();
     });
-    nookbit::RecoveryController recoveryController(history);
+    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal);
     nookbit::HistoryController historyController(
         history, std::filesystem::path(appData.toStdWString()),
         defaultDestination);

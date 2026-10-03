@@ -1,4 +1,5 @@
 #include "windows_staged_copy.hpp"
+#include "windows_transfer_file_inspector.hpp"
 #include "file_identity.hpp"
 #include <nookbit/domain/transfer.hpp>
 
@@ -338,8 +339,9 @@ public:
 };
 } // namespace
 
+namespace {
 // 없는 경로 끝을 제외하고 기존 안전한 조상의 볼륨을 조회하는 함수.
-Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::path& path) {
+Result<TransferVolume> inspectVolumePath(const std::filesystem::path& path) {
     if (!validPath(path)) return Result<TransferVolume>::failure({"transfer.path", "Unsupported path"});
     auto ancestor = path;
     while (GetFileAttributesW(ancestor.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -359,6 +361,67 @@ Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::p
     if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
         return Result<TransferVolume>::failure({"transfer.reparse", "Reparse paths are unsupported"});
     return volume(handle.value);
+}
+} // namespace
+
+// 공유된 읽기 전용 볼륨 검사를 호출하는 함수.
+Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::path& path) {
+    return inspectVolumePath(path);
+}
+
+// 파일을 생성하지 않고 보호된 핸들에서 객체·내용·실제 볼륨을 읽는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path& path) {
+    TransferFileObservation result;
+    // 관찰 실패를 파일 없음으로 바꾸지 않고 이유를 보존하는 함수.
+    const auto unavailable = [&](Error error) {
+        result.presence = TransferPathPresence::Unavailable;
+        result.error = std::move(error);
+        return result;
+    };
+    const auto location = inspectVolumePath(path);
+    if (!location) return unavailable(location.error());
+    result.volumeId = location.value().id;
+    if (!location.value().localNtfs)
+        return unavailable({"transfer.volume_unsupported", "Only local fixed NTFS can be inspected"});
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        const auto error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            return unavailable(failure("transfer.inspect"));
+        result.presence = TransferPathPresence::Missing;
+        return result;
+    }
+    std::vector<Handle> locks;
+    const auto locked = lockParents(path, locks);
+    if (!locked) return unavailable(locked.error());
+    const auto parentVolume = volume(locks.back().value);
+    if (!parentVolume) return unavailable(parentVolume.error());
+    result.volumeId = parentVolume.value().id;
+    Handle input(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            result.presence = TransferPathPresence::Missing;
+            return result;
+        }
+        return unavailable(failure("transfer.inspect_open"));
+    }
+    const auto supported = ordinarySource(input.value, path);
+    if (!supported) return unavailable(supported.error());
+    const auto before = fingerprint(input.value);
+    const auto hash = digest(input.value, {});
+    const auto after = fingerprint(input.value);
+    if (!before || !hash || !after)
+        return unavailable(!before ? before.error() : (!hash ? hash.error() : after.error()));
+    if (!sameFingerprint(before.value(), after.value()))
+        return unavailable({"transfer.inspect_changed", "File changed while being inspected"});
+    const auto checked = ordinarySource(input.value, path);
+    if (!checked) return unavailable(checked.error());
+    result.volumeId = after.value().volumeId;
+    result.fingerprint = after.value();
+    result.fingerprint->sha256 = hash.value();
+    result.presence = TransferPathPresence::Present;
+    return result;
 }
 
 // 지원 범위와 원본을 검사한 뒤 독점적인 새 임시 파일 세션을 만드는 함수.
@@ -406,6 +469,12 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외 플랫폼에서는 읽기 전용 검사도 지원하지 않는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path&) {
+    TransferFileObservation result;
+    result.error = Error{"transfer.unsupported", "Windows only"};
+    return result;
+}
 // Windows 외 플랫폼에서는 지원하지 않음을 반환하는 함수.
 Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::path&) {
     return Result<TransferVolume>::failure({"transfer.unsupported", "Windows only"});

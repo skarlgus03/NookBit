@@ -3,6 +3,7 @@
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/transfer_journal.hpp>
 
 #include <QObject>
 #include <QString>
@@ -19,7 +20,8 @@ class RecoveryController final : public QObject {
 
 public:
     /// 복구 기록 저장소를 받아 화면의 복구 작업을 준비하는 생성자.
-    explicit RecoveryController(IHistoryRepository& history, QObject* parent = nullptr);
+    explicit RecoveryController(IHistoryRepository& history, QObject* parent = nullptr,
+        const ITransferJournal* transfers = nullptr);
 
     /// 시작 시 발견한 미완료 작업 안내를 반환하는 함수.
     [[nodiscard]] QString recoveryNotice() const;
@@ -48,6 +50,7 @@ signals:
 
 private:
     IHistoryRepository& history_;
+    const ITransferJournal* transfers_;
     FilesystemScanner scanner_;
     QtPlanHasher hasher_;
     QString recoveryNotice_;

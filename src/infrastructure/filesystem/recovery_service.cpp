@@ -41,8 +41,19 @@ bool canTrustRecoveryPlan(const OperationPlan& plan, IPlanHasher& hasher) {
 // 이력과 현재 파일 정보를 확인할 기능을 받는 생성자.
 RecoveryService::RecoveryService(IHistoryRepository& history,
                                  IScanner& scanner,
-                                 IPlanHasher& hasher)
-    : history_(history), scanner_(scanner), hasher_(hasher) {}
+                                 IPlanHasher& hasher, const ITransferJournal* transfers)
+    : history_(history), scanner_(scanner), hasher_(hasher), transfers_(transfers) {}
+
+// 전송 시도가 하나라도 있으면 기존 이름 변경 복구로 완료/실패를 추론하지 않는 함수.
+Result<bool> RecoveryService::hasTransfers(const OperationPlan& plan) const {
+    if (!transfers_) return Result<bool>::success(false);
+    for (const auto& step : plan.steps) {
+        const auto attempts = transfers_->forStep(step.id);
+        if (!attempts) return Result<bool>::failure(attempts.error());
+        if (!attempts.value().empty()) return Result<bool>::success(true);
+    }
+    return Result<bool>::success(false);
+}
 
 // 불확실한 계획을 NeedsRecovery 상태로 기록하는 함수.
 Result<void> RecoveryService::markNeedsRecovery(const OperationPlan& plan) {
@@ -64,6 +75,12 @@ Result<RecoveryReport> RecoveryService::reconcile() {
     if (!loaded) return Result<RecoveryReport>::failure(loaded.error());
     RecoveryReport report;
     for (const auto& plan : loaded.value()) {
+        const auto tracked = hasTransfers(plan);
+        if (!tracked) return Result<RecoveryReport>::failure(tracked.error());
+        if (tracked.value()) {
+            report.needsAttention.push_back(plan.id);
+            continue;
+        }
         if (plan.status == PlanStatus::NeedsRecovery) {
             report.needsAttention.push_back(plan.id);
             continue;
@@ -180,13 +197,16 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
     if (!loaded) return Result<std::vector<RecoveryCase>>::failure(loaded.error());
     std::vector<RecoveryCase> cases;
     for (const auto& plan : loaded.value()) {
-        if (plan.status != PlanStatus::NeedsRecovery) continue;
+        const auto tracked = hasTransfers(plan);
+        if (!tracked) return Result<std::vector<RecoveryCase>>::failure(tracked.error());
+        if (plan.status != PlanStatus::NeedsRecovery && !tracked.value()) continue;
         const auto active = activeSteps(plan);
         if (active.empty()) {
             RecoveryCase item;
             item.planId = plan.id;
             item.partIndex = 1;
             item.partCount = 1;
+            item.transferTracked = tracked.value();
             cases.push_back(std::move(item));
             continue;
         }
@@ -209,7 +229,8 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
                 PlanSignature::isSha256Hex(*step->fingerprint.sha256);
             item.planIntact = intact;
             item.originKnown = originKnown;
-            if (intact) {
+            item.transferTracked = tracked.value();
+            if (intact && !tracked.value()) {
                 item.sourceState = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
                 item.destinationState = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
             }
@@ -218,7 +239,7 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
             cases.push_back(std::move(item));
         }
         for (std::size_t index = firstIndex; index < cases.size(); ++index) {
-            cases[index].canResolve = intact && originKnown &&
+            cases[index].canResolve = !tracked.value() && intact && originKnown &&
                 (allAtSource || allAtDestination);
         }
     }
@@ -233,6 +254,10 @@ Result<void> RecoveryService::resolveCase(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     const auto& plan = loaded.value();
+    const auto tracked = hasTransfers(plan);
+    if (!tracked) return Result<void>::failure(tracked.error());
+    if (tracked.value()) return Result<void>::failure({"recovery.transfer_tracked",
+        "Three-location transfer inspection is required; legacy record reconciliation is disabled."});
     const auto active = activeSteps(plan);
     if (plan.status != PlanStatus::NeedsRecovery ||
         !canTrustRecoveryPlan(plan, hasher_)) {

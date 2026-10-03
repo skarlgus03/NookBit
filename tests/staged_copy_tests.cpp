@@ -1,4 +1,5 @@
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
@@ -112,6 +113,10 @@ int main(int argc, char** argv) {
         FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
     expect(writer != INVALID_HANDLE_VALUE, "existing writer fixture");
     expect(!worker.open(source, expected, root / "writer-stage"), "source with existing writer rejected");
+    nookbit::WindowsTransferFileInspector inspector;
+    const auto unavailable = inspector.inspect(source);
+    expect(unavailable.presence == nookbit::TransferPathPresence::Unavailable && unavailable.error,
+        "read-only inspector reports existing writer as unavailable, not missing");
     if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
     expect(!worker.open(source, expected, root / "no-parent" / "stage"), "missing target parent rejected");
     expect(!worker.open(source, expected, root / "stage:stream"), "alternate stream target rejected");

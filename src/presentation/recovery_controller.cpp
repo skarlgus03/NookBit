@@ -29,8 +29,8 @@ QString stateText(FileProbe state) {
 } // namespace
 
 // 복구 기록 저장소를 받아 화면의 복구 작업을 준비하는 생성자.
-RecoveryController::RecoveryController(IHistoryRepository& history, QObject* parent)
-    : QObject(parent), history_(history) {}
+RecoveryController::RecoveryController(IHistoryRepository& history, QObject* parent, const ITransferJournal* transfers)
+    : QObject(parent), history_(history), transfers_(transfers) {}
 
 // 시작 시 발견한 미완료 작업 안내를 반환하는 함수.
 QString RecoveryController::recoveryNotice() const { return recoveryNotice_; }
@@ -50,7 +50,7 @@ void RecoveryController::setRecoveryNotice(QString notice) {
 
 // 중단 작업의 현재 원본·목적지 상태를 다시 읽는 함수.
 void RecoveryController::refreshRecoveryCases() {
-    RecoveryService recovery(history_, scanner_, hasher_);
+    RecoveryService recovery(history_, scanner_, hasher_, transfers_);
     auto inspected = recovery.inspectCases();
     if (!inspected) {
         recoveryMessage_ = QStringLiteral("복구 기록을 읽지 못했어요: %1")
@@ -62,7 +62,9 @@ void RecoveryController::refreshRecoveryCases() {
     QSet<QString> planIds;
     for (const auto& item : inspected.value()) {
         QString detail;
-        if (!item.contentHashAvailable) {
+        if (item.transferTracked) {
+            detail = QStringLiteral("별도 전송 기록이 있어 원본·임시 파일·최종 파일의 확인이 필요해요. 기존 기록 정리는 차단하며 파일은 건드리지 않아요.");
+        } else if (!item.contentHashAvailable) {
             detail = QStringLiteral("이전 기록에는 파일 내용 해시가 없어 자동 확정할 수 없어요.");
         } else if (!item.planIntact || !item.originKnown) {
             detail = QStringLiteral("계획 기록이나 중단 시점을 신뢰할 수 없어 자동 확정할 수 없어요.");
@@ -94,7 +96,7 @@ void RecoveryController::refreshRecoveryCases() {
 
 // 파일 위치를 다시 검증하고 확실한 작업 기록만 정리하는 함수.
 void RecoveryController::resolveRecoveryCase(const QString& planId) {
-    RecoveryService recovery(history_, scanner_, hasher_);
+    RecoveryService recovery(history_, scanner_, hasher_, transfers_);
     auto resolved = recovery.resolveCase(planId.toStdString());
     if (!resolved) {
         recoveryMessage_ = QStringLiteral("기록을 정리하지 못했어요: %1")
@@ -109,7 +111,7 @@ void RecoveryController::resolveRecoveryCase(const QString& planId) {
 
 // 실행 실패 뒤 중단 기록을 재조정하고 복구 목록을 갱신하는 함수.
 void RecoveryController::reconcileAndRefreshCases() {
-    RecoveryService recovery(history_, scanner_, hasher_);
+    RecoveryService recovery(history_, scanner_, hasher_, transfers_);
     (void)recovery.reconcile();
     refreshRecoveryCases();
 }

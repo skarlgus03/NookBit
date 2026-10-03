@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/transfer_journal.hpp>
 #include "infrastructure/filesystem/file_identity.hpp"
 
 namespace nookbit {
@@ -24,13 +25,15 @@ struct RecoveryCase {
     bool planIntact{false};
     bool originKnown{false};
     bool canResolve{false};
+    bool transferTracked{false};
 };
 
 /// 중단된 작업의 각 파일 위치와 DB 상태를 대조하는 서비스.
 class RecoveryService final {
 public:
     /// 이력과 현재 파일 정보를 확인할 기능을 받는 생성자.
-    RecoveryService(IHistoryRepository& history, IScanner& scanner, IPlanHasher& hasher);
+    RecoveryService(IHistoryRepository& history, IScanner& scanner, IPlanHasher& hasher,
+        const ITransferJournal* transfers = nullptr);
 
     /// 파일 이동 없이 확실한 상태만 DB에 반영하고 불확실한 계획은 표시하는 함수.
     [[nodiscard]] Result<RecoveryReport> reconcile();
@@ -42,12 +45,15 @@ public:
     [[nodiscard]] Result<void> resolveCase(const PlanId& planId);
 
 private:
+    /// 다른 볼륨 전송 기록이 있어 기존 두 위치 복구를 금지해야 하는지 검사하는 함수.
+    [[nodiscard]] Result<bool> hasTransfers(const OperationPlan& plan) const;
     /// 불확실한 계획을 NeedsRecovery 상태로 기록하는 함수.
     [[nodiscard]] Result<void> markNeedsRecovery(const OperationPlan& plan);
 
     IHistoryRepository& history_;
     IScanner& scanner_;
     IPlanHasher& hasher_;
+    const ITransferJournal* transfers_;
 };
 
 } // namespace nookbit
