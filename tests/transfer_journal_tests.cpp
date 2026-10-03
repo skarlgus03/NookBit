@@ -216,12 +216,16 @@ void testMigrationFailureIsAtomic() {
         hash = fixture.plan.planHash;
     }
     expect(sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
-               sql(dbPath, "DELETE FROM schema_migrations WHERE version=2").isValid(), "failure fixture should use v1");
+               sql(dbPath, "ALTER TABLE plans DROP COLUMN format_version").isValid() &&
+               sql(dbPath, "ALTER TABLE steps DROP COLUMN movement_json").isValid() &&
+               sql(dbPath, "DELETE FROM schema_migrations WHERE version>=2").isValid(), "failure fixture should use v1");
     const auto migrations = directory.filePath("migrations");
     expect(QDir().mkpath(migrations), "temporary migrations directory should exist");
     const auto initial = QDir(migrations).filePath("001_initial.sql");
     const auto upgrade = QDir(migrations).filePath("002_transfer_journal.sql");
     expect(QFile::copy(migrationPath(), initial), "initial migration should copy to the fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("003_plan_contract.sql"),
+                      QDir(migrations).filePath("003_plan_contract.sql")), "v3 migration should copy to the fixture");
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "broken migration fixture should open");
     if (!broken.isOpen()) return;
@@ -238,7 +242,7 @@ void testMigrationFailureIsAtomic() {
            "temporary broken migration should be replaced with the valid fixture");
     const auto repaired = repository.loadPlan("plan");
     expect(repaired && repaired.value().planHash == hash &&
-               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 2,
+               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3,
            "repaired migration should succeed without losing the old plan");
 }
 
@@ -254,22 +258,24 @@ void testMigrationCompatibility() {
         oldHash = fixture.plan.planHash;
     }
     expect(sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
-               sql(dbPath, "DELETE FROM schema_migrations WHERE version=2").isValid(), "legacy v1 schema should be reconstructed");
+               sql(dbPath, "ALTER TABLE plans DROP COLUMN format_version").isValid() &&
+               sql(dbPath, "ALTER TABLE steps DROP COLUMN movement_json").isValid() &&
+               sql(dbPath, "DELETE FROM schema_migrations WHERE version>=2").isValid(), "legacy v1 schema should be reconstructed");
     {
         nookbit::SqliteHistoryRepository upgraded(dbPath, migrationPath());
         const auto loaded = upgraded.loadPlan("plan");
         expect(loaded && loaded.value().planHash == oldHash && loaded.value().status == nookbit::PlanStatus::Executing,
                "v1 migration must preserve the plan hash and execution state");
-        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 2,
-               "v2 schema should apply exactly once");
+        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3,
+               "v2/v3 schema should apply exactly once");
     }
-    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(3,'future')").isValid(), "future schema fixture should save");
+    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(4,'future')").isValid(), "future schema fixture should save");
     nookbit::SqliteHistoryRepository tooOld(dbPath, migrationPath());
     auto unsupported = tooOld.loadPlan("plan");
     expect(!unsupported && unsupported.error().code == "history.schema_too_new",
            "future schema must be rejected before writes");
     expect(!tooOld.loadPlan("plan"), "failed opening must not become usable on the next call");
-    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3,
+    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
            "future migration marker must remain intact");
 }
 } // namespace

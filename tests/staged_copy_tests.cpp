@@ -4,6 +4,7 @@
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include <nookbit/domain/transfer.hpp>
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <fstream>
@@ -51,6 +52,21 @@ int main(int argc, char** argv) {
     expect(bool(volume) && volume.value().localNtfs, "inspect existing ancestor on local NTFS");
     expect(bool(volume) && volume.value().name.starts_with(L"\\\\?\\Volume{"), "stable volume GUID inspected");
     expect(!std::filesystem::exists(root / "missing"), "volume inspection makes no folders");
+    const auto contractSource = root / "contract-source";
+    write(contractSource, "volume contract source");
+    nookbit::OperationPlan contractDraft;
+    nookbit::MoveStep contractStep;
+    contractStep.source = contractSource;
+    contractStep.destination = root / "missing" / "nested" / "destination";
+    contractStep.fingerprint = fingerprint(contractSource);
+    contractDraft.steps.push_back(contractStep);
+    nookbit::PrepareTransferPlanUseCase prepare(worker);
+    const auto contractPlan = prepare.execute(contractDraft);
+    expect(contractPlan && contractPlan.value().steps[0].movement->strategy == nookbit::MoveStrategy::Rename,
+           "native volume query should prepare a same-volume v2 contract");
+    expect(contractPlan && prepare.verify(contractPlan.value()).hasValue(), "native approved-volume recheck should match");
+    expect(!std::filesystem::exists(root / "missing"), "plan preparation and recheck must not create destination parents");
+    unchanged(contractSource, contractStep.fingerprint);
 
     for (const auto size : {size_t(0), size_t(5), size_t(2 * 1024 * 1024 + 13)}) {
         const auto source = root / ("source-" + std::to_string(size));

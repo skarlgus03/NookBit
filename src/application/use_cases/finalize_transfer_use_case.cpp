@@ -31,6 +31,8 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
         return Result<TransferAttempt>::failure({"transfer.finalize_state", "Only a recorded committed copy may be finalized"});
     const auto plan = history_.loadPlan(state.planId);
     if (!plan) return Result<TransferAttempt>::failure(plan.error());
+    if (!PlanSignature::validateFormat(plan.value()) || plan.value().formatVersion != 1)
+        return Result<TransferAttempt>::failure({"transfer.volume_verifier_required", "V2 finalization requires current volume verification."});
     const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) {
         return item.id == state.stepId;
     });

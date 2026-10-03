@@ -103,6 +103,44 @@ void appendAtomicNode(std::string& output, const RuleNode& node) {
 
 } // namespace
 
+// 버전별 필수 정보와 실제 볼륨에 따른 이동 방식의 일관성을 검사하는 함수.
+Result<void> PlanSignature::validateFormat(const OperationPlan& plan) {
+    if (plan.formatVersion != 1 && plan.formatVersion != 2)
+        return Result<void>::failure({"plan.format_unsupported", "Unsupported approval plan version."});
+    // GUID 볼륨 경로와 32비트 십진 일련번호가 정규 형식인지 확인하는 함수.
+    const auto validVolume = [](const PlanVolume& volume) {
+        const auto& guid = volume.guidPath;
+        if (guid.size() != 49 || guid.substr(0, 11) != "\\\\?\\Volume{" || guid.substr(47) != "}\\" ||
+            volume.filesystem != "NTFS" || volume.serial.empty() || volume.serial.size() > 10 ||
+            (volume.serial.size() > 1 && volume.serial.front() == '0')) return false;
+        for (std::size_t i = 11; i < 47; ++i) {
+            const auto offset = i - 11;
+            if (offset == 8 || offset == 13 || offset == 18 || offset == 23) {
+                if (guid[i] != '-') return false;
+            } else if (!((guid[i] >= '0' && guid[i] <= '9') || (guid[i] >= 'a' && guid[i] <= 'f'))) return false;
+        }
+        if (!std::all_of(volume.serial.begin(), volume.serial.end(), [](char ch) { return ch >= '0' && ch <= '9'; })) return false;
+        return volume.serial.size() < 10 || volume.serial <= "4294967295";
+    };
+    for (const auto& step : plan.steps) {
+        if (plan.formatVersion == 1) {
+            if (step.movement) return Result<void>::failure({"plan.contract_unsigned", "Legacy plans cannot carry unsigned movement contracts."});
+            continue;
+        }
+        if (!step.movement) return Result<void>::failure({"plan.contract_missing", "Every v2 step needs a movement contract."});
+        const auto& movement = *step.movement;
+        if (!validVolume(movement.sourceVolume) || !validVolume(movement.destinationVolume) ||
+            !step.fingerprint.volumeId || *step.fingerprint.volumeId != movement.sourceVolume.serial ||
+            movement.preservation != PreservationPolicy::LocalNtfsBasic)
+            return Result<void>::failure({"plan.volume_invalid", "Volume identity or preservation policy is invalid."});
+        const bool same = movement.sourceVolume.guidPath == movement.destinationVolume.guidPath;
+        if ((same && movement.sourceVolume.serial != movement.destinationVolume.serial) ||
+            movement.strategy != (same ? MoveStrategy::Rename : MoveStrategy::VerifiedCopy))
+            return Result<void>::failure({"plan.strategy_invalid", "Movement strategy does not match the approved volumes."});
+    }
+    return Result<void>::success();
+}
+
 // 사용자 설정 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
 std::string PlanSignature::settings(const UserSettings& settings) {
     std::string output = "nookbit-settings-v1";
@@ -164,7 +202,8 @@ std::string PlanSignature::rules(const RuleSet& rules) {
 
 // 파일 경로·지문·판단 결과·경고를 고정 형식으로 직렬화하는 함수.
 std::string PlanSignature::planContents(const OperationPlan& plan) {
-    std::string output = "nookbit-plan-contents-v1";
+    std::string output = plan.formatVersion == 1 ? "nookbit-plan-contents-v1" : "nookbit-plan-contents-v2";
+    if (plan.formatVersion != 1) appendNumber(output, plan.formatVersion);
     append(output, plan.ruleSetVersion);
     appendNumber(output, plan.steps.size());
     for (const auto& step : plan.steps) {
@@ -179,6 +218,21 @@ std::string PlanSignature::planContents(const OperationPlan& plan) {
         append(output, step.reason);
         appendNumber(output, step.collisionPolicy);
         appendNumber(output, step.status);
+        if (plan.formatVersion != 1) {
+            appendNumber(output, step.movement.has_value());
+            if (step.movement) {
+                appendNumber(output, step.movement->strategy);
+                // 양쪽 볼륨의 모든 승인 필드를 순서대로 추가하는 함수.
+                const auto appendVolume = [&](const PlanVolume& volume) {
+                    append(output, volume.serial);
+                    append(output, volume.guidPath);
+                    append(output, volume.filesystem);
+                };
+                appendVolume(step.movement->sourceVolume);
+                appendVolume(step.movement->destinationVolume);
+                appendNumber(output, step.movement->preservation);
+            }
+        }
     }
     appendNumber(output, plan.warnings.size());
     for (const auto& warning : plan.warnings) {
@@ -194,7 +248,8 @@ std::string PlanSignature::approvalPayload(const OperationPlan& plan) {
     for (auto& step : approvalSnapshot.steps) {
         if (step.status != StepStatus::Skipped) step.status = StepStatus::Planned;
     }
-    return "nookbit-approval-plan-v1:" + plan.id + ":" + plan.settingsRevision +
+    const std::string prefix = plan.formatVersion == 1 ? "nookbit-approval-plan-v1:" : "nookbit-approval-plan-v2:";
+    return prefix + plan.id + ":" + plan.settingsRevision +
            ":" + plan.rulesRevision + ":" + planContents(approvalSnapshot);
 }
 

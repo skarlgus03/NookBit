@@ -1,5 +1,6 @@
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_schema.hpp"
+#include "application/use_cases/plan_signature.hpp"
 
 #include <QDateTime>
 #include <QDir>
@@ -134,6 +135,49 @@ std::optional<FileFingerprint> parseFingerprint(const QString& text) {
     return fingerprint;
 }
 
+// 승인한 볼륨 식별 정보를 JSON 객체로 만드는 함수.
+QJsonObject volumeJson(const PlanVolume& volume) {
+    return {{"serial", QString::fromStdString(volume.serial)},
+            {"guidPath", QString::fromStdString(volume.guidPath)},
+            {"filesystem", QString::fromStdString(volume.filesystem)}};
+}
+
+// 이동 계약을 DB에 저장할 JSON 문자열로 만드는 함수.
+QString movementJson(const MoveContract& movement) {
+    QJsonObject object{{"strategy", static_cast<int>(movement.strategy)},
+                       {"sourceVolume", volumeJson(movement.sourceVolume)},
+                       {"destinationVolume", volumeJson(movement.destinationVolume)},
+                       {"preservation", static_cast<int>(movement.preservation)}};
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+// 볼륨 JSON의 필수 문자열과 알 수 없는 필드를 검사해 복원하는 함수.
+std::optional<PlanVolume> parseVolume(const QJsonValue& value) {
+    if (!value.isObject()) return {};
+    const auto object = value.toObject();
+    if (object.size() != 3 || !object.value("serial").isString() ||
+        !object.value("guidPath").isString() || !object.value("filesystem").isString()) return {};
+    return PlanVolume{object.value("serial").toString().toStdString(),
+                      object.value("guidPath").toString().toStdString(),
+                      object.value("filesystem").toString().toStdString()};
+}
+
+// 누락·알 수 없는 enum·소수 값이 있는 이동 계약을 거부하는 함수.
+std::optional<MoveContract> parseMovement(const QString& text) {
+    const auto document = QJsonDocument::fromJson(text.toUtf8());
+    if (!document.isObject()) return {};
+    const auto object = document.object();
+    const auto strategy = object.value("strategy");
+    const auto preservation = object.value("preservation");
+    const auto source = parseVolume(object.value("sourceVolume"));
+    const auto destination = parseVolume(object.value("destinationVolume"));
+    if (object.size() != 4 || !strategy.isDouble() ||
+        (strategy.toDouble() != 0 && strategy.toDouble() != 1) ||
+        !preservation.isDouble() || preservation.toDouble() != 0 || !source || !destination) return {};
+    return MoveContract{static_cast<MoveStrategy>(strategy.toInt()), *source, *destination,
+                        PreservationPolicy::LocalNtfsBasic};
+}
+
 // 경고 목록을 DB의 JSON 문자열로 만드는 함수.
 QString warningsJson(const std::vector<Error>& warnings) {
     QJsonArray array;
@@ -198,6 +242,8 @@ Result<void> SqliteHistoryRepository::ensureOpen() const {
 
 // Planned 계획과 단계들을 한 트랜잭션에 저장하는 함수.
 Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
+    const auto format = PlanSignature::validateFormat(plan);
+    if (!format) return format;
     if (plan.status != PlanStatus::Planned || plan.id.empty() || plan.planHash.size() != 64 ||
         plan.settingsRevision.size() != 64 || plan.rulesRevision.size() != 64 ||
         std::none_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
@@ -214,7 +260,7 @@ Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
     QSqlQuery planQuery(database_);
     planQuery.prepare(QStringLiteral(
         "INSERT INTO plans(id, created_at, rule_set_version, settings_revision, rules_revision, "
-        "plan_hash, status, warnings_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"));
+        "plan_hash, status, warnings_json, format_version) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     planQuery.addBindValue(QString::fromStdString(plan.id));
     planQuery.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     planQuery.addBindValue(QString::fromStdString(plan.ruleSetVersion));
@@ -223,6 +269,7 @@ Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
     planQuery.addBindValue(QString::fromStdString(plan.planHash));
     planQuery.addBindValue(planStatus(plan.status));
     planQuery.addBindValue(warningsJson(plan.warnings));
+    planQuery.addBindValue(plan.formatVersion);
     if (!planQuery.exec()) {
         auto error = sqlFailure("history.insert_plan_failed", planQuery);
         database_.rollback();
@@ -234,8 +281,8 @@ Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
         QSqlQuery stepQuery(database_);
         stepQuery.prepare(QStringLiteral(
             "INSERT INTO steps(id, plan_id, sequence_no, source_path, destination_path, "
-            "fingerprint_json, matched_rule_id, reason, collision_policy, status) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+            "fingerprint_json, matched_rule_id, reason, collision_policy, status, movement_json) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
         stepQuery.addBindValue(QString::fromStdString(step.id));
         stepQuery.addBindValue(QString::fromStdString(plan.id));
         stepQuery.addBindValue(static_cast<qlonglong>(index));
@@ -246,6 +293,7 @@ Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
         stepQuery.addBindValue(QString::fromStdString(step.reason));
         stepQuery.addBindValue(collisionPolicy(step.collisionPolicy));
         stepQuery.addBindValue(stepStatus(step.status));
+        stepQuery.addBindValue(step.movement ? movementJson(*step.movement) : QString());
         if (!stepQuery.exec()) {
             auto error = sqlFailure("history.insert_step_failed", stepQuery);
             database_.rollback();
@@ -548,7 +596,7 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
     QSqlQuery plans(database_);
     plans.prepare(QStringLiteral(
         "SELECT id, rule_set_version, settings_revision, rules_revision, plan_hash, "
-        "status, warnings_json FROM plans WHERE ") + whereClause +
+        "status, warnings_json, format_version FROM plans WHERE ") + whereClause +
         QStringLiteral(" ORDER BY created_at, id"));
     if (!planId.isEmpty()) plans.addBindValue(planId);
     if (!plans.exec()) {
@@ -573,11 +621,16 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
         }
         plan.status = *status;
         plan.warnings = *warnings;
+        bool versionOk = false;
+        plan.formatVersion = plans.value(7).toInt(&versionOk);
+        if (!versionOk || plans.value(7).toDouble() != plan.formatVersion ||
+            (plan.formatVersion != 1 && plan.formatVersion != 2))
+            return Result<std::vector<OperationPlan>>::failure({"plan.format_unsupported", "Unsupported stored approval version."});
 
         QSqlQuery steps(database_);
         steps.prepare(QStringLiteral(
             "SELECT id, source_path, destination_path, fingerprint_json, matched_rule_id, "
-            "reason, collision_policy, status FROM steps WHERE plan_id = ? ORDER BY sequence_no"));
+            "reason, collision_policy, status, movement_json FROM steps WHERE plan_id = ? ORDER BY sequence_no"));
         steps.addBindValue(QString::fromStdString(plan.id));
         if (!steps.exec()) {
             return Result<std::vector<OperationPlan>>::failure({
@@ -602,8 +655,14 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
             step.reason = steps.value(5).toString().toStdString();
             step.collisionPolicy = *collision;
             step.status = *stepState;
+            if (!steps.value(8).isNull()) {
+                step.movement = parseMovement(steps.value(8).toString());
+                if (!step.movement) return Result<std::vector<OperationPlan>>::failure({"history.corrupt_contract", "Invalid stored movement contract."});
+            }
             plan.steps.push_back(std::move(step));
         }
+        const auto format = PlanSignature::validateFormat(plan);
+        if (!format) return Result<std::vector<OperationPlan>>::failure(format.error());
         result.push_back(std::move(plan));
     }
     return Result<std::vector<OperationPlan>>::success(std::move(result));

@@ -48,6 +48,8 @@ Result<void> SafeExecutor::execute(
     const OperationPlan& plan,
     const ApprovalRecord& approval,
     const std::vector<std::filesystem::path>& selectedFiles) {
+    if (!PlanSignature::validateFormat(plan) || plan.formatVersion != 1)
+        return Result<void>::failure({"execute.format_unsupported", "Legacy executor cannot execute a v2 movement contract."});
     if (!verifier_) {
         return Result<void>::failure({
             "execute.verifier_missing", "A verifier is required to move files."});
@@ -66,6 +68,8 @@ Result<void> SafeExecutor::execute(
         plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
+    if (!PlanSignature::validateFormat(saved) || saved.formatVersion != 1)
+        return Result<void>::failure({"execute.format_unsupported", "Legacy executor cannot execute a v2 movement contract."});
     if (saved.planHash != plan.planHash ||
         PlanSignature::planContents(saved) != PlanSignature::planContents(plan)) {
         return Result<void>::failure({"execute.plan_mismatch", "Requested plan differs from saved approval."});
@@ -271,6 +275,8 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     const auto& plan = loaded.value();
+    if (!PlanSignature::validateFormat(plan) || plan.formatVersion != 1)
+        return Result<void>::failure({"rollback.format_unsupported", "Legacy rollback cannot execute a v2 movement contract."});
     if ((plan.status != PlanStatus::Completed && plan.status != PlanStatus::Failed) ||
         !PlanSignature::isSha256Hex(plan.planHash) ||
         plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan))) {

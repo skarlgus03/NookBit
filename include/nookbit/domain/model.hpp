@@ -170,6 +170,27 @@ struct RuleSet {
     std::optional<RuleDestination> globalOtherwise;
 };
 
+/// 승인에 고정할 이동 방식이며 실행 실패 시 다른 방식으로 바꾸지 않는다.
+enum class MoveStrategy { Rename, VerifiedCopy };
+
+/// 다른 볼륨 복사에서 현재 지원하는 메타데이터 보존 범위.
+enum class PreservationPolicy { LocalNtfsBasic };
+
+/// 드라이브 문자와 별개로 승인 시 확인한 실제 볼륨을 표현한다.
+struct PlanVolume {
+    std::string serial;
+    std::string guidPath;
+    std::string filesystem;
+};
+
+/// v2 승인에 포함되는 이동 방식과 양쪽 볼륨의 불변 정보.
+struct MoveContract {
+    MoveStrategy strategy{MoveStrategy::Rename};
+    PlanVolume sourceVolume;
+    PlanVolume destinationVolume;
+    PreservationPolicy preservation{PreservationPolicy::LocalNtfsBasic};
+};
+
 struct MoveStep {
     StepId id;
     std::filesystem::path source;
@@ -179,6 +200,7 @@ struct MoveStep {
     std::string reason;
     CollisionPolicy collisionPolicy{CollisionPolicy::Rename};
     StepStatus status{StepStatus::Planned};
+    std::optional<MoveContract> movement;
 };
 
 /// 화면에서 파일별 분류 결과를 구분하는 미리보기 전용 상태.
@@ -203,6 +225,8 @@ struct OperationPlan {
     std::vector<PreviewFileOutcome> previewOutcomes;
     std::vector<Error> warnings;
     PlanStatus status{PlanStatus::Draft};
+    // 기존 저장 계획은 v1 그대로 읽어 승인 해시를 유지한다.
+    int formatVersion{1};
 };
 
 /// 저장된 작업 목록에 보여줄 최소한의 이력 정보.

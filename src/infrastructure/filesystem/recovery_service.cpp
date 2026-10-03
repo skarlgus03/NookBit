@@ -27,7 +27,7 @@ bool isOnlyMatch(FileProbe matching, FileProbe missing) {
 // 계획의 서명과 파일 내용 해시가 수동 복구에 충분한지 확인하는 함수.
 bool canTrustRecoveryPlan(const OperationPlan& plan, IPlanHasher& hasher) {
     const auto active = activeSteps(plan);
-    return !active.empty() &&
+    return plan.formatVersion == 1 && PlanSignature::validateFormat(plan) && !active.empty() &&
            std::all_of(active.begin(), active.end(), [](const MoveStep* step) {
                return step->fingerprint.sha256 &&
                       PlanSignature::isSha256Hex(*step->fingerprint.sha256);

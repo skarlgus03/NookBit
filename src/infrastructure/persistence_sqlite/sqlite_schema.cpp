@@ -10,7 +10,7 @@ namespace nookbit {
 
 // 기존 기록을 보존하며 지원하는 SQLite 버전까지 순서대로 이행하는 함수.
 Result<void> migrateHistorySchema(QSqlDatabase& database, const QString& initialMigrationPath) {
-    constexpr int latestVersion = 2;
+    constexpr int latestVersion = 3;
     int currentVersion = 0;
     {
         QSqlQuery table(database);
@@ -36,7 +36,8 @@ Result<void> migrateHistorySchema(QSqlDatabase& database, const QString& initial
     }
     for (int version = currentVersion + 1; version <= latestVersion; ++version) {
         const auto path = version == 1 ? initialMigrationPath :
-            QDir(QFileInfo(initialMigrationPath).path()).filePath(QStringLiteral("002_transfer_journal.sql"));
+            QDir(QFileInfo(initialMigrationPath).path()).filePath(version == 2 ?
+                QStringLiteral("002_transfer_journal.sql") : QStringLiteral("003_plan_contract.sql"));
         QFile migration(path);
         if (!migration.open(QIODevice::ReadOnly))
             return Result<void>::failure({"history.migration_missing", "Cannot read a required SQLite migration."});

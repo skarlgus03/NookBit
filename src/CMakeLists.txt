@@ -5,6 +5,7 @@ add_library(nookbit_core STATIC
   application/use_cases/approve_plan_use_case.cpp
   application/use_cases/freeze_preview_use_case.cpp
   application/use_cases/plan_signature.cpp
+  application/use_cases/prepare_transfer_plan_use_case.cpp
   application/use_cases/verify_saved_plan_use_case.cpp
   application/use_cases/evaluate_watch_folder_use_case.cpp
   application/use_cases/test_rule_use_case.cpp

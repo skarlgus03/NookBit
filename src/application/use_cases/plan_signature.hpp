@@ -9,6 +9,9 @@ namespace nookbit {
 /// 계획의 모든 승인 관련 입력을 순서가 고정된 바이트 문자열로 만드는 도우미.
 class PlanSignature final {
 public:
+    /// 지원하는 계획 버전과 이동 계약의 일관성을 검사하는 함수.
+    [[nodiscard]] static Result<void> validateFormat(const OperationPlan& plan);
+
     /// 사용자 설정 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
     [[nodiscard]] static std::string settings(const UserSettings& settings);
 

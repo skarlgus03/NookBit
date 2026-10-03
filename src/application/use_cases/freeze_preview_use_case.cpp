@@ -21,6 +21,8 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     const OperationPlan& draft,
     const std::vector<std::filesystem::path>& selectedFiles,
     const UserSettings& settings) {
+    const auto format = PlanSignature::validateFormat(draft);
+    if (!format) return Result<OperationPlan>::failure(format.error());
     if (draft.status != PlanStatus::Draft || !draft.planHash.empty() ||
         draft.id.empty() || draft.settingsRevision.empty() ||
         draft.rulesRevision.empty() || selectedFiles.empty()) {
@@ -54,6 +56,8 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
     auto refreshed = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
+    const auto currentFormat = PlanSignature::validateFormat(refreshed.value());
+    if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
     if (PlanSignature::planContents(draft) != PlanSignature::planContents(refreshed.value())) {
         return Result<OperationPlan>::failure({
             "freeze.preview_stale", "Files or proposed destinations changed after the preview.",

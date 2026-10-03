@@ -19,6 +19,8 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
         return Result<TransferAttempt>::failure({"transfer.rollback_origin", "A completed forward result is required"});
     const auto plan = history_.loadPlan(forward.value().planId);
     if (!plan) return Result<TransferAttempt>::failure(plan.error());
+    if (!PlanSignature::validateFormat(plan.value()) || plan.value().formatVersion != 1)
+        return Result<TransferAttempt>::failure({"transfer.volume_verifier_required", "V2 rollback requires current volume verification."});
     const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) {
         return item.id == forward.value().stepId;
     });

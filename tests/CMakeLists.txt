@@ -52,6 +52,18 @@ add_test(NAME nookbit_watch_evaluator_tests COMMAND nookbit_watch_evaluator_test
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql)
+  add_executable(nookbit_plan_contract_tests plan_contract_tests.cpp)
+  target_link_libraries(nookbit_plan_contract_tests PRIVATE nookbit_history Qt6::Core Qt6::Sql)
+  target_include_directories(nookbit_plan_contract_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_plan_contract_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  if(MSVC)
+    target_compile_options(nookbit_plan_contract_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_plan_contract_tests COMMAND nookbit_plan_contract_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_plan_contract_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_json_config_tests json_config_tests.cpp)
   target_link_libraries(nookbit_json_config_tests PRIVATE nookbit_json_config)
   target_include_directories(nookbit_json_config_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)

@@ -29,12 +29,19 @@ public:
     [[nodiscard]] virtual Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) = 0;
 };
 
-class IStagedCopy {
+/// 계획 단계는 복사 기능이 아닌 볼륨 조회 인터페이스만 사용한다.
+class ITransferVolumeInspector {
 public:
-    /// 복사 일꾼을 해제하는 함수.
-    virtual ~IStagedCopy() = default;
+    /// 볼륨 조회 일꾼을 해제하는 함수.
+    virtual ~ITransferVolumeInspector() = default;
     /// 파일을 생성하지 않고 가장 가까운 기존 경로의 실제 볼륨을 조회하는 함수.
     [[nodiscard]] virtual Result<TransferVolume> inspectVolume(const std::filesystem::path& path) = 0;
+};
+
+class IStagedCopy : public ITransferVolumeInspector {
+public:
+    /// 복사 일꾼을 해제하는 함수.
+    ~IStagedCopy() override = default;
     /// 원본을 검증하고 기존 파일을 덮어쓰지 않는 빈 임시 파일 세션을 만드는 함수.
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,

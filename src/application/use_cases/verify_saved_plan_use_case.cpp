@@ -39,6 +39,10 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
         });
     }
     const auto& saved = *found;
+    const auto format = PlanSignature::validateFormat(saved);
+    if (!format) return Result<OperationPlan>::failure(format.error());
+    if (saved.formatVersion != 1)
+        return Result<OperationPlan>::failure({"verify.volume_verifier_required", "V2 approval requires current volume verification."});
     if (saved.status != expectedStatus ||
         !PlanSignature::isSha256Hex(saved.planHash) ||
         saved.planHash != hasher_.sha256(PlanSignature::approvalPayload(saved))) {
