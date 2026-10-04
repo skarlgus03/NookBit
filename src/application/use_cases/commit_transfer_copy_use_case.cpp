@@ -8,7 +8,7 @@ CommitTransferCopyUseCase::CommitTransferCopyUseCase(IStagedCopy& copy, ITransfe
 
 // 기록 경계가 성공한 경우에만 다음 파일 작업을 진행하는 함수.
 Result<TransferAttempt> CommitTransferCopyUseCase::execute(
-    const TransferAttempt& attempt, const std::function<bool()>& cancelled) {
+    const TransferAttempt& attempt, const std::function<bool()>& cancelled, const MoveContract* movement) {
     const auto valid = TransferValidation::validateNew(attempt);
     if (!valid) return Result<TransferAttempt>::failure(valid.error());
     const auto begun = journal_.begin(attempt);
@@ -47,7 +47,8 @@ Result<TransferAttempt> CommitTransferCopyUseCase::execute(
 
     auto saved = record({state.phase, TransferPhase::CopyIntent});
     if (!saved) return recordFailure(saved.error());
-    auto session = copy_.open(state.source, state.sourceFingerprint, state.staging);
+    auto session = movement ? copy_.openApproved(state.source, state.sourceFingerprint, state.staging, *movement) :
+        copy_.open(state.source, state.sourceFingerprint, state.staging);
     // 생성 뒤 지문 조회 실패도 가능하므로 파일명만 보고 실패/재시도 가능으로 판단하지 않는다.
     if (!session) return stop(session.error(), TransferPhase::NeedsRecovery);
     saved = record({state.phase, TransferPhase::StagingCreated, session.value()->createdFingerprint()});

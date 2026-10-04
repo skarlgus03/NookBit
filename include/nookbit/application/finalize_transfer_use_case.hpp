@@ -20,6 +20,10 @@ public:
     virtual ~ITransferSourceRemoval() = default;
     /// 확정 증거가 있는 원본·최종 파일을 보호하고 검증하는 함수.
     [[nodiscard]] virtual Result<std::unique_ptr<ITransferRemovalSession>> open(const TransferAttempt& attempt) = 0;
+    /// 제거 세션의 보호된 두 파일 볼륨을 승인 계약과 비교하는 함수.
+    [[nodiscard]] virtual Result<std::unique_ptr<ITransferRemovalSession>> openApproved(const TransferAttempt&, const MoveContract&) {
+        return Result<std::unique_ptr<ITransferRemovalSession>>::failure({"transfer.contract_unsupported", "Approved volume handles are required."});
+    }
 };
 
 /// 최종 복사본이 기록된 정방향/역방향 전송 원본 제거와 완료 기록을 조율한다.

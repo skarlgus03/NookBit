@@ -13,6 +13,15 @@ public:
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,
         const std::filesystem::path& staging) override;
+    /// 승인 볼륨을 보호된 핸들에서 확인한 후 새 임시 파일을 만드는 함수.
+    [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openApproved(
+        const std::filesystem::path& source, const FileFingerprint& expected,
+        const std::filesystem::path& staging, const MoveContract& movement) override;
+private:
+    /// 승인 계약 유무에 따라 동일한 보호 복사 세션을 여는 함수.
+    [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openImpl(
+        const std::filesystem::path& source, const FileFingerprint& expected,
+        const std::filesystem::path& staging, const MoveContract* movement);
 };
 
 } // namespace nookbit

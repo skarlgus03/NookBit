@@ -8,6 +8,7 @@
 #include "modules/planner/path_safety_validator.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <utility>
 
@@ -31,9 +32,9 @@ SafeExecutor::SafeExecutor(ISettingsRepository& settings,
                            IScanner& scanner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
-                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes)
+                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes, ITransferStepExecutor* transfers)
     : settings_(settings), verifier_(&verifier), scanner_(scanner),
-      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes) {}
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes), transfers_(transfers) {}
 
 // 검증 객체 없이 되돌리기만 할 실행기를 만드는 생성자.
 SafeExecutor::SafeExecutor(ISettingsRepository& settings,
@@ -50,9 +51,12 @@ Result<void> SafeExecutor::verifyMovement(const OperationPlan& plan, const MoveS
     if (!valid) return valid;
     if (plan.formatVersion == 1) return Result<void>::success();
     if (!volumes_) return Result<void>::failure({"execute.volume_verifier_required", "V2 execution requires volume verification."});
-    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
+    const bool hasCopy = std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
         return item.status != StepStatus::Skipped && item.movement->strategy != MoveStrategy::Rename;
-    })) return Result<void>::failure({"execute.transfer_executor_required", "Verified copy requires a dedicated transfer executor; no rename fallback is allowed."});
+    });
+    if (hasCopy && (!transfers_ || std::count_if(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
+        return item.status != StepStatus::Skipped;
+    }) != 1)) return Result<void>::failure({"execute.transfer_executor_required", "Verified copy currently requires a dedicated single-step transfer executor."});
     PrepareTransferPlanUseCase prepare(*volumes_);
     if (!step) return prepare.verify(plan);
     OperationPlan single;
@@ -154,6 +158,19 @@ Result<void> SafeExecutor::execute(
                 "execute.batch_rolled_back", "A source changed; earlier moves were undone and this source was not moved.",
             });
         }
+        if (saved.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
+            static std::atomic<std::uint64_t> attemptCounter{0};
+            const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+            const auto attemptId = "transfer-" + std::to_string(stamp) + "-" + std::to_string(++attemptCounter);
+            const auto staging = step->destination.parent_path() / (".nookbit-" + attemptId + ".tmp");
+            const auto transferred = transfers_->execute(plan.id, step->id, attemptId, staging);
+            if (!transferred) {
+                const auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+            }
+            // 전송 완료 트랜잭션이 이미 단계와 계획을 완료하므로 중복 기록하지 않는다.
+            return transferred;
+        }
         auto moved = WindowsFileMover::moveNoReplace(step->source, step->destination);
         if (!moved) {
             const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
@@ -228,6 +245,9 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     const std::vector<const MoveStep*>& applied,
     PlanStatus finalStatus,
     bool duringExecution) {
+    if (plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
+        return step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
+    })) return Result<void>::failure({"rollback.transfer_executor_required", "V2 copy rollback requires approved reverse-transfer integration."});
     const auto movement = verifyMovement(plan);
     if (!movement) {
         if (duringExecution) {

@@ -12,7 +12,7 @@ public:
     CommitTransferCopyUseCase(IStagedCopy& copy, ITransferJournal& journal);
     /// 새 시도를 기록하고 검증된 복사본 확정 단계까지만 수행하는 함수.
     [[nodiscard]] Result<TransferAttempt> execute(const TransferAttempt& attempt,
-        const std::function<bool()>& cancelled = {});
+        const std::function<bool()>& cancelled = {}, const MoveContract* movement = nullptr);
 private:
     IStagedCopy& copy_;
     ITransferJournal& journal_;

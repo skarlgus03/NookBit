@@ -2,6 +2,7 @@
 #include <nookbit/application/inspect_transfer_recovery_use_case.hpp>
 #include <nookbit/application/finalize_transfer_use_case.hpp>
 #include <nookbit/application/rollback_transfer_use_case.hpp>
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
@@ -633,6 +634,34 @@ void testRollbackTransfers() {
 }
 }
 
+// 보호된 제거 핸들의 GUID 불일치가 원본·최종 파일을 모두 보존하는지 검사하는 함수.
+void testApprovedRemovalVolumes() {
+    Fixture fixture;
+    if (!fixture.ready) return;
+    const auto committed = fixture.useCase.execute(fixture.attempt);
+    expect(committed.hasValue(), "approved removal fixture should commit a copy");
+    if (!committed) return;
+    OperationPlan draft;
+    MoveStep step;
+    step.source = fixture.attempt.source;
+    step.destination = fixture.attempt.destination;
+    step.fingerprint = fixture.attempt.sourceFingerprint;
+    draft.steps.push_back(step);
+    PrepareTransferPlanUseCase prepare(fixture.worker);
+    const auto prepared = prepare.execute(draft);
+    expect(prepared.hasValue(), "native removal contract should prepare");
+    if (!prepared) return;
+    auto movement = *prepared.value().steps[0].movement;
+    movement.strategy = MoveStrategy::VerifiedCopy;
+    movement.destinationVolume.guidPath[11] = movement.destinationVolume.guidPath[11] == 'a' ? 'b' : 'a';
+    WindowsTransferSourceRemoval removal;
+    const auto rejected = removal.openApproved(committed.value(), movement);
+    expect(!rejected && rejected.error().code == "transfer.volume_changed", "protected removal must reject changed final volume GUID");
+    expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)) &&
+        sameFingerprint(*committed.value().destinationFingerprint, fingerprint(fixture.attempt.destination)),
+        "native volume rejection must retain both verified files");
+}
+
 // 실제 SQLite와 임시 NTFS 파일의 복사·확정 연동을 시험하는 함수.
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
@@ -643,6 +672,7 @@ int main(int argc, char** argv) {
     testReadOnlyTransferRecovery();
     testSourceRemovalAndCompletion();
     testRollbackTransfers();
+    testApprovedRemovalVolumes();
 #endif
     return failures ? 1 : 0;
 }

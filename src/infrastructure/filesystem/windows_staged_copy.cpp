@@ -4,6 +4,27 @@
 #include "file_identity.hpp"
 #include <nookbit/domain/transfer.hpp>
 
+namespace nookbit {
+// 기존 승인 형식의 복사 세션을 여는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
+    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging) {
+    return openImpl(source, expected, staging, nullptr);
+}
+// v2 계약을 보호된 파일·부모 핸들에서 확인하는 세션을 여는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openApproved(
+    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract& movement) {
+    return openImpl(source, expected, staging, &movement);
+}
+// 기존 승인 형식의 제거 세션을 여는 함수.
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt& attempt) {
+    return openImpl(attempt, nullptr);
+}
+// v2 계약을 보호된 두 파일 핸들에서 확인하는 제거 세션을 여는 함수.
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openApproved(const TransferAttempt& attempt, const MoveContract& movement) {
+    return openImpl(attempt, &movement);
+}
+}
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -103,6 +124,13 @@ Result<TransferVolume> volume(HANDLE handle) {
     TransferVolume result{std::to_string(serial), name, fs, false};
     result.localNtfs = _wcsicmp(fs, L"NTFS") == 0 && GetDriveTypeW(mount.data()) == DRIVE_FIXED;
     return Result<TransferVolume>::success(std::move(result));
+}
+
+// 드라이브 문자 대신 보호된 핸들의 실제 GUID·일련번호·파일 시스템을 비교하는 함수.
+bool approvedVolume(const TransferVolume& actual, const PlanVolume& approved) {
+    const std::wstring guid(approved.guidPath.begin(), approved.guidPath.end());
+    return actual.localNtfs && actual.id == approved.serial && approved.filesystem == "NTFS" &&
+        _wcsicmp(actual.filesystem.c_str(), L"NTFS") == 0 && _wcsicmp(actual.name.c_str(), guid.c_str()) == 0;
 }
 
 // 경로를 다시 열지 않고 보유한 핸들의 전체 SHA-256을 계산하는 함수.
@@ -405,7 +433,7 @@ public:
 } // namespace
 
 // 확정 증거가 있는 두 파일만 독점 보호하는 함수.
-Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt& attempt) {
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openImpl(const TransferAttempt& attempt, const MoveContract* movement) {
     using Return = Result<std::unique_ptr<ITransferRemovalSession>>;
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
@@ -427,10 +455,16 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (destination.value == INVALID_HANDLE_VALUE)
         return Return::failure(failure("transfer.removal_lock"));
+    std::size_t volumeIndex = 0;
     for (const auto handle : {source.value, destination.value}) {
         const auto location = volume(handle);
         if (!location || !location.value().localNtfs)
             return Return::failure({"transfer.removal_volume", "Accessible local fixed NTFS required"});
+        if (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
+            movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+            !approvedVolume(location.value(), volumeIndex == 0 ? movement->sourceVolume : movement->destinationVolume)))
+            return Return::failure({"transfer.volume_changed", "Protected removal volume differs from approval."});
+        ++volumeIndex;
     }
     return Return::success(std::make_unique<RemovalSession>(std::move(parents), std::move(source), std::move(destination), attempt));
 }
@@ -521,8 +555,8 @@ TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesys
 }
 
 // 지원 범위와 원본을 검사한 뒤 독점적인 새 임시 파일 세션을 만드는 함수.
-Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
-    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging) {
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
+    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract* movement) {
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
     if (!validPath(source) || !validPath(staging) || staging.filename().empty() ||
         !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId)
@@ -546,6 +580,10 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
     if (!sourceVolume || !targetVolume) return Return::failure(!sourceVolume ? sourceVolume.error() : targetVolume.error());
     if (!sourceVolume.value().localNtfs || !targetVolume.value().localNtfs)
         return Return::failure({"transfer.volume_unsupported", "Only local fixed NTFS supported"});
+    if (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
+        movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+        !approvedVolume(sourceVolume.value(), movement->sourceVolume) || !approvedVolume(targetVolume.value(), movement->destinationVolume)))
+        return Return::failure({"transfer.volume_changed", "Protected copy volume differs from approval."});
     auto fp = fingerprint(input.value);
     if (!fp) return Return::failure(fp.error());
     const auto hash = digest(input.value, {});
@@ -566,7 +604,7 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
 #else
 namespace nookbit {
 // Windows 외에서는 원본 제거를 지원하지 않는 함수.
-Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt&) {
+Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openImpl(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<ITransferRemovalSession>>::failure({"transfer.unsupported", "Windows only"});
 }
 // Windows 외 플랫폼에서는 읽기 전용 검사도 지원하지 않는 함수.
@@ -580,8 +618,8 @@ Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::p
     return Result<TransferVolume>::failure({"transfer.unsupported", "Windows only"});
 }
 // Windows 외 플랫폼에서는 파일을 생성하지 않는 함수.
-Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
-    const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&) {
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
+    const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&, const MoveContract*) {
     return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.unsupported", "Windows only"});
 }
 } // namespace nookbit

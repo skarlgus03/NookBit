@@ -67,6 +67,19 @@ int main(int argc, char** argv) {
     expect(contractPlan && prepare.verify(contractPlan.value()).hasValue(), "native approved-volume recheck should match");
     expect(!std::filesystem::exists(root / "missing"), "plan preparation and recheck must not create destination parents");
     unchanged(contractSource, contractStep.fingerprint);
+    if (contractPlan) {
+        auto movement = *contractPlan.value().steps[0].movement;
+        movement.strategy = nookbit::MoveStrategy::VerifiedCopy;
+        movement.destinationVolume.guidPath[11] = movement.destinationVolume.guidPath[11] == 'a' ? 'b' : 'a';
+        const auto rejected = worker.openApproved(contractSource, contractStep.fingerprint, root / "contract-stage", movement);
+        expect(!rejected && rejected.error().code == "transfer.volume_changed" && !std::filesystem::exists(root / "contract-stage"),
+               "protected destination GUID mismatch must reject before staging creation");
+        movement = *contractPlan.value().steps[0].movement;
+        movement.strategy = nookbit::MoveStrategy::VerifiedCopy;
+        movement.sourceVolume.serial = "0";
+        expect(!worker.openApproved(contractSource, contractStep.fingerprint, root / "contract-stage", movement),
+               "protected source serial mismatch must reject");
+    }
 
     for (const auto size : {size_t(0), size_t(5), size_t(2 * 1024 * 1024 + 13)}) {
         const auto source = root / ("source-" + std::to_string(size));
