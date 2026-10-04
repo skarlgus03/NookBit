@@ -14,6 +14,8 @@ add_library(nookbit_core STATIC
   application/use_cases/execute_transfer_step_use_case.cpp
   application/use_cases/inspect_transfer_recovery_use_case.cpp
   application/use_cases/reconcile_transfer_recovery_use_case.cpp
+  application/use_cases/transfer_recovery_binding.cpp
+  application/use_cases/cleanup_transfer_staging_use_case.cpp
   application/use_cases/finalize_transfer_use_case.cpp
   application/use_cases/rollback_transfer_use_case.cpp
   modules/rules/rule_engine.cpp

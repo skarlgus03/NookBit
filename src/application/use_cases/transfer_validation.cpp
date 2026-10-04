@@ -82,7 +82,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
     if (attempt.id.empty() || attempt.planId.empty() || attempt.stepId.empty() ||
         (attempt.direction != TransferDirection::Forward && attempt.direction != TransferDirection::Rollback) ||
         attempt.phase != TransferPhase::Prepared || attempt.stagingFingerprint ||
-        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted ||
+        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         samePath(attempt.source, attempt.destination) ||
         samePath(attempt.staging, attempt.destination) ||
@@ -96,7 +96,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
 
 // 허용된 증거만 합쳐 다음 단계의 스냅샷을 만드는 함수.
 Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUpdate& update) {
-    if (attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
+    if (attempt.stagingCleanup != StagingCleanup::None || attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
         return Result<TransferAttempt>::failure({"transfer.phase_conflict", "Transfer phase changed or the transition is not allowed."});
     }
     if (attempt.phase >= TransferPhase::CopyVerified && attempt.phase <= TransferPhase::SourceRemoved &&
@@ -143,7 +143,7 @@ Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUp
 
 // 일반 단계 전이를 열어두지 않고 명시적 복구 완료만 검증하는 함수.
 Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded) {
-    if (!removalIntentRecorded || attempt.recoveryCompleted || (attempt.phase != TransferPhase::SourceRemoveIntent &&
+    if (!removalIntentRecorded || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None || (attempt.phase != TransferPhase::SourceRemoveIntent &&
         attempt.phase != TransferPhase::SourceRemoved && attempt.phase != TransferPhase::NeedsRecovery) ||
         !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
         !sameObject(*attempt.stagingFingerprint, *attempt.destinationFingerprint) ||
@@ -157,4 +157,17 @@ Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool 
     return Result<TransferAttempt>::success(std::move(result));
 }
 
+// 파일 정리가 이동 완료나 재실행 허가로 해석되지 않도록 별도 감사값만 갱신하는 함수.
+Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, StagingCleanup next) {
+    if ((attempt.phase != TransferPhase::Failed && attempt.phase != TransferPhase::Cancelled && attempt.phase != TransferPhase::NeedsRecovery) ||
+        attempt.recoveryCompleted || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
+        !validObject(*attempt.stagingFingerprint) || sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        !((attempt.stagingCleanup == StagingCleanup::None && next == StagingCleanup::IntentRecorded) ||
+          (attempt.stagingCleanup == StagingCleanup::IntentRecorded && next == StagingCleanup::Removed)))
+        return Result<TransferAttempt>::failure({"transfer.cleanup_state", "Only a stopped, recorded verified staging copy can be cleaned"});
+    auto result = attempt;
+    result.stagingCleanup = next;
+    return Result<TransferAttempt>::success(std::move(result));
+}
 } // namespace nookbit::TransferValidation

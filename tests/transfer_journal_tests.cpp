@@ -257,6 +257,55 @@ void testRecoveryCompletionContract() {
     expect(!reopened.load("attempt"), "replaying a recovered completion without removal intent must reject corruption");
 }
 
+// 정리 감사 의도·결과의 순서·낡은 증거 거부·실제 SQL 실패 원자성을 검사하는 함수.
+void testStagingCleanupJournal() {
+    using namespace nookbit;
+    QTemporaryDir directory;
+    Fixture fixture(directory.path());
+    if (!fixture.ready) { expect(false, "cleanup journal fixture"); return; }
+    const auto dbPath = directory.filePath("history.sqlite");
+    SqliteTransferJournal journal(dbPath, migrationPath());
+    FileFingerprint stage{0, 1000, "target-volume", "staging-file", std::nullopt};
+    expect(journal.begin(fixture.attempt).hasValue() &&
+        journal.advance("attempt", {TransferPhase::Prepared, TransferPhase::CopyIntent}).hasValue() &&
+        journal.advance("attempt", {TransferPhase::CopyIntent, TransferPhase::StagingCreated, stage}).hasValue(), "cleanup initial events fixture");
+    stage.size = fixture.attempt.sourceFingerprint.size; stage.sha256 = fixture.attempt.sourceFingerprint.sha256;
+    expect(journal.advance("attempt", {TransferPhase::StagingCreated, TransferPhase::CopyVerified, stage}).hasValue() &&
+        journal.advance("attempt", {TransferPhase::CopyVerified, TransferPhase::Cancelled}).hasValue(), "verified cancelled copy fixture");
+    const auto expected = journal.load("attempt");
+    if (!expected) { expect(false, "cleanup expected evidence"); return; }
+    expect(!journal.recordStagingCleanup(expected.value(), fixture.plan.planHash, StagingCleanup::Removed), "cleanup completion cannot skip durable intent");
+    expect(!journal.recordStagingCleanup(expected.value(), std::string(64, 'f'), StagingCleanup::IntentRecorded), "cleanup requires current approval hash");
+    auto forged = expected.value(); forged.stagingFingerprint->fileId = "other-object";
+    expect(!journal.recordStagingCleanup(forged, fixture.plan.planHash, StagingCleanup::IntentRecorded), "cleanup compares exact owned object evidence");
+    const auto before = sql(dbPath, "SELECT count(*) FROM transfer_events").toInt();
+    expect(sql(dbPath, "CREATE TRIGGER fail_cleanup BEFORE INSERT ON events WHEN NEW.event_type='transfer_staging_cleanup' BEGIN SELECT RAISE(ABORT,'cleanup audit failure'); END").isValid(), "cleanup SQL fault fixture");
+    expect(!journal.recordStagingCleanup(expected.value(), fixture.plan.planHash, StagingCleanup::IntentRecorded), "cleanup audit failure rejects intent");
+    const auto unchanged = journal.load("attempt");
+    expect(unchanged && unchanged.value().stagingCleanup == StagingCleanup::None &&
+        sql(dbPath, "SELECT count(*) FROM transfer_events").toInt() == before, "failed cleanup intent rolls back both journals");
+    expect(sql(dbPath, "DROP TRIGGER fail_cleanup").isValid(), "cleanup intent fault removed");
+    expect(journal.recordStagingCleanup(expected.value(), fixture.plan.planHash, StagingCleanup::IntentRecorded).hasValue(), "cleanup intent saves before any deletion");
+    expect(!journal.recordStagingCleanup(expected.value(), fixture.plan.planHash, StagingCleanup::IntentRecorded), "stale cleanup snapshot rejects duplicate intent");
+    const auto intent = journal.load("attempt");
+    if (!intent) { expect(false, "cleanup intent replay"); return; }
+    expect(sql(dbPath, "CREATE TRIGGER fail_cleanup BEFORE INSERT ON events WHEN NEW.event_type='transfer_staging_cleanup' BEGIN SELECT RAISE(ABORT,'cleanup audit failure'); END").isValid(), "cleanup completion SQL fault fixture");
+    expect(!journal.recordStagingCleanup(intent.value(), fixture.plan.planHash, StagingCleanup::Removed), "cleanup result audit failure exposed");
+    const auto pending = journal.load("attempt");
+    expect(pending && pending.value().stagingCleanup == StagingCleanup::IntentRecorded &&
+        sql(dbPath, "SELECT count(*) FROM transfer_events").toInt() == before + 1, "cleanup result failure preserves only durable intent");
+    expect(sql(dbPath, "DROP TRIGGER fail_cleanup").isValid() &&
+        journal.recordStagingCleanup(intent.value(), fixture.plan.planHash, StagingCleanup::Removed).hasValue(), "cleanup result retries atomically");
+    SqliteTransferJournal restarted(dbPath, migrationPath());
+    const auto complete = restarted.load("attempt");
+    const auto plan = fixture.history.loadPlan("plan");
+    expect(complete && complete.value().phase == TransferPhase::Cancelled && complete.value().stagingCleanup == StagingCleanup::Removed &&
+        plan && plan.value().status == PlanStatus::Executing && plan.value().steps[0].status == StepStatus::IntentRecorded &&
+        plan.value().planHash == fixture.plan.planHash, "cleanup replay preserves movement state and approval");
+    expect(sql(dbPath, "DELETE FROM transfer_events WHERE staging_cleanup=1").isValid(), "cleanup event corruption fixture");
+    expect(!restarted.load("attempt"), "cleanup completion without prior intent fails replay");
+}
+
 // 마이그레이션 중 SQL 실패가 부분 테이블·버전을 남기지 않고 재시도 가능한지 검사하는 함수.
 void testMigrationFailureIsAtomic() {
     QTemporaryDir directory;
@@ -281,6 +330,8 @@ void testMigrationFailureIsAtomic() {
                       QDir(migrations).filePath("003_plan_contract.sql")), "v3 migration should copy to the fixture");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("004_transfer_recovery.sql"),
                       QDir(migrations).filePath("004_transfer_recovery.sql")), "v4 migration should copy to the fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("005_staging_cleanup.sql"),
+                      QDir(migrations).filePath("005_staging_cleanup.sql")), "v5 migration should copy to the fixture");
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "broken migration fixture should open");
     if (!broken.isOpen()) return;
@@ -297,7 +348,7 @@ void testMigrationFailureIsAtomic() {
            "temporary broken migration should be replaced with the valid fixture");
     const auto repaired = repository.loadPlan("plan");
     expect(repaired && repaired.value().planHash == hash &&
-               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
+               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 5,
            "repaired migration should succeed without losing the old plan");
 }
 
@@ -314,7 +365,8 @@ void testRecoveryMigrationCompatibility() {
         expect(journal.begin(fixture.attempt).hasValue(), "legacy transfer event fixture");
     }
     expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN recovery_completed").isValid() &&
-        sql(dbPath, "DELETE FROM schema_migrations WHERE version=4").isValid(), "legacy v3 database should be reconstructed");
+        sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_cleanup").isValid() &&
+        sql(dbPath, "DELETE FROM schema_migrations WHERE version>=4").isValid(), "legacy v3 database should be reconstructed");
     const auto brokenPath = directory.filePath("004_transfer_recovery.sql");
     QFile broken(brokenPath);
     expect(broken.open(QIODevice::WriteOnly), "broken recovery migration opens");
@@ -328,12 +380,45 @@ void testRecoveryMigrationCompatibility() {
         "failed recovery migration rolls back column and version together");
     expect(QFile::remove(brokenPath) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("004_transfer_recovery.sql"), brokenPath),
         "recovery migration may be repaired");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("005_staging_cleanup.sql"),
+        directory.filePath("005_staging_cleanup.sql")), "cleanup migration fixture should copy");
     const auto plan = upgraded.loadPlan("plan");
     expect(plan && plan.value().planHash == oldHash, "recovery schema upgrade preserves original signature");
     nookbit::SqliteTransferJournal reopened(dbPath, directory.filePath("001_initial.sql"));
     const auto attempt = reopened.load("attempt");
     expect(attempt && attempt.value().phase == nookbit::TransferPhase::Prepared && !attempt.value().recoveryCompleted,
         "old events migrate as ordinary events without fabricating recovery");
+}
+
+// 임시 정리 스키마 이행 실패가 컬럼·버전을 남기지 않고 v4 기록을 보존하는지 검사하는 함수.
+void testCleanupMigrationAtomic() {
+    QTemporaryDir directory;
+    const auto dbPath = directory.filePath("history.sqlite");
+    std::string hash;
+    {
+        Fixture fixture(directory.path());
+        expect(fixture.ready, "cleanup migration fixture");
+        hash = fixture.plan.planHash;
+        nookbit::SqliteTransferJournal journal(dbPath, migrationPath());
+        expect(journal.begin(fixture.attempt).hasValue(), "cleanup migration old event fixture");
+    }
+    expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_cleanup").isValid() &&
+        sql(dbPath, "DELETE FROM schema_migrations WHERE version=5").isValid(), "restore v4 fixture");
+    const auto upgrade = directory.filePath("005_staging_cleanup.sql");
+    QFile broken(upgrade);
+    expect(broken.open(QIODevice::WriteOnly), "cleanup migration fault file");
+    if (!broken.isOpen()) return;
+    broken.write("ALTER TABLE transfer_events ADD COLUMN staging_cleanup INTEGER NOT NULL DEFAULT 0; INVALID SQL;"); broken.close();
+    nookbit::SqliteHistoryRepository history(dbPath, directory.filePath("001_initial.sql"));
+    expect(!history.loadPlan("plan") && sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4 &&
+        sql(dbPath, "SELECT count(*) FROM pragma_table_info('transfer_events') WHERE name='staging_cleanup'").toInt() == 0,
+        "cleanup migration failure rolls back whole DDL and marker");
+    expect(QFile::remove(upgrade) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("005_staging_cleanup.sql"), upgrade), "repair cleanup migration");
+    const auto plan = history.loadPlan("plan");
+    nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
+    const auto old = journal.load("attempt");
+    expect(plan && plan.value().planHash == hash && old && old.value().stagingCleanup == nookbit::StagingCleanup::None &&
+        old.value().phase == nookbit::TransferPhase::Prepared, "v5 upgrade keeps signed v4 records without inventing cleanup");
 }
 
 // 이전 Schema·해시 보존과 더 높은 버전 쓰기 거부를 검사하는 함수.
@@ -356,16 +441,16 @@ void testMigrationCompatibility() {
         const auto loaded = upgraded.loadPlan("plan");
         expect(loaded && loaded.value().planHash == oldHash && loaded.value().status == nookbit::PlanStatus::Executing,
                "v1 migration must preserve the plan hash and execution state");
-        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
-               "v2/v3/v4 schema should apply exactly once");
+        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 5,
+               "v2/v3/v4/v5 schema should apply exactly once");
     }
-    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(5,'future')").isValid(), "future schema fixture should save");
+    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(6,'future')").isValid(), "future schema fixture should save");
     nookbit::SqliteHistoryRepository tooOld(dbPath, migrationPath());
     auto unsupported = tooOld.loadPlan("plan");
     expect(!unsupported && unsupported.error().code == "history.schema_too_new",
            "future schema must be rejected before writes");
     expect(!tooOld.loadPlan("plan"), "failed opening must not become usable on the next call");
-    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 5,
+    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 6,
            "future migration marker must remain intact");
 }
 } // namespace
@@ -376,8 +461,10 @@ int main(int argc, char* argv[]) {
     testTransferPhasesAndRoundTrip();
     testJournalFailureAndEvidence();
     testRecoveryCompletionContract();
+    testStagingCleanupJournal();
     testMigrationCompatibility();
     testRecoveryMigrationCompatibility();
+    testCleanupMigrationAtomic();
     testMigrationFailureIsAtomic();
     if (failures == 0) { std::cout << "All transfer journal tests passed.\n"; return 0; }
     std::cerr << failures << " transfer journal assertion(s) failed.\n";

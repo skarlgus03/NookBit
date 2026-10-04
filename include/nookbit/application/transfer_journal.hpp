@@ -28,6 +28,10 @@ public:
     [[nodiscard]] virtual Result<void> reconcileCompleted(const TransferAttempt&, const std::string&) {
         return Result<void>::failure({"transfer.recovery_unsupported", "Atomic recovery completion is unsupported"});
     }
+    /// 예상 시도·승인 해시를 재확인하고 임시 정리 의도/결과와 감사 이력을 원자적으로 저장하는 함수.
+    [[nodiscard]] virtual Result<void> recordStagingCleanup(const TransferAttempt&, const std::string&, StagingCleanup) {
+        return Result<void>::failure({"transfer.cleanup_unsupported", "Durable staging cleanup is unsupported"});
+    }
 
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;

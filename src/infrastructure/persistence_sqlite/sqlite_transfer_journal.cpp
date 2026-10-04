@@ -100,6 +100,19 @@ bool samePath(const QString& stored, const std::filesystem::path& path) {
     return QString::compare(QDir::cleanPath(stored), pathText(path), Qt::CaseInsensitive) == 0;
 }
 
+// 보호 세션이 검사한 예상 시도의 모든 불변 증거와 현재 감사 상태를 비교하는 함수.
+bool sameAttempt(const TransferAttempt& actual, const TransferAttempt& expected) {
+    return actual.id == expected.id && actual.planId == expected.planId && actual.stepId == expected.stepId &&
+        actual.direction == expected.direction && actual.phase == expected.phase &&
+        actual.recoveryCompleted == expected.recoveryCompleted && actual.stagingCleanup == expected.stagingCleanup &&
+        samePath(pathText(actual.source), expected.source) && samePath(pathText(actual.destination), expected.destination) &&
+        samePath(pathText(actual.staging), expected.staging) &&
+        encodeFingerprint(actual.sourceFingerprint) == encodeFingerprint(expected.sourceFingerprint) &&
+        sameNullable(optionalFingerprint(actual.stagingFingerprint), optionalFingerprint(expected.stagingFingerprint)) &&
+        sameNullable(optionalFingerprint(actual.destinationFingerprint), optionalFingerprint(expected.destinationFingerprint)) &&
+        sameNullable(encodeError(actual.error), encodeError(expected.error));
+}
+
 } // namespace
 
 // 기존 이력과 공유할 DB 및 초기 마이그레이션 경로를 받는 생성자.
@@ -130,7 +143,7 @@ Result<void> SqliteTransferJournal::ensureOpen() const {
 // 현재 트랜잭션에 단계별 증거 이벤트를 추가하는 함수.
 Result<void> SqliteTransferJournal::appendSnapshot(const TransferAttempt& attempt) const {
     QSqlQuery event(database_);
-    event.prepare("INSERT INTO transfer_events(attempt_id, occurred_at, phase, staging_fingerprint_json, destination_fingerprint_json, error_json, recovery_completed) VALUES(?,?,?,?,?,?,?)");
+    event.prepare("INSERT INTO transfer_events(attempt_id, occurred_at, phase, staging_fingerprint_json, destination_fingerprint_json, error_json, recovery_completed, staging_cleanup) VALUES(?,?,?,?,?,?,?,?)");
     event.addBindValue(QString::fromStdString(attempt.id));
     event.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     event.addBindValue(phaseName(attempt.phase));
@@ -138,6 +151,7 @@ Result<void> SqliteTransferJournal::appendSnapshot(const TransferAttempt& attemp
     event.addBindValue(optionalFingerprint(attempt.destinationFingerprint));
     event.addBindValue(encodeError(attempt.error));
     event.addBindValue(attempt.recoveryCompleted ? 1 : 0);
+    event.addBindValue(static_cast<int>(attempt.stagingCleanup));
     if (!event.exec()) return Result<void>::failure({"transfer.event_failed", event.lastError().text().toStdString()});
     return Result<void>::success();
 }
@@ -260,15 +274,29 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
     const auto valid = TransferValidation::validateNew(result);
     if (!valid) return Result<TransferAttempt>::failure(valid.error());
     QSqlQuery events(database_);
-    events.prepare("SELECT phase,staging_fingerprint_json,destination_fingerprint_json,error_json,recovery_completed FROM transfer_events WHERE attempt_id=? ORDER BY id");
+    events.prepare("SELECT phase,staging_fingerprint_json,destination_fingerprint_json,error_json,recovery_completed,staging_cleanup FROM transfer_events WHERE attempt_id=? ORDER BY id");
     events.addBindValue(QString::fromStdString(attemptId));
     if (!events.exec() || !events.next() || events.value(0).toString() != "prepared" ||
-        !events.value(1).isNull() || !events.value(2).isNull() || !events.value(3).isNull() || events.value(4).toInt() != 0)
+        !events.value(1).isNull() || !events.value(2).isNull() || !events.value(3).isNull() || events.value(4).toInt() != 0 || events.value(5).toInt() != 0)
         return Result<TransferAttempt>::failure({"transfer.record_invalid", "Missing or invalid initial transfer event."});
     bool removalIntentRecorded = false;
     while (events.next()) {
         const auto phase = parsePhase(events.value(0).toString());
         if (!phase) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Unknown transfer event phase."});
+        const auto cleanup = static_cast<StagingCleanup>(events.value(5).toInt());
+        if (cleanup != StagingCleanup::None) {
+            if (*phase != result.phase || events.value(4).toInt() != 0 ||
+                !sameNullable(events.value(1), optionalFingerprint(result.stagingFingerprint)) ||
+                !sameNullable(events.value(2), optionalFingerprint(result.destinationFingerprint)) ||
+                !sameNullable(events.value(3), encodeError(result.error)))
+                return Result<TransferAttempt>::failure({"transfer.record_invalid", "Cleanup event cannot change transfer phase or evidence"});
+            const auto next = TransferValidation::recordStagingCleanup(result, cleanup);
+            if (!next) return Result<TransferAttempt>::failure(next.error());
+            result = next.value();
+            continue;
+        }
+        if (result.stagingCleanup != StagingCleanup::None)
+            return Result<TransferAttempt>::failure({"transfer.record_invalid", "A cleanup attempt cannot resume ordinary transfer events"});
         TransferUpdate update{result.phase, *phase};
         if (*phase == TransferPhase::StagingCreated || *phase == TransferPhase::CopyVerified) {
             update.stagingFingerprint = decodeFingerprint(events.value(1).toString());
@@ -361,15 +389,7 @@ Result<void> SqliteTransferJournal::complete(const std::string& attemptId, Trans
     const auto current = readAttempt(attemptId);
     if (!current || current.value().direction != direction) return fail("transfer.completion_state");
     if (recovery) {
-        const auto& actual = current.value();
-        if (actual.id != recovery->id || actual.planId != recovery->planId || actual.stepId != recovery->stepId ||
-            actual.direction != recovery->direction || actual.phase != recovery->phase || actual.recoveryCompleted != recovery->recoveryCompleted ||
-            !samePath(pathText(actual.source), recovery->source) || !samePath(pathText(actual.destination), recovery->destination) ||
-            !samePath(pathText(actual.staging), recovery->staging) ||
-            encodeFingerprint(actual.sourceFingerprint) != encodeFingerprint(recovery->sourceFingerprint) ||
-            !sameNullable(optionalFingerprint(actual.stagingFingerprint), optionalFingerprint(recovery->stagingFingerprint)) ||
-            !sameNullable(optionalFingerprint(actual.destinationFingerprint), optionalFingerprint(recovery->destinationFingerprint)) ||
-            !sameNullable(encodeError(actual.error), encodeError(recovery->error))) return fail("transfer.recovery_conflict");
+        if (!sameAttempt(current.value(), *recovery)) return fail("transfer.recovery_conflict");
         QSqlQuery intentEvent(database_);
         intentEvent.prepare("SELECT 1 FROM transfer_events WHERE attempt_id=? AND phase='source_remove_intent' LIMIT 1");
         intentEvent.addBindValue(QString::fromStdString(attemptId));
@@ -449,6 +469,40 @@ Result<void> SqliteTransferJournal::complete(const std::string& attemptId, Trans
 // 보호 검사에서 읽은 시도와 현재 DB를 대조해 명시적 복구 완료를 저장하는 함수.
 Result<void> SqliteTransferJournal::reconcileCompleted(const TransferAttempt& expected, const std::string& planHash) {
     return complete(expected.id, expected.direction, &expected, planHash);
+}
+
+// 임시 정리 의도·결과와 상위 감사 이력을 저장하되 이동 상태는 바꾸지 않는 함수.
+Result<void> SqliteTransferJournal::recordStagingCleanup(const TransferAttempt& expected, const std::string& planHash, StagingCleanup cleanup) {
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", "Cannot start cleanup transaction"});
+    // 정리 감사 저장 실패 전체를 롤백하는 함수.
+    const auto fail = [&](const char* code) {
+        database_.rollback();
+        return Result<void>::failure({code, "Staging cleanup record was not committed"});
+    };
+    const auto current = readAttempt(expected.id);
+    if (!current || !sameAttempt(current.value(), expected)) return fail("transfer.cleanup_conflict");
+    const auto next = TransferValidation::recordStagingCleanup(current.value(), cleanup);
+    if (!next) return fail("transfer.cleanup_state");
+    const bool forward = expected.direction == TransferDirection::Forward;
+    QSqlQuery owner(database_);
+    owner.prepare("SELECT 1 FROM plans p JOIN steps s ON s.plan_id=p.id WHERE p.id=? AND s.id=? AND p.plan_hash=? AND p.approved_at IS NOT NULL AND p.status IN (?,'needs_recovery') AND s.status IN (?,'needs_recovery')");
+    owner.addBindValue(QString::fromStdString(expected.planId)); owner.addBindValue(QString::fromStdString(expected.stepId));
+    owner.addBindValue(QString::fromStdString(planHash)); owner.addBindValue(forward ? "executing" : "rolling_back");
+    owner.addBindValue(forward ? "intent_recorded" : "rollback_intent_recorded");
+    if (!owner.exec() || !owner.next()) return fail("transfer.cleanup_owner");
+    owner.finish();
+    if (!appendSnapshot(next.value())) return fail("transfer.cleanup_event");
+    QSqlQuery audit(database_);
+    audit.prepare("INSERT INTO events(plan_id,step_id,occurred_at,event_type,payload_json) VALUES(?,?,?,'transfer_staging_cleanup',?)");
+    audit.addBindValue(QString::fromStdString(expected.planId)); audit.addBindValue(QString::fromStdString(expected.stepId));
+    audit.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    audit.addBindValue(QString::fromUtf8(QJsonDocument(QJsonObject{{"attemptId", QString::fromStdString(expected.id)},
+        {"cleanup", cleanup == StagingCleanup::IntentRecorded ? "intent_recorded" : "removed"}}).toJson(QJsonDocument::Compact)));
+    if (!audit.exec()) return fail("transfer.cleanup_event");
+    if (!database_.commit()) return fail("transfer.cleanup_commit");
+    return Result<void>::success();
 }
 
 // 한 단계에 속한 시도를 생성 순서대로 읽는 함수.

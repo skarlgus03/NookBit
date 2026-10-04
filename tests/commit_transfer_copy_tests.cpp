@@ -54,6 +54,8 @@ public:
     std::function<void(TransferPhase)> beforeRecord;
     bool persistent{false};
     TransferPhase last{TransferPhase::Prepared};
+    std::optional<StagingCleanup> failCleanupAt;
+    std::function<void(StagingCleanup)> beforeCleanup;
     // 실제 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& journal) : inner(journal) {}
     // 새 시도를 실제 DB에 기록하는 함수.
@@ -95,6 +97,15 @@ public:
     Result<TransferAttempt> load(const std::string& id) const override { return inner.load(id); }
     // 같은 단계의 중복 시도 조회를 전달하는 함수.
     Result<std::vector<TransferAttempt>> forStep(const StepId& id) const override { return inner.forStep(id); }
+    // 정리 의도/결과 기록 경계에 실패를 주입하거나 실제 저널에 전달하는 함수.
+    Result<void> recordStagingCleanup(const TransferAttempt& attempt, const std::string& hash, StagingCleanup cleanup) override {
+        if (beforeCleanup) beforeCleanup(cleanup);
+        if (failCleanupAt == cleanup) {
+            failCleanupAt.reset();
+            return Result<void>::failure({"test.cleanup_record", "Injected cleanup record failure"});
+        }
+        return inner.recordStagingCleanup(attempt, hash, cleanup);
+    }
 };
 
 // 실제 이름 변경 직후 API 검증 실패를 주입하는 복사 어댑터.
@@ -709,6 +720,157 @@ void testProtectedRecoveryGuard() {
 #endif
 }
 
+// 검증된 취소 복사본의 정리·각 저장 경계·충돌·부분 복사본 보존을 검사하는 함수.
+void testVerifiedStagingCleanup() {
+#ifdef _WIN32
+    for (int scenario = 0; scenario <= 13; ++scenario) {
+        Fixture fixture;
+        if (!fixture.ready) continue;
+        if (scenario == 13) fixture.faults.failAt = TransferPhase::CommitIntent;
+        const auto boundary = scenario == 7 ? TransferPhase::StagingCreated : TransferPhase::CopyVerified;
+        // 검증 전 또는 검증 후 취소 경계를 선택하는 함수.
+        const auto stoppedCopy = scenario == 13 ? fixture.useCase.execute(fixture.attempt) :
+            fixture.useCase.execute(fixture.attempt, [&] { return fixture.faults.last == boundary; });
+        expect(!stoppedCopy, "cleanup cancelled or uncertain copy fixture");
+        const auto stopped = fixture.journal.load(fixture.attempt.id);
+        const auto oldPlan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(stopped && oldPlan && std::filesystem::exists(fixture.attempt.staging), "staging retained before explicit cleanup");
+        if (!stopped || !oldPlan) continue;
+        if (scenario == 1) write(fixture.attempt.source, "changed original");
+        if (scenario == 2) write(fixture.attempt.staging, "changed staging");
+        if (scenario == 3) {
+            std::filesystem::rename(fixture.attempt.staging, fixture.attempt.staging.parent_path() / "held-stage");
+            write(fixture.attempt.staging, "original contents for transfer copy");
+        }
+        if (scenario == 4) write(fixture.attempt.destination, "final occupant");
+        if (scenario == 5) fixture.faults.failCleanupAt = StagingCleanup::IntentRecorded;
+        if (scenario == 6) fixture.faults.failCleanupAt = StagingCleanup::Removed;
+        if (scenario == 12) {
+            fixture.faults.failCleanupAt = StagingCleanup::Removed;
+            // 삭제 후 기록 실패 구간의 같은 이름 새 파일을 만들어 잘못된 재삭제를 막는 함수.
+            fixture.faults.beforeCleanup = [&](StagingCleanup cleanup) {
+                if (cleanup == StagingCleanup::Removed) write(fixture.attempt.staging, "new staging occupant");
+            };
+        }
+        if (scenario == 8) expect(SetFileAttributesW(fixture.attempt.staging.c_str(), FILE_ATTRIBUTE_READONLY), "readonly staging fixture");
+        if (scenario == 10) {
+            // 삭제 의도 저장 중 새 목적지 파일을 만들어 삭제 직전 재검증을 시험하는 함수.
+            fixture.faults.beforeCleanup = [&](StagingCleanup cleanup) {
+                if (cleanup == StagingCleanup::IntentRecorded) write(fixture.attempt.destination, "late final occupant");
+            };
+        }
+        if (scenario == 11) {
+            expect(fixture.history.appendEvent(PlanStatusChanged{fixture.attempt.planId, PlanStatus::NeedsRecovery}).hasValue() &&
+                fixture.history.appendEvent(StepStatusChanged{fixture.attempt.planId, fixture.attempt.stepId, StepStatus::NeedsRecovery}).hasValue(), "cleanup parent recovery fixture");
+        }
+        QtPlanHasher hasher;
+        WindowsStagingCleanup worker;
+        CleanupTransferStagingUseCase cleanup(fixture.history, fixture.faults, worker, hasher);
+        StagingCleanupService service(cleanup);
+        WrongHasher wrong;
+        CleanupTransferStagingUseCase untrusted(fixture.history, fixture.faults, worker, wrong);
+        const auto result = scenario == 9 ? untrusted.execute(fixture.attempt.id) : service.execute(fixture.attempt.id);
+        expect(bool(result) == (scenario == 0 || scenario == 11 || scenario == 13), "only verified intact stopped staging copy should clean");
+        const auto attempt = fixture.journal.load(fixture.attempt.id);
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(attempt && attempt.value().phase == stopped.value().phase && plan &&
+            plan.value().planHash == oldPlan.value().planHash && plan.value().status == (scenario == 11 ? PlanStatus::NeedsRecovery : oldPlan.value().status) &&
+            plan.value().steps[0].status == (scenario == 11 ? StepStatus::NeedsRecovery : oldPlan.value().steps[0].status), "cleanup never marks move completed or changes approval");
+        expect(std::filesystem::exists(fixture.attempt.source), "cleanup never removes source");
+        if (scenario != 1) expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)), "cleanup preserves original identity and content");
+        if (scenario == 0 || scenario == 11 || scenario == 13) {
+            expect(attempt && attempt.value().stagingCleanup == StagingCleanup::Removed && !std::filesystem::exists(fixture.attempt.staging), "cleanup completion persists and owned staging is gone");
+            expect(!service.execute(fixture.attempt.id), "completed cleanup cannot repeat");
+        } else if (scenario == 6) {
+            expect(attempt && attempt.value().stagingCleanup == StagingCleanup::IntentRecorded && !std::filesystem::exists(fixture.attempt.staging), "post-delete record failure retains cleanup intent");
+            SqliteTransferJournal reopened(fixture.database, fixture.migration);
+            CleanupTransferStagingUseCase resumed(fixture.history, reopened, worker, hasher);
+            StagingCleanupService resume(resumed);
+            expect(resume.execute(fixture.attempt.id).hasValue(), "record-only cleanup retry succeeds after restart when staging absent");
+            expect(!resume.execute(fixture.attempt.id), "replayed cleanup completion cannot repeat");
+        } else {
+            expect(std::filesystem::exists(fixture.attempt.staging), "unsafe cleanup or intent failure preserves staging");
+            expect(attempt && attempt.value().stagingCleanup == (scenario == 10 || scenario == 12 ? StagingCleanup::IntentRecorded : StagingCleanup::None), "no false cleanup completion is recorded");
+            if (scenario == 5) expect(service.execute(fixture.attempt.id).hasValue(), "intent save failure permits explicit safe retry");
+            if (scenario == 12) {
+                expect(!service.execute(fixture.attempt.id), "cleanup retry must not delete a new staging occupant");
+                expect(fingerprint(fixture.attempt.staging).sha256 == hasher.sha256("new staging occupant"), "new staging occupant remains untouched");
+            }
+        }
+        if (scenario == 8) expect(SetFileAttributesW(fixture.attempt.staging.c_str(), FILE_ATTRIBUTE_NORMAL), "restore readonly fixture for test cleanup");
+    }
+#endif
+}
+
+// 원본·임시 객체 쓰기 차단과 승인 볼륨 변경 거부를 검사하는 함수.
+void testProtectedCleanupSession() {
+#ifdef _WIN32
+    Fixture fixture;
+    if (!fixture.ready) return;
+    // 검증된 복사본만 남기도록 확정 직전에 취소하는 함수.
+    expect(!fixture.useCase.execute(fixture.attempt, [&] { return fixture.faults.last == TransferPhase::CopyVerified; }), "protected cleanup fixture");
+    const auto state = fixture.journal.load(fixture.attempt.id);
+    if (!state) { expect(false, "protected cleanup state"); return; }
+    WindowsStagingCleanup worker;
+    {
+        auto session = worker.open(state.value(), nullptr);
+        expect(session && session.value()->verify(), "protected cleanup verification");
+        if (!session) return;
+        for (const auto& path : {fixture.attempt.source, fixture.attempt.staging}) {
+            HANDLE writeHandle = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, 0, nullptr);
+            expect(writeHandle == INVALID_HANDLE_VALUE, "cleanup protects both source and staging from writes");
+            if (writeHandle != INVALID_HANDLE_VALUE) CloseHandle(writeHandle);
+        }
+    }
+    expect(std::filesystem::exists(fixture.attempt.staging), "opening or releasing cleanup session never deletes");
+    OperationPlan draft;
+    MoveStep step;
+    step.source = fixture.attempt.source; step.destination = fixture.attempt.destination; step.fingerprint = fixture.attempt.sourceFingerprint;
+    draft.steps.push_back(step);
+    PrepareTransferPlanUseCase prepare(fixture.worker);
+    const auto prepared = prepare.execute(draft);
+    expect(prepared.hasValue(), "cleanup actual volume fixture");
+    if (!prepared) return;
+    auto movement = *prepared.value().steps[0].movement;
+    movement.strategy = MoveStrategy::VerifiedCopy;
+    movement.destinationVolume.guidPath[11] = movement.destinationVolume.guidPath[11] == 'a' ? 'b' : 'a';
+    expect(!worker.open(state.value(), &movement), "cleanup refuses a changed approved destination GUID");
+    expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)) &&
+        sameFingerprint(*state.value().stagingFingerprint, fingerprint(fixture.attempt.staging)), "volume rejection preserves original and verified staging");
+#endif
+}
+
+// 검증 뒤 취소한 역전송의 임시 파일만 정리하고 완료된 이동 파일은 유지하는 함수.
+void testReverseStagingCleanup() {
+#ifdef _WIN32
+    Fixture fixture;
+    if (!fixture.ready) return;
+    expect(fixture.useCase.execute(fixture.attempt).hasValue(), "reverse cleanup forward fixture");
+    WindowsTransferSourceRemoval removal;
+    QtPlanHasher hasher;
+    FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+    expect(finalize.execute(fixture.attempt.id).hasValue(), "reverse cleanup forward completion");
+    const auto moved = fingerprint(fixture.attempt.destination);
+    WindowsTransferFileInspector files;
+    RollbackTransferUseCase undo(fixture.faults, fixture.history, fixture.worker, removal, files, hasher);
+    const auto stage = fixture.attempt.source.parent_path() / "undo-stage";
+    // 역전송의 검증 단계 직후 취소하는 함수.
+    expect(!undo.execute(fixture.attempt.id, "undo", stage, [&] { return fixture.faults.last == TransferPhase::CopyVerified; }), "reverse cleanup cancelled undo fixture");
+    WindowsStagingCleanup worker;
+    CleanupTransferStagingUseCase cleanup(fixture.history, fixture.journal, worker, hasher);
+    StagingCleanupService service(cleanup);
+    const auto result = service.execute("undo");
+    const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+    expect(result && result.value().direction == TransferDirection::Rollback && result.value().phase == TransferPhase::Cancelled &&
+        result.value().stagingCleanup == StagingCleanup::Removed, "reverse cleanup keeps cancelled undo outcome");
+    expect(plan && plan.value().status == PlanStatus::RollingBack && plan.value().steps[0].status == StepStatus::RollbackIntentRecorded,
+        "reverse cleanup is not a completed rollback");
+    expect(!std::filesystem::exists(stage) && !std::filesystem::exists(fixture.attempt.source) &&
+        sameFingerprint(moved, fingerprint(fixture.attempt.destination)), "reverse cleanup removes only verified undo staging");
+#endif
+}
+
 // 실제 전송 완료 기록을 가진 임시 파일만 역전송하며 실패 경계를 검사하는 함수.
 void testRollbackTransfers() {
 #ifdef _WIN32
@@ -823,6 +985,9 @@ int main(int argc, char** argv) {
     testSourceRemovalAndCompletion();
     testExplicitCompletionRecovery();
     testProtectedRecoveryGuard();
+    testVerifiedStagingCleanup();
+    testProtectedCleanupSession();
+    testReverseStagingCleanup();
     testRollbackTransfers();
     testApprovedRemovalVolumes();
 #endif

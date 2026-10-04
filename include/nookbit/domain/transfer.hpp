@@ -5,6 +5,7 @@
 namespace nookbit {
 
 enum class TransferDirection { Forward, Rollback };
+enum class StagingCleanup { None, IntentRecorded, Removed };
 
 /// 한 전송 시도의 기록 단계이며 파일 작업을 허가하는 권한은 아니다.
 enum class TransferPhase {
@@ -29,6 +30,8 @@ struct TransferAttempt {
     std::optional<Error> error;
     /// 정상 완료와 구분되는 명시적 복구 감사값이며 승인 내용에는 포함하지 않는다.
     bool recoveryCompleted{false};
+    /// 임시 복사본 정리만 기록하며 이동 실패·취소 결과와 분리한다.
+    StagingCleanup stagingCleanup{StagingCleanup::None};
 };
 
 /// 예상한 이전 단계와 새 증거를 함께 전달하는 낙관적 동시성 갱신 요청.
@@ -63,6 +66,8 @@ namespace TransferValidation {
 
 /// 제거 의도가 기록된 중단 시도의 증거를 보존하며 복구 완료 스냅샷을 만드는 함수.
 [[nodiscard]] Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded);
+/// 검증된 임시 복사본의 명시적 정리 의도 또는 결과만 기록하는 함수.
+[[nodiscard]] Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, StagingCleanup next);
 
 } // namespace TransferValidation
 } // namespace nookbit

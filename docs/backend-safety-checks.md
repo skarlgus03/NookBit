@@ -6,6 +6,10 @@
 
 ## 확인한 흐름
 
+검증된 임시 복사본 정리는 `commit_transfer_copy_tests.cpp`의 `testVerifiedStagingCleanup`에서 검사한다. 정상 취소 후 명시적 정리, 원본/임시 내용 변경·동일 내용 다른 객체·최종 경로 충돌·정리 의도 저장 실패·제거 후 결과 저장 실패와 재시작 기록 마무리·부분 복사본 보존·읽기 전용 임시 파일·잘못된 서명·의도 저장 도중 최종 경로 점유·상위 NeedsRecovery 보존·삭제 후 같은 이름 새 파일 재삭제 거부를 다룬다. `testProtectedCleanupSession`은 원본과 임시 파일의 쓰기 차단, 세션 해제 시 삭제 없음, 승인 볼륨 GUID 변경 거부를 검사한다. `testReverseStagingCleanup`은 역전송 취소 정리 후 완료된 이동 결과는 그대로이고 RolledBack으로 오인하지 않는지 확인한다. 삭제 대상은 모두 테스트가 만든 임시 자료다.
+
+`transfer_journal_tests.cpp`의 `testStagingCleanupJournal`은 정리 의도 건너뛰기·낡은 증거·승인 해시 변경 거부, 실제 SQL 감사 실패 시 전체 롤백, 의도/제거 결과 재생과 의도 이벤트 누락 시 손상 거부를 검사한다. `testCleanupMigrationAtomic`은 Schema v4의 기존 기록을 보존하며 v5로 이행하고, 실패 시 컬럼/버전 롤백 후 재시도가 가능한지 확인한다. 부분·미기록 복사본 삭제와 실제 두 드라이브 시험은 포함하지 않는다.
+
 명시적 완료 기록 복구는 `commit_transfer_copy_tests.cpp`의 `testExplicitCompletionRecovery`에서 실제 임시 파일·SQLite로 검사한다. 제거 결과/완료 기록 실패, 복구 필요 기록까지 끊겨 남은 SourceRemoveIntent/SourceRemoved, 상위 NeedsRecovery, 새 원본 위치 점유·최종 내용 변경·같은 내용의 다른 객체·임시 위치 점유·잘못된 서명·제거 의도 없는 소실을 다룬다. 실제 SQL 완료 실패 후 기록 전체 유지와 명시적 재시도, 역전송 완료 복구, 미해결 형제가 남은 배치의 상위 상태 보존을 확인한다. `testProtectedRecoveryGuard`는 저장 동안 최종 파일의 쓰기/삭제 차단과 원본 부재 시에도 승인 볼륨 GUID 재검증을 확인한다. 파일 삭제·복사 재개·임시 정리나 실제 두 드라이브 시험은 아니다.
 
 `transfer_journal_tests.cpp`의 `testRecoveryCompletionContract`는 낡은 시도·다른 최종 객체·승인 해시 변경 거부, 제거 의도 요구, 복구 감사 이벤트 실패의 전체 트랜잭션 롤백, 재시작 이벤트 재생과 반복 완료 거부를 검사한다. `testRecoveryMigrationCompatibility`는 Schema v3의 기존 전송 이벤트/승인 해시를 보존하며 v4로 이행하고, 이행 SQL 실패 시 컬럼/버전 전체 롤백 후 재시도가 가능한지 검사한다.

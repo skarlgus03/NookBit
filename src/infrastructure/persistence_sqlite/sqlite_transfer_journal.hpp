@@ -23,6 +23,8 @@ public:
     [[nodiscard]] Result<void> completeRollback(const std::string& attemptId) override;
     /// 예상 증거·승인 해시·제거 의도가 그대로일 때 완료 기록을 원자적으로 복구하는 함수.
     [[nodiscard]] Result<void> reconcileCompleted(const TransferAttempt& expected, const std::string& planHash) override;
+    /// 예상 시도·승인·상위 상태를 검증해 임시 정리 감사 이벤트만 저장하는 함수.
+    [[nodiscard]] Result<void> recordStagingCleanup(const TransferAttempt& expected, const std::string& planHash, StagingCleanup next) override;
     /// 이벤트를 순서대로 재생해 마지막 스냅샷을 검증·복원하는 함수.
     [[nodiscard]] Result<TransferAttempt> load(const std::string& attemptId) const override;
     /// 한 단계에 속한 시도를 생성 순서대로 읽는 함수.

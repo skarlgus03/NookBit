@@ -585,6 +585,109 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
     return Return::success(std::make_unique<RecoverySession>(std::move(parents), std::move(finalFile), attempt));
 }
 
+namespace {
+// 보호된 파일 핸들의 객체·전체 내용·수정 시각을 승인 지문과 대조하는 함수.
+Result<void> verifyCleanupFile(HANDLE file, const std::filesystem::path& path, const FileFingerprint& expected) {
+    const auto supported = ordinarySource(file, path);
+    if (!supported) return supported;
+    const auto hash = digest(file, {});
+    const auto fp = fingerprint(file);
+    if (!hash || !fp) return Result<void>::failure(!hash ? hash.error() : fp.error());
+    auto actual = fp.value(); actual.sha256 = hash.value();
+    if (!sameFingerprint(expected, actual))
+        return Result<void>::failure({"transfer.cleanup_changed", "Source or verified staging object changed; no cleanup authorized"});
+    return Result<void>::success();
+}
+
+class CleanupSession final : public IStagingCleanupSession {
+    std::vector<Handle> parents_;
+    Handle source_, staging_;
+    TransferAttempt attempt_;
+    bool attempted_{false};
+public:
+    // 삭제를 예약하지 않고 원본·임시 객체의 보호 핸들을 소유하는 함수.
+    CleanupSession(std::vector<Handle> parents, Handle source, Handle staging, TransferAttempt attempt)
+        : parents_(std::move(parents)), source_(std::move(source)), staging_(std::move(staging)), attempt_(std::move(attempt)) {}
+    // 온전한 원본과 검증된 임시 복사본 또는 이전 정리 의도 뒤의 부재를 확인하는 함수.
+    Result<void> verify() override {
+        const auto source = verifyCleanupFile(source_.value, attempt_.source, attempt_.sourceFingerprint);
+        if (!source) return source;
+        const auto final = requireMissing(attempt_.destination);
+        if (!final) return final;
+        if (staging_.value == INVALID_HANDLE_VALUE) {
+            if (attempt_.stagingCleanup != StagingCleanup::IntentRecorded)
+                return Result<void>::failure({"transfer.cleanup_unrecorded_absence", "No prior cleanup intent proves this absence"});
+            return requireMissing(attempt_.staging);
+        }
+        const auto staging = verifyCleanupFile(staging_.value, attempt_.staging, *attempt_.stagingFingerprint);
+        if (!staging) return staging;
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (!GetFileInformationByHandle(staging_.value, &info)) return Result<void>::failure(failure("transfer.cleanup_stat"));
+        if (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+            return Result<void>::failure({"transfer.cleanup_readonly", "Read-only staging is preserved; attributes are not changed"});
+        return Result<void>::success();
+    }
+    // 저장된 정리 의도 뒤에 같은 임시 객체만 핸들로 제거하고 원본을 재확인하는 함수.
+    Result<void> removeVerifiedStaging() override {
+        if (std::exchange(attempted_, true)) return Result<void>::failure({"transfer.cleanup_reused", "Cleanup was already attempted"});
+        const auto checked = verify();
+        if (!checked) return checked;
+        if (staging_.value != INVALID_HANDLE_VALUE) {
+            FILE_DISPOSITION_INFO disposition{TRUE};
+            if (!SetFileInformationByHandle(staging_.value, FileDispositionInfo, &disposition, sizeof(disposition)))
+                return Result<void>::failure(failure("transfer.cleanup_remove"));
+            if (!CloseHandle(staging_.value)) return Result<void>::failure(failure("transfer.cleanup_close"));
+            staging_.value = INVALID_HANDLE_VALUE;
+        }
+        const auto absent = requireMissing(attempt_.staging);
+        if (!absent) return absent;
+        const auto final = requireMissing(attempt_.destination);
+        if (!final) return final;
+        return verifyCleanupFile(source_.value, attempt_.source, attempt_.sourceFingerprint);
+    }
+};
+}
+
+// 원본 보존과 최종 경로 부재 아래 기록된 검증 임시 파일에만 삭제 권한을 여는 함수.
+Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(const TransferAttempt& attempt, const MoveContract* movement) {
+    using Return = Result<std::unique_ptr<IStagingCleanupSession>>;
+    const auto target = attempt.stagingCleanup == StagingCleanup::None ? StagingCleanup::IntentRecorded : StagingCleanup::Removed;
+    const auto allowed = TransferValidation::recordStagingCleanup(attempt, target);
+    if (!allowed) return Return::failure(allowed.error());
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.error.reset(); initial.recoveryCompleted = false; initial.stagingCleanup = StagingCleanup::None;
+    if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
+        !validPath(attempt.staging) || !validPath(attempt.destination))
+        return Return::failure({"transfer.path", "Unsupported cleanup paths"});
+    std::vector<Handle> parents;
+    for (const auto& path : {attempt.source, attempt.staging}) {
+        const auto locked = lockParents(path, parents);
+        if (!locked) return Return::failure(locked.error());
+    }
+    Handle source(CreateFileW(attempt.source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (source.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.cleanup_source_lock"));
+    const auto sourceVolume = volume(source.value);
+    const auto stagingVolume = volume(parents.back().value);
+    if (!sourceVolume || !stagingVolume || !sourceVolume.value().localNtfs || !stagingVolume.value().localNtfs ||
+        sourceVolume.value().id != attempt.sourceFingerprint.volumeId || stagingVolume.value().id != attempt.stagingFingerprint->volumeId ||
+        (movement && (movement->strategy != MoveStrategy::VerifiedCopy || movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+        !approvedVolume(sourceVolume.value(), movement->sourceVolume) || !approvedVolume(stagingVolume.value(), movement->destinationVolume))))
+        return Return::failure({"transfer.volume_changed", "Protected cleanup volumes differ from recorded evidence or approval"});
+    Handle staging(CreateFileW(attempt.staging.c_str(), GENERIC_READ | DELETE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (staging.value == INVALID_HANDLE_VALUE && (GetLastError() != ERROR_FILE_NOT_FOUND || attempt.stagingCleanup != StagingCleanup::IntentRecorded))
+        return Return::failure(failure("transfer.cleanup_staging_lock"));
+    if (staging.value != INVALID_HANDLE_VALUE) {
+        const auto actualVolume = volume(staging.value);
+        if (!actualVolume || actualVolume.value().id != stagingVolume.value().id ||
+            (movement && !approvedVolume(actualVolume.value(), movement->destinationVolume)))
+            return Return::failure({"transfer.volume_changed", "Staging object volume changed"});
+    }
+    return Return::success(std::make_unique<CleanupSession>(std::move(parents), std::move(source), std::move(staging), attempt));
+}
+
 // 파일을 생성하지 않고 보호된 핸들에서 객체·내용·실제 볼륨을 읽는 함수.
 TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path& path) {
     TransferFileObservation result;
@@ -692,6 +795,10 @@ namespace nookbit {
 // Windows 외에서는 보호 복구 완료 검사를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::open(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<ITransferRecoverySession>>::failure({"transfer.unsupported", "Windows only"});
+}
+// Windows 외에서는 검증된 임시 복사본 정리를 지원하지 않는 함수.
+Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(const TransferAttempt&, const MoveContract*) {
+    return Result<std::unique_ptr<IStagingCleanupSession>>::failure({"transfer.unsupported", "Windows only"});
 }
 // Windows 외에서는 원본 제거를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openImpl(const TransferAttempt&, const MoveContract*) {
