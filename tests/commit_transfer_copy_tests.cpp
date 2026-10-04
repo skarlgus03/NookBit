@@ -106,6 +106,19 @@ public:
         }
         return inner.recordStagingCleanup(attempt, hash, cleanup);
     }
+    // 복구 제거 의도 저장 실패를 주입하거나 실제 저널로 전달하는 함수.
+    Result<void> recordRecoveryRemovalIntent(const TransferAttempt& attempt, const std::string& hash) override {
+        if (beforeRecord) beforeRecord(TransferPhase::SourceRemoveIntent);
+        if (failAt == TransferPhase::SourceRemoveIntent) {
+            failAt.reset();
+            return Result<void>::failure({"test.resume_intent", "Injected recovery intent failure"});
+        }
+        return inner.recordRecoveryRemovalIntent(attempt, hash);
+    }
+    // 복구 완료는 실제 원자적 저널로 전달하는 함수.
+    Result<void> reconcileCompleted(const TransferAttempt& attempt, const std::string& hash) override {
+        return inner.reconcileCompleted(attempt, hash);
+    }
 };
 
 // 실제 이름 변경 직후 API 검증 실패를 주입하는 복사 어댑터.
@@ -658,6 +671,146 @@ void clearCompletionFault(const QString& path) {
     QSqlDatabase::removeDatabase(name);
 }
 
+// 보호 세션의 제거 직전에 한 번 실패해 두 복사본이 남는 경계를 재현하는 일꾼.
+class OnceFailRemoval final : public ITransferSourceRemoval {
+    ITransferSourceRemoval& inner_;
+    bool fail_{true};
+    class Session final : public ITransferRemovalSession {
+        std::unique_ptr<ITransferRemovalSession> inner_;
+        bool& fail_;
+    public:
+        // 실제 보호 세션과 일회성 실패 상태를 받는 함수.
+        Session(std::unique_ptr<ITransferRemovalSession> inner, bool& fail) : inner_(std::move(inner)), fail_(fail) {}
+        // 실제 객체 검증을 전달하는 함수.
+        Result<void> verify() override { return inner_->verify(); }
+        // 처음에는 파일을 유지하고 이후에는 실제 검증된 제거를 전달하는 함수.
+        Result<void> removeVerifiedSource() override {
+            if (std::exchange(fail_, false)) return Result<void>::failure({"test.removal", "Injected before removal"});
+            return inner_->removeVerifiedSource();
+        }
+    };
+public:
+    // 실제 제거 일꾼을 빌려 받는 함수.
+    explicit OnceFailRemoval(ITransferSourceRemoval& inner) : inner_(inner) {}
+    // 실제 보호 세션에 일회성 제거 실패만 덧붙이는 함수.
+    Result<std::unique_ptr<ITransferRemovalSession>> open(const TransferAttempt& attempt) override {
+        auto opened = inner_.open(attempt);
+        if (!opened) return Result<std::unique_ptr<ITransferRemovalSession>>::failure(opened.error());
+        return Result<std::unique_ptr<ITransferRemovalSession>>::success(std::make_unique<Session>(std::move(opened.value()), fail_));
+    }
+};
+
+// 기록된 최종 복사본과 남은 원본의 명시적 마무리·거부·재시도 경계를 검사하는 함수.
+void testResumeCommittedTransfer() {
+#ifdef _WIN32
+    for (int scenario = 0; scenario <= 12; ++scenario) {
+        Fixture fixture(scenario == 11);
+        if (!fixture.ready) continue;
+        const auto copied = fixture.useCase.execute(fixture.attempt);
+        expect(copied.hasValue(), "resume committed copy fixture");
+        if (!copied) continue;
+        if (scenario == 1) {
+            expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::DestinationCommitted, TransferPhase::NeedsRecovery,
+                {}, {}, Error{"test.interrupted", "Interrupted before removal"}}).hasValue(), "stopped retained-source fixture");
+            expect(fixture.history.appendEvent(StepStatusChanged{fixture.attempt.planId, fixture.attempt.stepId, StepStatus::NeedsRecovery}).hasValue() &&
+                fixture.history.appendEvent(PlanStatusChanged{fixture.attempt.planId, PlanStatus::NeedsRecovery}).hasValue(), "resume parent recovery fixture");
+        }
+        if (scenario == 2) expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent}).hasValue(), "interrupted prior removal intent fixture");
+        if (scenario == 3) write(fixture.attempt.source, "changed original");
+        if (scenario == 4) write(fixture.attempt.destination, "changed final");
+        if (scenario == 5) fixture.faults.failAt = TransferPhase::SourceRemoveIntent;
+        if (scenario == 7) completionFault(fixture.database);
+        if (scenario == 8) write(fixture.attempt.staging, "new occupant");
+        if (scenario == 9) {
+            std::filesystem::rename(fixture.attempt.source, fixture.attempt.source.parent_path() / "held-original");
+            write(fixture.attempt.source, "original contents for transfer copy");
+        }
+        bool intentReached = false;
+        // 제거 의도 저장 중 두 파일이 보호되고 의도 이후 취소는 결과 기록을 막지 않는지 확인하는 함수.
+        fixture.faults.beforeRecord = [&](TransferPhase phase) {
+            if (phase != TransferPhase::SourceRemoveIntent) return;
+            intentReached = true;
+            for (const auto& path : {fixture.attempt.source, fixture.attempt.destination}) {
+                const auto writer = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                expect(writer == INVALID_HANDLE_VALUE, "resume protects both files during intent persistence");
+                if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+            }
+        };
+        WindowsTransferSourceRemoval removal;
+        WindowsTransferRecoveryGuard guard;
+        QtPlanHasher hasher;
+        WrongHasher wrong;
+        const IPlanHasher& verifier = scenario == 12 ? static_cast<const IPlanHasher&>(wrong) : hasher;
+        ResumeCommittedTransferUseCase resume(fixture.history, fixture.faults, removal, guard, verifier);
+        CommittedTransferResumeService service(resume);
+        int cancellationChecks = 0;
+        // 취소 경계별로 명시적 마무리를 중지하거나 의도 이후 취소를 재현하는 함수.
+        const auto result = service.execute(fixture.attempt.id, [&] {
+            ++cancellationChecks;
+            return scenario == 6 || (scenario == 10 && cancellationChecks >= 2) || (scenario == 0 && intentReached);
+        });
+        if (scenario <= 2 || scenario == 11) {
+            expect(result && result.value().phase == TransferPhase::Completed && result.value().recoveryCompleted && result.value().recoveryRemovalIntent,
+                "retained-source committed transfer explicitly completes with audit");
+            expect(!std::filesystem::exists(fixture.attempt.source) && sameFingerprint(*copied.value().destinationFingerprint, fingerprint(fixture.attempt.destination)),
+                "resume removes only original and retains exact final copy");
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            expect(plan && plan.value().status == (scenario == 11 ? PlanStatus::Executing : PlanStatus::Completed) && plan.value().steps[0].status == StepStatus::Applied,
+                "resume atomically completes running or recovery parents");
+            expect(!service.execute(fixture.attempt.id), "completed resume cannot remove again");
+        } else if (scenario == 7) {
+            const auto pending = fixture.journal.load(fixture.attempt.id);
+            expect(!result && pending && pending.value().recoveryRemovalIntent && pending.value().phase == TransferPhase::DestinationCommitted &&
+                !std::filesystem::exists(fixture.attempt.source), "completion record failure preserves durable intent and final file");
+            clearCompletionFault(fixture.database);
+            SqliteTransferJournal restarted(fixture.database, fixture.migration);
+            ResumeCommittedTransferUseCase retry(fixture.history, restarted, removal, guard, hasher);
+            CommittedTransferResumeService retryService(retry);
+            expect(retryService.execute(fixture.attempt.id).hasValue(), "restart after removal completes without deleting again");
+        } else {
+            expect(!result && std::filesystem::exists(fixture.attempt.source) && std::filesystem::exists(fixture.attempt.destination),
+                "rejected resume preserves both files");
+            const auto unchanged = fixture.journal.load(fixture.attempt.id);
+            expect(unchanged && !unchanged.value().recoveryRemovalIntent && unchanged.value().phase == TransferPhase::DestinationCommitted,
+                "rejected pre-intent resume does not change attempt");
+            if (scenario == 5) expect(service.execute(fixture.attempt.id).hasValue(), "failed intent record permits safe explicit retry");
+            if (scenario == 8) expect(std::filesystem::exists(fixture.attempt.staging), "unrelated staging occupant retained");
+        }
+    }
+    {
+        Fixture fixture;
+        if (!fixture.ready) return;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "resume removal failure fixture");
+        WindowsTransferSourceRemoval native;
+        OnceFailRemoval removal(native);
+        WindowsTransferRecoveryGuard guard;
+        QtPlanHasher hasher;
+        ResumeCommittedTransferUseCase resume(fixture.history, fixture.journal, removal, guard, hasher);
+        CommittedTransferResumeService service(resume);
+        expect(!service.execute(fixture.attempt.id), "failed removal keeps intent pending");
+        const auto pending = fixture.journal.load(fixture.attempt.id);
+        expect(pending && pending.value().recoveryRemovalIntent && std::filesystem::exists(fixture.attempt.source) &&
+            std::filesystem::exists(fixture.attempt.destination), "pre-removal failure retains both files and durable intent");
+        expect(service.execute(fixture.attempt.id).hasValue(), "pending intent revalidates retained source before retry removal");
+    }
+    {
+        Fixture fixture;
+        if (!fixture.ready) return;
+        PostRenameFaultCopy copy(fixture.worker);
+        CommitTransferCopyUseCase commit(copy, fixture.journal);
+        expect(!commit.execute(fixture.attempt), "unrecorded final copy fixture stops after rename");
+        WindowsTransferSourceRemoval removal;
+        WindowsTransferRecoveryGuard guard;
+        QtPlanHasher hasher;
+        ResumeCommittedTransferUseCase resume(fixture.history, fixture.journal, removal, guard, hasher);
+        expect(!resume.execute(fixture.attempt.id), "unrecorded final evidence cannot authorize source removal");
+        expect(std::filesystem::exists(fixture.attempt.source) && std::filesystem::exists(fixture.attempt.destination),
+            "ambiguous final copy and original are preserved");
+    }
+#endif
+}
+
 // 완료 기록만 잃은 실제 전송의 복구·충돌 거부·재시작 복원·SQL 원자성을 검사하는 함수.
 void testExplicitCompletionRecovery() {
 #ifdef _WIN32
@@ -989,6 +1142,17 @@ void testRollbackTransfers() {
                     "failed undo is not marked rolled back");
                 expect(std::filesystem::exists(fixture.attempt.source), "failed undo retains restored or collision file");
                 if (scenario == 3 || scenario == 5) expect(sameFingerprint(moved, fingerprint(fixture.attempt.destination)), "pre-removal failure retains moved file");
+                if (scenario == 3) {
+                    WindowsTransferRecoveryGuard guard;
+                    ResumeCommittedTransferUseCase resume(fixture.history, fixture.journal, removal, guard, hasher);
+                    CommittedTransferResumeService service(resume);
+                    const auto restored = service.execute("undo");
+                    const auto parent = fixture.history.loadPlan(fixture.attempt.planId);
+                    expect(restored && restored.value().direction == TransferDirection::Rollback && parent &&
+                        parent.value().status == PlanStatus::RolledBack && parent.value().steps[0].status == StepStatus::RolledBack,
+                        "retained-source reverse transfer resumes as rollback, not applied");
+                    expect(!std::filesystem::exists(fixture.attempt.destination), "reverse resume removes only moved-file source after restoring original location");
+                }
                 if (scenario == 4 || scenario == 7) expect(!std::filesystem::exists(fixture.attempt.destination), "post-removal failure preserves restored file only");
                 if (scenario == 4 || scenario == 7) {
                     if (scenario == 7) clearCompletionFault(fixture.database);
@@ -1048,6 +1212,7 @@ int main(int argc, char** argv) {
     testReadOnlyTransferRecovery();
     testSourceRemovalAndCompletion();
     testExplicitCompletionRecovery();
+    testResumeCommittedTransfer();
     testProtectedRecoveryGuard();
     testVerifiedStagingCleanup();
     testProtectedCleanupSession();

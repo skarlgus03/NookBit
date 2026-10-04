@@ -25,6 +25,8 @@ public:
     [[nodiscard]] Result<void> reconcileCompleted(const TransferAttempt& expected, const std::string& planHash) override;
     /// 예상 시도·승인·상위 상태를 검증해 임시 정리 감사 이벤트만 저장하는 함수.
     [[nodiscard]] Result<void> recordStagingCleanup(const TransferAttempt& expected, const std::string& planHash, StagingCleanup next) override;
+    /// 보호된 예상 시도·현재 승인을 대조해 제거 의도 또는 재시도 감사를 원자적으로 저장하는 함수.
+    [[nodiscard]] Result<void> recordRecoveryRemovalIntent(const TransferAttempt& expected, const std::string& planHash) override;
     /// 이벤트를 순서대로 재생해 마지막 스냅샷을 검증·복원하는 함수.
     [[nodiscard]] Result<TransferAttempt> load(const std::string& attemptId) const override;
     /// 한 단계에 속한 시도를 생성 순서대로 읽는 함수.

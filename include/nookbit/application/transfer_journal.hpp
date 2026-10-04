@@ -33,6 +33,11 @@ public:
         return Result<void>::failure({"transfer.cleanup_unsupported", "Durable staging cleanup is unsupported"});
     }
 
+    /// 보호된 예상 시도·현재 승인을 확인하고 복구 제거 의도 또는 재시도 감사를 저장하는 함수.
+    [[nodiscard]] virtual Result<void> recordRecoveryRemovalIntent(const TransferAttempt&, const std::string&) {
+        return Result<void>::failure({"transfer.resume_unsupported", "Durable recovery removal is unsupported"});
+    }
+
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;
 

@@ -500,7 +500,18 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
-    const auto evidence = TransferValidation::advance(attempt, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
+    initial.recoveryRemovalIntent = false;
+    auto proof = attempt;
+    // 저널 상태는 바꾸지 않고 같은 확정 증거의 파일 보호 조건만 재사용한다.
+    if (attempt.recoveryRemovalIntent || attempt.phase != TransferPhase::DestinationCommitted) {
+        auto eligible = attempt;
+        eligible.recoveryRemovalIntent = false;
+        if (!TransferValidation::recordRecoveryRemovalIntent(eligible))
+            return Return::failure({"transfer.removal_evidence", "Recorded committed recovery evidence required"});
+        proof.phase = TransferPhase::DestinationCommitted;
+        proof.recoveryRemovalIntent = false;
+    }
+    const auto evidence = TransferValidation::advance(proof, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
     if (!TransferValidation::validateNew(initial) || !evidence ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         TransferValidation::sameObject(attempt.sourceFingerprint, *attempt.destinationFingerprint))
@@ -615,6 +626,7 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
+    initial.recoveryRemovalIntent = false;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
         !validPath(attempt.destination) || !validPath(attempt.staging))
         return Return::failure({"transfer.path", "Unsupported recovery paths"});

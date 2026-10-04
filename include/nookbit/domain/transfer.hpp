@@ -32,6 +32,8 @@ struct TransferAttempt {
     bool recoveryCompleted{false};
     /// 임시 복사본 정리만 기록하며 이동 실패·취소 결과와 분리한다.
     StagingCleanup stagingCleanup{StagingCleanup::None};
+    /// 중단된 확정 전송의 원본 제거를 명시적으로 요청한 별도 감사값.
+    bool recoveryRemovalIntent{false};
 };
 
 /// 예상한 이전 단계와 새 증거를 함께 전달하는 낙관적 동시성 갱신 요청.
@@ -68,6 +70,8 @@ namespace TransferValidation {
 [[nodiscard]] Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded);
 /// 검증된 임시 복사본의 명시적 정리 의도 또는 결과만 기록하는 함수.
 [[nodiscard]] Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, StagingCleanup next);
+/// 확정된 복사본의 증거를 보존하며 명시적 원본 제거 의도만 표시하는 함수.
+[[nodiscard]] Result<TransferAttempt> recordRecoveryRemovalIntent(const TransferAttempt& attempt);
 
 } // namespace TransferValidation
 } // namespace nookbit

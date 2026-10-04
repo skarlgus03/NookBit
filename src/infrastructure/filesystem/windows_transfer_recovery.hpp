@@ -1,8 +1,19 @@
 #pragma once
 #include <nookbit/application/reconcile_transfer_recovery_use_case.hpp>
 #include <nookbit/application/cleanup_transfer_staging_use_case.hpp>
+#include <nookbit/application/resume_committed_transfer_use_case.hpp>
 
 namespace nookbit {
+/// 실행·복구와 같은 시스템 잠금 안에서 중단된 확정 전송을 마무리하는 진입점.
+class CommittedTransferResumeService final {
+public:
+    /// 외부 소유의 전송 마무리 유스케이스를 빌려 받는 함수.
+    explicit CommittedTransferResumeService(ResumeCommittedTransferUseCase& useCase) : useCase_(useCase) {}
+    /// 다른 실행과 직렬화한 뒤 명시적 전송 마무리를 요청하는 함수.
+    [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId, const std::function<bool()>& cancelled = {});
+private:
+    ResumeCommittedTransferUseCase& useCase_;
+};
 /// 기록 확정 동안 최종 파일과 부모를 보호하며 파일 변경은 제공하지 않는 어댑터.
 class WindowsTransferRecoveryGuard final : public ITransferRecoveryGuard {
 public:

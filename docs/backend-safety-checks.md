@@ -6,6 +6,10 @@
 
 ## 확인한 흐름
 
+확정 전송 마무리는 `commit_transfer_copy_tests.cpp`의 `testResumeCommittedTransfer`에서 실제 임시 파일·SQLite로 검사한다. DestinationCommitted/SourceRemoveIntent/NeedsRecovery와 상위 복구 상태에서 정상 마무리, 두 파일의 의도 저장 중 쓰기 차단, 의도 전 취소·의도 이후 취소의 완료 처리, 원본/최종 변경·동일 내용 다른 원본 객체·새 임시 점유·잘못된 서명·확정 결과 미기록 거부, 의도 저장 실패와 재시도, 제거 직전 실패 뒤 두 복사본 보존/재시도, 제거 후 실제 SQL 완료 실패와 재시작 기록 마무리·반복 거부를 확인한다. 미해결 형제가 있으면 배치 전체를 완료하지 않는다. `testRollbackTransfers`는 중단된 역전송의 명시적 마무리가 Applied가 아닌 RolledBack으로 기록되는지 검사한다. 실제 두 볼륨이나 부분 복사 이어쓰기 시험은 아니다.
+
+`transfer_journal_tests.cpp`의 `testRecoveryRemovalJournal`은 잘못된 단계·낡은 전체 증거·승인 해시 거부, 실제 SQL 감사 실패 시 의도 전체 롤백, 의도 재생과 진단 보존, 재시도 시 현재 승인 재확인, 일반 단계 재개 금지, 완료 감사 재생과 의도 이벤트 소실 시 손상 거부를 검사한다. `testRecoveryRemovalMigration`은 Schema v5에서 v6 이행 실패 시 컬럼/버전 롤백, 재시도 후 승인 해시와 기존 사건 보존·기존 사건에 제거 권한 없는 기본값을 확인한다.
+
 승인된 목적지 부모 생성은 `staged_copy_tests.cpp`의 `testApprovedParentCreation`에서 검사한다. 없는 다단계 폴더 생성·한글 최종 이름 확정·부모 이름 변경/쓰기 핸들 차단, 승인 GUID/원본 일련번호/해시 불일치 시 생성 없음, 기존 파일 보존, 나중 단계 실패 시 앞서 만든 빈 폴더 유지, 접근 잠금·장치 이름·상위 경로 우회 거부, 취소 후 원본/폴더 보존과 실제 NTFS junction 아래 생성 거부를 확인한다. 기존 `open`과 계획 준비/볼륨 조회는 폴더를 생성하지 않는다.
 
 `commit_transfer_copy_tests.cpp`의 `testTransferWithMissingParents`는 실제 SQLite의 CopyIntent 저장이 폴더 생성보다 먼저임을 확인한다. 정상 복사·확정·원본 제거, 의도 저장 실패 시 생성 없음, 생성/검증 결과 저장 실패·취소 시 원본과 생성된 자료 유지, 잘못된 목적지 볼륨 거부를 검사한다. 한 볼륨에서 저수준 승인 복사 어댑터를 시험하는 계약이며 실제 두 볼륨 v2 승인 계획/앱 지원을 의미하지 않는다.
