@@ -82,7 +82,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
     if (attempt.id.empty() || attempt.planId.empty() || attempt.stepId.empty() ||
         (attempt.direction != TransferDirection::Forward && attempt.direction != TransferDirection::Rollback) ||
         attempt.phase != TransferPhase::Prepared || attempt.stagingFingerprint ||
-        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None ||
+        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.copyResume != CopyResume::None || attempt.stagingCleanup != StagingCleanup::None ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         samePath(attempt.source, attempt.destination) ||
         samePath(attempt.staging, attempt.destination) ||
@@ -96,7 +96,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
 
 // 허용된 증거만 합쳐 다음 단계의 스냅샷을 만드는 함수.
 Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUpdate& update) {
-    if (attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None || attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
+    if (attempt.copyResume != CopyResume::None || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None || attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
         return Result<TransferAttempt>::failure({"transfer.phase_conflict", "Transfer phase changed or the transition is not allowed."});
     }
     if (attempt.phase >= TransferPhase::CopyVerified && attempt.phase <= TransferPhase::SourceRemoved &&
@@ -143,7 +143,7 @@ Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUp
 
 // 일반 단계 전이를 열어두지 않고 명시적 복구 완료만 검증하는 함수.
 Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded) {
-    if (!removalIntentRecorded || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None || (attempt.phase != TransferPhase::SourceRemoveIntent &&
+    if (!removalIntentRecorded || attempt.copyResume != CopyResume::None || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None || (attempt.phase != TransferPhase::SourceRemoveIntent &&
         attempt.phase != TransferPhase::SourceRemoved && attempt.phase != TransferPhase::NeedsRecovery &&
         !(attempt.phase == TransferPhase::DestinationCommitted && attempt.recoveryRemovalIntent)) ||
         !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
@@ -161,7 +161,7 @@ Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool 
 // 파일 정리가 이동 완료나 재실행 허가로 해석되지 않도록 별도 감사값만 갱신하는 함수.
 Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, StagingCleanup next) {
     if ((attempt.phase != TransferPhase::Failed && attempt.phase != TransferPhase::Cancelled && attempt.phase != TransferPhase::NeedsRecovery) ||
-        attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
+        attempt.copyResume == CopyResume::IntentRecorded || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
         !validObject(*attempt.stagingFingerprint) || sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
         !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
         !((attempt.stagingCleanup == StagingCleanup::None && next == StagingCleanup::IntentRecorded) ||
@@ -174,7 +174,7 @@ Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, Sta
 
 // 일반 단계 재개를 허용하지 않고 기록된 최종 복사본의 제거 의도만 만드는 함수.
 Result<TransferAttempt> recordRecoveryRemovalIntent(const TransferAttempt& attempt) {
-    if (attempt.recoveryRemovalIntent || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None ||
+    if (attempt.copyResume != CopyResume::None || attempt.recoveryRemovalIntent || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None ||
         (attempt.phase != TransferPhase::DestinationCommitted && attempt.phase != TransferPhase::SourceRemoveIntent &&
          attempt.phase != TransferPhase::NeedsRecovery) || !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
         !sameObject(*attempt.stagingFingerprint, *attempt.destinationFingerprint) ||
@@ -184,6 +184,24 @@ Result<TransferAttempt> recordRecoveryRemovalIntent(const TransferAttempt& attem
         return Result<TransferAttempt>::failure({"transfer.resume_state", "Stopped committed copy evidence is required"});
     auto result = attempt;
     result.recoveryRemovalIntent = true;
+    return Result<TransferAttempt>::success(std::move(result));
+}
+// 실패 상태를 되돌리지 않고 부분 복사의 의도 또는 전체 검증 결과만 기록하는 함수.
+Result<TransferAttempt> recordCopyResume(const TransferAttempt& attempt, CopyResume next,
+    const std::optional<FileFingerprint>& verified) {
+    const bool intent = next == CopyResume::IntentRecorded;
+    if (attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None ||
+        attempt.destinationFingerprint || !attempt.stagingFingerprint || !validObject(*attempt.stagingFingerprint) ||
+        sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        (attempt.phase != TransferPhase::StagingCreated && attempt.phase != TransferPhase::Failed &&
+         attempt.phase != TransferPhase::Cancelled && attempt.phase != TransferPhase::NeedsRecovery) ||
+        !((intent && attempt.copyResume == CopyResume::None && !verified) ||
+          (next == CopyResume::Verified && attempt.copyResume == CopyResume::IntentRecorded && verified &&
+           sameObject(*attempt.stagingFingerprint, *verified) && sameContent(attempt.sourceFingerprint, *verified))))
+        return Result<TransferAttempt>::failure({"transfer.copy_resume_state", "Recorded incomplete staging evidence and ordered resume intent required"});
+    auto result = attempt;
+    result.copyResume = next;
+    if (verified) result.stagingFingerprint = verified;
     return Result<TransferAttempt>::success(std::move(result));
 }
 } // namespace nookbit::TransferValidation

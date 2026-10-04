@@ -56,6 +56,8 @@ public:
     TransferPhase last{TransferPhase::Prepared};
     std::optional<StagingCleanup> failCleanupAt;
     std::function<void(StagingCleanup)> beforeCleanup;
+    std::optional<CopyResume> failCopyResumeAt;
+    std::function<void(CopyResume)> beforeCopyResume;
     // 실제 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& journal) : inner(journal) {}
     // 새 시도를 실제 DB에 기록하는 함수.
@@ -119,6 +121,16 @@ public:
     Result<void> reconcileCompleted(const TransferAttempt& attempt, const std::string& hash) override {
         return inner.reconcileCompleted(attempt, hash);
     }
+    // 이어쓰기 의도·결과 경계 실패를 주입하거나 실제 저널에 전달하는 함수.
+    Result<void> recordCopyResume(const TransferAttempt& attempt, const std::string& hash, CopyResume next,
+        const std::optional<FileFingerprint>& verified = {}) override {
+        if (beforeCopyResume) beforeCopyResume(next);
+        if (failCopyResumeAt == next) {
+            failCopyResumeAt.reset();
+            return Result<void>::failure({"test.copy_resume", "Injected copy resume record failure"});
+        }
+        return inner.recordCopyResume(attempt, hash, next, verified);
+    }
 };
 
 // 실제 이름 변경 직후 API 검증 실패를 주입하는 복사 어댑터.
@@ -169,10 +181,10 @@ struct Fixture {
     TransferAttempt attempt;
     bool ready{};
     // 원본 파일과 서명·승인·실행 의도를 실제 DB에 저장하는 함수.
-    explicit Fixture(bool multiple = false, bool missingParents = false) {
+    explicit Fixture(bool multiple = false, bool missingParents = false, const std::string& contents = "original contents for transfer copy") {
         expect(directory.isValid(), "temporary fixture");
         const std::filesystem::path root(directory.path().toStdWString());
-        write(root / "source", "original contents for transfer copy");
+        write(root / "source", contents);
         attempt.id = "attempt";
         attempt.planId = "plan";
         attempt.stepId = "step";
@@ -700,6 +712,79 @@ public:
     }
 };
 
+// 실제 중간 취소 복사본의 이어쓰기·전체 검증·기록 실패·재시작을 검사하는 함수.
+void testResumePartialCopy() {
+#ifdef _WIN32
+    const std::string contents(3 * 1024 * 1024 + 37, 'q');
+    for (int scenario = 0; scenario <= 9; ++scenario) {
+        Fixture fixture(false, false, contents);
+        if (!fixture.ready) continue;
+        int checks = 0;
+        // 첫 블록을 쓴 뒤 취소해 실제 부분 임시 파일을 남기는 함수.
+        expect(!fixture.useCase.execute(fixture.attempt, [&] { return ++checks >= 3; }), "original copy should stop after one block");
+        const auto stopped = fixture.journal.load(fixture.attempt.id);
+        expect(stopped && stopped.value().phase == TransferPhase::Cancelled && std::filesystem::file_size(fixture.attempt.staging) == 1024 * 1024,
+            "journal owns a genuine one-block partial file");
+        if (!stopped) continue;
+        if (scenario == 1) fixture.faults.failCopyResumeAt = CopyResume::IntentRecorded;
+        if (scenario == 2) fixture.faults.failCopyResumeAt = CopyResume::Verified;
+        if (scenario == 4) write(fixture.attempt.staging, std::string(1024 * 1024, 'x'));
+        if (scenario == 5) write(fixture.attempt.source, std::string(contents.size(), 'x'));
+        if (scenario == 8) write(fixture.attempt.destination, "unrelated final");
+        const auto before = fingerprint(fixture.attempt.staging);
+        bool intentReached = false;
+        int afterIntentChecks = 0;
+        // 이어쓰기 의도를 저장할 때 원본·임시 파일이 쓰기로부터 보호되는지 확인하는 함수.
+        fixture.faults.beforeCopyResume = [&](CopyResume next) {
+            if (next != CopyResume::IntentRecorded) return;
+            intentReached = true;
+            for (const auto& path : {fixture.attempt.source, fixture.attempt.staging}) {
+                const auto writer = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                expect(writer == INVALID_HANDLE_VALUE, "resume files protected during durable intent");
+                if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+            }
+        };
+        QtPlanHasher hasher;
+        WrongHasher wrong;
+        const IPlanHasher& verifier = scenario == 7 ? static_cast<const IPlanHasher&>(wrong) : hasher;
+        ResumePartialCopyUseCase resume(fixture.history, fixture.faults, fixture.worker, verifier);
+        PartialCopyResumeService service(resume);
+        // 의도 전 또는 의도 직후 취소를 재현하는 함수.
+        const auto result = service.execute(fixture.attempt.id, [&] {
+            return scenario == 3 || (scenario == 6 && intentReached) || (scenario == 9 && intentReached && ++afterIntentChecks >= 2);
+        });
+        if (scenario == 0) {
+            expect(result && result.value().copyResume == CopyResume::Verified && result.value().phase == TransferPhase::Cancelled &&
+                result.value().stagingFingerprint && TransferValidation::sameContent(fixture.attempt.sourceFingerprint, *result.value().stagingFingerprint),
+                "resume stores full verified evidence without changing original cancelled state");
+            expect(!service.execute(fixture.attempt.id), "verified resume cannot write again");
+            WindowsStagingCleanup cleanup;
+            CleanupTransferStagingUseCase useCase(fixture.history, fixture.journal, cleanup, hasher);
+            StagingCleanupService cleanupService(useCase);
+            expect(cleanupService.execute(fixture.attempt.id).hasValue() && !std::filesystem::exists(fixture.attempt.staging),
+                "fully verified resumed copy remains eligible for separate explicit cleanup");
+        } else {
+            expect(!result, "injected resume failure or rejection stops");
+            const auto pending = fixture.journal.load(fixture.attempt.id);
+            expect(pending && pending.value().copyResume == (scenario == 2 || scenario == 6 || scenario == 9 ? CopyResume::IntentRecorded : CopyResume::None),
+                "resume failure leaves only successfully recorded intent");
+            if (scenario != 2 && scenario != 9) expect(sameFingerprint(before, fingerprint(fixture.attempt.staging)), "rejected resume preserves partial bytes and metadata");
+            if (scenario == 9) expect(std::filesystem::file_size(fixture.attempt.staging) == 2 * 1024 * 1024, "second interruption retains two copied blocks without restarting at zero");
+            if (scenario == 1 || scenario == 2 || scenario == 6 || scenario == 9) {
+                SqliteTransferJournal restarted(fixture.database, fixture.migration);
+                ResumePartialCopyUseCase retry(fixture.history, restarted, fixture.worker, hasher);
+                PartialCopyResumeService retryService(retry);
+                const auto completed = retryService.execute(fixture.attempt.id);
+                expect(completed && completed.value().copyResume == CopyResume::Verified, "restart revalidates prefix and safely completes copy");
+            }
+        }
+        if (scenario != 5) expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)), "partial resume preserves original");
+        if (scenario != 8) expect(!std::filesystem::exists(fixture.attempt.destination), "partial resume never commits or deletes original");
+    }
+#endif
+}
+
 // 기록된 최종 복사본과 남은 원본의 명시적 마무리·거부·재시도 경계를 검사하는 함수.
 void testResumeCommittedTransfer() {
 #ifdef _WIN32
@@ -1213,6 +1298,7 @@ int main(int argc, char** argv) {
     testSourceRemovalAndCompletion();
     testExplicitCompletionRecovery();
     testResumeCommittedTransfer();
+    testResumePartialCopy();
     testProtectedRecoveryGuard();
     testVerifiedStagingCleanup();
     testProtectedCleanupSession();

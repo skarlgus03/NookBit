@@ -39,6 +39,7 @@ bool trusted(const OperationPlan& plan, const TransferAttempt& attempt, const IP
     initial.destinationFingerprint.reset();
     initial.error.reset();
     initial.recoveryCompleted = false;
+    initial.copyResume = CopyResume::None;
     initial.recoveryRemovalIntent = false;
     initial.stagingCleanup = StagingCleanup::None;
     if (!PlanSignature::validateFormat(plan) || !TransferValidation::validateNew(initial) || plan.id != attempt.planId ||

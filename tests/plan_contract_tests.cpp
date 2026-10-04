@@ -195,6 +195,7 @@ void testContractMigrationFailure() {
         mutate(path, "ALTER TABLE transfer_events DROP COLUMN recovery_completed") &&
         mutate(path, "ALTER TABLE transfer_events DROP COLUMN staging_cleanup") &&
         mutate(path, "ALTER TABLE transfer_events DROP COLUMN recovery_removal_intent") &&
+        mutate(path, "ALTER TABLE transfer_events DROP COLUMN copy_resume") &&
         mutate(path, "DELETE FROM schema_migrations WHERE version>=3"), "legacy v2 database should be reconstructed");
     const auto initial = directory.filePath("001_initial.sql");
     const auto upgrade = directory.filePath("003_plan_contract.sql");
@@ -213,6 +214,7 @@ void testContractMigrationFailure() {
     expect(QFile::copy(sourceDir + "004_transfer_recovery.sql", directory.filePath("004_transfer_recovery.sql")), "recovery migration fixture should copy");
     expect(QFile::copy(sourceDir + "005_staging_cleanup.sql", directory.filePath("005_staging_cleanup.sql")), "cleanup migration fixture should copy");
     expect(QFile::copy(sourceDir + "006_recovery_removal.sql", directory.filePath("006_recovery_removal.sql")), "removal recovery migration fixture should copy");
+    expect(QFile::copy(sourceDir + "007_copy_resume.sql", directory.filePath("007_copy_resume.sql")), "copy resume migration fixture should copy");
     loaded = repository.loadPlan(plan.id);
     expect(loaded && loaded.value().formatVersion == 1 && loaded.value().planHash == plan.planHash &&
         nookbit::PlanSignature::approvalPayload(loaded.value()) == nookbit::PlanSignature::approvalPayload(plan),

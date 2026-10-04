@@ -5,6 +5,7 @@
 #include <memory>
 
 namespace nookbit {
+struct TransferAttempt;
 
 struct TransferVolume {
     /// 기존 파일 지문과 호환되는 볼륨 일련번호.
@@ -20,7 +21,7 @@ class IStagedCopySession {
 public:
     /// 파일을 삭제하지 않고 보유한 핸들만 해제하는 함수.
     virtual ~IStagedCopySession() = default;
-    /// DB에 먼저 기록할 새 임시 파일의 객체 지문을 반환하는 함수.
+    /// 세션을 연 시점의 임시 파일 객체 지문을 반환하는 함수.
     [[nodiscard]] virtual const FileFingerprint& createdFingerprint() const = 0;
     /// 한 번만 복사하고 내용을 재검증하며 취소·실패 시에도 원본을 유지하는 함수.
     [[nodiscard]] virtual Result<FileFingerprint> copyAndVerify(
@@ -42,6 +43,11 @@ class IStagedCopy : public ITransferVolumeInspector {
 public:
     /// 복사 일꾼을 해제하는 함수.
     ~IStagedCopy() override = default;
+    /// 기록된 임시 객체·원본·앞부분을 보호 검증해 이어쓰기 세션만 여는 함수.
+    [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> openResume(
+        const TransferAttempt&, const MoveContract*, const std::function<bool()>& = {}) {
+        return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.resume_unsupported", "Protected copy resume unsupported"});
+    }
     /// 원본을 검증하고 기존 파일을 덮어쓰지 않는 빈 임시 파일 세션을 만드는 함수.
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,

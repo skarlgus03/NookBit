@@ -2,8 +2,19 @@
 #include <nookbit/application/reconcile_transfer_recovery_use_case.hpp>
 #include <nookbit/application/cleanup_transfer_staging_use_case.hpp>
 #include <nookbit/application/resume_committed_transfer_use_case.hpp>
+#include <nookbit/application/resume_partial_copy_use_case.hpp>
 
 namespace nookbit {
+/// 기존 실행·복구와 직렬화해 부분 임시 복사본만 이어 쓰는 진입점.
+class PartialCopyResumeService final {
+public:
+    /// 외부 소유의 이어쓰기 유스케이스를 빌려 받는 함수.
+    explicit PartialCopyResumeService(ResumePartialCopyUseCase& useCase) : useCase_(useCase) {}
+    /// 같은 시스템 잠금 안에서 명시적 이어쓰기를 요청하는 함수.
+    [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId, const std::function<bool()>& cancelled = {});
+private:
+    ResumePartialCopyUseCase& useCase_;
+};
 /// 실행·복구와 같은 시스템 잠금 안에서 중단된 확정 전송을 마무리하는 진입점.
 class CommittedTransferResumeService final {
 public:

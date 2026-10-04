@@ -252,6 +252,7 @@ public:
     std::optional<FileFingerprint> verifiedCopy;
     bool attempted{false};
     bool commitAttempted{false};
+    uintmax_t resumeOffset{};
 
     // 열린 파일의 소유권과 복사 전 증거를 받는 함수.
     Session(std::vector<Handle> locks, Handle input, Handle output, FileFingerprint fp,
@@ -261,18 +262,20 @@ public:
           expected(std::move(fp)), created(std::move(initial)), metadata(basic), sourcePath(std::move(path)),
           stagingPath(std::move(temporary)) {}
 
-    // 빈 임시 파일의 객체 지문을 반환하는 함수.
+    // 세션을 연 시점의 임시 파일 객체 지문을 반환하는 함수.
     const FileFingerprint& createdFingerprint() const override { return created; }
 
     // 원본을 유지하며 복사·flush·재읽기·메타데이터 검증을 수행하는 함수.
     Result<FileFingerprint> copyAndVerify(const std::function<bool()>& cancelled) override {
         if (std::exchange(attempted, true))
             return Result<FileFingerprint>::failure({"transfer.reused", "Session already attempted"});
-        LARGE_INTEGER zero{};
-        if (!SetFilePointerEx(source.value, zero, nullptr, FILE_BEGIN))
+        LARGE_INTEGER start{};
+        start.QuadPart = static_cast<LONGLONG>(resumeOffset);
+        if (!SetFilePointerEx(source.value, start, nullptr, FILE_BEGIN) ||
+            !SetFilePointerEx(staging.value, start, nullptr, FILE_BEGIN))
             return Result<FileFingerprint>::failure(failure("transfer.seek"));
         std::vector<unsigned char> buffer(1024 * 1024);
-        uintmax_t total{};
+        uintmax_t total{resumeOffset};
         for (;;) {
             if (cancelled && cancelled())
                 return Result<FileFingerprint>::failure({"transfer.cancelled", "Copy cancelled; source retained"});
@@ -500,6 +503,7 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
+    initial.copyResume = CopyResume::None;
     initial.recoveryRemovalIntent = false;
     auto proof = attempt;
     // 저널 상태는 바꾸지 않고 같은 확정 증거의 파일 보호 조건만 재사용한다.
@@ -626,6 +630,7 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
+    initial.copyResume = CopyResume::None;
     initial.recoveryRemovalIntent = false;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
         !validPath(attempt.destination) || !validPath(attempt.staging))
@@ -729,6 +734,7 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(cons
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
     initial.error.reset(); initial.recoveryCompleted = false; initial.stagingCleanup = StagingCleanup::None;
+    initial.copyResume = CopyResume::None;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
         !validPath(attempt.staging) || !validPath(attempt.destination))
         return Return::failure({"transfer.path", "Unsupported cleanup paths"});
@@ -867,9 +873,82 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     return Return::success(std::make_unique<Session>(std::move(locks), std::move(input), std::move(output),
         expected, initial.value(), basic, source, staging));
 }
+// 기록된 임시 객체와 원본의 앞부분을 변경 없이 비교해 이어쓰기 위치를 고정하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const TransferAttempt& attempt,
+    const MoveContract* movement, const std::function<bool()>& cancelled) {
+    using Return = Result<std::unique_ptr<IStagedCopySession>>;
+    auto eligible = attempt;
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared;
+    initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
+    initial.recoveryCompleted = false; initial.recoveryRemovalIntent = false;
+    initial.copyResume = CopyResume::None; initial.stagingCleanup = StagingCleanup::None;
+    if (eligible.copyResume == CopyResume::IntentRecorded) eligible.copyResume = CopyResume::None;
+    if (!TransferValidation::validateNew(initial) || !TransferValidation::recordCopyResume(eligible, CopyResume::IntentRecorded) ||
+        !validPath(attempt.source) || !validPath(attempt.staging) || !validPath(attempt.destination))
+        return Return::failure({"transfer.copy_resume_state", "Recorded partial staging and ordinary paths required"});
+    std::vector<Handle> parents;
+    for (const auto& path : {attempt.source, attempt.staging}) {
+        const auto locked = lockParents(path, parents);
+        if (!locked) return Return::failure(locked.error());
+    }
+    Handle input(CreateFileW(attempt.source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    Handle output(CreateFileW(attempt.staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE || output.value == INVALID_HANDLE_VALUE)
+        return Return::failure(failure("transfer.resume_lock"));
+    for (const auto& item : {std::pair{input.value, attempt.source}, std::pair{output.value, attempt.staging}}) {
+        const auto supported = ordinarySource(item.first, item.second);
+        if (!supported) return Return::failure(supported.error());
+        const auto actual = volume(item.first);
+        if (!actual || !actual.value().localNtfs || (movement &&
+            (movement->strategy != MoveStrategy::VerifiedCopy || movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+             !approvedVolume(actual.value(), item.first == input.value ? movement->sourceVolume : movement->destinationVolume))))
+            return Return::failure({"transfer.volume_changed", "Resume volumes differ from approval or support policy"});
+    }
+    auto sourceEvidence = fingerprint(input.value);
+    const auto sourceHash = digest(input.value, cancelled);
+    const auto staged = fingerprint(output.value);
+    if (!sourceEvidence || !sourceHash || !staged)
+        return Return::failure(!sourceEvidence ? sourceEvidence.error() : !sourceHash ? sourceHash.error() : staged.error());
+    sourceEvidence.value().sha256 = sourceHash.value();
+    if (!sameFingerprint(attempt.sourceFingerprint, sourceEvidence.value()) ||
+        !TransferValidation::sameObject(*attempt.stagingFingerprint, staged.value()) || staged.value().size > attempt.sourceFingerprint.size)
+        return Return::failure({"transfer.resume_changed", "Source, staging identity or staging size changed"});
+    if (GetFileAttributesW(attempt.destination.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
+        return Return::failure({"transfer.resume_destination", "Final path is not provably absent"});
+    LARGE_INTEGER zero{};
+    if (!SetFilePointerEx(input.value, zero, nullptr, FILE_BEGIN) || !SetFilePointerEx(output.value, zero, nullptr, FILE_BEGIN))
+        return Return::failure(failure("transfer.seek"));
+    std::vector<unsigned char> sourceBytes(1024 * 1024), stagedBytes(sourceBytes.size());
+    uintmax_t remaining = staged.value().size;
+    while (remaining) {
+        if (cancelled && cancelled()) return Return::failure({"transfer.cancelled", "Resume prefix check cancelled without writes"});
+        const DWORD wanted = static_cast<DWORD>(std::min<uintmax_t>(remaining, sourceBytes.size()));
+        DWORD sourceRead{}, stagingRead{};
+        if (!ReadFile(input.value, sourceBytes.data(), wanted, &sourceRead, nullptr) ||
+            !ReadFile(output.value, stagedBytes.data(), wanted, &stagingRead, nullptr))
+            return Return::failure(failure("transfer.resume_read"));
+        if (sourceRead != wanted || stagingRead != wanted || !std::equal(sourceBytes.begin(), sourceBytes.begin() + wanted, stagedBytes.begin()))
+            return Return::failure({"transfer.resume_prefix", "Existing staging prefix differs; no data overwritten"});
+        remaining -= wanted;
+    }
+    FILE_BASIC_INFO basic{};
+    if (!GetFileInformationByHandleEx(input.value, FileBasicInfo, &basic, sizeof(basic)))
+        return Return::failure(failure("transfer.resume_metadata"));
+    auto session = std::make_unique<Session>(std::move(parents), std::move(input), std::move(output),
+        attempt.sourceFingerprint, staged.value(), basic, attempt.source, attempt.staging);
+    session->resumeOffset = staged.value().size;
+    return Return::success(std::move(session));
+}
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외에서는 기존 부분 파일을 변경하지 않고 이어쓰기를 거부하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const TransferAttempt&, const MoveContract*, const std::function<bool()>&) {
+    return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.unsupported", "Windows only"});
+}
 // Windows 외에서는 보호 복구 완료 검사를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::open(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<ITransferRecoverySession>>::failure({"transfer.unsupported", "Windows only"});

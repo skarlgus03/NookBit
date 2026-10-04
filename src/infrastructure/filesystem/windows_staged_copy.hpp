@@ -7,6 +7,9 @@ namespace nookbit {
 /// 원본 제거 API 없이 로컬 NTFS의 임시 복사·검증·최종 이름 확정을 수행하는 어댑터.
 class WindowsStagedCopy final : public IStagedCopy {
 public:
+    /// 기존 임시 객체와 원본의 앞부분을 비교하고 보호된 이어쓰기 세션을 여는 함수.
+    [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openResume(
+        const TransferAttempt& attempt, const MoveContract* movement, const std::function<bool()>& cancelled = {}) override;
     /// 기존 경로의 볼륨과 지원 여부를 조회하는 함수.
     [[nodiscard]] Result<TransferVolume> inspectVolume(const std::filesystem::path& path) override;
     /// 원본과 부모 경로를 잠그고 새 임시 파일을 생성하는 함수.

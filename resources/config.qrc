@@ -13,5 +13,6 @@
     <file alias="004_transfer_recovery.sql">../src/infrastructure/persistence_sqlite/migrations/004_transfer_recovery.sql</file>
     <file alias="005_staging_cleanup.sql">../src/infrastructure/persistence_sqlite/migrations/005_staging_cleanup.sql</file>
     <file alias="006_recovery_removal.sql">../src/infrastructure/persistence_sqlite/migrations/006_recovery_removal.sql</file>
+    <file alias="007_copy_resume.sql">../src/infrastructure/persistence_sqlite/migrations/007_copy_resume.sql</file>
   </qresource>
 </RCC>

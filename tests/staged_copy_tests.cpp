@@ -42,6 +42,71 @@ void unchanged(const std::filesystem::path& source, const nookbit::FileFingerpri
 }
 
 #ifdef _WIN32
+// 기록된 임시 객체의 앞부분을 검증하고 나머지만 이어 쓰는 경계를 검사하는 함수.
+void testPartialCopyResume(const std::filesystem::path& root) {
+    using namespace nookbit;
+    std::string bytes(3 * 1024 * 1024 + 37, 'a');
+    for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<char>(i % 251);
+    for (int scenario = 0; scenario <= 11; ++scenario) {
+        const auto folder = root / ("resume-" + std::to_string(scenario));
+        std::filesystem::create_directory(folder);
+        TransferAttempt attempt;
+        attempt.id = "resume"; attempt.planId = "plan"; attempt.stepId = "step";
+        attempt.source = folder / "source"; attempt.staging = folder / "stage"; attempt.destination = folder / "final";
+        write(attempt.source, bytes); write(attempt.staging, "");
+        attempt.sourceFingerprint = fingerprint(attempt.source);
+        attempt.stagingFingerprint = fingerprint(attempt.staging);
+        attempt.phase = TransferPhase::Cancelled;
+        const size_t length = scenario == 8 ? 0 : scenario == 9 ? bytes.size() : 1024 * 1024 + 37;
+        write(attempt.staging, bytes.substr(0, length));
+        if (scenario == 1) write(attempt.staging, bytes + "extra");
+        if (scenario == 2) write(attempt.source, std::string(bytes.size(), 'x'));
+        if (scenario == 3) {
+            std::filesystem::rename(attempt.staging, folder / "held-stage");
+            write(attempt.staging, bytes.substr(0, length));
+        }
+        if (scenario == 4) write(attempt.staging, std::string(length, 'x'));
+        if (scenario == 5) write(attempt.destination, "keep existing final");
+        if (scenario == 6) attempt.stagingFingerprint.reset();
+        const auto before = fingerprint(attempt.staging);
+        HANDLE blocker = INVALID_HANDLE_VALUE;
+        if (scenario == 10) blocker = CreateFileW(attempt.staging.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        WindowsStagedCopy worker;
+        std::optional<MoveContract> movement;
+        if (scenario == 11) {
+            OperationPlan draft;
+            MoveStep step; step.source = attempt.source; step.destination = attempt.destination; step.fingerprint = attempt.sourceFingerprint;
+            draft.steps.push_back(step);
+            PrepareTransferPlanUseCase prepare(worker);
+            const auto contract = prepare.execute(draft);
+            expect(contract.hasValue(), "native resume volume fixture");
+            if (!contract) continue;
+            // 한 볼륨의 저수준 어댑터 검사이며 실제 두 볼륨 승인 계획은 아니다.
+            movement = *contract.value().steps[0].movement;
+            movement->strategy = MoveStrategy::VerifiedCopy; movement->destinationVolume.serial = "0";
+        }
+        // 취소된 검사에서는 임시 파일에 아무것도 쓰지 않는지 확인하는 함수.
+        auto session = worker.openResume(attempt, movement ? &*movement : nullptr, [&] { return scenario == 7; });
+        if (scenario == 0 || scenario == 8 || scenario == 9) {
+            expect(session.hasValue(), "valid recorded prefix opens resume session");
+            if (session) {
+                const auto verified = session.value()->copyAndVerify();
+                expect(verified && TransferValidation::sameContent(attempt.sourceFingerprint, verified.value()) &&
+                    TransferValidation::sameObject(*attempt.stagingFingerprint, verified.value()), "resume retains staging identity and verifies full binary contents");
+                expect(!session.value()->copyAndVerify(), "resume session cannot copy twice");
+            }
+            expect(!std::filesystem::exists(attempt.destination), "resume copy alone does not commit a final file");
+            unchanged(attempt.source, attempt.sourceFingerprint);
+        } else {
+            expect(!session, "invalid prefix, identity, source, destination or lock refuses resume");
+            if (blocker != INVALID_HANDLE_VALUE) CloseHandle(blocker);
+            unchanged(attempt.staging, before);
+            if (scenario != 2) unchanged(attempt.source, attempt.sourceFingerprint);
+            if (scenario == 5) expect(std::filesystem::exists(attempt.destination), "occupied final retained");
+        }
+    }
+}
+
 // 승인된 로컬 NTFS 부모 생성의 성공·거부·보호 경계를 실제 임시 자료로 검사하는 함수.
 void testApprovedParentCreation(const std::filesystem::path& root) {
     using namespace nookbit;
@@ -149,6 +214,7 @@ int main(int argc, char** argv) {
     expect(fixture.isValid(), "temporary directory");
     const std::filesystem::path root(fixture.path().toStdWString());
     testApprovedParentCreation(root);
+    testPartialCopyResume(root);
     nookbit::WindowsStagedCopy worker;
     const auto volume = worker.inspectVolume(root / "missing" / "nested" / "file");
     expect(bool(volume) && volume.value().localNtfs, "inspect existing ancestor on local NTFS");

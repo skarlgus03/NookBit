@@ -2,6 +2,13 @@
 #include "operation_mutex.hpp"
 
 namespace nookbit {
+// 다른 실행·복구와 같은 시스템 잠금 안에서 부분 복사 재개를 요청하는 함수.
+Result<TransferAttempt> PartialCopyResumeService::execute(const std::string& attemptId, const std::function<bool()>& cancelled) {
+    OperationMutex lock;
+    const auto acquired = lock.acquire();
+    if (!acquired) return Result<TransferAttempt>::failure(acquired.error());
+    return useCase_.execute(attemptId, cancelled);
+}
 // 다른 실행·되돌리기·복구와 공유하는 시스템 잠금 안에서 전송을 마무리하는 함수.
 Result<TransferAttempt> CommittedTransferResumeService::execute(const std::string& attemptId, const std::function<bool()>& cancelled) {
     OperationMutex lock;

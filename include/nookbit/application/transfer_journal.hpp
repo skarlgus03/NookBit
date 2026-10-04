@@ -40,6 +40,11 @@ public:
 
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;
+    /// 예상 시도·현재 승인을 대조해 이어쓰기 의도/재시도/전체 검증 증거를 저장하는 함수.
+    [[nodiscard]] virtual Result<void> recordCopyResume(const TransferAttempt&, const std::string&, CopyResume,
+        const std::optional<FileFingerprint>& = {}) {
+        return Result<void>::failure({"transfer.resume_unsupported", "Durable partial copy resume unsupported"});
+    }
 
     /// 단계 하나의 정방향·역방향 시도를 생성 순서대로 읽는 함수.
     [[nodiscard]] virtual Result<std::vector<TransferAttempt>> forStep(const StepId& stepId) const = 0;
