@@ -32,18 +32,19 @@ SafeExecutor::SafeExecutor(ISettingsRepository& settings,
                            IScanner& scanner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
-                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes, ITransferStepExecutor* transfers)
+                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes, ITransferStepExecutor* transfers,
+                           IRollbackTransferStepExecutor* reversals)
     : settings_(settings), verifier_(&verifier), scanner_(scanner),
-      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes), transfers_(transfers) {}
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes), transfers_(transfers), reversals_(reversals) {}
 
 // 검증 객체 없이 되돌리기만 할 실행기를 만드는 생성자.
 SafeExecutor::SafeExecutor(ISettingsRepository& settings,
                            IScanner& scanner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
-                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes)
+                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes, IRollbackTransferStepExecutor* reversals)
     : settings_(settings), verifier_(nullptr), scanner_(scanner),
-      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes) {}
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes), reversals_(reversals) {}
 
 // 복사 전략을 이름 변경으로 대체하지 않고 실제 승인 볼륨을 재확인하는 함수.
 Result<void> SafeExecutor::verifyMovement(const OperationPlan& plan, const MoveStep* step) {
@@ -343,6 +344,35 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
         });
     }
     const auto applied = stepsWithStatus(plan, StepStatus::Applied);
+    if (plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
+        return step->movement->strategy == MoveStrategy::VerifiedCopy;
+    })) {
+        if (!reversals_ || !volumes_ || plan.status != PlanStatus::Completed || applied.size() != 1 ||
+            std::count_if(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) { return step.status != StepStatus::Skipped; }) != 1)
+            return Result<void>::failure({"rollback.transfer_executor_required", "Approved reverse transfer currently requires a dedicated single-step executor."});
+        const auto* step = applied[0];
+        if (!step->source.is_absolute() || !step->destination.is_absolute() || !appDataRoot_.is_absolute() ||
+            PathSafetyValidator::isWithin(step->source, appDataRoot_) || PathSafetyValidator::isWithin(step->destination, appDataRoot_))
+            return Result<void>::failure({"rollback.path_invalid", "Reverse transfer paths must stay outside application data."});
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        const auto current = prepare.verify(plan);
+        if (!current) return current;
+        static std::atomic<std::uint64_t> reverseCounter{0};
+        const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+        const auto attemptId = "rollback-" + std::to_string(stamp) + "-" + std::to_string(++reverseCounter);
+        const auto staging = step->source.parent_path() / (".nookbit-" + attemptId + ".tmp");
+        const auto reversed = reversals_->rollback(plan.id, step->id, attemptId, staging);
+        if (!reversed) {
+            const auto after = history_.loadPlan(plan.id);
+            if (!after) return Result<void>::failure(after.error());
+            if (after.value().status == PlanStatus::RollingBack) {
+                const auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+            }
+        }
+        // 완료 트랜잭션에서 이미 RolledBack을 기록하므로 중복 기록하지 않는다.
+        return reversed;
+    }
     return rollbackAppliedSteps(plan, applied, PlanStatus::RolledBack, false);
 }
 

@@ -3,6 +3,7 @@
 #include <nookbit/application/ports.hpp>
 #include <nookbit/application/staged_copy.hpp>
 #include <nookbit/application/execute_transfer_step_use_case.hpp>
+#include <nookbit/application/rollback_transfer_use_case.hpp>
 #include <nookbit/application/use_cases/verify_saved_plan.hpp>
 
 #include <filesystem>
@@ -20,7 +21,8 @@ public:
                  IHistoryRepository& history,
                  std::filesystem::path appDataRoot,
                  ITransferVolumeInspector* volumes = nullptr,
-                 ITransferStepExecutor* transfers = nullptr);
+                 ITransferStepExecutor* transfers = nullptr,
+                 IRollbackTransferStepExecutor* reversals = nullptr);
 
     /// 검증이 필요 없는 되돌리기만 할 때 사용할 실행기를 만드는 생성자.
     SafeExecutor(ISettingsRepository& settings,
@@ -28,7 +30,8 @@ public:
                  IPlanHasher& hasher,
                  IHistoryRepository& history,
                  std::filesystem::path appDataRoot,
-                 ITransferVolumeInspector* volumes = nullptr);
+                 ITransferVolumeInspector* volumes = nullptr,
+                 IRollbackTransferStepExecutor* reversals = nullptr);
 
     /// 승인된 계획의 파일들을 덮어쓰기 없이 순서대로 실행하는 함수.
     [[nodiscard]] Result<void> execute(
@@ -60,6 +63,7 @@ private:
     std::filesystem::path appDataRoot_;
     ITransferVolumeInspector* volumes_;
     ITransferStepExecutor* transfers_{nullptr};
+    IRollbackTransferStepExecutor* reversals_{nullptr};
 };
 
 } // namespace nookbit

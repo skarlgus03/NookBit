@@ -1,5 +1,6 @@
 #include <nookbit/application/rollback_transfer_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <algorithm>
 
 namespace nookbit {
@@ -19,8 +20,8 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
         return Result<TransferAttempt>::failure({"transfer.rollback_origin", "A completed forward result is required"});
     const auto plan = history_.loadPlan(forward.value().planId);
     if (!plan) return Result<TransferAttempt>::failure(plan.error());
-    if (!PlanSignature::validateFormat(plan.value()) || plan.value().formatVersion != 1)
-        return Result<TransferAttempt>::failure({"transfer.volume_verifier_required", "V2 rollback requires current volume verification."});
+    const auto format = PlanSignature::validateFormat(plan.value());
+    if (!format) return Result<TransferAttempt>::failure(format.error());
     const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) {
         return item.id == forward.value().stepId;
     });
@@ -32,6 +33,16 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
         !TransferValidation::sameObject(step->fingerprint, forward.value().sourceFingerprint) ||
         !TransferValidation::sameContent(step->fingerprint, *forward.value().destinationFingerprint))
         return Result<TransferAttempt>::failure({"transfer.rollback_untrusted", "Plan signature or original transfer is untrusted"});
+    std::optional<MoveContract> reverseMovement;
+    if (plan.value().formatVersion == 2) {
+        if (step->movement->strategy != MoveStrategy::VerifiedCopy)
+            return Result<TransferAttempt>::failure({"transfer.strategy_invalid", "Reverse copy requires a verified-copy approval."});
+        PrepareTransferPlanUseCase prepare(copy_);
+        const auto current = prepare.verify(plan.value());
+        if (!current) return Result<TransferAttempt>::failure(current.error());
+        reverseMovement = *step->movement;
+        std::swap(reverseMovement->sourceVolume, reverseMovement->destinationVolume);
+    }
     TransferAttempt undo;
     undo.id = rollbackAttemptId;
     undo.planId = plan.value().id;
@@ -70,9 +81,27 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
         if (!intent) return Result<TransferAttempt>::failure(intent.error());
     }
     CommitTransferCopyUseCase copy(copy_, journal_);
-    const auto committed = copy.execute(undo, cancelled);
+    const auto committed = copy.execute(undo, cancelled, reverseMovement ? &*reverseMovement : nullptr);
     if (!committed) return committed;
     FinalizeTransferUseCase finalize(journal_, removal_, history_, hasher_);
     return finalize.execute(undo.id, cancelled);
+}
+
+// 이전 성공 결과를 모호하게 선택하거나 다른 계획의 기록을 재사용하지 않는 함수.
+Result<void> RollbackTransferUseCase::rollback(const PlanId& planId, const StepId& stepId,
+    const std::string& attemptId, const std::filesystem::path& staging) {
+    const auto attempts = journal_.forStep(stepId);
+    if (!attempts) return Result<void>::failure(attempts.error());
+    const TransferAttempt* origin = nullptr;
+    for (const auto& attempt : attempts.value()) {
+        if (attempt.planId == planId && attempt.direction == TransferDirection::Forward && attempt.phase == TransferPhase::Completed) {
+            if (origin) return Result<void>::failure({"transfer.rollback_ambiguous", "Multiple forward results require review."});
+            origin = &attempt;
+        }
+    }
+    if (!origin) return Result<void>::failure({"transfer.rollback_origin", "No completed forward result for this plan and step."});
+    const auto result = execute(origin->id, attemptId, staging);
+    if (!result) return Result<void>::failure(result.error());
+    return Result<void>::success();
 }
 } // namespace nookbit

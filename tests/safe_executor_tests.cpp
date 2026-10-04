@@ -8,6 +8,7 @@
 #include "infrastructure/filesystem/safe_executor.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
@@ -19,6 +20,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QSqlQuery>
+#include <QUuid>
 
 #include <chrono>
 #include <filesystem>
@@ -350,10 +353,12 @@ public:
 class LogicalCopy final : public nookbit::IStagedCopy {
 public:
     nookbit::WindowsStagedCopy native;
+    nookbit::ITransferVolumeInspector* volumes{nullptr};
+    std::optional<nookbit::MoveContract> forwardContract;
     int approvedCalls{0};
     bool fail{false};
     // 실제 볼륨 조회를 전달하는 함수.
-    nookbit::Result<nookbit::TransferVolume> inspectVolume(const std::filesystem::path& path) override { return native.inspectVolume(path); }
+    nookbit::Result<nookbit::TransferVolume> inspectVolume(const std::filesystem::path& path) override { return volumes ? volumes->inspectVolume(path) : native.inspectVolume(path); }
     // 승인 없는 API가 호출되면 테스트를 실패시키는 함수.
     nookbit::Result<std::unique_ptr<nookbit::IStagedCopySession>> open(const std::filesystem::path&, const nookbit::FileFingerprint&, const std::filesystem::path&) override {
         return nookbit::Result<std::unique_ptr<nookbit::IStagedCopySession>>::failure({"test.legacy_copy", "No legacy fallback"});
@@ -363,6 +368,17 @@ public:
         const nookbit::FileFingerprint& expected, const std::filesystem::path& staging, const nookbit::MoveContract& movement) override {
         ++approvedCalls;
         expect(movement.strategy == nookbit::MoveStrategy::VerifiedCopy, "copy must receive approved copy strategy");
+        if (!forwardContract) forwardContract = movement;
+        else expect(movement.sourceVolume.guidPath == forwardContract->destinationVolume.guidPath &&
+            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath, "reverse copy must swap only approved volume roles");
+        // 논리적 볼륨 조회에서도 의도 기록 뒤 변경된 계약을 거부하는 함수.
+        const auto matches = [&](const std::filesystem::path& path, const nookbit::PlanVolume& approved) {
+            const auto actual = inspectVolume(path);
+            return actual && actual.value().id == approved.serial &&
+                QString::fromStdWString(actual.value().name).compare(QString::fromStdString(approved.guidPath), Qt::CaseInsensitive) == 0;
+        };
+        if (!matches(source, movement.sourceVolume) || !matches(staging, movement.destinationVolume))
+            return nookbit::Result<std::unique_ptr<nookbit::IStagedCopySession>>::failure({"transfer.volume_changed", "Logical protected volume changed"});
         if (fail) return nookbit::Result<std::unique_ptr<nookbit::IStagedCopySession>>::failure({"test.copy", "Injected copy failure"});
         // 실제 두 볼륨 시험이 아닌 조율 테스트이므로 GUID 검사는 별도 native 테스트에서 다룬다.
         return native.open(source, expected, staging);
@@ -373,6 +389,7 @@ public:
 class LogicalRemoval final : public nookbit::ITransferSourceRemoval {
 public:
     nookbit::WindowsTransferSourceRemoval native;
+    std::optional<nookbit::MoveContract> forwardContract;
     int approvedCalls{0};
     bool fail{false};
     // 승인 없는 API 호출에는 세션을 열지 않는 함수.
@@ -383,10 +400,32 @@ public:
     nookbit::Result<std::unique_ptr<nookbit::ITransferRemovalSession>> openApproved(const nookbit::TransferAttempt& attempt, const nookbit::MoveContract& movement) override {
         ++approvedCalls;
         expect(movement.strategy == nookbit::MoveStrategy::VerifiedCopy, "removal must receive approved copy strategy");
+        if (!forwardContract) forwardContract = movement;
+        else expect(movement.sourceVolume.guidPath == forwardContract->destinationVolume.guidPath &&
+            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath, "reverse removal must swap only approved volume roles");
         if (fail) return nookbit::Result<std::unique_ptr<nookbit::ITransferRemovalSession>>::failure({"test.removal", "Injected volume/removal failure"});
         return native.open(attempt);
     }
 };
+
+// 역전송 완료 저장 실패를 임시 SQLite에 주입하는 함수.
+bool failRollbackCompletion(const QString& path) {
+    const auto name = QUuid::createUuid().toString();
+    bool result = false;
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+        db.setDatabaseName(path);
+        if (db.open()) {
+            QSqlQuery query(db);
+            result = query.exec("CREATE TRIGGER fail_rollback_completion BEFORE INSERT ON events "
+                "WHEN NEW.event_type='step_status_changed' AND json_extract(NEW.payload_json,'$.status')='rolled_back' "
+                "BEGIN SELECT RAISE(ABORT,'test rollback completion'); END");
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+    return result;
+}
 
 // 실제 임시 파일과 SQLite로 v2 승인부터 이동·되돌리기 및 직전 볼륨 변경 거부를 검사하는 함수.
 void testV2Execution(int scenario) {
@@ -438,12 +477,16 @@ void testV2Execution(int scenario) {
     FailingIntentHistory changingHistory(history);
     nookbit::SqliteTransferJournal journal(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
     LogicalCopy logicalCopy;
+    logicalCopy.volumes = &volumes;
     LogicalRemoval logicalRemoval;
     logicalCopy.fail = scenario == 6;
     logicalRemoval.fail = scenario == 7;
     nookbit::ExecuteTransferStepUseCase transfer(scenario == 4 ? static_cast<nookbit::IStagedCopy&>(volumes.native) : logicalCopy,
         logicalRemoval, journal, history, hasher);
-    nookbit::SafeExecutor executor(settings, verifier, scanner, hasher, changingHistory, appData, &volumes, scenario >= 4 ? &transfer : nullptr);
+    nookbit::WindowsTransferFileInspector files;
+    nookbit::RollbackTransferUseCase reverse(journal, changingHistory, logicalCopy, logicalRemoval, files, hasher);
+    nookbit::SafeExecutor executor(settings, verifier, scanner, hasher, changingHistory, appData, &volumes, scenario >= 4 ? &transfer : nullptr,
+        scenario >= 8 ? &reverse : nullptr);
     nookbit::SafeExecutor missingExecutor(settings, verifier, scanner, hasher, history, appData);
     expect(!missingExecutor.execute(approved.value(), approval.value(), {sourcePath}), "v2 execution must require a volume port");
     volumes.changed = true;
@@ -457,13 +500,46 @@ void testV2Execution(int scenario) {
         expect(saved && attempts && attempts.value().size() == 1, "approved transfer must have one durable attempt");
         if (!saved || !attempts || attempts.value().empty()) return;
         const auto& attempt = attempts.value()[0];
-        if (scenario == 5) {
+        if (scenario == 5 || scenario >= 8) {
             expect(moved && !QFile::exists(source) && readFile(destination) == "v2 original contents" &&
                 saved.value().status == nookbit::PlanStatus::Completed && saved.value().steps[0].status == nookbit::StepStatus::Applied &&
                 saved.value().planHash == frozen.value().planHash && attempt.phase == nookbit::TransferPhase::Completed,
                 "logical-volume transfer must complete exactly once without mutating approval");
             expect(logicalCopy.approvedCalls == 1 && logicalRemoval.approvedCalls == 1, "v2 transfer must use approved ports only");
-            expect(!executor.rollback(frozen.value().id), "copy result must not use rename rollback");
+            if (scenario == 5) expect(!executor.rollback(frozen.value().id), "copy result must not use rename rollback");
+            else {
+                if (scenario == 9) expect(writeFile(source, "new occupant"), "reverse collision fixture should exist");
+                if (scenario == 10) volumes.changed = true;
+                if (scenario == 11) changingHistory.onIntent = [&] { volumes.changed = true; };
+                if (scenario == 12) logicalCopy.fail = true;
+                if (scenario == 13) logicalRemoval.fail = true;
+                if (scenario == 14) expect(failRollbackCompletion(directory.filePath("history.sqlite")), "reverse completion SQL failure should install");
+                if (scenario == 15) expect(writeFile(destination, "changed moved contents"), "changed moved file should write");
+                const auto undone = executor.rollback(frozen.value().id);
+                const auto after = history.loadPlan(frozen.value().id);
+                const auto records = journal.forStep(approved.value().steps[0].id);
+                expect(after && records && after.value().planHash == frozen.value().planHash, "reverse must preserve original approval hash");
+                if (!after || !records) return;
+                if (scenario == 8) {
+                    expect(undone && readFile(source) == "v2 original contents" && !QFile::exists(destination) &&
+                        after.value().status == nookbit::PlanStatus::RolledBack && records.value().size() == 2 &&
+                        records.value()[1].direction == nookbit::TransferDirection::Rollback && records.value()[1].phase == nookbit::TransferPhase::Completed,
+                        "approved v2 reverse must restore contents and atomically record a separate completed attempt");
+                    expect(logicalCopy.approvedCalls == 2 && logicalRemoval.approvedCalls == 2, "both directions must use approved ports only");
+                    expect(!executor.rollback(frozen.value().id), "completed v2 reverse must not repeat");
+                } else if (scenario == 9 || scenario == 10 || scenario == 15) {
+                    expect(!undone && QFile::exists(destination) && after.value().status == nookbit::PlanStatus::Completed && records.value().size() == 1,
+                        "reverse preflight rejection must leave completion and forward result unchanged");
+                    if (scenario == 9) expect(readFile(source) == "new occupant", "reverse must not overwrite original-location occupant");
+                } else {
+                    expect(!undone && after.value().status == nookbit::PlanStatus::NeedsRecovery && records.value().size() == 2 &&
+                        records.value()[1].phase == nookbit::TransferPhase::NeedsRecovery, "reverse failure must preserve durable recovery evidence");
+                    if (scenario == 14) expect(readFile(source) == "v2 original contents" && !QFile::exists(destination), "post-removal record failure must retain restored file");
+                    else expect(readFile(destination) == "v2 original contents", "pre-removal failure must retain moved file");
+                    if (scenario == 13) expect(readFile(source) == "v2 original contents", "reverse removal failure must retain restored copy too");
+                    if (scenario == 11 || scenario == 12) expect(!QFile::exists(source), "reverse copy rejection must not create original-location file");
+                }
+            }
         } else {
             expect(!moved && QFile::exists(source) && saved.value().status == nookbit::PlanStatus::NeedsRecovery &&
                 attempt.phase == nookbit::TransferPhase::NeedsRecovery, "failed transfer must retain original and durable recovery evidence");
@@ -607,7 +683,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
-    for (int scenario = 0; scenario < 8; ++scenario) testV2Execution(scenario);
+    for (int scenario = 0; scenario < 16; ++scenario) testV2Execution(scenario);
     testBatchFailureRollsBackEarlierMove(false);
     testBatchFailureRollsBackEarlierMove(true);
     testBatchFailureRollsBackEarlierMove(false, true);
