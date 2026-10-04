@@ -12,6 +12,12 @@ RollbackTransferUseCase::RollbackTransferUseCase(ITransferJournal& journal, IHis
 // 충돌·내용 변경을 먼저 확인하고 정방향과 별개인 역전송 시도를 수행하는 함수.
 Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forwardAttemptId,
     const std::string& rollbackAttemptId, const std::filesystem::path& staging, const std::function<bool()>& cancelled) {
+    return executeImpl(forwardAttemptId, rollbackAttemptId, staging, cancelled, false);
+}
+
+// 읽기 전용 점검과 실제 역전송에서 같은 기록·파일 검증을 사용하는 함수.
+Result<TransferAttempt> RollbackTransferUseCase::executeImpl(const std::string& forwardAttemptId,
+    const std::string& rollbackAttemptId, const std::filesystem::path& staging, const std::function<bool()>& cancelled, bool inspectOnly) {
     if (cancelled && cancelled()) return Result<TransferAttempt>::failure({"transfer.cancelled", "Rollback cancelled before any changes"});
     const auto forward = journal_.load(forwardAttemptId);
     if (!forward) return Result<TransferAttempt>::failure(forward.error());
@@ -28,7 +34,8 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
     if (!PlanSignature::isSha256Hex(plan.value().planHash) ||
         plan.value().planHash != hasher_.sha256(PlanSignature::approvalPayload(plan.value())) ||
         step == plan.value().steps.end() ||
-        (plan.value().status != PlanStatus::Completed && plan.value().status != PlanStatus::RollingBack) ||
+        (plan.value().status != PlanStatus::Completed && plan.value().status != PlanStatus::RollingBack &&
+            !(inspectOnly && (plan.value().status == PlanStatus::Executing || plan.value().status == PlanStatus::Failed))) ||
         (step->status != StepStatus::Applied && step->status != StepStatus::RollbackIntentRecorded) ||
         !TransferValidation::sameObject(step->fingerprint, forward.value().sourceFingerprint) ||
         !TransferValidation::sameContent(step->fingerprint, *forward.value().destinationFingerprint))
@@ -57,7 +64,7 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
     const auto attempts = journal_.forStep(step->id);
     if (!attempts) return Result<TransferAttempt>::failure(attempts.error());
     for (const auto& prior : attempts.value()) {
-        if (prior.id == rollbackAttemptId || (!TransferValidation::isTerminal(prior.phase)) ||
+        if ((!inspectOnly && prior.id == rollbackAttemptId) || (!TransferValidation::isTerminal(prior.phase)) ||
             prior.phase == TransferPhase::NeedsRecovery ||
             (prior.direction == TransferDirection::Rollback && prior.phase == TransferPhase::Completed))
             return Result<TransferAttempt>::failure({"transfer.attempt_conflict", "Rollback is unresolved, already completed or the ID is reused"});
@@ -72,6 +79,7 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
     if (target.presence != TransferPathPresence::Missing || target.volumeId != step->fingerprint.volumeId)
         return Result<TransferAttempt>::failure({"transfer.rollback_destination", "Original location must be absent on its recorded volume; no rename or overwrite fallback"});
     if (cancelled && cancelled()) return Result<TransferAttempt>::failure({"transfer.cancelled", "Rollback cancelled before intent"});
+    if (inspectOnly) return Result<TransferAttempt>::success(std::move(undo));
     if (plan.value().status == PlanStatus::Completed) {
         const auto rolling = history_.appendEvent(PlanStatusChanged{undo.planId, PlanStatus::RollingBack});
         if (!rolling) return Result<TransferAttempt>::failure(rolling.error());
@@ -88,19 +96,37 @@ Result<TransferAttempt> RollbackTransferUseCase::execute(const std::string& forw
 }
 
 // 이전 성공 결과를 모호하게 선택하거나 다른 계획의 기록을 재사용하지 않는 함수.
-Result<void> RollbackTransferUseCase::rollback(const PlanId& planId, const StepId& stepId,
-    const std::string& attemptId, const std::filesystem::path& staging) {
+Result<std::string> RollbackTransferUseCase::findForward(const PlanId& planId, const StepId& stepId) {
     const auto attempts = journal_.forStep(stepId);
-    if (!attempts) return Result<void>::failure(attempts.error());
+    if (!attempts) return Result<std::string>::failure(attempts.error());
     const TransferAttempt* origin = nullptr;
     for (const auto& attempt : attempts.value()) {
         if (attempt.planId == planId && attempt.direction == TransferDirection::Forward && attempt.phase == TransferPhase::Completed) {
-            if (origin) return Result<void>::failure({"transfer.rollback_ambiguous", "Multiple forward results require review."});
+            if (origin) return Result<std::string>::failure({"transfer.rollback_ambiguous", "Multiple forward results require review."});
             origin = &attempt;
         }
     }
-    if (!origin) return Result<void>::failure({"transfer.rollback_origin", "No completed forward result for this plan and step."});
-    const auto result = execute(origin->id, attemptId, staging);
+    if (!origin) return Result<std::string>::failure({"transfer.rollback_origin", "No completed forward result for this plan and step."});
+    return Result<std::string>::success(origin->id);
+}
+
+// 배치 되돌리기를 시작하기 전에 해당 단계의 안전 조건을 읽기 전용으로 검사하는 함수.
+Result<void> RollbackTransferUseCase::verifyRollback(const PlanId& planId, const StepId& stepId) {
+    const auto origin = findForward(planId, stepId);
+    if (!origin) return Result<void>::failure(origin.error());
+    const auto forward = journal_.load(origin.value());
+    if (!forward) return Result<void>::failure(forward.error());
+    const auto result = executeImpl(origin.value(), "preflight", forward.value().source.parent_path() / ".nookbit-preflight.tmp", {}, true);
+    if (!result) return Result<void>::failure(result.error());
+    return Result<void>::success();
+}
+
+// 사전 점검 후에도 실제 실행 직전에 동일한 조건을 다시 검사하는 함수.
+Result<void> RollbackTransferUseCase::rollback(const PlanId& planId, const StepId& stepId,
+    const std::string& attemptId, const std::filesystem::path& staging) {
+    const auto origin = findForward(planId, stepId);
+    if (!origin) return Result<void>::failure(origin.error());
+    const auto result = execute(origin.value(), attemptId, staging);
     if (!result) return Result<void>::failure(result.error());
     return Result<void>::success();
 }

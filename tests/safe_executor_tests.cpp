@@ -70,6 +70,8 @@ public:
 class FailingIntentHistory final : public nookbit::IHistoryRepository {
 public:
     std::function<void()> onIntent;
+    int failIntentAt{2};
+    bool injectIntentFailure{true};
     QString changedSource;
     QString changedRollbackDestination;
     // 실제 SQLite 저장소를 테스트 대리자로 받는 생성자.
@@ -93,7 +95,7 @@ public:
             changed && (changed->status == nookbit::StepStatus::IntentRecorded ||
                         changed->status == nookbit::StepStatus::RollbackIntentRecorded) && onIntent) onIntent();
         if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
-            changed && changed->status == nookbit::StepStatus::IntentRecorded && ++intents_ == 2) {
+            changed && changed->status == nookbit::StepStatus::IntentRecorded && ++intents_ == failIntentAt && injectIntentFailure) {
             if (!changedSource.isEmpty()) {
                 QFile source(changedSource);
                 if (!source.open(QIODevice::WriteOnly) || source.write("changed source") != 14) {
@@ -370,7 +372,9 @@ public:
         expect(movement.strategy == nookbit::MoveStrategy::VerifiedCopy, "copy must receive approved copy strategy");
         if (!forwardContract) forwardContract = movement;
         else expect(movement.sourceVolume.guidPath == forwardContract->destinationVolume.guidPath &&
-            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath, "reverse copy must swap only approved volume roles");
+            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath ||
+            movement.sourceVolume.guidPath == forwardContract->sourceVolume.guidPath && movement.destinationVolume.guidPath == forwardContract->destinationVolume.guidPath,
+            "copy contracts must retain or reverse approved volume roles");
         // 논리적 볼륨 조회에서도 의도 기록 뒤 변경된 계약을 거부하는 함수.
         const auto matches = [&](const std::filesystem::path& path, const nookbit::PlanVolume& approved) {
             const auto actual = inspectVolume(path);
@@ -402,7 +406,9 @@ public:
         expect(movement.strategy == nookbit::MoveStrategy::VerifiedCopy, "removal must receive approved copy strategy");
         if (!forwardContract) forwardContract = movement;
         else expect(movement.sourceVolume.guidPath == forwardContract->destinationVolume.guidPath &&
-            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath, "reverse removal must swap only approved volume roles");
+            movement.destinationVolume.guidPath == forwardContract->sourceVolume.guidPath ||
+            movement.sourceVolume.guidPath == forwardContract->sourceVolume.guidPath && movement.destinationVolume.guidPath == forwardContract->destinationVolume.guidPath,
+            "removal contracts must retain or reverse approved volume roles");
         if (fail) return nookbit::Result<std::unique_ptr<nookbit::ITransferRemovalSession>>::failure({"test.removal", "Injected volume/removal failure"});
         return native.open(attempt);
     }
@@ -575,6 +581,117 @@ void testV2Execution(int scenario) {
     }
 }
 
+// 복사·이름 변경·복사 배치의 완료와 역순 보상 및 불확실한 실패 중단을 검사하는 함수.
+void testMixedBatch(int scenario) {
+    QTemporaryDir directory(QCoreApplication::applicationDirPath() + "/mixed-batch-XXXXXX");
+    expect(directory.isValid(), "mixed batch directory should exist");
+    if (!directory.isValid()) return;
+    expect(QDir().mkpath(directory.filePath("organized-input")), "rename source parent should exist");
+    const QString first = directory.filePath("first.jpg"), second = directory.filePath("organized-input/second.jpg"), last = directory.filePath("z-last.jpg");
+    expect(writeFile(first, "first bytes") && writeFile(second, "second bytes") && writeFile(last, "last bytes"), "mixed originals should exist");
+    const std::vector<std::filesystem::path> selected{std::filesystem::path(first.toStdWString()),
+        std::filesystem::path(second.toStdWString()), std::filesystem::path(last.toStdWString())};
+    const std::filesystem::path appData(directory.filePath("app-data").toStdWString());
+    TestSettingsRepository settings;
+    settings.settings.homeRoot = std::filesystem::path(directory.filePath("organized").toStdWString());
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, appData);
+    nookbit::QtPlanHasher hasher;
+    const auto database = directory.filePath("history.sqlite");
+    const auto migration = projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
+    nookbit::SqliteHistoryRepository history(database, migration);
+    nookbit::SqliteTransferJournal journal(database, migration);
+    ChangingVolumes volumes;
+    volumes.differentDestination = true;
+    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, &volumes);
+    const auto ruleSet = rules.load();
+    if (!ruleSet) { expect(false, "mixed rules should load"); return; }
+    const auto draft = preview.execute({ruleSet.value().version, selected});
+    if (!draft) { expect(false, "mixed preview should build"); return; }
+    expect(draft.value().steps.size() == 3 && draft.value().steps[0].movement->strategy == nookbit::MoveStrategy::VerifiedCopy &&
+        draft.value().steps[1].movement->strategy == nookbit::MoveStrategy::Rename && draft.value().steps[2].movement->strategy == nookbit::MoveStrategy::VerifiedCopy,
+        "fixture must be copy then rename then copy");
+    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history, &volumes);
+    const auto frozen = freezer.execute(draft.value(), selected, settings.settings);
+    if (!frozen) { expect(false, "mixed plan should freeze"); return; }
+    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, &volumes);
+    nookbit::ApprovePlanUseCase approver(verifier, history);
+    const auto approval = approver.execute(frozen.value().id, selected, settings.settings);
+    const auto approved = history.loadPlan(frozen.value().id);
+    if (!approval || !approved) { expect(false, "mixed plan should approve"); return; }
+    const auto& plan = approved.value();
+    const auto target1 = QString::fromStdWString(plan.steps[0].destination.wstring());
+    const auto target2 = QString::fromStdWString(plan.steps[1].destination.wstring());
+    const auto target3 = QString::fromStdWString(plan.steps[2].destination.wstring());
+    expect(QDir().mkpath(QFileInfo(target1).absolutePath()), "mixed target parent should exist");
+    FailingIntentHistory changing(history);
+    changing.failIntentAt = 3;
+    changing.injectIntentFailure = scenario == 1 || scenario == 2 || scenario == 4 || scenario == 7;
+    if (scenario == 2) changing.changedSource = last;
+    LogicalCopy copy;
+    copy.volumes = &volumes;
+    LogicalRemoval removal;
+    nookbit::WindowsTransferFileInspector files;
+    nookbit::ExecuteTransferStepUseCase transfer(copy, removal, journal, history, hasher);
+    nookbit::RollbackTransferUseCase reverse(journal, changing, copy, removal, files, hasher);
+    nookbit::SafeExecutor executor(settings, verifier, scanner, hasher, changing, appData, &volumes, &transfer, &reverse);
+    nookbit::SafeExecutor missingReverse(settings, verifier, scanner, hasher, history, appData, &volumes, &transfer);
+    expect(!missingReverse.execute(plan, approval.value(), selected), "copy batch must require reverse capability before starting");
+    int intents = 0;
+    changing.onIntent = [&] {
+        ++intents;
+        if (intents == 3) {
+            if (scenario == 3) copy.fail = true;
+            if (scenario == 4) expect(writeFile(first, "new occupant"), "compensation collision should install");
+            if (scenario == 7) removal.fail = true;
+        }
+    };
+    const auto result = executor.execute(plan, approval.value(), selected);
+    const auto saved = history.loadPlan(plan.id);
+    expect(saved && saved.value().planHash == plan.planHash, "mixed execution must preserve approval hash");
+    if (!saved) return;
+    if (scenario == 1 || scenario == 2) {
+        expect(!result && result.error().code == "execute.batch_rolled_back" && saved.value().status == nookbit::PlanStatus::Failed &&
+            saved.value().steps[0].status == nookbit::StepStatus::RolledBack && saved.value().steps[1].status == nookbit::StepStatus::RolledBack &&
+            readFile(first) == "first bytes" && readFile(second) == "second bytes" && !QFile::exists(target1) && !QFile::exists(target2),
+            "certain later failure must compensate copy and rename in reverse order");
+        const auto attempts = journal.forStep(plan.steps[0].id);
+        expect(attempts && attempts.value().size() == 2 && attempts.value()[1].phase == nookbit::TransferPhase::Completed,
+            "batch compensation must keep separate completed reverse evidence");
+        return;
+    }
+    if (scenario == 3 || scenario == 4 || scenario == 7) {
+        expect(!result && saved.value().status == nookbit::PlanStatus::NeedsRecovery && readFile(target1) == "first bytes",
+            "uncertain transfer or compensation must not hide moved copy");
+        if (scenario == 7) expect(readFile(second) == "second bytes" && !QFile::exists(target2) && readFile(first) == "first bytes" &&
+            saved.value().steps[1].status == nookbit::StepStatus::RolledBack, "partial compensation must preserve restored files and known rolled-back status");
+        else expect(readFile(target2) == "second bytes" && !QFile::exists(second), "uncertain failure or blocked preflight must not begin compensation");
+        if (scenario == 4) expect(readFile(first) == "new occupant", "compensation must never overwrite collision occupant");
+        return;
+    }
+    expect(result && saved.value().status == nookbit::PlanStatus::Completed && !QFile::exists(first) && !QFile::exists(second) && !QFile::exists(last),
+        "mixed batch must complete only after all three moves");
+    if (!result) return;
+    changing.onIntent = {};
+    if (scenario == 5) expect(writeFile(first, "new occupant"), "manual batch undo collision should install");
+    if (scenario == 6) changing.onIntent = [&] { removal.fail = true; };
+    const auto undone = executor.rollback(plan.id);
+    const auto after = history.loadPlan(plan.id);
+    if (!after) { expect(false, "mixed rollback plan should read"); return; }
+    if (scenario == 5) {
+        expect(!undone && after.value().status == nookbit::PlanStatus::Completed && QFile::exists(target1) && QFile::exists(target2) && QFile::exists(target3),
+            "batch undo must preflight every file before undoing any file");
+    } else if (scenario == 6) {
+        expect(!undone && after.value().status == nookbit::PlanStatus::NeedsRecovery && readFile(last) == "last bytes" && QFile::exists(target3) &&
+            QFile::exists(target1) && QFile::exists(target2) && !QFile::exists(first) && !QFile::exists(second),
+            "late reverse failure must retain both copies and stop earlier reverse steps");
+    } else expect(undone && after.value().status == nookbit::PlanStatus::RolledBack && after.value().planHash == plan.planHash &&
+        readFile(first) == "first bytes" && readFile(second) == "second bytes" && readFile(last) == "last bytes" &&
+        !QFile::exists(target1) && !QFile::exists(target2) && !QFile::exists(target3), "mixed batch undo must restore all originals with unchanged approval");
+}
+
 // 두 번째 단계의 기록 실패나 목적지 충돌 뒤 첫 이동을 되돌리는지 검사하는 함수.
 void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool sourceChanged = false, bool v2 = false) {
     QTemporaryDir directory(QCoreApplication::applicationDirPath() + "/batch-execute-XXXXXX");
@@ -684,6 +801,7 @@ int main(int argc, char* argv[]) {
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
     for (int scenario = 0; scenario < 16; ++scenario) testV2Execution(scenario);
+    for (int scenario = 0; scenario < 8; ++scenario) testMixedBatch(scenario);
     testBatchFailureRollsBackEarlierMove(false);
     testBatchFailureRollsBackEarlierMove(true);
     testBatchFailureRollsBackEarlierMove(false, true);

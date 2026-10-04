@@ -52,12 +52,6 @@ Result<void> SafeExecutor::verifyMovement(const OperationPlan& plan, const MoveS
     if (!valid) return valid;
     if (plan.formatVersion == 1) return Result<void>::success();
     if (!volumes_) return Result<void>::failure({"execute.volume_verifier_required", "V2 execution requires volume verification."});
-    const bool hasCopy = std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
-        return item.status != StepStatus::Skipped && item.movement->strategy != MoveStrategy::Rename;
-    });
-    if (hasCopy && (!transfers_ || std::count_if(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
-        return item.status != StepStatus::Skipped;
-    }) != 1)) return Result<void>::failure({"execute.transfer_executor_required", "Verified copy currently requires a dedicated single-step transfer executor."});
     PrepareTransferPlanUseCase prepare(*volumes_);
     if (!step) return prepare.verify(plan);
     OperationPlan single;
@@ -91,6 +85,12 @@ Result<void> SafeExecutor::execute(
         plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
+    const bool hasCopy = saved.formatVersion == 2 && std::any_of(saved.steps.begin(), saved.steps.end(), [](const MoveStep& item) {
+        return item.status != StepStatus::Skipped && item.movement && item.movement->strategy == MoveStrategy::VerifiedCopy;
+    });
+    if (hasCopy && (!transfers_ || (!reversals_ && std::count_if(saved.steps.begin(), saved.steps.end(), [](const MoveStep& item) {
+        return item.status != StepStatus::Skipped;
+    }) > 1))) return Result<void>::failure({"execute.transfer_executor_required", "Copy batches require transfer and reverse-transfer services."});
     const auto movement = verifyMovement(saved);
     if (!movement) return movement;
     if (saved.planHash != plan.planHash ||
@@ -168,9 +168,20 @@ Result<void> SafeExecutor::execute(
             if (!transferred) {
                 const auto marked = markNeedsRecovery(plan.id);
                 if (!marked) return marked;
+                return transferred;
             }
-            // 전송 완료 트랜잭션이 이미 단계와 계획을 완료하므로 중복 기록하지 않는다.
-            return transferred;
+            const auto recorded = history_.loadPlan(plan.id);
+            if (!recorded) return Result<void>::failure(recorded.error());
+            const auto completedStep = std::find_if(recorded.value().steps.begin(), recorded.value().steps.end(), [&](const MoveStep& item) { return item.id == step->id; });
+            if (completedStep == recorded.value().steps.end() || completedStep->status != StepStatus::Applied ||
+                recorded.value().planHash != saved.planHash ||
+                recorded.value().planHash != hasher_.sha256(PlanSignature::approvalPayload(recorded.value()))) {
+                const auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+                return Result<void>::failure({"execute.transfer_record_invalid", "Transfer result is not backed by an intact applied-step record."});
+            }
+            appliedSteps.push_back(step);
+            continue;
         }
         auto moved = WindowsFileMover::moveNoReplace(step->source, step->destination);
         if (!moved) {
@@ -218,6 +229,10 @@ Result<void> SafeExecutor::execute(
         }
         appliedSteps.push_back(step);
     }
+    const auto currentPlan = history_.loadPlan(plan.id);
+    if (!currentPlan) return Result<void>::failure(currentPlan.error());
+    // 마지막 복사 단계가 이미 원자적으로 전체 완료를 기록했다면 중복하지 않는다.
+    if (currentPlan.value().status == PlanStatus::Completed) return Result<void>::success();
     auto completed = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Completed});
     if (!completed) {
         return Result<void>::failure({
@@ -232,7 +247,7 @@ Result<void> SafeExecutor::markNeedsRecovery(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     for (const auto& step : loaded.value().steps) {
-        if (step.status == StepStatus::Skipped || step.status == StepStatus::NeedsRecovery) continue;
+        if (step.status == StepStatus::Skipped || step.status == StepStatus::NeedsRecovery || step.status == StepStatus::RolledBack) continue;
         auto changed = history_.appendEvent(
             StepStatusChanged{planId, step.id, StepStatus::NeedsRecovery});
         if (!changed) return changed;
@@ -246,9 +261,10 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     const std::vector<const MoveStep*>& applied,
     PlanStatus finalStatus,
     bool duringExecution) {
-    if (plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
+    const bool hasCopy = plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
         return step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
-    })) return Result<void>::failure({"rollback.transfer_executor_required", "V2 copy rollback requires approved reverse-transfer integration."});
+    });
+    if (hasCopy && !reversals_) return Result<void>::failure({"rollback.transfer_executor_required", "Copy rollback requires reverse-transfer services."});
     const auto movement = verifyMovement(plan);
     if (!movement) {
         if (duringExecution) {
@@ -261,14 +277,17 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
         return Result<void>::failure({"rollback.no_steps", "There are no applied files to undo."});
     }
     for (const auto* step : applied) {
+        const bool copyStep = plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy;
+        Result<void> reverseReady = Result<void>::success();
+        if (copyStep) reverseReady = reversals_->verifyRollback(plan.id, step->id);
         if (!step->fingerprint.sha256 ||
             !PlanSignature::isSha256Hex(*step->fingerprint.sha256) ||
             !step->source.is_absolute() || !step->destination.is_absolute() ||
             !appDataRoot_.is_absolute() ||
             PathSafetyValidator::isWithin(step->source, appDataRoot_) ||
             PathSafetyValidator::isWithin(step->destination, appDataRoot_) ||
-            probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
-            probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
+            !reverseReady || (!copyStep && (probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
+            probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing))) {
             if (duringExecution) {
                 auto marked = markNeedsRecovery(plan.id);
                 if (!marked) return marked;
@@ -283,6 +302,19 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     if (!started) return started;
     for (auto iterator = applied.rbegin(); iterator != applied.rend(); ++iterator) {
         const auto* step = *iterator;
+        if (plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
+            static std::atomic<std::uint64_t> reverseCounter{0};
+            const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+            const auto attemptId = "rollback-" + std::to_string(stamp) + "-" + std::to_string(++reverseCounter);
+            const auto staging = step->source.parent_path() / (".nookbit-" + attemptId + ".tmp");
+            const auto reversed = reversals_->rollback(plan.id, step->id, attemptId, staging);
+            if (!reversed) {
+                const auto marked = markNeedsRecovery(plan.id);
+                if (!marked) return marked;
+                return reversed;
+            }
+            continue;
+        }
         auto intent = history_.appendEvent(
             StepStatusChanged{plan.id, step->id, StepStatus::RollbackIntentRecorded});
         if (!intent) {
@@ -323,6 +355,9 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             return reverted;
         }
     }
+    const auto currentPlan = history_.loadPlan(plan.id);
+    if (!currentPlan) return Result<void>::failure(currentPlan.error());
+    if (currentPlan.value().status == finalStatus) return Result<void>::success();
     return history_.appendEvent(PlanStatusChanged{plan.id, finalStatus});
 }
 
@@ -347,9 +382,10 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
     if (plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
         return step->movement->strategy == MoveStrategy::VerifiedCopy;
     })) {
-        if (!reversals_ || !volumes_ || plan.status != PlanStatus::Completed || applied.size() != 1 ||
-            std::count_if(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) { return step.status != StepStatus::Skipped; }) != 1)
-            return Result<void>::failure({"rollback.transfer_executor_required", "Approved reverse transfer currently requires a dedicated single-step executor."});
+        if (applied.size() != 1 || std::count_if(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) { return step.status != StepStatus::Skipped; }) != 1)
+            return rollbackAppliedSteps(plan, applied, PlanStatus::RolledBack, false);
+        if (!reversals_ || !volumes_ || plan.status != PlanStatus::Completed)
+            return Result<void>::failure({"rollback.transfer_executor_required", "Approved reverse transfer requires its dedicated executor."});
         const auto* step = applied[0];
         if (!step->source.is_absolute() || !step->destination.is_absolute() || !appDataRoot_.is_absolute() ||
             PathSafetyValidator::isWithin(step->source, appDataRoot_) || PathSafetyValidator::isWithin(step->destination, appDataRoot_))
