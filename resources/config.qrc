@@ -10,5 +10,6 @@
     <file alias="001_initial.sql">../src/infrastructure/persistence_sqlite/migrations/001_initial.sql</file>
     <file alias="002_transfer_journal.sql">../src/infrastructure/persistence_sqlite/migrations/002_transfer_journal.sql</file>
     <file alias="003_plan_contract.sql">../src/infrastructure/persistence_sqlite/migrations/003_plan_contract.sql</file>
+    <file alias="004_transfer_recovery.sql">../src/infrastructure/persistence_sqlite/migrations/004_transfer_recovery.sql</file>
   </qresource>
 </RCC>

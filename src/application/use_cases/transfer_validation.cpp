@@ -82,7 +82,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
     if (attempt.id.empty() || attempt.planId.empty() || attempt.stepId.empty() ||
         (attempt.direction != TransferDirection::Forward && attempt.direction != TransferDirection::Rollback) ||
         attempt.phase != TransferPhase::Prepared || attempt.stagingFingerprint ||
-        attempt.destinationFingerprint || attempt.error ||
+        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         samePath(attempt.source, attempt.destination) ||
         samePath(attempt.staging, attempt.destination) ||
@@ -139,6 +139,22 @@ Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUp
     if (update.destinationFingerprint) next.destinationFingerprint = update.destinationFingerprint;
     next.error = update.error;
     return Result<TransferAttempt>::success(std::move(next));
+}
+
+// 일반 단계 전이를 열어두지 않고 명시적 복구 완료만 검증하는 함수.
+Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded) {
+    if (!removalIntentRecorded || attempt.recoveryCompleted || (attempt.phase != TransferPhase::SourceRemoveIntent &&
+        attempt.phase != TransferPhase::SourceRemoved && attempt.phase != TransferPhase::NeedsRecovery) ||
+        !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
+        !sameObject(*attempt.stagingFingerprint, *attempt.destinationFingerprint) ||
+        !sameContent(attempt.sourceFingerprint, *attempt.destinationFingerprint) ||
+        !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint))
+        return Result<TransferAttempt>::failure({"transfer.recovery_state", "Recorded removal intent and verified final evidence are required"});
+    auto result = attempt;
+    result.phase = TransferPhase::Completed;
+    result.error.reset();
+    result.recoveryCompleted = true;
+    return Result<TransferAttempt>::success(std::move(result));
 }
 
 } // namespace nookbit::TransferValidation

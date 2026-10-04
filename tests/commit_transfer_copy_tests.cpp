@@ -4,6 +4,7 @@
 #include <nookbit/application/rollback_transfer_use_case.hpp>
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
+#include "infrastructure/filesystem/windows_transfer_recovery.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
@@ -569,6 +570,145 @@ void testSourceRemovalAndCompletion() {
 #endif
 }
 
+// 임시 DB의 완료 실패 트리거를 제거하여 명시적 재시도를 시험하는 함수.
+void clearCompletionFault(const QString& path) {
+    const auto name = QUuid::createUuid().toString();
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+        db.setDatabaseName(path);
+        expect(db.open(), "recovery SQL fixture open");
+        QSqlQuery query(db);
+        expect(query.exec("DROP TRIGGER reject_completion"), "recovery trigger removal");
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+}
+
+// 완료 기록만 잃은 실제 전송의 복구·충돌 거부·재시작 복원·SQL 원자성을 검사하는 함수.
+void testExplicitCompletionRecovery() {
+#ifdef _WIN32
+    for (int scenario = 0; scenario <= 12; ++scenario) {
+        Fixture fixture(scenario == 11);
+        if (!fixture.ready) continue;
+        const auto copied = fixture.useCase.execute(fixture.attempt);
+        expect(copied.hasValue(), "recovery copy fixture");
+        if (!copied) continue;
+        WindowsTransferSourceRemoval removal;
+        QtPlanHasher hasher;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        if (scenario == 12) {
+            std::filesystem::rename(fixture.attempt.source, fixture.attempt.source.parent_path() / "held-original");
+            expect(fixture.journal.advance(fixture.attempt.id, {TransferPhase::DestinationCommitted,
+                TransferPhase::NeedsRecovery, {}, {}, Error{"test.no_intent", "No removal was authorized"}}).hasValue(), "missing removal intent fixture");
+        } else {
+            const auto boundary = (scenario == 0 || scenario == 2) ? TransferPhase::SourceRemoved : TransferPhase::Completed;
+            fixture.faults.failAt = boundary;
+            if (scenario == 2 || scenario == 3) {
+                // 해당 결과 기록부터 연결 전체가 끊긴 상황을 재현하는 함수.
+                fixture.faults.beforeRecord = [&](TransferPhase phase) {
+                    if (phase == boundary) fixture.faults.persistent = true;
+                };
+            }
+            expect(!finalize.execute(fixture.attempt.id), "interrupted completion fixture");
+        }
+        const auto before = fixture.journal.load(fixture.attempt.id);
+        const auto savedPlan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(before && savedPlan, "recovery state should load");
+        if (!before || !savedPlan) continue;
+        if (scenario == 4 || scenario == 11) {
+            expect(fixture.history.appendEvent(PlanStatusChanged{fixture.attempt.planId, PlanStatus::NeedsRecovery}).hasValue(), "recovery parent fixture");
+            expect(fixture.history.appendEvent(StepStatusChanged{fixture.attempt.planId, fixture.attempt.stepId, StepStatus::NeedsRecovery}).hasValue(), "recovery step fixture");
+            if (scenario == 11) expect(fixture.history.appendEvent(StepStatusChanged{
+                fixture.attempt.planId, "pending-step", StepStatus::NeedsRecovery}).hasValue(), "unresolved sibling fixture");
+        }
+        if (scenario == 5) write(fixture.attempt.source, "new occupant");
+        if (scenario == 6) write(fixture.attempt.destination, "changed destination");
+        if (scenario == 7) {
+            std::filesystem::rename(fixture.attempt.destination, fixture.attempt.destination.parent_path() / "held-final");
+            write(fixture.attempt.destination, "original contents for transfer copy");
+        }
+        if (scenario == 8) write(fixture.attempt.staging, "unowned staging");
+        if (scenario == 9) completionFault(fixture.database);
+        WindowsTransferRecoveryGuard guard;
+        ReconcileTransferRecoveryUseCase recovery(fixture.history, fixture.journal, guard, hasher);
+        TransferRecoveryService service(recovery);
+        WrongHasher wrong;
+        ReconcileTransferRecoveryUseCase untrusted(fixture.history, fixture.journal, guard, wrong);
+        const auto result = scenario == 10 ? untrusted.execute(fixture.attempt.id) : service.execute(fixture.attempt.id);
+        const bool allowed = scenario <= 4 || scenario == 11;
+        expect(bool(result) == allowed, "only proven completed moves may recover");
+        if (allowed) {
+            SqliteTransferJournal reopened(fixture.database, fixture.migration);
+            const auto restored = reopened.load(fixture.attempt.id);
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            expect(restored && restored.value().phase == TransferPhase::Completed && restored.value().recoveryCompleted &&
+                !restored.value().error, "recovery audit should replay after restart without reporting a success as an error");
+            expect(plan && plan.value().steps[0].status == StepStatus::Applied && plan.value().planHash == savedPlan.value().planHash &&
+                plan.value().status == (scenario == 11 ? PlanStatus::NeedsRecovery : PlanStatus::Completed), "only resolved step and eligible parent should complete");
+            expect(!service.execute(fixture.attempt.id), "recovery cannot repeat completion");
+            expect(!std::filesystem::exists(fixture.attempt.source) && !std::filesystem::exists(fixture.attempt.staging) &&
+                sameFingerprint(*copied.value().destinationFingerprint, fingerprint(fixture.attempt.destination)), "completion recovery changes no files");
+        } else {
+            const auto unchanged = fixture.journal.load(fixture.attempt.id);
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            expect(unchanged && unchanged.value().phase == before.value().phase && plan &&
+                plan.value().steps[0].status == savedPlan.value().steps[0].status && plan.value().status == savedPlan.value().status,
+                "rejected or failed recovery leaves all records unchanged");
+            expect(std::filesystem::exists(fixture.attempt.destination), "rejected recovery preserves destination");
+            if (scenario == 5) expect(std::filesystem::exists(fixture.attempt.source), "original-location occupant preserved");
+            if (scenario == 8) expect(std::filesystem::exists(fixture.attempt.staging), "unowned staging preserved");
+            if (scenario == 12) expect(std::filesystem::exists(fixture.attempt.source.parent_path() / "held-original"), "unlogged original preserved");
+            if (scenario == 9) {
+                clearCompletionFault(fixture.database);
+                expect(service.execute(fixture.attempt.id).hasValue(), "atomic failed recovery may be explicitly retried");
+            }
+        }
+    }
+#endif
+}
+
+// 복구 저장 동안 최종 파일 쓰기·삭제가 막히고 실제 GUID 변경도 거부되는지 검사하는 함수.
+void testProtectedRecoveryGuard() {
+#ifdef _WIN32
+    Fixture fixture;
+    if (!fixture.ready) return;
+    expect(fixture.useCase.execute(fixture.attempt).hasValue(), "protected recovery copy");
+    fixture.faults.failAt = TransferPhase::Completed;
+    WindowsTransferSourceRemoval removal;
+    QtPlanHasher hasher;
+    FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+    expect(!finalize.execute(fixture.attempt.id), "protected recovery interrupted completion");
+    const auto state = fixture.journal.load(fixture.attempt.id);
+    if (!state) { expect(false, "protected recovery state"); return; }
+    WindowsTransferRecoveryGuard guard;
+    {
+        auto session = guard.open(state.value(), nullptr);
+        expect(session.hasValue(), "protected recovery session opens without mutation");
+        if (!session) return;
+        expect(session.value()->verify().hasValue(), "protected final evidence verifies");
+        HANDLE writer = CreateFileW(fixture.attempt.destination.c_str(), GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        expect(writer == INVALID_HANDLE_VALUE, "recovery final cannot be written while record is saved");
+        if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+        expect(!DeleteFileW(fixture.attempt.destination.c_str()), "recovery final cannot be deleted while record is saved");
+    }
+    OperationPlan draft;
+    MoveStep step;
+    step.source = fixture.attempt.source; step.destination = fixture.attempt.destination;
+    step.fingerprint = fixture.attempt.sourceFingerprint;
+    draft.steps.push_back(step);
+    PrepareTransferPlanUseCase prepare(fixture.worker);
+    const auto prepared = prepare.execute(draft);
+    expect(prepared.hasValue(), "recovery volume lookup fixture");
+    if (!prepared) return;
+    auto movement = *prepared.value().steps[0].movement;
+    movement.strategy = MoveStrategy::VerifiedCopy;
+    movement.sourceVolume.guidPath[11] = movement.sourceVolume.guidPath[11] == 'a' ? 'b' : 'a';
+    expect(!guard.open(state.value(), &movement), "protected source-parent GUID must match approval even when source is absent");
+    expect(sameFingerprint(*state.value().destinationFingerprint, fingerprint(fixture.attempt.destination)), "volume rejection preserves final file");
+#endif
+}
+
 // 실제 전송 완료 기록을 가진 임시 파일만 역전송하며 실패 경계를 검사하는 함수.
 void testRollbackTransfers() {
 #ifdef _WIN32
@@ -625,6 +765,16 @@ void testRollbackTransfers() {
                 expect(std::filesystem::exists(fixture.attempt.source), "failed undo retains restored or collision file");
                 if (scenario == 3 || scenario == 5) expect(sameFingerprint(moved, fingerprint(fixture.attempt.destination)), "pre-removal failure retains moved file");
                 if (scenario == 4 || scenario == 7) expect(!std::filesystem::exists(fixture.attempt.destination), "post-removal failure preserves restored file only");
+                if (scenario == 4 || scenario == 7) {
+                    if (scenario == 7) clearCompletionFault(fixture.database);
+                    WindowsTransferRecoveryGuard guard;
+                    ReconcileTransferRecoveryUseCase recovery(fixture.history, fixture.journal, guard, hasher);
+                    TransferRecoveryService service(recovery);
+                    expect(service.execute("undo").hasValue(), "interrupted reverse completion should recover");
+                    const auto recovered = fixture.history.loadPlan(fixture.attempt.planId);
+                    expect(recovered && recovered.value().status == PlanStatus::RolledBack &&
+                        recovered.value().steps[0].status == StepStatus::RolledBack, "reverse recovery must not mark step applied");
+                }
             }
             if (scenario == 1 || scenario == 5) expect(fingerprint(fixture.attempt.source).sha256 ==
                 hasher.sha256(scenario == 1 ? "new original-location file" : "late original-location collision"), "undo never overwrites original-location collision");
@@ -671,6 +821,8 @@ int main(int argc, char** argv) {
     testRejectedFiles();
     testReadOnlyTransferRecovery();
     testSourceRemovalAndCompletion();
+    testExplicitCompletionRecovery();
+    testProtectedRecoveryGuard();
     testRollbackTransfers();
     testApprovedRemovalVolumes();
 #endif

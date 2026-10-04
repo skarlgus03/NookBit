@@ -24,6 +24,11 @@ public:
         return Result<void>::failure({"transfer.completion_unsupported", "Atomic rollback completion is unsupported"});
     }
 
+    /// 보호 검사 중인 예상 시도·승인 해시가 그대로일 때 완료와 상위 기록을 원자적으로 복구하는 함수.
+    [[nodiscard]] virtual Result<void> reconcileCompleted(const TransferAttempt&, const std::string&) {
+        return Result<void>::failure({"transfer.recovery_unsupported", "Atomic recovery completion is unsupported"});
+    }
+
     /// 재시작 후 전송 시도의 마지막 스냅샷을 복원하는 함수.
     [[nodiscard]] virtual Result<TransferAttempt> load(const std::string& attemptId) const = 0;
 

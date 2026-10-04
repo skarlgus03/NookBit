@@ -21,6 +21,8 @@ public:
     [[nodiscard]] Result<void> completeForward(const std::string& attemptId) override;
     /// 역전송 완료와 되돌린 단계·계획을 한 트랜잭션으로 저장하는 함수.
     [[nodiscard]] Result<void> completeRollback(const std::string& attemptId) override;
+    /// 예상 증거·승인 해시·제거 의도가 그대로일 때 완료 기록을 원자적으로 복구하는 함수.
+    [[nodiscard]] Result<void> reconcileCompleted(const TransferAttempt& expected, const std::string& planHash) override;
     /// 이벤트를 순서대로 재생해 마지막 스냅샷을 검증·복원하는 함수.
     [[nodiscard]] Result<TransferAttempt> load(const std::string& attemptId) const override;
     /// 한 단계에 속한 시도를 생성 순서대로 읽는 함수.
@@ -28,7 +30,8 @@ public:
 
 private:
     /// 방향에 맞는 실행 상태와 완료 상태를 검사해 원자적으로 저장하는 함수.
-    [[nodiscard]] Result<void> complete(const std::string& attemptId, TransferDirection direction);
+    [[nodiscard]] Result<void> complete(const std::string& attemptId, TransferDirection direction,
+        const TransferAttempt* recovery = nullptr, const std::string& planHash = {});
     /// 연결을 열고 공유 Schema를 지원 버전까지 이행하는 함수.
     [[nodiscard]] Result<void> ensureOpen() const;
     /// 현재 트랜잭션에 단계별 증거 이벤트를 추가하는 함수.

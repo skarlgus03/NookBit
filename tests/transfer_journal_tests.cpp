@@ -204,6 +204,59 @@ void testJournalFailureAndEvidence() {
     expect(!journal.load("attempt"), "snapshot/event disagreement must be rejected, not treated as success");
 }
 
+// 명시적 복구의 예상 증거·제거 의도·이벤트 원자성을 DB만으로 검사하는 함수.
+void testRecoveryCompletionContract() {
+    using namespace nookbit;
+    QTemporaryDir directory;
+    Fixture fixture(directory.path());
+    expect(fixture.ready, "recovery journal fixture");
+    if (!fixture.ready) return;
+    const auto dbPath = directory.filePath("history.sqlite");
+    SqliteTransferJournal journal(dbPath, migrationPath());
+    expect(journal.begin(fixture.attempt).hasValue(), "recovery prepared fixture");
+    FileFingerprint stage{0, 1000, "target-volume", "copy-file", std::nullopt};
+    expect(journal.advance("attempt", {TransferPhase::Prepared, TransferPhase::CopyIntent}).hasValue() &&
+        journal.advance("attempt", {TransferPhase::CopyIntent, TransferPhase::StagingCreated, stage}).hasValue(), "recovery staging fixture");
+    stage.size = fixture.attempt.sourceFingerprint.size;
+    stage.sha256 = fixture.attempt.sourceFingerprint.sha256;
+    expect(journal.advance("attempt", {TransferPhase::StagingCreated, TransferPhase::CopyVerified, stage}).hasValue() &&
+        journal.advance("attempt", {TransferPhase::CopyVerified, TransferPhase::CommitIntent}).hasValue() &&
+        journal.advance("attempt", {TransferPhase::CommitIntent, TransferPhase::DestinationCommitted, {}, stage}).hasValue(), "recovery committed fixture");
+    expect(journal.advance("attempt", {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent}).hasValue(), "record removal intent");
+    const auto expected = journal.load("attempt");
+    expect(expected.hasValue(), "expected recovery state");
+    if (!expected) return;
+    auto forged = expected.value();
+    forged.destinationFingerprint->fileId = "substituted";
+    expect(!journal.reconcileCompleted(forged, fixture.plan.planHash), "recovery must compare exact final identity snapshot");
+    expect(!journal.reconcileCompleted(expected.value(), std::string(64, 'f')), "recovery must compare saved approval hash");
+    expect(journal.advance("attempt", {TransferPhase::SourceRemoveIntent, TransferPhase::NeedsRecovery,
+        {}, {}, Error{"test.stop", "Interrupted"}}).hasValue(), "recovery phase changed fixture");
+    expect(!journal.reconcileCompleted(expected.value(), fixture.plan.planHash), "stale recovery observation cannot overwrite changed phase");
+    const auto current = journal.load("attempt");
+    expect(current.hasValue(), "current recovery state");
+    if (!current) return;
+    expect(!journal.advance("attempt", {TransferPhase::NeedsRecovery, TransferPhase::Completed}), "ordinary advance cannot bypass recovery authority");
+    expect(!TransferValidation::reconcileCompleted(current.value(), false), "removal intent provenance is mandatory");
+    const auto count = sql(dbPath, "SELECT count(*) FROM transfer_events").toInt();
+    expect(sql(dbPath, "CREATE TRIGGER fail_recovery BEFORE INSERT ON events WHEN NEW.event_type='transfer_recovery_completed' BEGIN SELECT RAISE(ABORT,'recovery event failure'); END").isValid(), "recovery audit failure fixture");
+    expect(!journal.reconcileCompleted(current.value(), fixture.plan.planHash), "recovery audit failure must fail transaction");
+    const auto unchanged = journal.load("attempt");
+    const auto plan = fixture.history.loadPlan("plan");
+    expect(unchanged && unchanged.value().phase == TransferPhase::NeedsRecovery && plan &&
+        plan.value().steps[0].status == StepStatus::IntentRecorded && plan.value().status == PlanStatus::Executing &&
+        sql(dbPath, "SELECT count(*) FROM transfer_events").toInt() == count, "recovery audit failure rolls back attempt step parent and events");
+    expect(sql(dbPath, "DROP TRIGGER fail_recovery").isValid(), "remove recovery audit fault");
+    expect(journal.reconcileCompleted(current.value(), fixture.plan.planHash).hasValue(), "explicit recovery retries after failed SQL transaction");
+    SqliteTransferJournal reopened(dbPath, migrationPath());
+    const auto restored = reopened.load("attempt");
+    expect(restored && restored.value().phase == TransferPhase::Completed && restored.value().recoveryCompleted &&
+        !restored.value().error, "recovery completion audit replays separately from errors");
+    expect(!journal.reconcileCompleted(current.value(), fixture.plan.planHash), "completed recovery cannot be repeated with old snapshot");
+    expect(sql(dbPath, "DELETE FROM transfer_events WHERE phase='source_remove_intent'").isValid(), "remove historical intent in corruption fixture");
+    expect(!reopened.load("attempt"), "replaying a recovered completion without removal intent must reject corruption");
+}
+
 // 마이그레이션 중 SQL 실패가 부분 테이블·버전을 남기지 않고 재시도 가능한지 검사하는 함수.
 void testMigrationFailureIsAtomic() {
     QTemporaryDir directory;
@@ -226,6 +279,8 @@ void testMigrationFailureIsAtomic() {
     expect(QFile::copy(migrationPath(), initial), "initial migration should copy to the fixture");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("003_plan_contract.sql"),
                       QDir(migrations).filePath("003_plan_contract.sql")), "v3 migration should copy to the fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("004_transfer_recovery.sql"),
+                      QDir(migrations).filePath("004_transfer_recovery.sql")), "v4 migration should copy to the fixture");
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "broken migration fixture should open");
     if (!broken.isOpen()) return;
@@ -242,8 +297,43 @@ void testMigrationFailureIsAtomic() {
            "temporary broken migration should be replaced with the valid fixture");
     const auto repaired = repository.loadPlan("plan");
     expect(repaired && repaired.value().planHash == hash &&
-               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3,
+               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
            "repaired migration should succeed without losing the old plan");
+}
+
+// v3 전송 기록 보존과 복구 감사 컬럼 마이그레이션 실패의 원자성을 검사하는 함수.
+void testRecoveryMigrationCompatibility() {
+    QTemporaryDir directory;
+    const auto dbPath = directory.filePath("history.sqlite");
+    std::string oldHash;
+    {
+        Fixture fixture(directory.path());
+        expect(fixture.ready, "recovery migration legacy fixture");
+        oldHash = fixture.plan.planHash;
+        nookbit::SqliteTransferJournal journal(dbPath, migrationPath());
+        expect(journal.begin(fixture.attempt).hasValue(), "legacy transfer event fixture");
+    }
+    expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN recovery_completed").isValid() &&
+        sql(dbPath, "DELETE FROM schema_migrations WHERE version=4").isValid(), "legacy v3 database should be reconstructed");
+    const auto brokenPath = directory.filePath("004_transfer_recovery.sql");
+    QFile broken(brokenPath);
+    expect(broken.open(QIODevice::WriteOnly), "broken recovery migration opens");
+    if (!broken.isOpen()) return;
+    broken.write("ALTER TABLE transfer_events ADD COLUMN recovery_completed INTEGER NOT NULL DEFAULT 0; INVALID SQL;");
+    broken.close();
+    nookbit::SqliteHistoryRepository upgraded(dbPath, directory.filePath("001_initial.sql"));
+    expect(!upgraded.loadPlan("plan"), "invalid recovery migration rejects opening");
+    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3 &&
+        sql(dbPath, "SELECT count(*) FROM pragma_table_info('transfer_events') WHERE name='recovery_completed'").toInt() == 0,
+        "failed recovery migration rolls back column and version together");
+    expect(QFile::remove(brokenPath) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("004_transfer_recovery.sql"), brokenPath),
+        "recovery migration may be repaired");
+    const auto plan = upgraded.loadPlan("plan");
+    expect(plan && plan.value().planHash == oldHash, "recovery schema upgrade preserves original signature");
+    nookbit::SqliteTransferJournal reopened(dbPath, directory.filePath("001_initial.sql"));
+    const auto attempt = reopened.load("attempt");
+    expect(attempt && attempt.value().phase == nookbit::TransferPhase::Prepared && !attempt.value().recoveryCompleted,
+        "old events migrate as ordinary events without fabricating recovery");
 }
 
 // 이전 Schema·해시 보존과 더 높은 버전 쓰기 거부를 검사하는 함수.
@@ -266,16 +356,16 @@ void testMigrationCompatibility() {
         const auto loaded = upgraded.loadPlan("plan");
         expect(loaded && loaded.value().planHash == oldHash && loaded.value().status == nookbit::PlanStatus::Executing,
                "v1 migration must preserve the plan hash and execution state");
-        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 3,
-               "v2/v3 schema should apply exactly once");
+        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
+               "v2/v3/v4 schema should apply exactly once");
     }
-    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(4,'future')").isValid(), "future schema fixture should save");
+    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(5,'future')").isValid(), "future schema fixture should save");
     nookbit::SqliteHistoryRepository tooOld(dbPath, migrationPath());
     auto unsupported = tooOld.loadPlan("plan");
     expect(!unsupported && unsupported.error().code == "history.schema_too_new",
            "future schema must be rejected before writes");
     expect(!tooOld.loadPlan("plan"), "failed opening must not become usable on the next call");
-    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 4,
+    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 5,
            "future migration marker must remain intact");
 }
 } // namespace
@@ -285,7 +375,9 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testTransferPhasesAndRoundTrip();
     testJournalFailureAndEvidence();
+    testRecoveryCompletionContract();
     testMigrationCompatibility();
+    testRecoveryMigrationCompatibility();
     testMigrationFailureIsAtomic();
     if (failures == 0) { std::cout << "All transfer journal tests passed.\n"; return 0; }
     std::cerr << failures << " transfer journal assertion(s) failed.\n";

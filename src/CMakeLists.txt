@@ -13,6 +13,7 @@ add_library(nookbit_core STATIC
   application/use_cases/commit_transfer_copy_use_case.cpp
   application/use_cases/execute_transfer_step_use_case.cpp
   application/use_cases/inspect_transfer_recovery_use_case.cpp
+  application/use_cases/reconcile_transfer_recovery_use_case.cpp
   application/use_cases/finalize_transfer_use_case.cpp
   application/use_cases/rollback_transfer_use_case.cpp
   modules/rules/rule_engine.cpp
@@ -37,6 +38,7 @@ add_library(nookbit_filesystem STATIC
   infrastructure/filesystem/recovery_service.cpp
   infrastructure/filesystem/windows_file_mover.cpp
   infrastructure/filesystem/windows_staged_copy.cpp
+  infrastructure/filesystem/transfer_recovery_service.cpp
   infrastructure/filesystem/safe_executor.cpp
 )
 target_include_directories(nookbit_filesystem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

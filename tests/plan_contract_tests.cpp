@@ -192,7 +192,8 @@ void testContractMigrationFailure() {
     }
     expect(mutate(path, "ALTER TABLE plans DROP COLUMN format_version") &&
         mutate(path, "ALTER TABLE steps DROP COLUMN movement_json") &&
-        mutate(path, "DELETE FROM schema_migrations WHERE version=3"), "legacy v2 database should be reconstructed");
+        mutate(path, "ALTER TABLE transfer_events DROP COLUMN recovery_completed") &&
+        mutate(path, "DELETE FROM schema_migrations WHERE version>=3"), "legacy v2 database should be reconstructed");
     const auto initial = directory.filePath("001_initial.sql");
     const auto upgrade = directory.filePath("003_plan_contract.sql");
     QFile broken(upgrade);
@@ -207,6 +208,7 @@ void testContractMigrationFailure() {
     expect(mutate(path, "ALTER TABLE plans ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1") &&
         mutate(path, "ALTER TABLE plans DROP COLUMN format_version"), "failed migration must leave no partial format column");
     expect(QFile::remove(upgrade) && QFile::copy(sourceDir + "003_plan_contract.sql", upgrade), "valid contract migration should replace failed fixture");
+    expect(QFile::copy(sourceDir + "004_transfer_recovery.sql", directory.filePath("004_transfer_recovery.sql")), "recovery migration fixture should copy");
     loaded = repository.loadPlan(plan.id);
     expect(loaded && loaded.value().formatVersion == 1 && loaded.value().planHash == plan.planHash &&
         nookbit::PlanSignature::approvalPayload(loaded.value()) == nookbit::PlanSignature::approvalPayload(plan),

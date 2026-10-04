@@ -1,6 +1,7 @@
 #include "windows_staged_copy.hpp"
 #include "windows_transfer_file_inspector.hpp"
 #include "windows_transfer_source_removal.hpp"
+#include "windows_transfer_recovery.hpp"
 #include "file_identity.hpp"
 #include <nookbit/domain/transfer.hpp>
 
@@ -438,6 +439,7 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
+    initial.recoveryCompleted = false;
     const auto evidence = TransferValidation::advance(attempt, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
     if (!TransferValidation::validateNew(initial) || !evidence ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
@@ -497,6 +499,90 @@ Result<TransferVolume> inspectVolumePath(const std::filesystem::path& path) {
 // 공유된 읽기 전용 볼륨 검사를 호출하는 함수.
 Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::path& path) {
     return inspectVolumePath(path);
+}
+
+namespace {
+// 보호된 부모 아래의 부재만 확인하고 접근 거부를 파일 없음으로 취급하지 않는 함수.
+Result<void> requireMissing(const std::filesystem::path& path) {
+    Handle probe(CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (probe.value != INVALID_HANDLE_VALUE)
+        return Result<void>::failure({"transfer.recovery_file_present", "Source or staging still exists; no cleanup is authorized"});
+    if (GetLastError() != ERROR_FILE_NOT_FOUND)
+        return Result<void>::failure(failure("transfer.recovery_unavailable"));
+    return Result<void>::success();
+}
+
+class RecoverySession final : public ITransferRecoverySession {
+public:
+    std::vector<Handle> parents;
+    Handle destination;
+    TransferAttempt attempt;
+    // 최종 파일·부모 보호 핸들과 예상 전송 증거를 소유하는 함수.
+    RecoverySession(std::vector<Handle> locks, Handle file, TransferAttempt expected)
+        : parents(std::move(locks)), destination(std::move(file)), attempt(std::move(expected)) {}
+    // 잠긴 최종 파일을 재검증하고 두 부재 관찰값을 완료 저장 직전에 확인하는 함수.
+    Result<void> verify() override {
+        const auto supported = ordinarySource(destination.value, attempt.destination);
+        if (!supported) return supported;
+        const auto before = fingerprint(destination.value);
+        const auto hash = digest(destination.value, {});
+        const auto after = fingerprint(destination.value);
+        if (!before || !hash || !after)
+            return Result<void>::failure(!before ? before.error() : (!hash ? hash.error() : after.error()));
+        auto actual = after.value();
+        actual.sha256 = hash.value();
+        if (!sameFingerprint(before.value(), after.value()) || !attempt.destinationFingerprint ||
+            !TransferValidation::sameObject(*attempt.destinationFingerprint, actual) ||
+            !TransferValidation::sameContent(*attempt.destinationFingerprint, actual) ||
+            attempt.destinationFingerprint->modifiedUtcMs != actual.modifiedUtcMs)
+            return Result<void>::failure({"transfer.recovery_changed", "Final object, contents or modification time changed"});
+        const auto source = requireMissing(attempt.source);
+        if (!source) return source;
+        return requireMissing(attempt.staging);
+    }
+};
+}
+
+// 파일을 생성하거나 제거하지 않고 승인 볼륨과 검증된 결과를 보호하는 함수.
+Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::open(
+    const TransferAttempt& attempt, const MoveContract* movement) {
+    using Return = Result<std::unique_ptr<ITransferRecoverySession>>;
+    const auto evidence = TransferValidation::reconcileCompleted(attempt, true);
+    if (!evidence) return Return::failure(evidence.error());
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared;
+    initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
+    initial.recoveryCompleted = false;
+    if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
+        !validPath(attempt.destination) || !validPath(attempt.staging))
+        return Return::failure({"transfer.path", "Unsupported recovery paths"});
+    std::vector<Handle> parents;
+    const auto sourceParents = lockParents(attempt.source, parents);
+    if (!sourceParents) return Return::failure(sourceParents.error());
+    const auto sourceVolume = volume(parents.back().value);
+    const auto targetParents = lockParents(attempt.destination, parents);
+    if (!targetParents) return Return::failure(targetParents.error());
+    const auto targetVolume = volume(parents.back().value);
+    if (!sourceVolume || !targetVolume)
+        return Return::failure(!sourceVolume ? sourceVolume.error() : targetVolume.error());
+    if (!sourceVolume.value().localNtfs || !targetVolume.value().localNtfs ||
+        sourceVolume.value().id != attempt.sourceFingerprint.volumeId ||
+        targetVolume.value().id != attempt.destinationFingerprint->volumeId ||
+        (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
+        movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+        !approvedVolume(sourceVolume.value(), movement->sourceVolume) ||
+        !approvedVolume(targetVolume.value(), movement->destinationVolume))))
+        return Return::failure({"transfer.volume_changed", "Recovery volumes do not match recorded evidence and approval"});
+    Handle finalFile(CreateFileW(attempt.destination.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (finalFile.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.recovery_open"));
+    const auto finalVolume = volume(finalFile.value);
+    if (!finalVolume || finalVolume.value().id != targetVolume.value().id ||
+        (movement && !approvedVolume(finalVolume.value(), movement->destinationVolume)))
+        return Return::failure({"transfer.volume_changed", "Final file volume changed"});
+    return Return::success(std::make_unique<RecoverySession>(std::move(parents), std::move(finalFile), attempt));
 }
 
 // 파일을 생성하지 않고 보호된 핸들에서 객체·내용·실제 볼륨을 읽는 함수.
@@ -603,6 +689,10 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외에서는 보호 복구 완료 검사를 지원하지 않는 함수.
+Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::open(const TransferAttempt&, const MoveContract*) {
+    return Result<std::unique_ptr<ITransferRecoverySession>>::failure({"transfer.unsupported", "Windows only"});
+}
 // Windows 외에서는 원본 제거를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openImpl(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<ITransferRemovalSession>>::failure({"transfer.unsupported", "Windows only"});

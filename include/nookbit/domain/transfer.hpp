@@ -27,6 +27,8 @@ struct TransferAttempt {
     std::optional<FileFingerprint> destinationFingerprint;
     TransferPhase phase{TransferPhase::Prepared};
     std::optional<Error> error;
+    /// 정상 완료와 구분되는 명시적 복구 감사값이며 승인 내용에는 포함하지 않는다.
+    bool recoveryCompleted{false};
 };
 
 /// 예상한 이전 단계와 새 증거를 함께 전달하는 낙관적 동시성 갱신 요청.
@@ -58,6 +60,9 @@ namespace TransferValidation {
 
 /// 허용된 증거만 합쳐 다음 단계의 스냅샷을 만드는 함수.
 [[nodiscard]] Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUpdate& update);
+
+/// 제거 의도가 기록된 중단 시도의 증거를 보존하며 복구 완료 스냅샷을 만드는 함수.
+[[nodiscard]] Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded);
 
 } // namespace TransferValidation
 } // namespace nookbit

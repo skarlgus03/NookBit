@@ -38,6 +38,7 @@ bool trusted(const OperationPlan& plan, const TransferAttempt& attempt, const IP
     initial.stagingFingerprint.reset();
     initial.destinationFingerprint.reset();
     initial.error.reset();
+    initial.recoveryCompleted = false;
     if (!PlanSignature::validateFormat(plan) || !TransferValidation::validateNew(initial) || plan.id != attempt.planId ||
         !PlanSignature::isSha256Hex(plan.planHash) ||
         plan.planHash != hasher.sha256(PlanSignature::approvalPayload(plan))) return false;
