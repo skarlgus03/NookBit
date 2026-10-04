@@ -48,6 +48,11 @@ public:
         const TransferAttempt&, const MoveContract*, const std::function<bool()>& = {}) {
         return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.resume_unsupported", "Protected copy resume unsupported"});
     }
+    /// 기록된 전체 검증 복사본을 다시 보호 검사하고 확정 전용 세션을 여는 함수.
+    [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> openVerified(
+        const TransferAttempt&, const MoveContract*, const std::function<bool()>& = {}) {
+        return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.commit_resume_unsupported", "Protected staging commit unsupported"});
+    }
     /// 원본을 검증하고 기존 파일을 덮어쓰지 않는 빈 임시 파일 세션을 만드는 함수.
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,

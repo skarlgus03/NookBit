@@ -3,8 +3,19 @@
 #include <nookbit/application/cleanup_transfer_staging_use_case.hpp>
 #include <nookbit/application/resume_committed_transfer_use_case.hpp>
 #include <nookbit/application/resume_partial_copy_use_case.hpp>
+#include <nookbit/application/commit_resumed_staging_use_case.hpp>
 
 namespace nookbit {
+/// 다른 실행·복구와 직렬화해 재개 복사본의 최종 이름을 확정하는 진입점.
+class ResumedStagingCommitService final {
+public:
+    /// 외부 소유의 확정 유스케이스를 빌려 받는 함수.
+    explicit ResumedStagingCommitService(CommitResumedStagingUseCase& useCase) : useCase_(useCase) {}
+    /// 같은 시스템 잠금 안에서 명시적 최종 확정을 요청하는 함수.
+    [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId, const std::function<bool()>& cancelled = {});
+private:
+    CommitResumedStagingUseCase& useCase_;
+};
 /// 기존 실행·복구와 직렬화해 부분 임시 복사본만 이어 쓰는 진입점.
 class PartialCopyResumeService final {
 public:

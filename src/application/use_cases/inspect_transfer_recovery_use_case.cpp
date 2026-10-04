@@ -40,6 +40,7 @@ bool trusted(const OperationPlan& plan, const TransferAttempt& attempt, const IP
     initial.error.reset();
     initial.recoveryCompleted = false;
     initial.copyResume = CopyResume::None;
+    initial.stagingCommit = StagingCommit::None;
     initial.recoveryRemovalIntent = false;
     initial.stagingCleanup = StagingCleanup::None;
     if (!PlanSignature::validateFormat(plan) || !TransferValidation::validateNew(initial) || plan.id != attempt.planId ||
@@ -123,7 +124,8 @@ Result<TransferRecoveryInspection> InspectTransferRecoveryUseCase::execute(const
         if (report.attempt.destinationFingerprint) {
             report.finding = Finding::CommittedSourceRetained;
             report.reason = "Recorded final copy and source both remain; this is not a completed move and neither is deleted.";
-        } else if (phase == TransferPhase::CommitIntent || phase == TransferPhase::NeedsRecovery) {
+        } else if (phase == TransferPhase::CommitIntent || phase == TransferPhase::NeedsRecovery ||
+            report.attempt.stagingCommit == StagingCommit::IntentRecorded) {
             report.finding = Finding::CommitNotRecorded;
             report.reason = "Verified staging object is at the final path, but commit result is not recorded; preserve both files.";
         }

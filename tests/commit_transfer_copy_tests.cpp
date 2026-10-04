@@ -58,6 +58,8 @@ public:
     std::function<void(StagingCleanup)> beforeCleanup;
     std::optional<CopyResume> failCopyResumeAt;
     std::function<void(CopyResume)> beforeCopyResume;
+    std::optional<StagingCommit> failStagingCommitAt;
+    std::function<void(StagingCommit)> beforeStagingCommit;
     // 실제 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& journal) : inner(journal) {}
     // 새 시도를 실제 DB에 기록하는 함수.
@@ -131,6 +133,16 @@ public:
         }
         return inner.recordCopyResume(attempt, hash, next, verified);
     }
+    // 재개 복사본 확정의 의도·결과 경계 실패를 주입하는 함수.
+    Result<void> recordStagingCommit(const TransferAttempt& attempt, const std::string& hash, StagingCommit next,
+        const std::optional<FileFingerprint>& destination = {}) override {
+        if (beforeStagingCommit) beforeStagingCommit(next);
+        if (failStagingCommitAt == next) {
+            failStagingCommitAt.reset();
+            return Result<void>::failure({"test.staging_commit", "Injected staging commit record failure"});
+        }
+        return inner.recordStagingCommit(attempt, hash, next, destination);
+    }
 };
 
 // 실제 이름 변경 직후 API 검증 실패를 주입하는 복사 어댑터.
@@ -157,6 +169,13 @@ class PostRenameFaultCopy final : public IStagedCopy {
 public:
     // 실제 복사 일꾼을 빌려 받는 함수.
     explicit PostRenameFaultCopy(IStagedCopy& inner) : inner_(inner) {}
+    // 실제 검증된 재개 세션에 확정 후 실패만 덧씌우는 함수.
+    Result<std::unique_ptr<IStagedCopySession>> openVerified(const TransferAttempt& attempt, const MoveContract* movement,
+        const std::function<bool()>& cancelled) override {
+        auto result = inner_.openVerified(attempt, movement, cancelled);
+        if (!result) return Result<std::unique_ptr<IStagedCopySession>>::failure(result.error());
+        return Result<std::unique_ptr<IStagedCopySession>>::success(std::make_unique<Session>(std::move(result.value())));
+    }
     // 실제 볼륨 조회를 전달하는 함수.
     Result<TransferVolume> inspectVolume(const std::filesystem::path& path) override { return inner_.inspectVolume(path); }
     // 실제 세션에 확정 후 실패 어댑터만 덧씌우는 함수.
@@ -785,6 +804,184 @@ void testResumePartialCopy() {
 #endif
 }
 
+// 실제 이어쓰기 검증부터 최종 확정·별도 원본 제거까지의 실패 경계를 검사하는 함수.
+void testCommitResumedStaging() {
+#ifdef _WIN32
+    const std::string contents(1024 * 1024 + 37, 'r');
+    for (int scenario = 0; scenario <= 14; ++scenario) {
+        Fixture fixture(scenario == 13, false, contents);
+        if (!fixture.ready) continue;
+        int checks = 0;
+        // 실제 첫 블록 복사 이후 취소하는 함수.
+        expect(!fixture.useCase.execute(fixture.attempt, [&] { return ++checks >= 3; }), "resumed commit partial fixture");
+        QtPlanHasher hasher;
+        ResumePartialCopyUseCase resume(fixture.history, fixture.faults, fixture.worker, hasher);
+        const auto verified = resume.execute(fixture.attempt.id);
+        expect(verified && verified.value().copyResume == CopyResume::Verified, "resumed commit whole verification fixture");
+        if (!verified) continue;
+        const auto stagedBefore = *verified.value().stagingFingerprint;
+        if (scenario == 13) {
+            expect(fixture.history.appendEvent(StepStatusChanged{fixture.attempt.planId, fixture.attempt.stepId, StepStatus::NeedsRecovery}).hasValue() &&
+                fixture.history.appendEvent(PlanStatusChanged{fixture.attempt.planId, PlanStatus::NeedsRecovery}).hasValue(), "resumed commit parent recovery fixture");
+        }
+        if (scenario == 14) {
+            OperationPlan draft;
+            MoveStep step;
+            step.source = fixture.attempt.source; step.destination = fixture.attempt.destination; step.fingerprint = fixture.attempt.sourceFingerprint;
+            draft.steps.push_back(step);
+            PrepareTransferPlanUseCase prepare(fixture.worker);
+            const auto prepared = prepare.execute(draft);
+            expect(prepared.hasValue(), "verified commit native volume fixture");
+            if (!prepared) continue;
+            auto movement = *prepared.value().steps[0].movement;
+            movement.strategy = MoveStrategy::VerifiedCopy; // 한 볼륨의 저수준 계약 검증일 뿐 두 볼륨 승인 계획은 아니다.
+            movement.destinationVolume.serial = "0";
+            expect(!fixture.worker.openVerified(verified.value(), &movement), "verified commit rejects altered approved volume");
+            expect(sameFingerprint(stagedBefore, fingerprint(fixture.attempt.staging)) &&
+                sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)) && !std::filesystem::exists(fixture.attempt.destination),
+                "approved volume mismatch mutates neither original nor verified stage");
+            continue;
+        }
+        if (scenario == 1) fixture.faults.failStagingCommitAt = StagingCommit::IntentRecorded;
+        if (scenario == 2) fixture.faults.failStagingCommitAt = StagingCommit::Committed;
+        if (scenario == 4) write(fixture.attempt.staging, std::string(contents.size(), 'x'));
+        if (scenario == 5) write(fixture.attempt.source, std::string(contents.size(), 'x'));
+        if (scenario == 6) write(fixture.attempt.destination, "keep final collision");
+        if (scenario == 8) {
+            std::filesystem::rename(fixture.attempt.staging, fixture.attempt.staging.parent_path() / "old-stage");
+            write(fixture.attempt.staging, contents);
+        }
+        bool intentReached = false;
+        // 의도 저장 중 핸들 잠금과 이름 충돌 경쟁을 검사하는 함수.
+        fixture.faults.beforeStagingCommit = [&](StagingCommit next) {
+            if (next != StagingCommit::IntentRecorded) return;
+            intentReached = true;
+            expect(!std::filesystem::exists(fixture.attempt.destination), "commit intent precedes rename");
+            for (const auto& path : {fixture.attempt.source, fixture.attempt.staging}) {
+                const auto writer = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                expect(writer == INVALID_HANDLE_VALUE, "commit protects original and staging through durable intent");
+                if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+            }
+            if (scenario == 9) write(fixture.attempt.destination, "racing collision");
+        };
+        WrongHasher wrong;
+        const IPlanHasher& verifier = scenario == 7 ? static_cast<const IPlanHasher&>(wrong) : hasher;
+        PostRenameFaultCopy postRename(fixture.worker);
+        IStagedCopy& worker = scenario == 10 ? static_cast<IStagedCopy&>(postRename) : fixture.worker;
+        CommitResumedStagingUseCase commit(fixture.history, fixture.faults, worker, verifier);
+        ResumedStagingCommitService service(commit);
+        // 확정 직전 취소와 의도 이후 취소 요청을 구분하는 함수.
+        const auto result = service.execute(fixture.attempt.id, [&] {
+            return scenario == 3 || (scenario == 11 && intentReached);
+        });
+        if (scenario == 0 || scenario == 11 || scenario == 12 || scenario == 13) {
+            expect(result && result.value().phase == TransferPhase::DestinationCommitted &&
+                result.value().stagingCommit == StagingCommit::Committed && result.value().copyResume == CopyResume::Verified,
+                "resumed commit stores final evidence separately from movement completion");
+            expect(!std::filesystem::exists(fixture.attempt.staging) &&
+                sameFingerprint(stagedBefore, fingerprint(fixture.attempt.destination)), "verified staging renamed without content or identity replacement");
+            expect(!service.execute(fixture.attempt.id), "committed staging cannot commit twice");
+            const auto state = fixture.journal.load(fixture.attempt.id);
+            expect(state && !TransferValidation::advance(state.value(), {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent}),
+                "resumed lineage cannot bypass explicit recovery removal");
+            WindowsTransferSourceRemoval removal;
+            WindowsTransferRecoveryGuard guard;
+            ResumeCommittedTransferUseCase finish(fixture.history, fixture.faults, removal, guard, hasher);
+            if (scenario == 12) {
+                completionFault(fixture.database);
+                expect(!finish.execute(fixture.attempt.id), "resumed removal completion failure stays unresolved");
+                expect(!std::filesystem::exists(fixture.attempt.source) && std::filesystem::exists(fixture.attempt.destination),
+                    "resumed completion failure preserves final copy");
+                clearCompletionFault(fixture.database);
+            } else expect(std::filesystem::exists(fixture.attempt.source), "commit alone retains original");
+            const auto completed = finish.execute(fixture.attempt.id);
+            expect(completed && completed.value().phase == TransferPhase::Completed && completed.value().recoveryCompleted &&
+                completed.value().stagingCommit == StagingCommit::Committed && !std::filesystem::exists(fixture.attempt.source),
+                "separate explicit removal completes resumed lineage including restart after completion fault");
+            if (scenario == 13) {
+                const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+                expect(plan && plan.value().status == PlanStatus::NeedsRecovery && plan.value().steps[0].status == StepStatus::Applied,
+                    "resumed completion does not complete unresolved sibling batch");
+            }
+            if (scenario == 0) {
+                WindowsTransferFileInspector files;
+                RollbackTransferUseCase undo(fixture.journal, fixture.history, fixture.worker, removal, files, hasher);
+                expect(undo.execute(fixture.attempt.id, "undo-after-resume", fixture.attempt.source.parent_path() / "undo-after-resume-stage").hasValue(),
+                    "completed resumed forward transfer permits a distinct reverse attempt");
+                const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+                expect(plan && plan.value().status == PlanStatus::RolledBack && std::filesystem::exists(fixture.attempt.source) &&
+                    !std::filesystem::exists(fixture.attempt.destination), "resumed forward result can be undone without unresolved-resume false conflict");
+            }
+        } else {
+            expect(!result, "resumed commit fault or rejection stops");
+            const auto state = fixture.journal.load(fixture.attempt.id);
+            const bool pending = scenario == 2 || scenario == 9 || scenario == 10;
+            expect(state && state.value().stagingCommit == (pending ? StagingCommit::IntentRecorded : StagingCommit::None),
+                "failure retains only durable commit intent");
+            if (scenario == 1 || scenario == 3 || scenario == 7)
+                expect(sameFingerprint(stagedBefore, fingerprint(fixture.attempt.staging)), "pre-intent rejection does not modify verified copy");
+            if (scenario == 2 || scenario == 10) {
+                expect(std::filesystem::exists(fixture.attempt.destination) && !std::filesystem::exists(fixture.attempt.staging),
+                    "unrecorded renamed final retained after result failure");
+                expect(!service.execute(fixture.attempt.id) && std::filesystem::exists(fixture.attempt.source),
+                    "ambiguous final never guessed complete or original removed");
+                WindowsTransferFileInspector files;
+                InspectTransferRecoveryUseCase inspect(fixture.history, fixture.journal, files, hasher);
+                const auto report = inspect.execute(fixture.attempt.id);
+                expect(report && report.value().finding == TransferRecoveryFinding::CommitNotRecorded,
+                    "read-only inspection recognizes resumed rename with missing result record");
+            }
+            if (scenario == 1 || scenario == 9) {
+                if (scenario == 9) {
+                    expect(fingerprint(fixture.attempt.destination).sha256 == hasher.sha256("racing collision"), "racing final not overwritten");
+                    std::filesystem::remove(fixture.attempt.destination); // 테스트가 만든 충돌 파일만 제거한다.
+                }
+                fixture.faults.beforeStagingCommit = {};
+                SqliteTransferJournal restarted(fixture.database, fixture.migration);
+                CommitResumedStagingUseCase retry(fixture.history, restarted, fixture.worker, hasher);
+                expect(retry.execute(fixture.attempt.id).hasValue(), "pre-rename failure safely retries after restart and revalidation");
+            }
+            if (scenario != 5) expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)),
+                "failed commit never deletes or rewrites original");
+        }
+    }
+#endif
+}
+
+// 역전송의 재개 복사본 확정 후 별도 마무리가 RolledBack으로 연결되는지 검사하는 함수.
+void testReverseResumedCommit() {
+#ifdef _WIN32
+    Fixture fixture;
+    if (!fixture.ready) return;
+    expect(fixture.useCase.execute(fixture.attempt).hasValue(), "reverse resumed commit forward fixture");
+    QtPlanHasher hasher;
+    WindowsTransferSourceRemoval removal;
+    FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+    expect(finalize.execute(fixture.attempt.id).hasValue(), "reverse resumed forward completion");
+    WindowsTransferFileInspector files;
+    RollbackTransferUseCase undo(fixture.faults, fixture.history, fixture.worker, removal, files, hasher);
+    const auto stage = fixture.attempt.source.parent_path() / "undo-stage";
+    // 역전송 임시 객체 기록 직후 취소해 재개용 시도를 남기는 함수.
+    expect(!undo.execute(fixture.attempt.id, "undo", stage, [&] { return fixture.faults.last == TransferPhase::StagingCreated; }),
+        "reverse staging created cancellation fixture");
+    ResumePartialCopyUseCase resume(fixture.history, fixture.journal, fixture.worker, hasher);
+    expect(resume.execute("undo").hasValue(), "reverse staged copy fully verified");
+    CommitResumedStagingUseCase commit(fixture.history, fixture.journal, fixture.worker, hasher);
+    const auto committed = commit.execute("undo");
+    expect(committed && committed.value().direction == TransferDirection::Rollback &&
+        committed.value().stagingCommit == StagingCommit::Committed && std::filesystem::exists(fixture.attempt.destination) &&
+        std::filesystem::exists(fixture.attempt.source), "reverse resumed commit retains both copies before removal");
+    WindowsTransferRecoveryGuard guard;
+    ResumeCommittedTransferUseCase finish(fixture.history, fixture.journal, removal, guard, hasher);
+    const auto completed = finish.execute("undo");
+    const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+    expect(completed && plan && plan.value().status == PlanStatus::RolledBack && plan.value().steps[0].status == StepStatus::RolledBack &&
+        !std::filesystem::exists(fixture.attempt.destination) && TransferValidation::sameContent(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)),
+        "reverse resumed lineage completes rollback rather than forward application");
+#endif
+}
+
 // 기록된 최종 복사본과 남은 원본의 명시적 마무리·거부·재시도 경계를 검사하는 함수.
 void testResumeCommittedTransfer() {
 #ifdef _WIN32
@@ -1299,6 +1496,8 @@ int main(int argc, char** argv) {
     testExplicitCompletionRecovery();
     testResumeCommittedTransfer();
     testResumePartialCopy();
+    testCommitResumedStaging();
+    testReverseResumedCommit();
     testProtectedRecoveryGuard();
     testVerifiedStagingCleanup();
     testProtectedCleanupSession();

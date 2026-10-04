@@ -6,6 +6,16 @@
 #include <nookbit/domain/transfer.hpp>
 
 namespace nookbit {
+// 검증 기록이 있는 임시 파일의 확정 전용 세션을 요청하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openVerified(const TransferAttempt& attempt,
+    const MoveContract* movement, const std::function<bool()>& cancelled) {
+    return openExistingImpl(attempt, movement, cancelled, true);
+}
+// 기존 부분 파일의 이어쓰기 세션을 요청하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const TransferAttempt& attempt,
+    const MoveContract* movement, const std::function<bool()>& cancelled) {
+    return openExistingImpl(attempt, movement, cancelled, false);
+}
 // 기존 승인 형식의 복사 세션을 여는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::open(
     const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging) {
@@ -504,16 +514,19 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
     initial.copyResume = CopyResume::None;
+    initial.stagingCommit = StagingCommit::None;
     initial.recoveryRemovalIntent = false;
     auto proof = attempt;
     // 저널 상태는 바꾸지 않고 같은 확정 증거의 파일 보호 조건만 재사용한다.
-    if (attempt.recoveryRemovalIntent || attempt.phase != TransferPhase::DestinationCommitted) {
+    if (attempt.recoveryRemovalIntent || attempt.phase != TransferPhase::DestinationCommitted || attempt.copyResume != CopyResume::None) {
         auto eligible = attempt;
         eligible.recoveryRemovalIntent = false;
         if (!TransferValidation::recordRecoveryRemovalIntent(eligible))
             return Return::failure({"transfer.removal_evidence", "Recorded committed recovery evidence required"});
         proof.phase = TransferPhase::DestinationCommitted;
         proof.recoveryRemovalIntent = false;
+        proof.copyResume = CopyResume::None;
+        proof.stagingCommit = StagingCommit::None;
     }
     const auto evidence = TransferValidation::advance(proof, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent});
     if (!TransferValidation::validateNew(initial) || !evidence ||
@@ -631,6 +644,7 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
     initial.copyResume = CopyResume::None;
+    initial.stagingCommit = StagingCommit::None;
     initial.recoveryRemovalIntent = false;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
         !validPath(attempt.destination) || !validPath(attempt.staging))
@@ -735,6 +749,7 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(cons
     initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
     initial.error.reset(); initial.recoveryCompleted = false; initial.stagingCleanup = StagingCleanup::None;
     initial.copyResume = CopyResume::None;
+    initial.stagingCommit = StagingCommit::None;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) ||
         !validPath(attempt.staging) || !validPath(attempt.destination))
         return Return::failure({"transfer.path", "Unsupported cleanup paths"});
@@ -873,9 +888,9 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     return Return::success(std::make_unique<Session>(std::move(locks), std::move(input), std::move(output),
         expected, initial.value(), basic, source, staging));
 }
-// 기록된 임시 객체와 원본의 앞부분을 변경 없이 비교해 이어쓰기 위치를 고정하는 함수.
-Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const TransferAttempt& attempt,
-    const MoveContract* movement, const std::function<bool()>& cancelled) {
+// 기록된 임시 객체를 변경 없이 비교해 이어쓰기 위치 또는 전체 검증 확정 세션을 고정하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(const TransferAttempt& attempt,
+    const MoveContract* movement, const std::function<bool()>& cancelled, bool verified) {
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
     auto eligible = attempt;
     auto initial = attempt;
@@ -883,10 +898,14 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const 
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false; initial.recoveryRemovalIntent = false;
     initial.copyResume = CopyResume::None; initial.stagingCleanup = StagingCleanup::None;
-    if (eligible.copyResume == CopyResume::IntentRecorded) eligible.copyResume = CopyResume::None;
-    if (!TransferValidation::validateNew(initial) || !TransferValidation::recordCopyResume(eligible, CopyResume::IntentRecorded) ||
+    initial.stagingCommit = StagingCommit::None;
+    if (verified && eligible.stagingCommit == StagingCommit::IntentRecorded) eligible.stagingCommit = StagingCommit::None;
+    if (!verified && eligible.copyResume == CopyResume::IntentRecorded) eligible.copyResume = CopyResume::None;
+    const auto allowed = verified ? TransferValidation::recordStagingCommit(eligible, StagingCommit::IntentRecorded) :
+        TransferValidation::recordCopyResume(eligible, CopyResume::IntentRecorded);
+    if (!TransferValidation::validateNew(initial) || !allowed ||
         !validPath(attempt.source) || !validPath(attempt.staging) || !validPath(attempt.destination))
-        return Return::failure({"transfer.copy_resume_state", "Recorded partial staging and ordinary paths required"});
+        return Return::failure({"transfer.copy_resume_state", "Recorded staging evidence and ordinary paths required"});
     std::vector<Handle> parents;
     for (const auto& path : {attempt.source, attempt.staging}) {
         const auto locked = lockParents(path, parents);
@@ -937,16 +956,26 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const 
     FILE_BASIC_INFO basic{};
     if (!GetFileInformationByHandleEx(input.value, FileBasicInfo, &basic, sizeof(basic)))
         return Return::failure(failure("transfer.resume_metadata"));
+    if (verified) {
+        auto full = staged.value();
+        full.sha256 = sourceHash.value();
+        if (!sameFingerprint(*attempt.stagingFingerprint, full))
+            return Return::failure({"transfer.commit_staging_changed", "Verified staging size, time or full contents changed"});
+    }
     auto session = std::make_unique<Session>(std::move(parents), std::move(input), std::move(output),
         attempt.sourceFingerprint, staged.value(), basic, attempt.source, attempt.staging);
     session->resumeOffset = staged.value().size;
+    if (verified) {
+        session->verifiedCopy = attempt.stagingFingerprint;
+        session->attempted = true;
+    }
     return Return::success(std::move(session));
 }
 } // namespace nookbit
 #else
 namespace nookbit {
-// Windows 외에서는 기존 부분 파일을 변경하지 않고 이어쓰기를 거부하는 함수.
-Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openResume(const TransferAttempt&, const MoveContract*, const std::function<bool()>&) {
+// Windows 외에서는 기존 임시 파일의 이어쓰기와 확정을 변경 없이 거부하는 함수.
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(const TransferAttempt&, const MoveContract*, const std::function<bool()>&, bool) {
     return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.unsupported", "Windows only"});
 }
 // Windows 외에서는 보호 복구 완료 검사를 지원하지 않는 함수.

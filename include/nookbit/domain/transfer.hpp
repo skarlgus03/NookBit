@@ -7,6 +7,7 @@ namespace nookbit {
 enum class TransferDirection { Forward, Rollback };
 enum class StagingCleanup { None, IntentRecorded, Removed };
 enum class CopyResume { None, IntentRecorded, Verified };
+enum class StagingCommit { None, IntentRecorded, Committed };
 
 /// 한 전송 시도의 기록 단계이며 파일 작업을 허가하는 권한은 아니다.
 enum class TransferPhase {
@@ -37,6 +38,8 @@ struct TransferAttempt {
     bool recoveryRemovalIntent{false};
     /// 부분 임시 파일 이어쓰기의 의도·전체 검증 결과이며 이동 완료와 분리한다.
     CopyResume copyResume{CopyResume::None};
+    /// 이어쓰기 검증 이후 최종 이름 확정의 의도·결과를 따로 보존한다.
+    StagingCommit stagingCommit{StagingCommit::None};
 };
 
 /// 예상한 이전 단계와 새 증거를 함께 전달하는 낙관적 동시성 갱신 요청.
@@ -78,6 +81,9 @@ namespace TransferValidation {
 /// 부분 복사 재개 의도 또는 같은 임시 객체의 전체 검증 증거만 만드는 함수.
 [[nodiscard]] Result<TransferAttempt> recordCopyResume(const TransferAttempt& attempt, CopyResume next,
     const std::optional<FileFingerprint>& verified = {});
+/// 전체 검증된 재개 복사본의 확정 의도 또는 최종 객체 증거를 만드는 함수.
+[[nodiscard]] Result<TransferAttempt> recordStagingCommit(const TransferAttempt& attempt, StagingCommit next,
+    const std::optional<FileFingerprint>& destination = {});
 
 } // namespace TransferValidation
 } // namespace nookbit

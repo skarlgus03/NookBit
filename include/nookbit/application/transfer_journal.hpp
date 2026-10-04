@@ -46,6 +46,12 @@ public:
         return Result<void>::failure({"transfer.resume_unsupported", "Durable partial copy resume unsupported"});
     }
 
+    /// 보호된 예상 시도와 현재 승인을 대조해 재개 복사본 확정 감사를 저장하는 함수.
+    [[nodiscard]] virtual Result<void> recordStagingCommit(const TransferAttempt&, const std::string&, StagingCommit,
+        const std::optional<FileFingerprint>& = {}) {
+        return Result<void>::failure({"transfer.commit_resume_unsupported", "Durable staging commit unsupported"});
+    }
+
     /// 단계 하나의 정방향·역방향 시도를 생성 순서대로 읽는 함수.
     [[nodiscard]] virtual Result<std::vector<TransferAttempt>> forStep(const StepId& stepId) const = 0;
 };

@@ -13,6 +13,12 @@ bool validObject(const FileFingerprint& fingerprint) {
            fingerprint.fileId && !fingerprint.fileId->empty();
 }
 
+// 정상 복사 또는 명시적 확정까지 기록된 재개 복사인지 검사하는 함수.
+bool committedLineage(const TransferAttempt& attempt) {
+    return (attempt.copyResume == CopyResume::None && attempt.stagingCommit == StagingCommit::None) ||
+        (attempt.copyResume == CopyResume::Verified && attempt.stagingCommit == StagingCommit::Committed);
+}
+
 // 경로가 절대 경로이며 파일을 가리킬 수 있는지 검사하는 함수.
 bool validPath(const std::filesystem::path& path) {
     const auto normalized = path.lexically_normal();
@@ -82,7 +88,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
     if (attempt.id.empty() || attempt.planId.empty() || attempt.stepId.empty() ||
         (attempt.direction != TransferDirection::Forward && attempt.direction != TransferDirection::Rollback) ||
         attempt.phase != TransferPhase::Prepared || attempt.stagingFingerprint ||
-        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.copyResume != CopyResume::None || attempt.stagingCleanup != StagingCleanup::None ||
+        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.copyResume != CopyResume::None || attempt.stagingCommit != StagingCommit::None || attempt.stagingCleanup != StagingCleanup::None ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         samePath(attempt.source, attempt.destination) ||
         samePath(attempt.staging, attempt.destination) ||
@@ -96,7 +102,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
 
 // 허용된 증거만 합쳐 다음 단계의 스냅샷을 만드는 함수.
 Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUpdate& update) {
-    if (attempt.copyResume != CopyResume::None || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None || attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
+    if (attempt.stagingCommit != StagingCommit::None || attempt.copyResume != CopyResume::None || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None || attempt.phase != update.expectedPhase || !canAdvance(attempt.phase, update.nextPhase)) {
         return Result<TransferAttempt>::failure({"transfer.phase_conflict", "Transfer phase changed or the transition is not allowed."});
     }
     if (attempt.phase >= TransferPhase::CopyVerified && attempt.phase <= TransferPhase::SourceRemoved &&
@@ -143,7 +149,7 @@ Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUp
 
 // 일반 단계 전이를 열어두지 않고 명시적 복구 완료만 검증하는 함수.
 Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool removalIntentRecorded) {
-    if (!removalIntentRecorded || attempt.copyResume != CopyResume::None || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None || (attempt.phase != TransferPhase::SourceRemoveIntent &&
+    if (!removalIntentRecorded || !committedLineage(attempt) || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None || (attempt.phase != TransferPhase::SourceRemoveIntent &&
         attempt.phase != TransferPhase::SourceRemoved && attempt.phase != TransferPhase::NeedsRecovery &&
         !(attempt.phase == TransferPhase::DestinationCommitted && attempt.recoveryRemovalIntent)) ||
         !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
@@ -161,7 +167,7 @@ Result<TransferAttempt> reconcileCompleted(const TransferAttempt& attempt, bool 
 // 파일 정리가 이동 완료나 재실행 허가로 해석되지 않도록 별도 감사값만 갱신하는 함수.
 Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, StagingCleanup next) {
     if ((attempt.phase != TransferPhase::Failed && attempt.phase != TransferPhase::Cancelled && attempt.phase != TransferPhase::NeedsRecovery) ||
-        attempt.copyResume == CopyResume::IntentRecorded || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
+        attempt.stagingCommit != StagingCommit::None || attempt.copyResume == CopyResume::IntentRecorded || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
         !validObject(*attempt.stagingFingerprint) || sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
         !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
         !((attempt.stagingCleanup == StagingCleanup::None && next == StagingCleanup::IntentRecorded) ||
@@ -174,7 +180,7 @@ Result<TransferAttempt> recordStagingCleanup(const TransferAttempt& attempt, Sta
 
 // 일반 단계 재개를 허용하지 않고 기록된 최종 복사본의 제거 의도만 만드는 함수.
 Result<TransferAttempt> recordRecoveryRemovalIntent(const TransferAttempt& attempt) {
-    if (attempt.copyResume != CopyResume::None || attempt.recoveryRemovalIntent || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None ||
+    if (!committedLineage(attempt) || attempt.recoveryRemovalIntent || attempt.recoveryCompleted || attempt.stagingCleanup != StagingCleanup::None ||
         (attempt.phase != TransferPhase::DestinationCommitted && attempt.phase != TransferPhase::SourceRemoveIntent &&
          attempt.phase != TransferPhase::NeedsRecovery) || !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
         !sameObject(*attempt.stagingFingerprint, *attempt.destinationFingerprint) ||
@@ -190,7 +196,7 @@ Result<TransferAttempt> recordRecoveryRemovalIntent(const TransferAttempt& attem
 Result<TransferAttempt> recordCopyResume(const TransferAttempt& attempt, CopyResume next,
     const std::optional<FileFingerprint>& verified) {
     const bool intent = next == CopyResume::IntentRecorded;
-    if (attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None ||
+    if (attempt.stagingCommit != StagingCommit::None || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.stagingCleanup != StagingCleanup::None ||
         attempt.destinationFingerprint || !attempt.stagingFingerprint || !validObject(*attempt.stagingFingerprint) ||
         sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
         (attempt.phase != TransferPhase::StagingCreated && attempt.phase != TransferPhase::Failed &&
@@ -202,6 +208,30 @@ Result<TransferAttempt> recordCopyResume(const TransferAttempt& attempt, CopyRes
     auto result = attempt;
     result.copyResume = next;
     if (verified) result.stagingFingerprint = verified;
+    return Result<TransferAttempt>::success(std::move(result));
+}
+// 실패 기록을 지우지 않고 별도 의도와 최종 객체 증거가 있을 때만 확정으로 연결하는 함수.
+Result<TransferAttempt> recordStagingCommit(const TransferAttempt& attempt, StagingCommit next,
+    const std::optional<FileFingerprint>& destination) {
+    const bool intent = next == StagingCommit::IntentRecorded;
+    if (attempt.copyResume != CopyResume::Verified || attempt.recoveryCompleted || attempt.recoveryRemovalIntent ||
+        attempt.stagingCleanup != StagingCleanup::None || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
+        !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        !validObject(*attempt.stagingFingerprint) || sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        (attempt.phase != TransferPhase::StagingCreated && attempt.phase != TransferPhase::Failed &&
+         attempt.phase != TransferPhase::Cancelled && attempt.phase != TransferPhase::NeedsRecovery) ||
+        !((intent && attempt.stagingCommit == StagingCommit::None && !destination) ||
+          (next == StagingCommit::Committed && attempt.stagingCommit == StagingCommit::IntentRecorded && destination &&
+           sameObject(*attempt.stagingFingerprint, *destination) && sameContent(attempt.sourceFingerprint, *destination) &&
+           destination->modifiedUtcMs == attempt.stagingFingerprint->modifiedUtcMs)))
+        return Result<TransferAttempt>::failure({"transfer.staging_commit_state", "Verified resumed staging and ordered commit intent required"});
+    auto result = attempt;
+    result.stagingCommit = next;
+    if (destination) {
+        result.destinationFingerprint = destination;
+        result.phase = TransferPhase::DestinationCommitted;
+        result.error.reset();
+    }
     return Result<TransferAttempt>::success(std::move(result));
 }
 } // namespace nookbit::TransferValidation
