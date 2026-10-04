@@ -156,7 +156,7 @@ struct Fixture {
     TransferAttempt attempt;
     bool ready{};
     // 원본 파일과 서명·승인·실행 의도를 실제 DB에 저장하는 함수.
-    explicit Fixture(bool multiple = false) {
+    explicit Fixture(bool multiple = false, bool missingParents = false) {
         expect(directory.isValid(), "temporary fixture");
         const std::filesystem::path root(directory.path().toStdWString());
         write(root / "source", "original contents for transfer copy");
@@ -166,6 +166,10 @@ struct Fixture {
         attempt.source = root / "source";
         attempt.staging = root / "stage";
         attempt.destination = root / "destination";
+        if (missingParents) {
+            attempt.destination = root / "new-target" / "nested" / "destination";
+            attempt.staging = attempt.destination.parent_path() / "stage";
+        }
         attempt.sourceFingerprint = fingerprint(attempt.source);
         OperationPlan plan;
         plan.id = attempt.planId;
@@ -237,6 +241,65 @@ void testSuccessAndCancel() {
         expect(!std::filesystem::exists(fixture.attempt.destination), "cancel does not commit");
         if (cancelAt == TransferPhase::Prepared) expect(!std::filesystem::exists(fixture.attempt.staging), "early cancel creates no files");
     }
+}
+
+// 승인 복사 어댑터의 부모 생성과 실제 저널·확정·제거 경계가 함께 동작하는지 검사하는 함수.
+void testTransferWithMissingParents() {
+#ifdef _WIN32
+    for (int scenario = 0; scenario <= 5; ++scenario) {
+        Fixture fixture(false, true);
+        if (!fixture.ready) continue;
+        QtPlanHasher hasher;
+        OperationPlan draft;
+        MoveStep step;
+        step.source = fixture.attempt.source; step.destination = fixture.attempt.destination;
+        step.fingerprint = fixture.attempt.sourceFingerprint;
+        draft.steps.push_back(step);
+        PrepareTransferPlanUseCase prepare(fixture.worker);
+        const auto prepared = prepare.execute(draft);
+        expect(prepared.hasValue(), "missing parents native volume fixture");
+        if (!prepared) continue;
+        auto movement = *prepared.value().steps[0].movement;
+        // 한 볼륨에서 저수준 계약·저널 연동만 검사하며 실제 두 볼륨 승인 계획은 아니다.
+        movement.strategy = MoveStrategy::VerifiedCopy;
+        const auto firstParent = fixture.attempt.source.parent_path() / "new-target";
+        bool checkedIntent = false;
+        // 폴더 생성 전 복사 의도 저장 경계가 실행되는지 확인하는 함수.
+        fixture.faults.beforeRecord = [&](TransferPhase phase) {
+            if (phase == TransferPhase::CopyIntent) {
+                checkedIntent = true;
+                expect(!std::filesystem::exists(firstParent), "no parent is created before copy intent record");
+            }
+        };
+        if (scenario == 1) fixture.faults.failAt = TransferPhase::CopyIntent;
+        if (scenario == 2) fixture.faults.failAt = TransferPhase::StagingCreated;
+        if (scenario == 3) fixture.faults.failAt = TransferPhase::CopyVerified;
+        if (scenario == 5) movement.destinationVolume.serial = "0";
+        // 검증 직후 취소를 요청해 새 부모 안의 임시 파일 보존을 시험하는 함수.
+        const auto copied = fixture.useCase.execute(fixture.attempt,
+            [&] { return scenario == 4 && fixture.faults.last == TransferPhase::CopyVerified; }, &movement);
+        expect(checkedIntent, "copy intent boundary should precede all parent creation");
+        if (scenario == 0) {
+            expect(copied && copied.value().phase == TransferPhase::DestinationCommitted, "copy commits in new parent chain");
+            WindowsTransferSourceRemoval removal;
+            FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+            expect(finalize.execute(fixture.attempt.id).hasValue(), "verified removal completes after new-parent copy");
+            const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+            expect(plan && plan.value().status == PlanStatus::Completed && !std::filesystem::exists(fixture.attempt.source) &&
+                TransferValidation::sameContent(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.destination)), "new-parent transfer records completion and keeps final contents");
+        } else {
+            expect(!copied, "injected copy failure or cancellation must stop");
+            const auto state = fixture.journal.load(fixture.attempt.id);
+            expect(state && state.value().phase == (scenario == 4 ? TransferPhase::Cancelled : TransferPhase::NeedsRecovery),
+                "new-parent failure retains interrupted phase");
+            expect(sameFingerprint(fixture.attempt.sourceFingerprint, fingerprint(fixture.attempt.source)), "new-parent failure never removes original");
+            if (scenario == 1 || scenario == 5) expect(!std::filesystem::exists(firstParent), "intent or volume mismatch failure creates no parents");
+            else expect(std::filesystem::is_directory(fixture.attempt.destination.parent_path()) &&
+                std::filesystem::exists(fixture.attempt.staging), "created folders and staging retained after later failure");
+            expect(!std::filesystem::exists(fixture.attempt.destination), "precommit failure does not create final file");
+        }
+    }
+#endif
 }
 
 // 각 기록 경계의 실패로 다음 파일 작업이 실행되지 않는지 검사하는 함수.
@@ -979,6 +1042,7 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
 #ifdef _WIN32
     testSuccessAndCancel();
+    testTransferWithMissingParents();
     testJournalFailures();
     testRejectedFiles();
     testReadOnlyTransferRecovery();

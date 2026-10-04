@@ -46,7 +46,7 @@ public:
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,
         const std::filesystem::path& staging) = 0;
-    /// 보호된 핸들의 볼륨을 승인 계약과 비교한 뒤 임시 파일을 만드는 함수.
+    /// 보호된 원본·승인 볼륨을 검증한 뒤 필요한 부모와 새 임시 파일을 만드는 함수.
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> openApproved(
         const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&, const MoveContract&) {
         return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.contract_unsupported", "Approved volume handles are required."});

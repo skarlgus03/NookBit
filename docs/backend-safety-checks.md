@@ -6,6 +6,10 @@
 
 ## 확인한 흐름
 
+승인된 목적지 부모 생성은 `staged_copy_tests.cpp`의 `testApprovedParentCreation`에서 검사한다. 없는 다단계 폴더 생성·한글 최종 이름 확정·부모 이름 변경/쓰기 핸들 차단, 승인 GUID/원본 일련번호/해시 불일치 시 생성 없음, 기존 파일 보존, 나중 단계 실패 시 앞서 만든 빈 폴더 유지, 접근 잠금·장치 이름·상위 경로 우회 거부, 취소 후 원본/폴더 보존과 실제 NTFS junction 아래 생성 거부를 확인한다. 기존 `open`과 계획 준비/볼륨 조회는 폴더를 생성하지 않는다.
+
+`commit_transfer_copy_tests.cpp`의 `testTransferWithMissingParents`는 실제 SQLite의 CopyIntent 저장이 폴더 생성보다 먼저임을 확인한다. 정상 복사·확정·원본 제거, 의도 저장 실패 시 생성 없음, 생성/검증 결과 저장 실패·취소 시 원본과 생성된 자료 유지, 잘못된 목적지 볼륨 거부를 검사한다. 한 볼륨에서 저수준 승인 복사 어댑터를 시험하는 계약이며 실제 두 볼륨 v2 승인 계획/앱 지원을 의미하지 않는다.
+
 검증된 임시 복사본 정리는 `commit_transfer_copy_tests.cpp`의 `testVerifiedStagingCleanup`에서 검사한다. 정상 취소 후 명시적 정리, 원본/임시 내용 변경·동일 내용 다른 객체·최종 경로 충돌·정리 의도 저장 실패·제거 후 결과 저장 실패와 재시작 기록 마무리·부분 복사본 보존·읽기 전용 임시 파일·잘못된 서명·의도 저장 도중 최종 경로 점유·상위 NeedsRecovery 보존·삭제 후 같은 이름 새 파일 재삭제 거부를 다룬다. `testProtectedCleanupSession`은 원본과 임시 파일의 쓰기 차단, 세션 해제 시 삭제 없음, 승인 볼륨 GUID 변경 거부를 검사한다. `testReverseStagingCleanup`은 역전송 취소 정리 후 완료된 이동 결과는 그대로이고 RolledBack으로 오인하지 않는지 확인한다. 삭제 대상은 모두 테스트가 만든 임시 자료다.
 
 `transfer_journal_tests.cpp`의 `testStagingCleanupJournal`은 정리 의도 건너뛰기·낡은 증거·승인 해시 변경 거부, 실제 SQL 감사 실패 시 전체 롤백, 의도/제거 결과 재생과 의도 이벤트 누락 시 손상 거부를 검사한다. `testCleanupMigrationAtomic`은 Schema v4의 기존 기록을 보존하며 v5로 이행하고, 실패 시 컬럼/버전 롤백 후 재시도가 가능한지 확인한다. 부분·미기록 복사본 삭제와 실제 두 드라이브 시험은 포함하지 않는다.

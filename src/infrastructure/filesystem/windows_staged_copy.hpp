@@ -13,7 +13,7 @@ public:
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> open(
         const std::filesystem::path& source, const FileFingerprint& expected,
         const std::filesystem::path& staging) override;
-    /// 승인 볼륨을 보호된 핸들에서 확인한 후 새 임시 파일을 만드는 함수.
+    /// 원본·승인 볼륨을 검증하고 없는 부모를 안전하게 생성한 뒤 새 임시 파일을 만드는 함수.
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openApproved(
         const std::filesystem::path& source, const FileFingerprint& expected,
         const std::filesystem::path& staging, const MoveContract& movement) override;

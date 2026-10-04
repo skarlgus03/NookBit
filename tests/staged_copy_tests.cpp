@@ -7,6 +7,8 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <QCoreApplication>
 #include <QTemporaryDir>
+#include <QProcess>
+#include <QDir>
 #include <fstream>
 #include <iostream>
 #ifdef _WIN32
@@ -38,6 +40,105 @@ nookbit::FileFingerprint fingerprint(const std::filesystem::path& path) {
 void unchanged(const std::filesystem::path& source, const nookbit::FileFingerprint& expected) {
     expect(nookbit::sameFingerprint(expected, fingerprint(source)), "source retained unchanged");
 }
+
+#ifdef _WIN32
+// 승인된 로컬 NTFS 부모 생성의 성공·거부·보호 경계를 실제 임시 자료로 검사하는 함수.
+void testApprovedParentCreation(const std::filesystem::path& root) {
+    using namespace nookbit;
+    WindowsStagedCopy worker;
+    const auto source = root / "parent-source";
+    write(source, "parent creation source");
+    const auto expected = fingerprint(source);
+    OperationPlan draft;
+    MoveStep step;
+    step.source = source; step.destination = root / "new-parent" / "nested" / L"최종-문서.txt"; step.fingerprint = expected;
+    draft.steps.push_back(step);
+    PrepareTransferPlanUseCase prepare(worker);
+    const auto plan = prepare.execute(draft);
+    expect(plan.hasValue(), "parent creation volume contract fixture");
+    if (!plan) return;
+    auto movement = *plan.value().steps[0].movement;
+    // 한 볼륨에서 저수준 복사 어댑터를 검사할 뿐 실제 두 볼륨 승인 계획은 아니다.
+    movement.strategy = MoveStrategy::VerifiedCopy;
+    {
+        auto session = worker.openApproved(source, expected, root / "new-parent" / "nested" / "stage", movement);
+        if (!session) std::cerr << session.error().code << ": " << session.error().message << '\n';
+        expect(session.hasValue(), "approved copy creates missing parent chain");
+        if (session) {
+            expect(std::filesystem::is_directory(root / "new-parent" / "nested"), "nested target parents created");
+            expect(!MoveFileW((root / "new-parent").c_str(), (root / "renamed-new-parent").c_str()), "new parents protected from rename during copy");
+            const auto writableParent = CreateFileW((root / "new-parent" / "nested").c_str(), GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+            expect(writableParent == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION,
+                "parent protection denies writable directory handles needed for reparse replacement");
+            if (writableParent != INVALID_HANDLE_VALUE) CloseHandle(writableParent);
+            expect(session.value()->copyAndVerify().hasValue(), "copy verifies in newly created parent");
+            expect(session.value()->commitNoReplace(step.destination).hasValue(), "copy commits without replacing in new parent");
+        }
+    }
+    expect(std::filesystem::exists(step.destination), "new parent contains verified final copy");
+    unchanged(source, expected);
+    auto wrong = movement;
+    wrong.destinationVolume.guidPath[11] = wrong.destinationVolume.guidPath[11] == 'a' ? 'b' : 'a';
+    expect(!worker.openApproved(source, expected, root / "wrong-target-volume" / "nested" / "stage", wrong), "wrong approved destination GUID rejected");
+    expect(!std::filesystem::exists(root / "wrong-target-volume"), "destination volume mismatch creates no folders");
+    wrong = movement; wrong.sourceVolume.serial = "0";
+    expect(!worker.openApproved(source, expected, root / "wrong-source-volume" / "nested" / "stage", wrong), "wrong approved source volume rejected");
+    expect(!std::filesystem::exists(root / "wrong-source-volume"), "source volume mismatch creates no folders");
+    auto stale = expected; stale.sha256 = std::string(64, '0');
+    expect(!worker.openApproved(source, stale, root / "stale-source" / "nested" / "stage", movement), "changed source rejected before parent creation");
+    expect(!std::filesystem::exists(root / "stale-source"), "source hash mismatch creates no folders");
+    expect(!worker.open(source, expected, root / "legacy-missing" / "stage") && !std::filesystem::exists(root / "legacy-missing"),
+        "unsigned legacy parent creation stays disabled");
+    write(root / "file-parent", "existing file must remain");
+    const auto occupied = fingerprint(root / "file-parent");
+    expect(!worker.openApproved(source, expected, root / "file-parent" / "nested" / "stage", movement), "file in parent chain is never replaced");
+    unchanged(root / "file-parent", occupied);
+    const auto partial = root / "partial-created-parent";
+    expect(!worker.openApproved(source, expected, partial / std::string(300, 'x') / "stage", movement),
+        "later invalid parent component fails without creating staging");
+    expect(std::filesystem::is_directory(partial), "folders already created before later failure are retained without blind cleanup");
+    const auto busy = root / "busy-existing-parent";
+    std::filesystem::create_directory(busy);
+    HANDLE parentLock = CreateFileW(busy.c_str(), FILE_READ_ATTRIBUTES | DELETE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    expect(parentLock != INVALID_HANDLE_VALUE, "busy parent fixture lock");
+    const auto blocked = worker.openApproved(source, expected, busy / "nested" / "stage", movement);
+    expect(!blocked && !std::filesystem::exists(busy / "nested"),
+        "inaccessible existing parent fails without descending or creating children");
+    if (parentLock != INVALID_HANDLE_VALUE) CloseHandle(parentLock);
+    expect(!worker.openApproved(source, expected, root / "device-prefix" / "COM1.txt" / "stage", movement) &&
+        !std::filesystem::exists(root / "device-prefix"), "device parent is rejected before any folder creation");
+    expect(!worker.openApproved(source, expected, root / "traversal-prefix" / ".." / "stage", movement) &&
+        !std::filesystem::exists(root / "traversal-prefix"), "parent traversal rejected before creation");
+    {
+        auto session = worker.openApproved(source, expected, root / "cancel-parent" / "nested" / "stage", movement);
+        expect(session.hasValue(), "cancelled copy parent fixture");
+        if (session) expect(!session.value()->copyAndVerify([] { return true; }), "cancelled copy preserves source and created folders");
+    }
+    expect(std::filesystem::is_directory(root / "cancel-parent" / "nested") &&
+        std::filesystem::exists(root / "cancel-parent" / "nested" / "stage"), "failure does not delete new folders or staging automatically");
+    unchanged(source, expected);
+
+    const auto redirected = root / "junction-target";
+    const auto junction = root / "junction-parent";
+    std::filesystem::create_directory(redirected);
+    QProcess command;
+    // 테스트용 명령 창을 표시하지 않고 같은 임시 폴더 안에만 junction을 만드는 함수.
+    command.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) { args->flags |= CREATE_NO_WINDOW; });
+    command.start(qEnvironmentVariable("ComSpec"), {"/c", "mklink", "/J", QDir::toNativeSeparators(QString::fromStdWString(junction.wstring())),
+        QDir::toNativeSeparators(QString::fromStdWString(redirected.wstring()))});
+    const bool linked = command.waitForFinished(5000) && command.exitCode() == 0;
+    if (!linked) std::cerr << command.errorString().toStdString() << ": " << command.readAllStandardError().toStdString() <<
+        command.readAllStandardOutput().toStdString() << '\n';
+    expect(linked, "native NTFS junction fixture should be created");
+    if (linked) {
+        expect(!worker.openApproved(source, expected, junction / "nested" / "stage", movement), "junction parent rejected before descent");
+        expect(!std::filesystem::exists(redirected / "nested"), "rejected junction creates no redirected folders or files");
+        expect(RemoveDirectoryW(junction.c_str()), "remove only test junction without touching target");
+    }
+    unchanged(source, expected);
+}
+#endif
 }
 
 // 실제 임시 NTFS 파일로 복사 세션의 안전 경계를 시험하는 함수.
@@ -47,6 +148,7 @@ int main(int argc, char** argv) {
     QTemporaryDir fixture(QCoreApplication::applicationDirPath() + "/staged-copy-XXXXXX");
     expect(fixture.isValid(), "temporary directory");
     const std::filesystem::path root(fixture.path().toStdWString());
+    testApprovedParentCreation(root);
     nookbit::WindowsStagedCopy worker;
     const auto volume = worker.inspectVolume(root / "missing" / "nested" / "file");
     expect(bool(volume) && volume.value().localNtfs, "inspect existing ancestor on local NTFS");

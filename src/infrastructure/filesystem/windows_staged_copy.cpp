@@ -29,6 +29,7 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
+#include <winternl.h>
 #include <bcrypt.h>
 #include <algorithm>
 #include <array>
@@ -54,13 +55,25 @@ struct Handle {
     ~Handle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
 };
 
-// 우회 경로·대체 스트림·네트워크 경로를 받지 않는 함수.
+// Windows 장치 예약 이름을 파일·폴더 이름으로 사용하지 못하게 하는 함수.
+bool reservedComponent(const std::wstring& text) {
+    auto name = text.substr(0, text.find(L'.'));
+    while (!name.empty() && name.back() == L' ') name.pop_back();
+    for (const auto device : {L"CON", L"PRN", L"AUX", L"NUL", L"CONIN$", L"CONOUT$"})
+        if (_wcsicmp(name.c_str(), device) == 0) return true;
+    if (name.size() == 4 && (_wcsnicmp(name.c_str(), L"COM", 3) == 0 || _wcsnicmp(name.c_str(), L"LPT", 3) == 0))
+        return (name.back() >= L'1' && name.back() <= L'9') || name.back() == L'\u00b9' ||
+            name.back() == L'\u00b2' || name.back() == L'\u00b3';
+    return false;
+}
+
+// 우회 경로·대체 스트림·장치 이름·네트워크 경로를 받지 않는 함수.
 bool validPath(const std::filesystem::path& path) {
     if (!path.is_absolute() || path.root_name().wstring().size() != 2 ||
         path.native().find(wchar_t{}) != std::wstring::npos) return false;
     for (const auto& part : path.relative_path()) {
         const auto text = part.wstring();
-        if (text == L".." || text == L"." || text.find(L':') != std::wstring::npos ||
+        if (text == L".." || text == L"." || reservedComponent(text) || text.find(L':') != std::wstring::npos ||
             (!text.empty() && (text.back() == L' ' || text.back() == L'.'))) return false;
     }
     return true;
@@ -91,7 +104,7 @@ Result<void> lockParents(const std::filesystem::path& path, std::vector<Handle>&
         paths.push_back(current);
     }
     for (const auto& parent : paths) {
-        Handle handle(CreateFileW(parent.c_str(), FILE_READ_ATTRIBUTES,
+        Handle handle(CreateFileW(parent.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ, nullptr, OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         BY_HANDLE_FILE_INFORMATION info{};
@@ -132,6 +145,40 @@ bool approvedVolume(const TransferVolume& actual, const PlanVolume& approved) {
     const std::wstring guid(approved.guidPath.begin(), approved.guidPath.end());
     return actual.localNtfs && actual.id == approved.serial && approved.filesystem == "NTFS" &&
         _wcsicmp(actual.filesystem.c_str(), L"NTFS") == 0 && _wcsicmp(actual.name.c_str(), guid.c_str()) == 0;
+}
+
+// 승인 볼륨의 부모를 한 단계씩 보호하며 없는 폴더만 생성하고 링크 우회를 거부하는 함수.
+Result<void> prepareApprovedParents(const std::filesystem::path& path, const PlanVolume& approved,
+    std::vector<Handle>& handles) {
+    auto current = path.root_path();
+    std::vector<std::filesystem::path> paths{current};
+    for (const auto& part : path.parent_path().relative_path()) {
+        current /= part;
+        paths.push_back(current);
+    }
+    for (size_t index = 0; index < paths.size(); ++index) {
+        const auto& parent = paths[index];
+        HANDLE raw = CreateFileW(parent.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (raw == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND && index != 0) {
+            // 바로 위 부모는 이미 잠겨 있고 승인 볼륨임을 확인한 상태다.
+            if (!CreateDirectoryW(parent.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS)
+                return Result<void>::failure(failure("transfer.parent_create"));
+            raw = CreateFileW(parent.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        }
+        Handle handle(raw);
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (handle.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(handle.value, &info))
+            return Result<void>::failure(failure("transfer.parent_unavailable"));
+        if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            return Result<void>::failure({"transfer.parent_unsupported", "Only ordinary directory parents are supported"});
+        const auto actual = volume(handle.value);
+        if (!actual || !approvedVolume(actual.value(), approved))
+            return Result<void>::failure({"transfer.volume_changed", "Protected destination parent differs from approved volume"});
+        handles.push_back(std::move(handle));
+    }
+    return Result<void>::success();
 }
 
 // 경로를 다시 열지 않고 보유한 핸들의 전체 SHA-256을 계산하는 함수.
@@ -328,18 +375,31 @@ public:
             outputBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
             outputBasic.FileAttributes != expectedAttributes)
             return Result<FileFingerprint>::failure({"transfer.commit_changed", "Source or staging metadata changed before commit"});
-        const auto name = destination.lexically_normal().wstring();
+        const auto name = destination.filename().wstring();
         const size_t bytes = offsetof(FILE_RENAME_INFO, FileName) + (name.size() + 1) * sizeof(wchar_t);
         if (bytes > MAXDWORD)
             return Result<FileFingerprint>::failure({"transfer.commit_path", "Destination path too long"});
         std::vector<uint64_t> storage((bytes + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
         auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
         rename->ReplaceIfExists = FALSE;
+        // 단순 이름과 NULL 루트는 같은 디렉터리 내부 변경만 허용한다.
         rename->RootDirectory = nullptr;
         rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
         std::copy(name.begin(), name.end(), rename->FileName);
-        if (!SetFileInformationByHandle(staging.value, FileRenameInfo, rename, static_cast<DWORD>(bytes)))
+        using SetInformation = NTSTATUS (NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
+        using StatusToError = ULONG (WINAPI*)(NTSTATUS);
+        const auto native = GetModuleHandleW(L"ntdll.dll");
+        const auto setInformation = reinterpret_cast<SetInformation>(GetProcAddress(native, "NtSetInformationFile"));
+        const auto statusToError = reinterpret_cast<StatusToError>(GetProcAddress(native, "RtlNtStatusToDosError"));
+        if (!setInformation || !statusToError)
+            return Result<FileFingerprint>::failure({"transfer.commit_unsupported", "Native same-directory rename unavailable"});
+        IO_STATUS_BLOCK statusBlock{};
+        constexpr ULONG renameInformation = 10; // FileRenameInformation
+        const auto status = setInformation(staging.value, &statusBlock, rename, static_cast<ULONG>(bytes), renameInformation);
+        if (status < 0) {
+            SetLastError(statusToError(status));
             return Result<FileFingerprint>::failure(failure("transfer.commit_rename"));
+        }
         // NTFS 이름 변경이 보관 속성을 추가할 수 있어 승인 당시 보존 정책을 다시 적용한다.
         FILE_BASIC_INFO preserve = metadata;
         preserve.LastAccessTime.QuadPart = 0;
@@ -751,10 +811,8 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
         !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId)
         return Return::failure({"transfer.path", "Absolute ordinary paths and full source evidence required"});
     std::vector<Handle> locks;
-    for (const auto& path : {source, staging}) {
-        const auto locked = lockParents(path, locks);
-        if (!locked) return Return::failure(locked.error());
-    }
+    const auto sourceParents = lockParents(source, locks);
+    if (!sourceParents) return Return::failure(sourceParents.error());
     Handle input(CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     BY_HANDLE_FILE_INFORMATION info{};
@@ -765,13 +823,12 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     const auto supported = ordinarySource(input.value, source);
     if (!supported) return Return::failure(supported.error());
     const auto sourceVolume = volume(input.value);
-    const auto targetVolume = volume(locks.back().value);
-    if (!sourceVolume || !targetVolume) return Return::failure(!sourceVolume ? sourceVolume.error() : targetVolume.error());
-    if (!sourceVolume.value().localNtfs || !targetVolume.value().localNtfs)
+    if (!sourceVolume) return Return::failure(sourceVolume.error());
+    if (!sourceVolume.value().localNtfs)
         return Return::failure({"transfer.volume_unsupported", "Only local fixed NTFS supported"});
     if (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
         movement->preservation != PreservationPolicy::LocalNtfsBasic ||
-        !approvedVolume(sourceVolume.value(), movement->sourceVolume) || !approvedVolume(targetVolume.value(), movement->destinationVolume)))
+        !approvedVolume(sourceVolume.value(), movement->sourceVolume)))
         return Return::failure({"transfer.volume_changed", "Protected copy volume differs from approval."});
     auto fp = fingerprint(input.value);
     if (!fp) return Return::failure(fp.error());
@@ -780,6 +837,15 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     fp.value().sha256 = hash.value();
     if (!sameFingerprint(expected, fp.value()))
         return Return::failure({"transfer.source_changed", "Source no longer matches approved evidence"});
+    // 원본 객체·내용·계약을 확인하기 전에는 목적지 폴더를 생성하지 않는다.
+    const auto targetParents = movement ? prepareApprovedParents(staging, movement->destinationVolume, locks) : lockParents(staging, locks);
+    if (!targetParents) return Return::failure(targetParents.error());
+    const auto targetVolume = volume(locks.back().value);
+    if (!targetVolume) return Return::failure(targetVolume.error());
+    if (!targetVolume.value().localNtfs)
+        return Return::failure({"transfer.volume_unsupported", "Only local fixed NTFS supported"});
+    if (movement && !approvedVolume(targetVolume.value(), movement->destinationVolume))
+        return Return::failure({"transfer.volume_changed", "Protected copy destination differs from approval"});
     // DELETE 권한은 앱이 만든 임시 파일의 이름 변경에만 사용하며 제거 API는 제공하지 않는다.
     Handle output(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
