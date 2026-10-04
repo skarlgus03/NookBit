@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/staged_copy.hpp>
 #include <nookbit/application/use_cases/verify_saved_plan.hpp>
 
 namespace nookbit {
@@ -13,7 +14,8 @@ public:
                            IScanner& scanner,
                            IPlanner& planner,
                            IPlanHasher& hasher,
-                           IHistoryRepository& history);
+                           IHistoryRepository& history,
+                           ITransferVolumeInspector* volumes = nullptr);
 
     /// DB에서 계획을 다시 읽고 해시와 현재 계획을 비교하는 함수.
     [[nodiscard]] Result<OperationPlan> execute(
@@ -28,6 +30,7 @@ private:
     IPlanner& planner_;
     IPlanHasher& hasher_;
     IHistoryRepository& history_;
+    ITransferVolumeInspector* volumes_;
 };
 
 } // namespace nookbit

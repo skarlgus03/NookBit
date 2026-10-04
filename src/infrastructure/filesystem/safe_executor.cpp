@@ -1,6 +1,7 @@
 #include "infrastructure/filesystem/safe_executor.hpp"
 
 #include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include "infrastructure/filesystem/windows_file_mover.hpp"
@@ -30,26 +31,43 @@ SafeExecutor::SafeExecutor(ISettingsRepository& settings,
                            IScanner& scanner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
-                           std::filesystem::path appDataRoot)
+                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes)
     : settings_(settings), verifier_(&verifier), scanner_(scanner),
-      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)) {}
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes) {}
 
 // 검증 객체 없이 되돌리기만 할 실행기를 만드는 생성자.
 SafeExecutor::SafeExecutor(ISettingsRepository& settings,
                            IScanner& scanner,
                            IPlanHasher& hasher,
                            IHistoryRepository& history,
-                           std::filesystem::path appDataRoot)
+                           std::filesystem::path appDataRoot, ITransferVolumeInspector* volumes)
     : settings_(settings), verifier_(nullptr), scanner_(scanner),
-      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)) {}
+      hasher_(hasher), history_(history), appDataRoot_(std::move(appDataRoot)), volumes_(volumes) {}
+
+// 복사 전략을 이름 변경으로 대체하지 않고 실제 승인 볼륨을 재확인하는 함수.
+Result<void> SafeExecutor::verifyMovement(const OperationPlan& plan, const MoveStep* step) {
+    const auto valid = PlanSignature::validateFormat(plan);
+    if (!valid) return valid;
+    if (plan.formatVersion == 1) return Result<void>::success();
+    if (!volumes_) return Result<void>::failure({"execute.volume_verifier_required", "V2 execution requires volume verification."});
+    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& item) {
+        return item.status != StepStatus::Skipped && item.movement->strategy != MoveStrategy::Rename;
+    })) return Result<void>::failure({"execute.transfer_executor_required", "Verified copy requires a dedicated transfer executor; no rename fallback is allowed."});
+    PrepareTransferPlanUseCase prepare(*volumes_);
+    if (!step) return prepare.verify(plan);
+    OperationPlan single;
+    single.formatVersion = 2;
+    single.steps.push_back(*step);
+    return prepare.verify(single);
+}
 
 // 승인된 계획의 파일들을 덮어쓰기 없이 순서대로 실행하는 함수.
 Result<void> SafeExecutor::execute(
     const OperationPlan& plan,
     const ApprovalRecord& approval,
     const std::vector<std::filesystem::path>& selectedFiles) {
-    if (!PlanSignature::validateFormat(plan) || plan.formatVersion != 1)
-        return Result<void>::failure({"execute.format_unsupported", "Legacy executor cannot execute a v2 movement contract."});
+    const auto format = PlanSignature::validateFormat(plan);
+    if (!format) return format;
     if (!verifier_) {
         return Result<void>::failure({
             "execute.verifier_missing", "A verifier is required to move files."});
@@ -68,8 +86,8 @@ Result<void> SafeExecutor::execute(
         plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
-    if (!PlanSignature::validateFormat(saved) || saved.formatVersion != 1)
-        return Result<void>::failure({"execute.format_unsupported", "Legacy executor cannot execute a v2 movement contract."});
+    const auto movement = verifyMovement(saved);
+    if (!movement) return movement;
     if (saved.planHash != plan.planHash ||
         PlanSignature::planContents(saved) != PlanSignature::planContents(plan)) {
         return Result<void>::failure({"execute.plan_mismatch", "Requested plan differs from saved approval."});
@@ -113,6 +131,12 @@ Result<void> SafeExecutor::execute(
             });
         }
         // 앞선 이동이나 의도 기록 중 바뀐 파일은 옮기지 않는 최종 검사.
+        const auto currentMovement = verifyMovement(saved, step);
+        if (!currentMovement) {
+            const auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return currentMovement;
+        }
         if (probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches) {
             auto failedStep = history_.appendEvent(
                 StepStatusChanged{plan.id, step->id, StepStatus::Failed});
@@ -204,6 +228,14 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     const std::vector<const MoveStep*>& applied,
     PlanStatus finalStatus,
     bool duringExecution) {
+    const auto movement = verifyMovement(plan);
+    if (!movement) {
+        if (duringExecution) {
+            const auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+        }
+        return movement;
+    }
     if (applied.empty()) {
         return Result<void>::failure({"rollback.no_steps", "There are no applied files to undo."});
     }
@@ -238,6 +270,12 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             return intent;
         }
         // 되돌리기 의도까지 기록한 뒤 실제 이동 직전에 두 위치를 다시 검사한다.
+        const auto currentMovement = verifyMovement(plan, step);
+        if (!currentMovement) {
+            const auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return currentMovement;
+        }
         if (probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
             probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
             auto marked = markNeedsRecovery(plan.id);
@@ -275,8 +313,8 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     const auto& plan = loaded.value();
-    if (!PlanSignature::validateFormat(plan) || plan.formatVersion != 1)
-        return Result<void>::failure({"rollback.format_unsupported", "Legacy rollback cannot execute a v2 movement contract."});
+    const auto format = PlanSignature::validateFormat(plan);
+    if (!format) return format;
     if ((plan.status != PlanStatus::Completed && plan.status != PlanStatus::Failed) ||
         !PlanSignature::isSha256Hex(plan.planHash) ||
         plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan))) {

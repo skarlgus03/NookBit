@@ -6,6 +6,7 @@
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
@@ -19,6 +20,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -62,6 +64,7 @@ public:
 // 이동 의도 기록 도중 실패·충돌·파일 변경을 재현하는 저장소.
 class FailingIntentHistory final : public nookbit::IHistoryRepository {
 public:
+    std::function<void()> onIntent;
     QString changedSource;
     QString changedRollbackDestination;
     // 실제 SQLite 저장소를 테스트 대리자로 받는 생성자.
@@ -81,6 +84,9 @@ public:
 
     // 이동·되돌리기 의도를 기록할 때 테스트용 오류나 파일 변경을 주입하는 함수.
     [[nodiscard]] nookbit::Result<void> appendEvent(const nookbit::DomainEvent& event) override {
+        if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
+            changed && (changed->status == nookbit::StepStatus::IntentRecorded ||
+                        changed->status == nookbit::StepStatus::RollbackIntentRecorded) && onIntent) onIntent();
         if (const auto* changed = std::get_if<nookbit::StepStatusChanged>(&event);
             changed && changed->status == nookbit::StepStatus::IntentRecorded && ++intents_ == 2) {
             if (!changedSource.isEmpty()) {
@@ -323,9 +329,105 @@ void testApprovedSingleFileMoveAndUndo() {
            "undo completion should be recorded");
 }
 
+// 실제 조회 앞에서 볼륨 교체 또는 다른 목적지 볼륨을 재현하는 테스트 일꾼.
+class ChangingVolumes final : public nookbit::ITransferVolumeInspector {
+public:
+    nookbit::WindowsStagedCopy native;
+    bool changed{false};
+    bool differentDestination{false};
+    // 실제 NTFS 조회 결과 중 GUID만 바꾸어 계약 변경을 주입하는 함수.
+    nookbit::Result<nookbit::TransferVolume> inspectVolume(const std::filesystem::path& path) override {
+        auto result = native.inspectVolume(path);
+        if (result && (changed || (differentDestination && path.wstring().find(L"organized") != std::wstring::npos)))
+            result.value().name = L"\\\\?\\Volume{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}\\";
+        return result;
+    }
+};
+
+// 실제 임시 파일과 SQLite로 v2 승인부터 이동·되돌리기 및 직전 볼륨 변경 거부를 검사하는 함수.
+void testV2Execution(int scenario) {
+    QTemporaryDir directory(QCoreApplication::applicationDirPath() + "/v2-execute-XXXXXX");
+    expect(directory.isValid(), "v2 execution fixture should exist");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath("photo.jpg");
+    expect(writeFile(source, "v2 original contents"), "v2 source should exist");
+    const std::filesystem::path sourcePath(source.toStdWString());
+    const std::filesystem::path appData(directory.filePath("app-data").toStdWString());
+    TestSettingsRepository settings;
+    settings.settings.homeRoot = std::filesystem::path(directory.filePath("organized").toStdWString());
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, appData);
+    nookbit::QtPlanHasher hasher;
+    nookbit::SqliteHistoryRepository history(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    ChangingVolumes volumes;
+    volumes.differentDestination = scenario == 3;
+    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, &volumes);
+    const auto loadedRules = rules.load();
+    if (!loadedRules) { expect(false, "v2 rules should load"); return; }
+    const auto draft = preview.execute({loadedRules.value().version, {sourcePath}});
+    expect(draft && draft.value().formatVersion == 2, "preview should explicitly prepare v2");
+    if (!draft) return;
+    nookbit::FreezePreviewUseCase missingFreezer(rules, scanner, planner, hasher, history);
+    expect(!missingFreezer.execute(draft.value(), {sourcePath}, settings.settings), "v2 freeze must require a volume port");
+    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history, &volumes);
+    volumes.changed = true;
+    expect(!freezer.execute(draft.value(), {sourcePath}, settings.settings), "changed volume must block freezing");
+    volumes.changed = false;
+    const auto frozen = freezer.execute(draft.value(), {sourcePath}, settings.settings);
+    expect(frozen.hasValue(), "v2 draft should freeze without changing its contract");
+    if (!frozen) return;
+    nookbit::VerifySavedPlanUseCase missingVerifier(rules, scanner, planner, hasher, history);
+    expect(!missingVerifier.execute(frozen.value().id, {sourcePath}, settings.settings), "v2 approval must require a volume port");
+    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, &volumes);
+    nookbit::ApprovePlanUseCase approver(verifier, history);
+    volumes.changed = true;
+    expect(!approver.execute(frozen.value().id, {sourcePath}, settings.settings), "volume change must block approval");
+    volumes.changed = false;
+    const auto approval = approver.execute(frozen.value().id, {sourcePath}, settings.settings);
+    expect(approval.hasValue(), "v2 unchanged plan should approve");
+    const auto approved = history.loadPlan(frozen.value().id);
+    if (!approval || !approved) return;
+    const auto destination = QString::fromStdWString(approved.value().steps[0].destination.wstring());
+    FailingIntentHistory changingHistory(history);
+    nookbit::SafeExecutor executor(settings, verifier, scanner, hasher, changingHistory, appData, &volumes);
+    nookbit::SafeExecutor missingExecutor(settings, verifier, scanner, hasher, history, appData);
+    expect(!missingExecutor.execute(approved.value(), approval.value(), {sourcePath}), "v2 execution must require a volume port");
+    volumes.changed = true;
+    expect(!executor.execute(approved.value(), approval.value(), {sourcePath}), "volume change must block execution");
+    volumes.changed = false;
+    if (scenario == 1) changingHistory.onIntent = [&] { volumes.changed = true; };
+    const auto moved = executor.execute(approved.value(), approval.value(), {sourcePath});
+    if (scenario == 1 || scenario == 3) {
+        expect(!moved && QFile::exists(source) && !QFile::exists(destination), "late volume change or copy strategy must not rename source");
+        const auto saved = history.loadPlan(frozen.value().id);
+        expect(saved && saved.value().status == (scenario == 1 ? nookbit::PlanStatus::NeedsRecovery : nookbit::PlanStatus::Approved),
+               "uncertain intent must need review, unsupported strategy must stay approved");
+        if (scenario == 3) expect(moved.error().code == "execute.transfer_executor_required", "copy contract must explicitly require transfer executor");
+        return;
+    }
+    expect(moved && !QFile::exists(source) && readFile(destination) == "v2 original contents", "v2 rename should move only approved content");
+    if (!moved) return;
+    volumes.changed = true;
+    expect(!executor.rollback(frozen.value().id) && !QFile::exists(source) && QFile::exists(destination), "volume change must block undo before mutation");
+    volumes.changed = false;
+    if (scenario == 2) changingHistory.onIntent = [&] { volumes.changed = true; };
+    const auto undone = executor.rollback(frozen.value().id);
+    const auto saved = history.loadPlan(frozen.value().id);
+    if (scenario == 2) {
+        expect(!undone && !QFile::exists(source) && QFile::exists(destination) && saved && saved.value().status == nookbit::PlanStatus::NeedsRecovery,
+               "late undo volume change must preserve destination and require review");
+    } else {
+        expect(undone && readFile(source) == "v2 original contents" && !QFile::exists(destination) && saved &&
+               saved.value().status == nookbit::PlanStatus::RolledBack && saved.value().planHash == frozen.value().planHash,
+               "v2 undo must restore original content without changing approval hash");
+    }
+}
+
 // 두 번째 단계의 기록 실패나 목적지 충돌 뒤 첫 이동을 되돌리는지 검사하는 함수.
-void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool sourceChanged = false) {
-    QTemporaryDir directory;
+void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool sourceChanged = false, bool v2 = false) {
+    QTemporaryDir directory(QCoreApplication::applicationDirPath() + "/batch-execute-XXXXXX");
     expect(directory.isValid(), "batch-failure directory should be available");
     if (!directory.isValid()) return;
     const auto incoming = directory.filePath(QStringLiteral("incoming"));
@@ -357,19 +459,20 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool source
         expect(false, "batch-failure rules should load");
         return;
     }
-    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
+    nookbit::WindowsStagedCopy volumes;
+    nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, v2 ? &volumes : nullptr);
     auto draft = preview.execute({loadedRules.value().version, selected});
     if (!draft) {
         expect(false, "batch-failure preview should succeed");
         return;
     }
-    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history);
+    nookbit::FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history, v2 ? &volumes : nullptr);
     auto frozen = freezer.execute(draft.value(), selected, settings.settings);
     if (!frozen) {
         expect(false, "batch-failure plan should freeze");
         return;
     }
-    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history);
+    nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, v2 ? &volumes : nullptr);
     nookbit::ApprovePlanUseCase approver(verifier, history);
     auto approval = approver.execute(frozen.value().id, selected, settings.settings);
     auto approved = history.loadPlan(frozen.value().id);
@@ -382,9 +485,9 @@ void testBatchFailureRollsBackEarlierMove(bool destinationCollision, bool source
         destinationCollision ? secondDestination : QString());
     if (sourceChanged) failingHistory.changedSource = second;
     nookbit::VerifySavedPlanUseCase executionVerifier(
-        rules, scanner, planner, hasher, failingHistory);
+        rules, scanner, planner, hasher, failingHistory, v2 ? &volumes : nullptr);
     nookbit::SafeExecutor executor(settings, executionVerifier, scanner, hasher, failingHistory,
-                                   std::filesystem::path(appData.toStdWString()));
+                                   std::filesystem::path(appData.toStdWString()), v2 ? &volumes : nullptr);
     auto executed = executor.execute(approved.value(), approval.value(), selected);
     expect(!executed.hasValue() && executed.error().code == "execute.batch_rolled_back",
            "second-step failure should report completed compensation");
@@ -430,9 +533,13 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
+    for (int scenario = 0; scenario < 4; ++scenario) testV2Execution(scenario);
     testBatchFailureRollsBackEarlierMove(false);
     testBatchFailureRollsBackEarlierMove(true);
     testBatchFailureRollsBackEarlierMove(false, true);
+    testBatchFailureRollsBackEarlierMove(false, false, true);
+    testBatchFailureRollsBackEarlierMove(true, false, true);
+    testBatchFailureRollsBackEarlierMove(false, true, true);
     if (failures == 0) {
         std::cout << "All safe-executor tests passed.\n";
         return 0;

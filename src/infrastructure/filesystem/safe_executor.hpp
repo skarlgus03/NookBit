@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/staged_copy.hpp>
 #include <nookbit/application/use_cases/verify_saved_plan.hpp>
 
 #include <filesystem>
@@ -16,14 +17,16 @@ public:
                  IScanner& scanner,
                  IPlanHasher& hasher,
                  IHistoryRepository& history,
-                 std::filesystem::path appDataRoot);
+                 std::filesystem::path appDataRoot,
+                 ITransferVolumeInspector* volumes = nullptr);
 
     /// 검증이 필요 없는 되돌리기만 할 때 사용할 실행기를 만드는 생성자.
     SafeExecutor(ISettingsRepository& settings,
                  IScanner& scanner,
                  IPlanHasher& hasher,
                  IHistoryRepository& history,
-                 std::filesystem::path appDataRoot);
+                 std::filesystem::path appDataRoot,
+                 ITransferVolumeInspector* volumes = nullptr);
 
     /// 승인된 계획의 파일들을 덮어쓰기 없이 순서대로 실행하는 함수.
     [[nodiscard]] Result<void> execute(
@@ -35,6 +38,8 @@ public:
     [[nodiscard]] Result<void> rollback(const PlanId& planId) override;
 
 private:
+    /// v2의 승인된 볼륨과 이름 변경 전략만 현재 실행 범위에 맞는지 검사하는 함수.
+    [[nodiscard]] Result<void> verifyMovement(const OperationPlan& plan, const MoveStep* step = nullptr);
     /// 이미 적용된 단계들을 검증하고 역순으로 되돌려 최종 상태를 기록하는 함수.
     [[nodiscard]] Result<void> rollbackAppliedSteps(
         const OperationPlan& plan,
@@ -51,6 +56,7 @@ private:
     IPlanHasher& hasher_;
     IHistoryRepository& history_;
     std::filesystem::path appDataRoot_;
+    ITransferVolumeInspector* volumes_;
 };
 
 } // namespace nookbit

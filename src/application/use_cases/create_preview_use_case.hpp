@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/staged_copy.hpp>
 #include <nookbit/application/use_cases/create_preview.hpp>
 
 namespace nookbit {
@@ -14,14 +15,16 @@ public:
         IRuleSetRepository& rules,
         IScanner& scanner,
         IPlanner& planner,
-        IPlanHasher* hasher = nullptr);
+        IPlanHasher* hasher = nullptr,
+        ITransferVolumeInspector* volumes = nullptr);
 
     /// 요청에 포함된 목적지를 사용하도록 외부 일꾼만 받는 생성자.
     CreatePreviewUseCase(
         IRuleSetRepository& rules,
         IScanner& scanner,
         IPlanner& planner,
-        IPlanHasher* hasher = nullptr);
+        IPlanHasher* hasher = nullptr,
+        ITransferVolumeInspector* volumes = nullptr);
 
     /// 선택한 파일과 요청 목적지·규칙으로 정리 미리보기를 생성하는 함수.
     [[nodiscard]] Result<OperationPlan> execute(
@@ -33,6 +36,7 @@ private:
     IScanner& scanner_;
     IPlanner& planner_;
     IPlanHasher* hasher_;
+    ITransferVolumeInspector* volumes_;
 };
 
 } // namespace nookbit

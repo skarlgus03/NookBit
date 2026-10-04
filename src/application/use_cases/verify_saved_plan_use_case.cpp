@@ -2,6 +2,7 @@
 
 #include "application/use_cases/content_fingerprint.hpp"
 #include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <algorithm>
 
@@ -12,9 +13,9 @@ VerifySavedPlanUseCase::VerifySavedPlanUseCase(IRuleSetRepository& rules,
                                                IScanner& scanner,
                                                IPlanner& planner,
                                                IPlanHasher& hasher,
-                                               IHistoryRepository& history)
+                                               IHistoryRepository& history, ITransferVolumeInspector* volumes)
     : rules_(rules), scanner_(scanner), planner_(planner),
-      hasher_(hasher), history_(history) {}
+      hasher_(hasher), history_(history), volumes_(volumes) {}
 
 // DB에서 계획을 다시 읽고 해시와 현재 계획을 비교하는 함수.
 Result<OperationPlan> VerifySavedPlanUseCase::execute(
@@ -41,14 +42,19 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     const auto& saved = *found;
     const auto format = PlanSignature::validateFormat(saved);
     if (!format) return Result<OperationPlan>::failure(format.error());
-    if (saved.formatVersion != 1)
-        return Result<OperationPlan>::failure({"verify.volume_verifier_required", "V2 approval requires current volume verification."});
     if (saved.status != expectedStatus ||
         !PlanSignature::isSha256Hex(saved.planHash) ||
         saved.planHash != hasher_.sha256(PlanSignature::approvalPayload(saved))) {
         return Result<OperationPlan>::failure({
             "verify.plan_modified", "The saved plan is not an intact unapproved plan.",
         });
+    }
+
+    if (saved.formatVersion == 2) {
+        if (!volumes_) return Result<OperationPlan>::failure({"verify.volume_verifier_required", "V2 approval requires current volume verification."});
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        const auto checked = prepare.verify(saved);
+        if (!checked) return Result<OperationPlan>::failure(checked.error());
     }
 
     if (saved.settingsRevision != hasher_.sha256(PlanSignature::settings(settings))) {
@@ -69,6 +75,13 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
     auto current = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!current) return Result<OperationPlan>::failure(current.error());
+    if (saved.formatVersion == 2 && current.value().formatVersion == 1) {
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        current = prepare.execute(current.value());
+        if (!current) return Result<OperationPlan>::failure(current.error());
+    }
+    const auto currentFormat = PlanSignature::validateFormat(current.value());
+    if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
     auto hashed = attachContentHashes(current.value(), scanner_, hasher_);
     if (!hashed) return Result<OperationPlan>::failure(hashed.error());
     if (PlanSignature::planContents(saved) != PlanSignature::planContents(current.value())) {

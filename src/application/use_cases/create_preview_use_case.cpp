@@ -1,5 +1,6 @@
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <utility>
 
@@ -11,16 +12,16 @@ CreatePreviewUseCase::CreatePreviewUseCase(
     IRuleSetRepository& rules,
     IScanner& scanner,
     IPlanner& planner,
-    IPlanHasher* hasher)
-    : settings_(&settings), rules_(rules), scanner_(scanner), planner_(planner), hasher_(hasher) {}
+    IPlanHasher* hasher, ITransferVolumeInspector* volumes)
+    : settings_(&settings), rules_(rules), scanner_(scanner), planner_(planner), hasher_(hasher), volumes_(volumes) {}
 
 // 요청에 포함된 목적지를 사용할 때 외부 일꾼만 저장하는 생성자.
 CreatePreviewUseCase::CreatePreviewUseCase(
     IRuleSetRepository& rules,
     IScanner& scanner,
     IPlanner& planner,
-    IPlanHasher* hasher)
-    : settings_(nullptr), rules_(rules), scanner_(scanner), planner_(planner), hasher_(hasher) {}
+    IPlanHasher* hasher, ITransferVolumeInspector* volumes)
+    : settings_(nullptr), rules_(rules), scanner_(scanner), planner_(planner), hasher_(hasher), volumes_(volumes) {}
 
 // 대기 파일과 요청 목적지·규칙을 확인한 뒤 이동 계획을 생성하는 함수.
 Result<OperationPlan> CreatePreviewUseCase::execute(
@@ -78,6 +79,10 @@ Result<OperationPlan> CreatePreviewUseCase::execute(
         snapshot.value(),
         settings,
         rules.value());
+    if (plan && volumes_) {
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        plan = prepare.execute(plan.value());
+    }
     if (plan && hasher_) {
         plan.value().settingsRevision = hasher_->sha256(
             PlanSignature::settings(settings));

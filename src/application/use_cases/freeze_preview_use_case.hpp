@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/staged_copy.hpp>
 #include <nookbit/application/use_cases/freeze_preview.hpp>
 
 namespace nookbit {
@@ -13,7 +14,8 @@ public:
                          IScanner& scanner,
                          IPlanner& planner,
                          IPlanHasher& hasher,
-                         IHistoryRepository& history);
+                         IHistoryRepository& history,
+                         ITransferVolumeInspector* volumes = nullptr);
 
     /// 화면 초안과 현재 상태가 같을 때만 Planned 계획으로 저장하는 함수.
     [[nodiscard]] Result<OperationPlan> execute(
@@ -27,6 +29,7 @@ private:
     IPlanner& planner_;
     IPlanHasher& hasher_;
     IHistoryRepository& history_;
+    ITransferVolumeInspector* volumes_;
 };
 
 } // namespace nookbit

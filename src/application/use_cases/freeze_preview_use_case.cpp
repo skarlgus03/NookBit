@@ -2,6 +2,7 @@
 
 #include "application/use_cases/content_fingerprint.hpp"
 #include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <algorithm>
 
@@ -12,9 +13,9 @@ FreezePreviewUseCase::FreezePreviewUseCase(IRuleSetRepository& rules,
                                            IScanner& scanner,
                                            IPlanner& planner,
                                            IPlanHasher& hasher,
-                                           IHistoryRepository& history)
+                                           IHistoryRepository& history, ITransferVolumeInspector* volumes)
     : rules_(rules), scanner_(scanner), planner_(planner),
-      hasher_(hasher), history_(history) {}
+      hasher_(hasher), history_(history), volumes_(volumes) {}
 
 // 화면 초안과 현재 상태가 같을 때만 Planned 계획으로 저장하는 함수.
 Result<OperationPlan> FreezePreviewUseCase::execute(
@@ -23,6 +24,12 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     const UserSettings& settings) {
     const auto format = PlanSignature::validateFormat(draft);
     if (!format) return Result<OperationPlan>::failure(format.error());
+    if (draft.formatVersion == 2) {
+        if (!volumes_) return Result<OperationPlan>::failure({"freeze.volume_verifier_required", "V2 freeze requires volume verification."});
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        const auto checked = prepare.verify(draft);
+        if (!checked) return Result<OperationPlan>::failure(checked.error());
+    }
     if (draft.status != PlanStatus::Draft || !draft.planHash.empty() ||
         draft.id.empty() || draft.settingsRevision.empty() ||
         draft.rulesRevision.empty() || selectedFiles.empty()) {
@@ -56,6 +63,11 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
     auto refreshed = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
+    if (draft.formatVersion == 2 && refreshed.value().formatVersion == 1) {
+        PrepareTransferPlanUseCase prepare(*volumes_);
+        refreshed = prepare.execute(refreshed.value());
+        if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
+    }
     const auto currentFormat = PlanSignature::validateFormat(refreshed.value());
     if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
     if (PlanSignature::planContents(draft) != PlanSignature::planContents(refreshed.value())) {
