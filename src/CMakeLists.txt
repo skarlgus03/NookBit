@@ -17,6 +17,7 @@ add_library(nookbit_core STATIC
   application/use_cases/resume_committed_transfer_use_case.cpp
   application/use_cases/resume_partial_copy_use_case.cpp
   application/use_cases/commit_resumed_staging_use_case.cpp
+  application/use_cases/reconcile_transfer_commit_use_case.cpp
   application/use_cases/transfer_recovery_binding.cpp
   application/use_cases/cleanup_transfer_staging_use_case.cpp
   application/use_cases/finalize_transfer_use_case.cpp

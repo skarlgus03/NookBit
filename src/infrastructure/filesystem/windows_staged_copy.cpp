@@ -518,7 +518,8 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     initial.recoveryRemovalIntent = false;
     auto proof = attempt;
     // 저널 상태는 바꾸지 않고 같은 확정 증거의 파일 보호 조건만 재사용한다.
-    if (attempt.recoveryRemovalIntent || attempt.phase != TransferPhase::DestinationCommitted || attempt.copyResume != CopyResume::None) {
+    if (attempt.recoveryRemovalIntent || attempt.phase != TransferPhase::DestinationCommitted ||
+        attempt.copyResume != CopyResume::None || attempt.stagingCommit != StagingCommit::None) {
         auto eligible = attempt;
         eligible.recoveryRemovalIntent = false;
         if (!TransferValidation::recordRecoveryRemovalIntent(eligible))
@@ -689,6 +690,45 @@ Result<void> verifyCleanupFile(HANDLE file, const std::filesystem::path& path, c
         return Result<void>::failure({"transfer.cleanup_changed", "Source or verified staging object changed; no cleanup authorized"});
     return Result<void>::success();
 }
+
+// 원본·최종 파일을 읽기 전용으로 보호하며 누락된 확정 결과의 지문만 반환하는 세션.
+class CommitRecoverySession final : public ITransferCommitRecoverySession {
+    std::vector<Handle> parents_;
+    Handle source_, destination_;
+    TransferAttempt attempt_;
+public:
+    // 두 읽기 핸들과 보호된 부모·예상 증거를 넘겨 받는 함수.
+    CommitRecoverySession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt)
+        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)) {}
+    // 객체·전체 내용·기본 메타데이터와 임시 경로 부재를 변경 없이 검사하는 함수.
+    Result<FileFingerprint> verify(const std::function<bool()>& cancelled) override {
+        using Return = Result<FileFingerprint>;
+        for (const auto& item : {std::pair{source_.value, attempt_.source}, std::pair{destination_.value, attempt_.destination}}) {
+            if (cancelled && cancelled()) return Return::failure({"transfer.cancelled", "Commit recovery check cancelled"});
+            const auto supported = ordinarySource(item.first, item.second);
+            const auto hash = digest(item.first, cancelled);
+            const auto fp = fingerprint(item.first);
+            if (!supported || !hash || !fp) return Return::failure(!supported ? supported.error() : !hash ? hash.error() : fp.error());
+            auto actual = fp.value(); actual.sha256 = hash.value();
+            const auto& expected = item.first == source_.value ? attempt_.sourceFingerprint : *attempt_.stagingFingerprint;
+            if (!sameFingerprint(expected, actual))
+                return Return::failure({"transfer.commit_recovery_changed", "Source or renamed staging object changed"});
+        }
+        FILE_BASIC_INFO sourceBasic{}, finalBasic{};
+        if (!GetFileInformationByHandleEx(source_.value, FileBasicInfo, &sourceBasic, sizeof(sourceBasic)) ||
+            !GetFileInformationByHandleEx(destination_.value, FileBasicInfo, &finalBasic, sizeof(finalBasic)))
+            return Return::failure(failure("transfer.commit_recovery_metadata"));
+        const auto attributes = sourceBasic.FileAttributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN |
+            FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED);
+        if (sourceBasic.CreationTime.QuadPart != finalBasic.CreationTime.QuadPart ||
+            sourceBasic.LastWriteTime.QuadPart != finalBasic.LastWriteTime.QuadPart ||
+            finalBasic.FileAttributes != (attributes ? attributes : FILE_ATTRIBUTE_NORMAL))
+            return Return::failure({"transfer.commit_recovery_metadata", "Final basic metadata differs; no repair is performed"});
+        const auto missing = requireMissing(attempt_.staging);
+        if (!missing) return Return::failure(missing.error());
+        return Return::success(*attempt_.stagingFingerprint);
+    }
+};
 
 class CleanupSession final : public IStagingCleanupSession {
     std::vector<Handle> parents_;
@@ -888,6 +928,38 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     return Return::success(std::make_unique<Session>(std::move(locks), std::move(input), std::move(output),
         expected, initial.value(), basic, source, staging));
 }
+// 원본과 최종 객체를 변경 없이 열고 승인된 부모·볼륨을 보호하는 함수.
+Result<std::unique_ptr<ITransferCommitRecoverySession>> WindowsTransferCommitRecoveryGuard::open(
+    const TransferAttempt& attempt, const MoveContract* movement) {
+    using Return = Result<std::unique_ptr<ITransferCommitRecoverySession>>;
+    if (!attempt.stagingFingerprint || !TransferValidation::reconcileDestinationCommitted(attempt, *attempt.stagingFingerprint, true))
+        return Return::failure({"transfer.commit_recovery_state", "Unrecorded final commit evidence required"});
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.error.reset(); initial.copyResume = CopyResume::None; initial.stagingCommit = StagingCommit::None;
+    if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging))
+        return Return::failure({"transfer.path", "Unsupported commit recovery paths"});
+    std::vector<Handle> parents;
+    for (const auto& path : {attempt.source, attempt.destination}) {
+        const auto locked = lockParents(path, parents);
+        if (!locked) return Return::failure(locked.error());
+    }
+    Handle source(CreateFileW(attempt.source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    Handle final(CreateFileW(attempt.destination.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (source.value == INVALID_HANDLE_VALUE || final.value == INVALID_HANDLE_VALUE)
+        return Return::failure(failure("transfer.commit_recovery_open"));
+    for (const auto& file : {std::pair{source.value, attempt.sourceFingerprint}, std::pair{final.value, *attempt.stagingFingerprint}}) {
+        const auto actual = volume(file.first);
+        if (!actual || !actual.value().localNtfs || actual.value().id != file.second.volumeId ||
+            (movement && (movement->strategy != MoveStrategy::VerifiedCopy || movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+             !approvedVolume(actual.value(), file.first == source.value ? movement->sourceVolume : movement->destinationVolume))))
+            return Return::failure({"transfer.volume_changed", "Commit recovery volume differs from recorded approval"});
+    }
+    return Return::success(std::make_unique<CommitRecoverySession>(std::move(parents), std::move(source), std::move(final), attempt));
+}
+
 // 기록된 임시 객체를 변경 없이 비교해 이어쓰기 위치 또는 전체 검증 확정 세션을 고정하는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(const TransferAttempt& attempt,
     const MoveContract* movement, const std::function<bool()>& cancelled, bool verified) {
@@ -974,6 +1046,10 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외에서는 누락 확정 결과의 보호 검사를 지원하지 않는 함수.
+Result<std::unique_ptr<ITransferCommitRecoverySession>> WindowsTransferCommitRecoveryGuard::open(const TransferAttempt&, const MoveContract*) {
+    return Result<std::unique_ptr<ITransferCommitRecoverySession>>::failure({"transfer.unsupported", "Windows only"});
+}
 // Windows 외에서는 기존 임시 파일의 이어쓰기와 확정을 변경 없이 거부하는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(const TransferAttempt&, const MoveContract*, const std::function<bool()>&, bool) {
     return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.unsupported", "Windows only"});

@@ -467,6 +467,68 @@ void testStagingCommitJournal() {
     expect(sql(dbPath, "DELETE FROM transfer_events WHERE staging_commit=1").isValid() && !restarted.load("attempt"), "missing commit intent corrupts lineage and prevents reuse");
 }
 
+// 정상·재개 확정 의도와 실제 SQL 실패·현재 승인·재생의 복구 경계를 검사하는 함수.
+void testCommitRecoveryJournal() {
+    using namespace nookbit;
+    for (int mode = 0; mode < 3; ++mode) {
+        QTemporaryDir directory;
+        Fixture fixture(directory.path());
+        if (!fixture.ready) continue;
+        const auto dbPath = directory.filePath("history.sqlite");
+        SqliteTransferJournal journal(dbPath, migrationPath());
+        FileFingerprint stage{0, 1000, "target-volume", "stage", std::nullopt};
+        expect(journal.begin(fixture.attempt).hasValue() &&
+            journal.advance("attempt", {TransferPhase::Prepared, TransferPhase::CopyIntent}).hasValue() &&
+            journal.advance("attempt", {TransferPhase::CopyIntent, TransferPhase::StagingCreated, stage}).hasValue(), "commit recovery created fixture");
+        auto state = journal.load("attempt");
+        expect(state && !journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "unverified staging cannot recover final result");
+        stage.size = fixture.attempt.sourceFingerprint.size; stage.sha256 = fixture.attempt.sourceFingerprint.sha256;
+        if (mode == 2) {
+            expect(journal.advance("attempt", {TransferPhase::StagingCreated, TransferPhase::Cancelled}).hasValue(), "resumed cancelled journal fixture");
+            state = journal.load("attempt");
+            expect(state && journal.recordCopyResume(state.value(), fixture.plan.planHash, CopyResume::IntentRecorded).hasValue(), "resumed intent fixture");
+            state = journal.load("attempt");
+            expect(state && journal.recordCopyResume(state.value(), fixture.plan.planHash, CopyResume::Verified, stage).hasValue(), "resumed verification fixture");
+            state = journal.load("attempt");
+            expect(state && !journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "resumed copy alone grants no commit recovery");
+            expect(state && journal.recordStagingCommit(state.value(), fixture.plan.planHash, StagingCommit::IntentRecorded).hasValue(), "resumed commit intent fixture");
+        } else {
+            expect(journal.advance("attempt", {TransferPhase::StagingCreated, TransferPhase::CopyVerified, stage}).hasValue(), "normal verification fixture");
+            state = journal.load("attempt");
+            expect(state && !journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "verified copy without commit intent cannot recover");
+            expect(journal.advance("attempt", {TransferPhase::CopyVerified, TransferPhase::CommitIntent}).hasValue(), "normal commit intent fixture");
+            if (mode == 1) expect(journal.advance("attempt", {TransferPhase::CommitIntent, TransferPhase::NeedsRecovery, {}, {}, Error{"test.interrupted", "result missing"}}).hasValue(), "normal stopped commit fixture");
+        }
+        state = journal.load("attempt");
+        if (!state) { expect(false, "commit recovery pending state"); continue; }
+        expect(!TransferValidation::reconcileDestinationCommitted(state.value(), stage, false), "missing historical commit intent blocks pure recovery");
+        auto stale = state.value(); stale.stagingFingerprint->modifiedUtcMs++;
+        expect(!journal.reconcileDestinationCommitted(stale, fixture.plan.planHash, stage), "stale protected snapshot rejected");
+        auto changed = stage; changed.fileId = "other";
+        expect(!journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, changed), "different final object rejected");
+        changed = stage; changed.modifiedUtcMs++;
+        expect(!journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, changed), "changed final time rejected");
+        expect(!journal.reconcileDestinationCommitted(state.value(), std::string(64, '0'), stage), "changed approval hash rejected");
+        expect(sql(dbPath, "UPDATE plans SET approved_at=NULL").isValid() &&
+            !journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "current approval checked at recovery record time");
+        expect(sql(dbPath, "UPDATE plans SET approved_at='restored'").isValid(), "restore current approval fixture");
+        expect(sql(dbPath, "CREATE TRIGGER fail_commit_recovery BEFORE INSERT ON events WHEN NEW.event_type='transfer_commit_recovered' BEGIN SELECT RAISE(ABORT,'recovery audit failure'); END").isValid(), "real recovery SQL fault fixture");
+        expect(!journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "recovery audit failure reported");
+        const auto unchanged = journal.load("attempt");
+        expect(unchanged && unchanged.value().phase == state.value().phase && !unchanged.value().destinationFingerprint &&
+            unchanged.value().stagingCommit == state.value().stagingCommit, "SQL audit failure rolls back final evidence and marker together");
+        expect(sql(dbPath, "DROP TRIGGER fail_commit_recovery").isValid() &&
+            journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage).hasValue(), "commit recovery retry succeeds atomically");
+        SqliteTransferJournal restarted(dbPath, migrationPath());
+        const auto recovered = restarted.load("attempt");
+        expect(recovered && recovered.value().phase == TransferPhase::DestinationCommitted && recovered.value().stagingCommit == StagingCommit::Committed &&
+            TransferValidation::recordRecoveryRemovalIntent(recovered.value()).hasValue(), "replay of recovered final permits only separate explicit removal");
+        expect(!journal.reconcileDestinationCommitted(state.value(), fixture.plan.planHash, stage), "same stale recovery request cannot record twice");
+        expect(sql(dbPath, mode == 2 ? "DELETE FROM transfer_events WHERE staging_commit=1" : "DELETE FROM transfer_events WHERE phase='commit_intent'").isValid() &&
+            !restarted.load("attempt"), "missing historical intent makes recovered final chain invalid");
+    }
+}
+
 // v7에서 확정 감사 컬럼 이행 실패·재시도·승인 보존을 검사하는 함수.
 void testStagingCommitMigration() {
     QTemporaryDir directory;
@@ -727,6 +789,7 @@ int main(int argc, char* argv[]) {
     testRecoveryRemovalJournal();
     testCopyResumeJournal();
     testStagingCommitJournal();
+    testCommitRecoveryJournal();
     testStagingCommitMigration();
     testCopyResumeMigration();
     testRecoveryRemovalMigration();

@@ -4,8 +4,26 @@
 #include <nookbit/application/resume_committed_transfer_use_case.hpp>
 #include <nookbit/application/resume_partial_copy_use_case.hpp>
 #include <nookbit/application/commit_resumed_staging_use_case.hpp>
+#include <nookbit/application/reconcile_transfer_commit_use_case.hpp>
 
 namespace nookbit {
+/// 기록 누락 확정의 원본·최종 파일을 읽기 전용으로 보호하는 어댑터.
+class WindowsTransferCommitRecoveryGuard final : public ITransferCommitRecoveryGuard {
+public:
+    /// 파일 변경 없이 승인 볼륨과 두 객체를 보호하는 함수.
+    [[nodiscard]] Result<std::unique_ptr<ITransferCommitRecoverySession>> open(
+        const TransferAttempt& attempt, const MoveContract* movement) override;
+};
+/// 다른 실행·복구와 같은 시스템 잠금 안에서 확정 기록만 복구하는 진입점.
+class TransferCommitRecoveryService final {
+public:
+    /// 외부 소유의 기록 복구 유스케이스를 빌려 받는 함수.
+    explicit TransferCommitRecoveryService(ReconcileTransferCommitUseCase& useCase) : useCase_(useCase) {}
+    /// 파일을 변경하지 않고 누락 확정 결과의 명시적 복구를 요청하는 함수.
+    [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId, const std::function<bool()>& cancelled = {});
+private:
+    ReconcileTransferCommitUseCase& useCase_;
+};
 /// 다른 실행·복구와 직렬화해 재개 복사본의 최종 이름을 확정하는 진입점.
 class ResumedStagingCommitService final {
 public:

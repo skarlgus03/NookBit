@@ -2,6 +2,13 @@
 #include "operation_mutex.hpp"
 
 namespace nookbit {
+// 다른 파일 실행·복구와 직렬화한 뒤 누락 확정 기록만 복구하는 함수.
+Result<TransferAttempt> TransferCommitRecoveryService::execute(const std::string& attemptId, const std::function<bool()>& cancelled) {
+    OperationMutex lock;
+    const auto acquired = lock.acquire();
+    if (!acquired) return Result<TransferAttempt>::failure(acquired.error());
+    return useCase_.execute(attemptId, cancelled);
+}
 // 다른 실행·복구와 같은 시스템 잠금 안에서 재개 복사본을 확정하는 함수.
 Result<TransferAttempt> ResumedStagingCommitService::execute(const std::string& attemptId, const std::function<bool()>& cancelled) {
     OperationMutex lock;

@@ -52,6 +52,11 @@ public:
         return Result<void>::failure({"transfer.commit_resume_unsupported", "Durable staging commit unsupported"});
     }
 
+    /// 보호 검증 중인 예상 시도·현재 승인·실제 확정 의도를 대조해 누락 결과만 저장하는 함수.
+    [[nodiscard]] virtual Result<void> reconcileDestinationCommitted(const TransferAttempt&, const std::string&,
+        const FileFingerprint&) {
+        return Result<void>::failure({"transfer.commit_recovery_unsupported", "Durable commit recovery unsupported"});
+    }
     /// 단계 하나의 정방향·역방향 시도를 생성 순서대로 읽는 함수.
     [[nodiscard]] virtual Result<std::vector<TransferAttempt>> forStep(const StepId& stepId) const = 0;
 };

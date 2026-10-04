@@ -285,6 +285,7 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
         !events.value(1).isNull() || !events.value(2).isNull() || !events.value(3).isNull() || events.value(4).toInt() != 0 || events.value(5).toInt() != 0 || events.value(6).toInt() != 0 || events.value(7).toInt() != 0 || events.value(8).toInt() != 0)
         return Result<TransferAttempt>::failure({"transfer.record_invalid", "Missing or invalid initial transfer event."});
     bool removalIntentRecorded = false;
+    bool commitIntentRecorded = false;
     while (events.next()) {
         const auto phase = parsePhase(events.value(0).toString());
         if (!phase) return Result<TransferAttempt>::failure({"transfer.record_invalid", "Unknown transfer event phase."});
@@ -292,7 +293,9 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
         const auto committed = static_cast<StagingCommit>(events.value(8).toInt());
         if (committed != result.stagingCommit) {
             const auto final = committed == StagingCommit::Committed ? decodeFingerprint(events.value(2).toString()) : std::nullopt;
-            const auto next = TransferValidation::recordStagingCommit(result, committed, final);
+            const auto next = committed == StagingCommit::Committed && result.copyResume == CopyResume::None && final ?
+                TransferValidation::reconcileDestinationCommitted(result, *final, commitIntentRecorded) :
+                TransferValidation::recordStagingCommit(result, committed, final);
             if (!next || resumed != result.copyResume || events.value(4).toInt() != 0 || events.value(5).toInt() != 0 ||
                 events.value(6).toInt() != 0 || !sameNullable(events.value(1), optionalFingerprint(result.stagingFingerprint)) ||
                 *phase != next.value().phase || !sameNullable(events.value(3), encodeError(next.value().error)) ||
@@ -366,6 +369,7 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
             TransferValidation::advance(result, update);
         if (!next) return Result<TransferAttempt>::failure(next.error());
         if (*phase == TransferPhase::SourceRemoveIntent) removalIntentRecorded = true;
+        if (*phase == TransferPhase::CommitIntent) commitIntentRecorded = true;
         result = next.value();
     }
     if (row.value(7).toString() != phaseName(result.phase) ||
@@ -676,6 +680,51 @@ Result<void> SqliteTransferJournal::recordStagingCommit(const TransferAttempt& e
         {"state", retry ? "retry" : commit == StagingCommit::IntentRecorded ? "intent_recorded" : "committed"}}).toJson(QJsonDocument::Compact)));
     if (!audit.exec()) return fail("transfer.staging_commit_event");
     if (!database_.commit()) return fail("transfer.staging_commit_transaction");
+    return Result<void>::success();
+}
+
+// 파일 보호 중의 예상 증거·실제 확정 의도·현재 승인을 확인해 누락 결과만 저장하는 함수.
+Result<void> SqliteTransferJournal::reconcileDestinationCommitted(const TransferAttempt& expected,
+    const std::string& planHash, const FileFingerprint& destination) {
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", "Cannot start commit recovery transaction"});
+    // 스냅샷·감사 중 하나라도 실패하면 이번 변경을 전부 취소하는 함수.
+    const auto fail = [&](const char* code) {
+        database_.rollback();
+        return Result<void>::failure({code, "Commit recovery record was not committed"});
+    };
+    const auto current = readAttempt(expected.id);
+    if (!current || !sameAttempt(current.value(), expected)) return fail("transfer.commit_recovery_conflict");
+    QSqlQuery intent(database_);
+    intent.prepare("SELECT 1 FROM transfer_events WHERE attempt_id=? AND (phase='commit_intent' OR staging_commit=1) LIMIT 1");
+    intent.addBindValue(QString::fromStdString(expected.id));
+    if (!intent.exec() || !intent.next()) return fail("transfer.commit_recovery_intent");
+    intent.finish();
+    const auto next = TransferValidation::reconcileDestinationCommitted(current.value(), destination, true);
+    if (!next) return fail("transfer.commit_recovery_state");
+    const bool forward = expected.direction == TransferDirection::Forward;
+    QSqlQuery owner(database_);
+    owner.prepare("SELECT 1 FROM plans p JOIN steps s ON s.plan_id=p.id WHERE p.id=? AND s.id=? AND p.plan_hash=? AND p.approved_at IS NOT NULL AND p.status IN (?,'needs_recovery') AND s.status IN (?,'needs_recovery')");
+    owner.addBindValue(QString::fromStdString(expected.planId)); owner.addBindValue(QString::fromStdString(expected.stepId));
+    owner.addBindValue(QString::fromStdString(planHash)); owner.addBindValue(forward ? "executing" : "rolling_back");
+    owner.addBindValue(forward ? "intent_recorded" : "rollback_intent_recorded");
+    if (!owner.exec() || !owner.next()) return fail("transfer.commit_recovery_owner");
+    owner.finish();
+    QSqlQuery change(database_);
+    change.prepare("UPDATE transfer_attempts SET phase=?,destination_fingerprint_json=?,error_json=NULL,updated_at=? WHERE id=? AND phase=?");
+    change.addBindValue(phaseName(next.value().phase)); change.addBindValue(encodeFingerprint(destination));
+    change.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    change.addBindValue(QString::fromStdString(expected.id)); change.addBindValue(phaseName(expected.phase));
+    if (!change.exec() || change.numRowsAffected() != 1 || !appendSnapshot(next.value())) return fail("transfer.commit_recovery_event");
+    QSqlQuery audit(database_);
+    audit.prepare("INSERT INTO events(plan_id,step_id,occurred_at,event_type,payload_json) VALUES(?,?,?,'transfer_commit_recovered',?)");
+    audit.addBindValue(QString::fromStdString(expected.planId)); audit.addBindValue(QString::fromStdString(expected.stepId));
+    audit.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    audit.addBindValue(QString::fromUtf8(QJsonDocument(QJsonObject{{"attemptId", QString::fromStdString(expected.id)},
+        {"direction", forward ? "forward" : "rollback"}}).toJson(QJsonDocument::Compact)));
+    if (!audit.exec()) return fail("transfer.commit_recovery_event");
+    if (!database_.commit()) return fail("transfer.commit_recovery_commit");
     return Result<void>::success();
 }
 

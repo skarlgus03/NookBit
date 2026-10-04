@@ -15,7 +15,8 @@ bool validObject(const FileFingerprint& fingerprint) {
 
 // 정상 복사 또는 명시적 확정까지 기록된 재개 복사인지 검사하는 함수.
 bool committedLineage(const TransferAttempt& attempt) {
-    return (attempt.copyResume == CopyResume::None && attempt.stagingCommit == StagingCommit::None) ||
+    return (attempt.copyResume == CopyResume::None &&
+        (attempt.stagingCommit == StagingCommit::None || attempt.stagingCommit == StagingCommit::Committed)) ||
         (attempt.copyResume == CopyResume::Verified && attempt.stagingCommit == StagingCommit::Committed);
 }
 
@@ -232,6 +233,28 @@ Result<TransferAttempt> recordStagingCommit(const TransferAttempt& attempt, Stag
         result.phase = TransferPhase::DestinationCommitted;
         result.error.reset();
     }
+    return Result<TransferAttempt>::success(std::move(result));
+}
+// 일반 실패 재실행을 열지 않고 실제 확정 의도로 증명된 최종 객체만 기록하는 함수.
+Result<TransferAttempt> reconcileDestinationCommitted(const TransferAttempt& attempt,
+    const FileFingerprint& destination, bool commitIntentRecorded) {
+    const bool normal = attempt.copyResume == CopyResume::None && attempt.stagingCommit == StagingCommit::None &&
+        (attempt.phase == TransferPhase::CommitIntent || attempt.phase == TransferPhase::NeedsRecovery);
+    const bool resumed = attempt.copyResume == CopyResume::Verified && attempt.stagingCommit == StagingCommit::IntentRecorded &&
+        (attempt.phase == TransferPhase::StagingCreated || attempt.phase == TransferPhase::Failed ||
+         attempt.phase == TransferPhase::Cancelled || attempt.phase == TransferPhase::NeedsRecovery);
+    if (!commitIntentRecorded || (!normal && !resumed) || attempt.recoveryCompleted || attempt.recoveryRemovalIntent ||
+        attempt.stagingCleanup != StagingCleanup::None || attempt.destinationFingerprint || !attempt.stagingFingerprint ||
+        sameObject(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        !sameContent(attempt.sourceFingerprint, *attempt.stagingFingerprint) ||
+        !sameObject(*attempt.stagingFingerprint, destination) || !sameContent(attempt.sourceFingerprint, destination) ||
+        destination.modifiedUtcMs != attempt.stagingFingerprint->modifiedUtcMs)
+        return Result<TransferAttempt>::failure({"transfer.commit_recovery_state", "Recorded commit intent and unchanged verified final object required"});
+    auto result = attempt;
+    result.phase = TransferPhase::DestinationCommitted;
+    result.destinationFingerprint = destination;
+    result.stagingCommit = StagingCommit::Committed;
+    result.error.reset();
     return Result<TransferAttempt>::success(std::move(result));
 }
 } // namespace nookbit::TransferValidation

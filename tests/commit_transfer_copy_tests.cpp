@@ -20,6 +20,7 @@
 #include <QUuid>
 #include <fstream>
 #include <iostream>
+#include <utility>
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -60,6 +61,8 @@ public:
     std::function<void(CopyResume)> beforeCopyResume;
     std::optional<StagingCommit> failStagingCommitAt;
     std::function<void(StagingCommit)> beforeStagingCommit;
+    bool failCommitRecovery{false};
+    std::function<void()> beforeCommitRecovery;
     // 실제 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& journal) : inner(journal) {}
     // 새 시도를 실제 DB에 기록하는 함수.
@@ -132,6 +135,14 @@ public:
             return Result<void>::failure({"test.copy_resume", "Injected copy resume record failure"});
         }
         return inner.recordCopyResume(attempt, hash, next, verified);
+    }
+    // 확정 기록 복구 저장 실패·동시 변경을 주입하거나 실제 저널에 전달하는 함수.
+    Result<void> reconcileDestinationCommitted(const TransferAttempt& attempt, const std::string& hash,
+        const FileFingerprint& destination) override {
+        if (beforeCommitRecovery) beforeCommitRecovery();
+        if (std::exchange(failCommitRecovery, false))
+            return Result<void>::failure({"test.commit_recovery", "Injected commit recovery record failure"});
+        return inner.reconcileDestinationCommitted(attempt, hash, destination);
     }
     // 재개 복사본 확정의 의도·결과 경계 실패를 주입하는 함수.
     Result<void> recordStagingCommit(const TransferAttempt& attempt, const std::string& hash, StagingCommit next,
@@ -949,6 +960,147 @@ void testCommitResumedStaging() {
 #endif
 }
 
+// 정상·재개 복사의 누락 확정 결과를 파일 변경 없이 복구하고 실패 경계를 검사하는 함수.
+void testUnrecordedCommitRecovery() {
+#ifdef _WIN32
+    for (const bool resumed : {false, true}) {
+        for (int scenario = 0; scenario <= 10; ++scenario) {
+            Fixture fixture;
+            if (!fixture.ready) continue;
+            QtPlanHasher hasher;
+            if (resumed) {
+                // 임시 객체 생성 후 취소해 별도 재개와 확정 누락을 준비하는 함수.
+                expect(!fixture.useCase.execute(fixture.attempt, [&] { return fixture.faults.last == TransferPhase::StagingCreated; }), "commit recovery resume fixture");
+                ResumePartialCopyUseCase resume(fixture.history, fixture.faults, fixture.worker, hasher);
+                expect(resume.execute(fixture.attempt.id).hasValue(), "commit recovery resumed full verification");
+                fixture.faults.failStagingCommitAt = StagingCommit::Committed;
+                CommitResumedStagingUseCase commit(fixture.history, fixture.faults, fixture.worker, hasher);
+                expect(!commit.execute(fixture.attempt.id), "resumed rename result recording interrupted");
+            } else {
+                fixture.faults.failAt = TransferPhase::DestinationCommitted;
+                expect(!fixture.useCase.execute(fixture.attempt), "normal rename result recording interrupted");
+            }
+            const auto pending = fixture.journal.load(fixture.attempt.id);
+            expect(pending && !pending.value().destinationFingerprint && std::filesystem::exists(fixture.attempt.destination), "unrecorded renamed final fixture");
+            if (!pending) continue;
+            const auto sourceBefore = fingerprint(fixture.attempt.source);
+            const auto finalBefore = fingerprint(fixture.attempt.destination);
+            if (scenario == 1) fixture.faults.failCommitRecovery = true;
+            if (scenario == 3) write(fixture.attempt.source, "changed original");
+            if (scenario == 4) write(fixture.attempt.destination, "changed final");
+            if (scenario == 5) {
+                std::filesystem::rename(fixture.attempt.destination, fixture.attempt.destination.parent_path() / "old-final");
+                write(fixture.attempt.destination, "original contents for transfer copy");
+            }
+            if (scenario == 6) write(fixture.attempt.staging, "new stage occupant");
+            if (scenario == 7) std::filesystem::rename(fixture.attempt.source, fixture.attempt.source.parent_path() / "absent-source");
+            if (scenario == 9) expect(SetFileAttributesW(fixture.attempt.destination.c_str(), FILE_ATTRIBUTE_HIDDEN), "metadata mismatch fixture");
+            if (scenario == 10) {
+                OperationPlan draft;
+                MoveStep step;
+                step.source = fixture.attempt.source; step.destination = fixture.attempt.destination; step.fingerprint = sourceBefore;
+                draft.steps.push_back(step);
+                PrepareTransferPlanUseCase prepare(fixture.worker);
+                const auto prepared = prepare.execute(draft);
+                expect(prepared.hasValue(), "commit recovery native volume fixture");
+                if (!prepared) continue;
+                auto movement = *prepared.value().steps[0].movement;
+                movement.strategy = MoveStrategy::VerifiedCopy;
+                movement.destinationVolume.serial = "0";
+                WindowsTransferCommitRecoveryGuard guard;
+                expect(!guard.open(pending.value(), &movement), "commit recovery rejects altered approved volume without writes");
+                continue;
+            }
+            // 기록 저장 중 두 파일의 쓰기·삭제 공유가 차단되는지 검사하는 함수.
+            fixture.faults.beforeCommitRecovery = [&] {
+                for (const auto& path : {fixture.attempt.source, fixture.attempt.destination}) {
+                    HANDLE writer = CreateFileW(path.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                    expect(writer == INVALID_HANDLE_VALUE, "commit recovery protects both files throughout SQL record");
+                    if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+                }
+            };
+            WindowsTransferCommitRecoveryGuard guard;
+            WrongHasher wrong;
+            const IPlanHasher& verifier = scenario == 8 ? static_cast<const IPlanHasher&>(wrong) : hasher;
+            ReconcileTransferCommitUseCase recover(fixture.history, fixture.faults, guard, verifier);
+            TransferCommitRecoveryService service(recover);
+            // 명시적 취소는 파일과 기록을 모두 유지하는 함수.
+            const auto result = service.execute(fixture.attempt.id, [&] { return scenario == 2; });
+            if (scenario == 0 || scenario == 1) {
+                if (scenario == 1) {
+                    expect(!result && fixture.journal.load(fixture.attempt.id).value().phase == pending.value().phase,
+                        "failed recovery record preserves original snapshot");
+                    SqliteTransferJournal restarted(fixture.database, fixture.migration);
+                    ReconcileTransferCommitUseCase retry(fixture.history, restarted, guard, hasher);
+                    expect(retry.execute(fixture.attempt.id).hasValue(), "restart revalidates both copies and records recovered final");
+                } else expect(result && result.value().phase == TransferPhase::DestinationCommitted && result.value().stagingCommit == StagingCommit::Committed,
+                    "recovery records final evidence without declaring movement complete");
+                expect(sameFingerprint(sourceBefore, fingerprint(fixture.attempt.source)) && sameFingerprint(finalBefore, fingerprint(fixture.attempt.destination)),
+                    "record recovery does not change either file");
+                expect(!service.execute(fixture.attempt.id), "recovered commit is not applied twice");
+                WindowsTransferSourceRemoval removal;
+                WindowsTransferRecoveryGuard completionGuard;
+                ResumeCommittedTransferUseCase finish(fixture.history, fixture.journal, removal, completionGuard, hasher);
+                expect(finish.execute(fixture.attempt.id).hasValue(), "recovered normal or resumed lineage permits separate explicit removal");
+            } else {
+                expect(!result, "unsafe recovery or cancellation rejected");
+                const auto unchanged = fixture.journal.load(fixture.attempt.id);
+                expect(unchanged && unchanged.value().phase == pending.value().phase && !unchanged.value().destinationFingerprint,
+                    "rejected recovery never fabricates final evidence");
+                if (scenario != 3 && scenario != 7) expect(sameFingerprint(sourceBefore, fingerprint(fixture.attempt.source)), "rejected recovery preserves original");
+                if (scenario != 4 && scenario != 5) expect(sameFingerprint(finalBefore, fingerprint(fixture.attempt.destination)), "rejected recovery preserves final content and object");
+            }
+            if (scenario == 9) expect(SetFileAttributesW(fixture.attempt.destination.c_str(), FILE_ATTRIBUTE_NORMAL), "restore fixture attributes for cleanup");
+        }
+    }
+#endif
+}
+
+// 역전송의 정상·재개 확정 결과 누락도 기록 복구 후 별도 제거로 끝나는지 검사하는 함수.
+void testReverseCommitRecovery() {
+#ifdef _WIN32
+    for (const bool resumed : {false, true}) {
+        Fixture fixture;
+        if (!fixture.ready) continue;
+        expect(fixture.useCase.execute(fixture.attempt).hasValue(), "reverse recovery forward fixture");
+        QtPlanHasher hasher;
+        WindowsTransferSourceRemoval removal;
+        FinalizeTransferUseCase finalize(fixture.faults, removal, fixture.history, hasher);
+        expect(finalize.execute(fixture.attempt.id).hasValue(), "reverse recovery completed origin fixture");
+        WindowsTransferFileInspector files;
+        RollbackTransferUseCase undo(fixture.faults, fixture.history, fixture.worker, removal, files, hasher);
+        const auto stage = fixture.attempt.source.parent_path() / "undo-recovery-stage";
+        if (resumed) {
+            // 역전송 임시 객체 기록 직후 취소하는 함수.
+            expect(!undo.execute(fixture.attempt.id, "undo", stage, [&] { return fixture.faults.last == TransferPhase::StagingCreated; }), "reverse recovery cancelled stage fixture");
+            ResumePartialCopyUseCase resume(fixture.history, fixture.journal, fixture.worker, hasher);
+            expect(resume.execute("undo").hasValue(), "reverse recovery resumed verification");
+            fixture.faults.failStagingCommitAt = StagingCommit::Committed;
+            CommitResumedStagingUseCase commit(fixture.history, fixture.faults, fixture.worker, hasher);
+            expect(!commit.execute("undo"), "reverse resumed commit result failure");
+        } else {
+            fixture.faults.failAt = TransferPhase::DestinationCommitted;
+            expect(!undo.execute(fixture.attempt.id, "undo", stage), "reverse normal commit result failure");
+        }
+        const auto sourceBefore = fingerprint(fixture.attempt.destination);
+        const auto finalBefore = fingerprint(fixture.attempt.source);
+        WindowsTransferCommitRecoveryGuard guard;
+        ReconcileTransferCommitUseCase recover(fixture.history, fixture.journal, guard, hasher);
+        const auto result = recover.execute("undo");
+        expect(result && result.value().direction == TransferDirection::Rollback && result.value().phase == TransferPhase::DestinationCommitted &&
+            sameFingerprint(sourceBefore, fingerprint(fixture.attempt.destination)) && sameFingerprint(finalBefore, fingerprint(fixture.attempt.source)),
+            "reverse record recovery retains both existing files without completing rollback");
+        WindowsTransferRecoveryGuard completionGuard;
+        ResumeCommittedTransferUseCase finish(fixture.history, fixture.journal, removal, completionGuard, hasher);
+        expect(finish.execute("undo").hasValue(), "reverse recovered final permits explicit original removal");
+        const auto plan = fixture.history.loadPlan(fixture.attempt.planId);
+        expect(plan && plan.value().status == PlanStatus::RolledBack && plan.value().steps[0].status == StepStatus::RolledBack &&
+            !std::filesystem::exists(fixture.attempt.destination), "reverse commit recovery completes RolledBack not Applied");
+    }
+#endif
+}
+
 // 역전송의 재개 복사본 확정 후 별도 마무리가 RolledBack으로 연결되는지 검사하는 함수.
 void testReverseResumedCommit() {
 #ifdef _WIN32
@@ -1498,6 +1650,8 @@ int main(int argc, char** argv) {
     testResumePartialCopy();
     testCommitResumedStaging();
     testReverseResumedCommit();
+    testUnrecordedCommitRecovery();
+    testReverseCommitRecovery();
     testProtectedRecoveryGuard();
     testVerifiedStagingCleanup();
     testProtectedCleanupSession();

@@ -38,7 +38,7 @@ struct TransferAttempt {
     bool recoveryRemovalIntent{false};
     /// 부분 임시 파일 이어쓰기의 의도·전체 검증 결과이며 이동 완료와 분리한다.
     CopyResume copyResume{CopyResume::None};
-    /// 이어쓰기 검증 이후 최종 이름 확정의 의도·결과를 따로 보존한다.
+    /// 명시적 최종 이름 확정 또는 누락된 확정 기록의 복구 결과를 보존한다.
     StagingCommit stagingCommit{StagingCommit::None};
 };
 
@@ -84,6 +84,9 @@ namespace TransferValidation {
 /// 전체 검증된 재개 복사본의 확정 의도 또는 최종 객체 증거를 만드는 함수.
 [[nodiscard]] Result<TransferAttempt> recordStagingCommit(const TransferAttempt& attempt, StagingCommit next,
     const std::optional<FileFingerprint>& destination = {});
+/// 실제 확정 의도와 보호 검증 증거가 있을 때 누락된 최종 결과만 복구하는 함수.
+[[nodiscard]] Result<TransferAttempt> reconcileDestinationCommitted(const TransferAttempt& attempt,
+    const FileFingerprint& destination, bool commitIntentRecorded);
 
 } // namespace TransferValidation
 } // namespace nookbit

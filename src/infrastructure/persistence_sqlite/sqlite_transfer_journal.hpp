@@ -9,6 +9,9 @@ namespace nookbit {
 /// 승인 계획과 별개인 전송 스냅샷·단계 이벤트를 보관하는 SQLite 일꾼.
 class SqliteTransferJournal final : public ITransferJournal {
 public:
+    /// 보호 증거·현재 승인·기록된 확정 의도를 대조해 누락 결과와 감사를 원자적으로 저장하는 함수.
+    [[nodiscard]] Result<void> reconcileDestinationCommitted(const TransferAttempt& expected, const std::string& planHash,
+        const FileFingerprint& destination) override;
     /// 재개 복사본의 확정 의도·재시도·최종 증거를 원자적으로 저장하는 함수.
     [[nodiscard]] Result<void> recordStagingCommit(const TransferAttempt& expected, const std::string& planHash,
         StagingCommit next, const std::optional<FileFingerprint>& destination = {}) override;
