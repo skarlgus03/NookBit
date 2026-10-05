@@ -12,6 +12,9 @@ public:
     /// 지원하는 계획 버전과 이동 계약의 일관성을 검사하는 함수.
     [[nodiscard]] static Result<void> validateFormat(const OperationPlan& plan);
 
+    /// 볼륨 계약 없는 구형 계획에 다른 드라이브 이동이 섞이지 않았는지 검사하는 함수.
+    [[nodiscard]] static Result<void> validateMovementScope(const OperationPlan& plan);
+
     /// 사용자 설정 전체를 해시할 수 있는 고정 형식으로 직렬화하는 함수.
     [[nodiscard]] static std::string settings(const UserSettings& settings);
 

@@ -83,6 +83,10 @@ Result<OperationPlan> CreatePreviewUseCase::execute(
         PrepareTransferPlanUseCase prepare(*volumes_);
         plan = prepare.execute(plan.value());
     }
+    if (plan) {
+        const auto scope = PlanSignature::validateMovementScope(plan.value());
+        if (!scope) return Result<OperationPlan>::failure(scope.error());
+    }
     if (plan && hasher_) {
         plan.value().settingsRevision = hasher_->sha256(
             PlanSignature::settings(settings));

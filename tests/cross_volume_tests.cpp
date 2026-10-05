@@ -3,6 +3,13 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <nookbit/application/rollback_transfer_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
+#include "application/use_cases/create_preview_use_case.hpp"
+#include "application/use_cases/freeze_preview_use_case.hpp"
+#include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "application/use_cases/approve_plan_use_case.hpp"
+#include "infrastructure/filesystem/safe_executor.hpp"
+#include "modules/planner/planner.hpp"
+#include "modules/rules/rule_engine.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
@@ -250,6 +257,184 @@ void scenario(const QString& sourceRun, const QString& targetRun, int index) {
     } else fixture.rollback();
 }
 
+// 시험 전용 목적지만 제공하고 사용자 설정 파일은 읽거나 바꾸지 않는 저장소.
+class BatchSettings final : public ISettingsRepository {
+public:
+    UserSettings value;
+    // 이번 시험의 목적지 설정을 읽는 함수.
+    Result<UserSettings> load() const override { return Result<UserSettings>::success(value); }
+    // 실제 사용자 설정 저장을 거부하는 함수.
+    Result<void> save(const UserSettings&) override {
+        return Result<void>::failure({"test.read_only", "Test settings are read-only."});
+    }
+};
+
+// 실제 규칙 엔진이 해석할 고정 v3 규칙만 제공하는 저장소.
+class BatchRules final : public IRuleSetRepository {
+public:
+    // 확장자 조건 하나와 목적지 리프를 가진 규칙을 만드는 함수.
+    Result<RuleSet> load() const override {
+        RuleSet rules;
+        rules.id = "native-mixed"; rules.version = "native-mixed-v1"; rules.schemaVersion = 3;
+        RuleNode condition;
+        condition.id = "jpg"; condition.atomicCondition = ExtensionPredicate{{"jpg"}};
+        RuleNode leaf;
+        leaf.id = "destination"; leaf.otherwise = true;
+        leaf.destination = RuleDestination{"pictures", CollisionPolicy::Abort};
+        condition.children.push_back(leaf); rules.nodes.push_back(condition);
+        return Result<RuleSet>::success(std::move(rules));
+    }
+};
+
+// 실제 SQLite 기록 경계에 시험 전용 충돌만 삽입하는 저장소 대리자.
+class BatchHistory final : public IHistoryRepository {
+    IHistoryRepository& inner_;
+public:
+    std::function<void(const DomainEvent&)> beforeEvent;
+    // 외부에서 소유한 실제 이력 저장소를 받는 함수.
+    explicit BatchHistory(IHistoryRepository& inner) : inner_(inner) {}
+    // 계획 저장을 실제 SQLite로 전달하는 함수.
+    Result<void> savePlan(const OperationPlan& plan) override { return inner_.savePlan(plan); }
+    // 승인 저장을 실제 SQLite로 전달하는 함수.
+    Result<void> saveApproval(const ApprovalRecord& approval) override { return inner_.saveApproval(approval); }
+    // 지정한 기록 경계에서만 시험 사건을 일으키는 함수.
+    Result<void> appendEvent(const DomainEvent& event) override {
+        if (beforeEvent) beforeEvent(event);
+        return inner_.appendEvent(event);
+    }
+    // 미완료 계획을 실제 SQLite에서 읽는 함수.
+    Result<std::vector<OperationPlan>> incompletePlans() const override { return inner_.incompletePlans(); }
+    // 저장 계획 하나를 실제 SQLite에서 읽는 함수.
+    Result<OperationPlan> loadPlan(const PlanId& id) const override { return inner_.loadPlan(id); }
+    // 최근 계획을 실제 SQLite에서 읽는 함수.
+    Result<std::vector<PlanHistoryEntry>> recentPlans(int limit) const override { return inner_.recentPlans(limit); }
+    // 복구 직전 상태를 실제 SQLite에서 읽는 함수.
+    Result<PlanStatus> interruptedStatus(const PlanId& id) const override { return inner_.interruptedStatus(id); }
+};
+
+// 실제 두 볼륨에서 규칙 미리보기부터 승인·혼합 실행·보상·되돌리기를 검사하는 함수.
+void batchScenario(const QString& sourceRun, const QString& targetRun, int index) {
+    const auto name = QString("case-%1").arg(index);
+    const std::filesystem::path cRoot(QDir(sourceRun).filePath(name).toStdWString());
+    const std::filesystem::path dRoot(QDir(targetRun).filePath(name).toStdWString());
+    require(std::filesystem::create_directory(cRoot) && std::filesystem::create_directory(dRoot), "Cannot create owned batch folders");
+    const bool renameFirst = index == 1 || index == 2;
+    const bool copyLast = index == 4;
+    const std::vector<std::filesystem::path> selected{
+        (renameFirst ? dRoot : cRoot) / L"첫째.jpg", (renameFirst ? cRoot : dRoot) / L"둘째.jpg",
+        (copyLast ? cRoot : dRoot) / L"마지막.jpg"};
+    for (size_t i = 0; i < selected.size(); ++i) createFile(selected[i], "owned batch contents " + std::to_string(i));
+    const std::filesystem::path appData = dRoot / "app-data";
+    const auto database = QString::fromStdWString((appData / "history.sqlite").wstring());
+    const auto migration = QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql";
+    BatchSettings settings;
+    settings.value.homeRoot = dRoot / "organized";
+    BatchRules rules;
+    FilesystemScanner scanner;
+    RuleEngine engine;
+    Planner planner(engine, appData, CrossVolumeDrafts::Allow);
+    Planner legacyPlanner(engine, appData);
+    QtPlanHasher hasher;
+    WindowsStagedCopy copy;
+    WindowsTransferSourceRemoval removal;
+    WindowsTransferFileInspector files;
+    SqliteHistoryRepository history(database, migration);
+    SqliteTransferJournal journal(database, migration);
+    BatchHistory hooks(history);
+    CreatePreviewUseCase legacyPreview(settings, rules, scanner, legacyPlanner, &hasher);
+    CreatePreviewUseCase missingVolumes(settings, rules, scanner, planner, &hasher);
+    const CreatePreviewRequest request{take(rules.load()).version, selected};
+    require(!legacyPreview.execute(request), "Existing app planning must remain rename-only until opted in");
+    const auto uncontracted = missingVolumes.execute(request);
+    require(!uncontracted && uncontracted.error().code == "plan.volume_contract_required", "Missing volume wiring must not emit a cross-drive v1 preview");
+    CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, &copy);
+    const auto draft = take(preview.execute(request));
+    require(draft.formatVersion == 2 && draft.steps.size() == 3, "Native preview must prepare all three contracts");
+    for (size_t i = 0; i < selected.size(); ++i) {
+        require(draft.steps[i].source == selected[i] && draft.steps[i].movement->strategy ==
+            (((renameFirst ? i == 1 : i == 0) || (copyLast && i == 2)) ? MoveStrategy::VerifiedCopy : MoveStrategy::Rename), "Real mixed movement order differs");
+        require(std::filesystem::exists(selected[i]) && !std::filesystem::exists(draft.steps[i].destination), "Preview must not move files");
+    }
+    FreezePreviewUseCase freezer(rules, scanner, planner, hasher, history, &copy);
+    auto downgraded = draft;
+    downgraded.formatVersion = 1;
+    for (auto& step : downgraded.steps) step.movement.reset();
+    require(!freezer.execute(downgraded, selected, settings.value), "Uncontracted cross-drive freeze must fail");
+    const auto frozen = take(freezer.execute(draft, selected, settings.value));
+    VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, &copy);
+    ApprovePlanUseCase approve(verifier, history);
+    const auto approval = take(approve.execute(frozen.id, selected, settings.value));
+    const auto plan = take(history.loadPlan(frozen.id));
+    ExecuteTransferStepUseCase forward(copy, removal, journal, history, hasher);
+    RollbackTransferUseCase reverse(journal, history, copy, removal, files, hasher);
+    SafeExecutor executor(settings, verifier, scanner, hasher, hooks, appData, &copy, &forward, &reverse);
+    SafeExecutor missingReverse(settings, verifier, scanner, hasher, history, appData, &copy, &forward);
+    require(!missingReverse.execute(plan, approval, selected) && take(history.loadPlan(plan.id)).status == PlanStatus::Approved,
+        "Batch without compensation capability must stop before starting");
+    std::optional<FileFingerprint> sentinel;
+    size_t started = 0;
+    // 혼합 배치가 중간에 전체 완료되지 않는지 검사하고 지정한 마지막 단계에만 충돌을 넣는 함수.
+    hooks.beforeEvent = [&](const DomainEvent& event) {
+        const auto* changed = std::get_if<StepStatusChanged>(&event);
+        if (changed && changed->status == StepStatus::IntentRecorded) {
+            const auto running = take(history.loadPlan(plan.id));
+            require(running.status == PlanStatus::Executing && changed->stepId == plan.steps[started].id,
+                "Mixed batch must stay executing and preserve approved order until every step finishes");
+            for (size_t i = 0; i < started; ++i)
+                require(running.steps[i].status == StepStatus::Applied, "Previous mixed step is not durably applied");
+            ++started;
+            if (index == 2 && changed->stepId == plan.steps[2].id) {
+                createFile(plan.steps[2].destination, "owned collision sentinel");
+                sentinel = fingerprint(plan.steps[2].destination);
+            }
+        }
+    };
+    const auto result = executor.execute(plan, approval, selected);
+    hooks.beforeEvent = {};
+    const auto moved = take(history.loadPlan(plan.id));
+    require(moved.planHash == plan.planHash, "Execution must preserve the exact approval hash");
+    if (index == 2) {
+        require(!result && result.error().code == "execute.batch_rolled_back" && moved.status == PlanStatus::Failed &&
+            moved.steps[0].status == StepStatus::RolledBack && moved.steps[1].status == StepStatus::RolledBack && moved.steps[2].status == StepStatus::Failed,
+            "Certain collision must compensate earlier rename and native cross-volume copy");
+        for (size_t i = 0; i < selected.size(); ++i)
+            require(TransferValidation::sameContent(plan.steps[i].fingerprint, fingerprint(selected[i])), "Compensation must restore every original");
+        require(!std::filesystem::exists(plan.steps[0].destination) && !std::filesystem::exists(plan.steps[1].destination) &&
+            sentinel && sameFingerprint(*sentinel, fingerprint(plan.steps[2].destination)), "Compensation must preserve the collision occupant");
+    } else {
+        saved(result);
+        require(moved.status == PlanStatus::Completed, "Mixed batch did not complete");
+        for (size_t i = 0; i < selected.size(); ++i) {
+            require(moved.steps[i].status == StepStatus::Applied && !std::filesystem::exists(selected[i]) &&
+                TransferValidation::sameContent(plan.steps[i].fingerprint, fingerprint(plan.steps[i].destination)), "Mixed applied file evidence differs");
+            if (plan.steps[i].movement->strategy == MoveStrategy::Rename)
+                require(sameFingerprint(plan.steps[i].fingerprint, fingerprint(plan.steps[i].destination)), "Rename must preserve the original file object");
+        }
+        if (index == 3) {
+            createFile(selected[0], "owned reverse collision sentinel");
+            sentinel = fingerprint(selected[0]);
+            require(!executor.rollback(plan.id) && take(history.loadPlan(plan.id)).status == PlanStatus::Completed,
+                "Undo preflight must reject collision before reversing any step");
+            for (const auto& step : plan.steps)
+                require(TransferValidation::sameContent(step.fingerprint, fingerprint(step.destination)), "Rejected batch undo changed a moved file");
+            require(sameFingerprint(*sentinel, fingerprint(selected[0])), "Rejected undo overwrote the occupant");
+        } else {
+            saved(executor.rollback(plan.id));
+            const auto restored = take(history.loadPlan(plan.id));
+            require(restored.status == PlanStatus::RolledBack && restored.planHash == plan.planHash, "Mixed undo status or signature differs");
+            for (size_t i = 0; i < selected.size(); ++i)
+                require(restored.steps[i].status == StepStatus::RolledBack && !std::filesystem::exists(plan.steps[i].destination) &&
+                    TransferValidation::sameContent(plan.steps[i].fingerprint, fingerprint(selected[i])), "Mixed undo must restore every original");
+        }
+    }
+    for (const auto& step : plan.steps) {
+        const auto attempts = take(journal.forStep(step.id));
+        const size_t expected = step.movement->strategy == MoveStrategy::Rename ? 0 : (index == 3 ? 1 : 2);
+        require(attempts.size() == expected, "Only copy steps should have separate forward/reverse transfer records");
+        for (const auto& attempt : attempts) require(attempt.phase == TransferPhase::Completed, "Finished copy evidence is incomplete");
+    }
+}
+
 // 새 자식이 읽은 계획을 이번 실행이 만든 전용 시험 자료에만 연결하는 함수.
 OperationPlan ownedPlan(SqliteHistoryRepository& history, const QString& database) {
     const QFileInfo db(database);
@@ -413,8 +598,8 @@ int main(int argc, char** argv) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run or --crash-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --crash-run or --batch-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -426,6 +611,7 @@ int main(int argc, char** argv) {
         require(sourceVolume.localNtfs && targetVolume.localNtfs && sourceVolume.name != targetVolume.name,
             "Two genuinely distinct fixed NTFS volumes required before creating any test folders");
         const bool crashing = args[1] == "--crash-run";
+        const bool batching = args[1] == "--batch-run";
         // 일반 시험은 전체 잠금, 강제 종료 시험은 각 자식이 독립적으로 잠금을 갖는다.
         std::unique_ptr<OperationMutex> lock;
         if (!crashing) { lock = std::make_unique<OperationMutex>(); saved(lock->acquire()); }
@@ -437,11 +623,16 @@ int main(int argc, char** argv) {
         QJsonArray results;
         int failures = 0;
         const QStringList names = crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
+            batching ? QStringList{"copy-then-renames-roundtrip", "rename-copy-rename-roundtrip", "mixed-late-collision-compensation", "mixed-undo-collision-preflight", "copy-rename-copy-roundtrip"} :
             QStringList{"roundtrip", "forward-collision", "partial-resume-roundtrip", "commit-record-recovery-roundtrip", "removal-record-recovery-roundtrip", "reverse-collision"};
         for (int index = 0; index < names.size(); ++index) {
             try {
                 if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index]));
-                else { scenario(source.path(), target.path(), index); results.append(QJsonObject{{"case", names[index]}, {"passed", true}}); }
+                else {
+                    if (batching) batchScenario(source.path(), target.path(), index);
+                    else scenario(source.path(), target.path(), index);
+                    results.append(QJsonObject{{"case", names[index]}, {"passed", true}});
+                }
                 std::cout << "PASS " << names[index].toStdString() << '\n';
             } catch (const std::exception& error) {
                 ++failures;
@@ -449,11 +640,11 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
-            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : "record-fault-injection"},
+            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : batching ? "native-mixed-batch" : "record-fault-injection"},
             {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";

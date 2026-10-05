@@ -43,7 +43,7 @@ public:
     [[nodiscard]] Result<void> rollback(const PlanId& planId) override;
 
 private:
-    /// v2의 승인된 볼륨과 이름 변경 전략만 현재 실행 범위에 맞는지 검사하는 함수.
+    /// v2의 승인된 볼륨과 이동 전략을 실제 실행 직전에 재검사하는 함수.
     [[nodiscard]] Result<void> verifyMovement(const OperationPlan& plan, const MoveStep* step = nullptr);
     /// 이미 적용된 단계들을 검증하고 역순으로 되돌려 최종 상태를 기록하는 함수.
     [[nodiscard]] Result<void> rollbackAppliedSteps(

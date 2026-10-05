@@ -50,7 +50,7 @@ SafeExecutor::SafeExecutor(ISettingsRepository& settings,
 Result<void> SafeExecutor::verifyMovement(const OperationPlan& plan, const MoveStep* step) {
     const auto valid = PlanSignature::validateFormat(plan);
     if (!valid) return valid;
-    if (plan.formatVersion == 1) return Result<void>::success();
+    if (plan.formatVersion == 1) return PlanSignature::validateMovementScope(plan);
     if (!volumes_) return Result<void>::failure({"execute.volume_verifier_required", "V2 execution requires volume verification."});
     PrepareTransferPlanUseCase prepare(*volumes_);
     if (!step) return prepare.verify(plan);

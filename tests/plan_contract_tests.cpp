@@ -55,6 +55,12 @@ nookbit::OperationPlan draft() {
 // 기존 v1 바이트 유지와 신규 계약의 모든 승인 필드 서명을 검사하는 함수.
 void testSignatures() {
     auto plan = draft();
+#ifdef _WIN32
+    expect(!nookbit::PlanSignature::validateMovementScope(plan), "legacy cross-drive plan requires a volume contract");
+    auto sameDrive = plan;
+    sameDrive.steps[0].destination = L"c:/b";
+    expect(nookbit::PlanSignature::validateMovementScope(sameDrive).hasValue(), "legacy drive comparison must ignore case");
+#endif
     const std::string golden = "nookbit-plan-contents-v11:v1:14:C:/a4:D:/b1:11:21:11:31:11:41:01:r1:x1:01:01:0";
     expect(nookbit::PlanSignature::planContents(plan) == golden, "legacy step bytes must remain exactly unchanged");
     expect(nookbit::PlanSignature::approvalPayload(plan) == "nookbit-approval-plan-v1:p:" + plan.settingsRevision +
@@ -65,6 +71,7 @@ void testSignatures() {
     expect(prepared.hasValue(), "volume plan should prepare");
     if (!prepared) return;
     plan = prepared.value();
+    expect(nookbit::PlanSignature::validateMovementScope(plan).hasValue(), "explicit v2 contract permits cross-drive planning");
     nookbit::QtPlanHasher hasher;
     const auto hash = hasher.sha256(nookbit::PlanSignature::approvalPayload(plan));
     // 계약 필드를 하나 바꿨을 때 승인 해시도 달라지는지 검사하는 함수.

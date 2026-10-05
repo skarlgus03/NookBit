@@ -24,6 +24,8 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
     const UserSettings& settings) {
     const auto format = PlanSignature::validateFormat(draft);
     if (!format) return Result<OperationPlan>::failure(format.error());
+    const auto scope = PlanSignature::validateMovementScope(draft);
+    if (!scope) return Result<OperationPlan>::failure(scope.error());
     if (draft.formatVersion == 2) {
         if (!volumes_) return Result<OperationPlan>::failure({"freeze.volume_verifier_required", "V2 freeze requires volume verification."});
         PrepareTransferPlanUseCase prepare(*volumes_);

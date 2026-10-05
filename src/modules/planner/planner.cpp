@@ -64,7 +64,11 @@ std::string nextPlanId() {
 
 // 규칙 판단기와 보호할 앱 데이터 폴더를 받는 생성자.
 Planner::Planner(IRuleEngine& ruleEngine, std::filesystem::path appDataRoot)
-    : ruleEngine_(ruleEngine), appDataRoot_(std::move(appDataRoot)) {}
+    : Planner(ruleEngine, std::move(appDataRoot), CrossVolumeDrafts::Reject) {}
+
+// 통합 백엔드에서만 다른 드라이브 초안을 만들도록 정책을 받는 생성자.
+Planner::Planner(IRuleEngine& ruleEngine, std::filesystem::path appDataRoot, CrossVolumeDrafts crossVolumeDrafts)
+    : ruleEngine_(ruleEngine), appDataRoot_(std::move(appDataRoot)), crossVolumeDrafts_(crossVolumeDrafts) {}
 
 // 파일별 분류와 안전 검사를 수행하되 실제 파일은 변경하지 않는 함수.
 Result<OperationPlan> Planner::buildPlan(
@@ -138,7 +142,9 @@ Result<OperationPlan> Planner::buildPlan(
         auto safety = PathSafetyValidator::validateMove(
             file.absolutePath, requestedDestination, selectedFiles, settings.homeRoot, appDataRoot_);
         if (!safety) return Result<OperationPlan>::failure(safety.error());
-        if (pathKey(file.absolutePath.root_name()) != pathKey(requestedDestination.root_name())) {
+        // 통합 백엔드만 초안을 허용하며 실제 이동 방식은 후속 볼륨 계약 준비가 결정한다.
+        if (crossVolumeDrafts_ == CrossVolumeDrafts::Reject &&
+            pathKey(file.absolutePath.root_name()) != pathKey(requestedDestination.root_name())) {
             return Result<OperationPlan>::failure({
                 "plan.cross_volume_unsupported", "Cross-volume file operations are not supported yet.",
             });

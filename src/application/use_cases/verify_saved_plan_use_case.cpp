@@ -42,6 +42,8 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     const auto& saved = *found;
     const auto format = PlanSignature::validateFormat(saved);
     if (!format) return Result<OperationPlan>::failure(format.error());
+    const auto scope = PlanSignature::validateMovementScope(saved);
+    if (!scope) return Result<OperationPlan>::failure(scope.error());
     if (saved.status != expectedStatus ||
         !PlanSignature::isSha256Hex(saved.planHash) ||
         saved.planHash != hasher_.sha256(PlanSignature::approvalPayload(saved))) {

@@ -1,5 +1,7 @@
 #include "application/use_cases/plan_signature.hpp"
 
+#include <cwctype>
+
 #include <algorithm>
 #include <string_view>
 
@@ -137,6 +139,24 @@ Result<void> PlanSignature::validateFormat(const OperationPlan& plan) {
         if ((same && movement.sourceVolume.serial != movement.destinationVolume.serial) ||
             movement.strategy != (same ? MoveStrategy::Rename : MoveStrategy::VerifiedCopy))
             return Result<void>::failure({"plan.strategy_invalid", "Movement strategy does not match the approved volumes."});
+    }
+    return Result<void>::success();
+}
+
+// 구형 계획을 복사 전략으로 암묵적으로 확장하지 않는 함수.
+Result<void> PlanSignature::validateMovementScope(const OperationPlan& plan) {
+    if (plan.formatVersion != 1) return Result<void>::success();
+    for (const auto& step : plan.steps) {
+        auto source = step.source.root_name().wstring();
+        auto destination = step.destination.root_name().wstring();
+#ifdef _WIN32
+        // Windows 드라이브 이름의 대소문자를 정규화하는 함수.
+        const auto lower = [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); };
+        std::transform(source.begin(), source.end(), source.begin(), lower);
+        std::transform(destination.begin(), destination.end(), destination.begin(), lower);
+#endif
+        if (source != destination)
+            return Result<void>::failure({"plan.volume_contract_required", "Cross-drive drafts require explicit v2 volume contracts."});
     }
     return Result<void>::success();
 }
