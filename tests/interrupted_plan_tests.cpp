@@ -175,6 +175,74 @@ struct Runner final : IRecoveredPlanRunner {
     Result<void> runRecoveredPlan(const OperationPlan&, RecoveryAction) override { ++executions; return Result<void>::success(); }
 };
 
+struct Resolver final : IInterruptedTransferResolver {
+    Fixture& fixture;
+    bool supported{true}, fail{false}, finishPlan{false};
+    int executions{0};
+    std::function<void()> afterResume;
+    // 시험 전용 기록과 관찰값을 외부에서 빌려 받는 함수.
+    explicit Resolver(Fixture& value) : fixture(value) {}
+    // 지원하지 않는 개별 복구 경계를 읽기 전용으로 재현하는 함수.
+    Result<void> verifyResume(const TransferRecoveryInspection& report) override {
+        return supported && report.attempt.direction == TransferDirection::Forward && report.finding == TransferRecoveryFinding::PartialCopy ?
+            Result<void>::success() : Result<void>::failure({"test.unsupported_transfer", "Unsupported finding"});
+    }
+    // 실제 파일 작업 없이 완료된 단일 시도와 그 관찰값을 재현하는 함수.
+    Result<void> resume(const std::string& id) override {
+        ++executions;
+        if (fail) return Result<void>::failure({"test.resolve_failed", "Injected resolver failure"});
+        auto& attempt = fixture.journal.attempts[0];
+        if (attempt.id != id) return Result<void>::failure({"test.wrong_attempt", "Wrong attempt"});
+        auto final = *attempt.stagingFingerprint;
+        final.size = attempt.sourceFingerprint.size; final.sha256 = attempt.sourceFingerprint.sha256;
+        attempt.stagingFingerprint = final; attempt.destinationFingerprint = final; attempt.phase = TransferPhase::Completed;
+        fixture.missing(attempt.source, "1"); fixture.missing(attempt.staging, "2"); fixture.present(attempt.destination, final);
+        fixture.history.plan.steps[0].status = StepStatus::Applied; ++fixture.journal.writes;
+        if (finishPlan) fixture.history.plan.status = PlanStatus::Completed;
+        if (afterResume) afterResume();
+        return Result<void>::success();
+    }
+};
+
+// 개별 복구가 선택 감사 후에만 실행되고 남은 전체 작업 또는 마지막 완료로 연결되는지 검사하는 함수.
+void testTransferToWholeResume() {
+    for (int scenario = 0; scenario < 9; ++scenario) {
+        Fixture f;
+        if (scenario == 7) f.history.plan.steps.resize(1);
+        auto attempt = f.forward(0, TransferPhase::StagingCreated);
+        attempt.stagingFingerprint = FileFingerprint{0, 20, "2", "partial", {}};
+        auto actual = *attempt.stagingFingerprint; actual.size = 3; actual.sha256 = std::string(64, 'd');
+        f.present(attempt.staging, actual); f.journal.attempts.push_back(attempt); f.history.plan.steps[0].status = StepStatus::IntentRecorded;
+        Settings settings; Rules rules; rules.value.version = "rules"; Runner runner; Resolver resolver(f);
+        f.history.plan.settingsRevision = f.history.plan.rulesRevision = std::string(64, 'b'); f.seal();
+        InspectInterruptedPlanUseCase inspector(f.history, f.journal, f.files, f.hasher, &f.volumes);
+        RecoverInterruptedPlanUseCase recover(inspector, f.history, settings, rules, f.hasher, runner, &resolver);
+        RecoveryRequest request{f.history.plan.id, f.history.plan.planHash, scenario == 1 ? RecoveryAction::Rollback : RecoveryAction::Resume};
+        if (scenario == 2) f.history.failRecovery = true;
+        if (scenario == 3) resolver.fail = true;
+        if (scenario == 4) {
+            // 선택 저장 중 대기 파일을 교체해 개별 복구 시작 전에 차단하는 함수.
+            f.history.onRecovery = [&] { auto changed = f.history.plan.steps[1].fingerprint; changed.fileId = "other";
+                f.present(f.history.plan.steps[1].source, changed); };
+        }
+        if (scenario == 5) resolver.afterResume = [&] { rules.value.version = "changed"; };
+        if (scenario == 6) resolver.supported = false;
+        if (scenario == 7) resolver.finishPlan = true;
+        if (scenario == 8) {
+            // 선택 저장 중 승인 내용을 바꾸면 새 경로를 읽거나 복구하기 전에 차단하는 함수.
+            f.history.onRecovery = [&] { f.history.plan.steps[1].destination = path("different-target/file"); f.seal(); };
+        }
+        const auto result = recover.execute(request);
+        if (scenario == 0) expect(result && resolver.executions == 1 && runner.executions == 1 && f.history.writes == 1,
+            "one explicit choice must resolve the tracked partial then request whole-plan execution");
+        else if (scenario == 7) expect(result && resolver.executions == 1 && runner.executions == 0 && f.history.plan.status == PlanStatus::Completed,
+            "last transfer completing the whole plan must be verified without restarting a completed runner");
+        else expect(!result && runner.executions == 0 && resolver.executions == ((scenario == 3 || scenario == 5) ? 1 : 0) &&
+            f.history.writes == ((scenario == 3 || scenario == 4 || scenario == 5 || scenario == 8) ? 1 : 0),
+            "undo, failed audit, changed file/configuration, unsupported route or resolver failure must stop safely");
+    }
+}
+
 // 선택·서명·설정·차단·원자적 기록 실패·기록 중 파일 변경을 검사하는 함수.
 void testExplicitChoices() {
     for (int scenario = 0; scenario < 9; ++scenario) {
@@ -361,5 +429,6 @@ int main() {
     testMixedProgress(); testRenameAndChoices(); testUnsafeFiles(); testUntrustedPlans();
     testReverseEvidence(); testTransferBoundaries(); testStartupFilter();
     testExplicitChoices();
+    testTransferToWholeResume();
     return failures ? 1 : 0;
 }

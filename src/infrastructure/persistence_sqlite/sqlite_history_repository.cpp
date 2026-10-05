@@ -526,7 +526,10 @@ Result<void> SqliteHistoryRepository::beginRecovery(const RecoveryRestart& resta
     for (size_t i = 0; i < restart.steps.size(); ++i) {
         const auto& step = restart.steps[i];
         if (step.stepId != current.steps[i].id || step.expected != current.steps[i].status || !ids.insert(step.stepId).second ||
-            (step.restored != StepStatus::Planned && step.restored != StepStatus::Applied && step.restored != StepStatus::RolledBack && step.restored != StepStatus::Skipped) ||
+            (step.restored != StepStatus::Planned && step.restored != StepStatus::Applied && step.restored != StepStatus::RolledBack && step.restored != StepStatus::Skipped && step.restored != StepStatus::IntentRecorded) ||
+            (step.restored == StepStatus::IntentRecorded && (request.action != RecoveryAction::Resume || !current.steps[i].movement ||
+                current.steps[i].movement->strategy != MoveStrategy::VerifiedCopy ||
+                (step.expected != StepStatus::IntentRecorded && step.expected != StepStatus::NeedsRecovery))) ||
             ((step.expected == StepStatus::Skipped) != (step.restored == StepStatus::Skipped)) ||
             (request.action == RecoveryAction::Resume && step.restored == StepStatus::RolledBack))
             return Result<void>::failure({"history.recovery_steps_invalid", "Every original step must appear once in order without changing skip decisions."});

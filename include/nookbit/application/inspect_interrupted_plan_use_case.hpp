@@ -45,9 +45,13 @@ public:
         ITransferFileInspector& files, const IPlanHasher& hasher, ITransferVolumeInspector* volumes = nullptr);
     /// 작업 하나의 파일 상태와 복구 후보·차단 이유를 새로 읽어 반환하는 함수.
     [[nodiscard]] Result<InterruptedPlanInspection> execute(const PlanId& planId);
+    /// 개별 재개가 마지막 이동까지 완료한 경우에도 실제 결과를 읽기 전용으로 재검사하는 함수.
+    [[nodiscard]] Result<InterruptedPlanInspection> inspectAfterResume(const PlanId& planId);
     /// 시작 시 미완료 목록 중 실제로 중단된 작업만 검사하는 함수.
     [[nodiscard]] Result<std::vector<InterruptedPlanInspection>> inspectAll();
 private:
+    /// 중단 작업과 재개 직후 완료 작업의 공통 파일 진단을 수행하는 함수.
+    [[nodiscard]] Result<InterruptedPlanInspection> inspectPlan(const PlanId& planId, bool allowCompleted);
     const IHistoryRepository& history_;
     const ITransferJournal& journal_;
     ITransferFileInspector& files_;

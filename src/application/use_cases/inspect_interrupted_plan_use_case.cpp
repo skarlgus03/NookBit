@@ -90,11 +90,22 @@ InspectInterruptedPlanUseCase::InspectInterruptedPlanUseCase(const IHistoryRepos
 
 // 파일이나 기록을 고치지 않고 중단된 전체 계획을 검사하는 함수.
 Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::execute(const PlanId& planId) {
+    return inspectPlan(planId, false);
+}
+
+// 정방향 재개 직후 자동 완료된 계획의 파일 상태도 같은 증거 기준으로 검사하는 함수.
+Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectAfterResume(const PlanId& planId) {
+    return inspectPlan(planId, true);
+}
+
+// 명시적 재개 후 완료 검사를 제외하면 기존 중단 작업만 검사하는 함수.
+Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(const PlanId& planId, bool allowCompleted) {
     using Return = Result<InterruptedPlanInspection>;
     const auto loaded = history_.loadPlan(planId);
     if (!loaded) return Return::failure(loaded.error());
     const auto& plan = loaded.value();
-    if (!interrupted(plan.status)) return Return::failure({"recovery.not_interrupted", "Only interrupted operations need this inspection."});
+    if (!interrupted(plan.status) && !(allowCompleted && plan.status == PlanStatus::Completed))
+        return Return::failure({"recovery.not_interrupted", "Only interrupted operations need this inspection."});
     InterruptedPlanInspection report;
     report.planId = plan.id; report.status = plan.status;
     bool unsafe = false;
@@ -112,7 +123,7 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::execute(const P
     if (plan.status == PlanStatus::NeedsRecovery) {
         const auto origin = history_.interruptedStatus(plan.id);
         if (origin && (origin.value() == PlanStatus::Executing || origin.value() == PlanStatus::RollingBack)) report.interruptedStatus = origin.value();
-    } else report.interruptedStatus = plan.status;
+    } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing : plan.status;
     std::vector<Error> globalReasons;
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});

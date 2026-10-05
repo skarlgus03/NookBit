@@ -130,7 +130,8 @@ Result<TransferRecoveryInspection> InspectTransferRecoveryUseCase::execute(const
             report.reason = "Verified staging object is at the final path, but commit result is not recorded; preserve both files.";
         }
     } else if (report.source == State::Missing && noStage && report.destination == State::Matches &&
-        report.attempt.destinationFingerprint && phase >= TransferPhase::SourceRemoveIntent && phase <= TransferPhase::Completed) {
+        report.attempt.destinationFingerprint && ((phase >= TransferPhase::SourceRemoveIntent && phase <= TransferPhase::Completed) ||
+            report.attempt.recoveryRemovalIntent)) {
         report.finding = Finding::SourceAbsentAfterRemoveIntent;
         report.reason = "Source is absent after a recorded removal intent and final copy matches; inspection does not finalize the record.";
     }
