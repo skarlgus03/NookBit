@@ -25,6 +25,9 @@ public:
     /// 실행 상태 변경과 이벤트를 한 트랜잭션에 기록하는 함수.
     [[nodiscard]] Result<void> appendEvent(const DomainEvent& event) override;
 
+    /// 검사한 승인·단계 상태를 비교하고 복구 선택과 재시작 상태를 원자적으로 저장하는 함수.
+    [[nodiscard]] Result<void> beginRecovery(const RecoveryRestart& restart) override;
+
     /// 아직 완료되지 않은 저장 계획을 읽어오는 함수.
     [[nodiscard]] Result<std::vector<OperationPlan>> incompletePlans() const override;
 

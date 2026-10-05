@@ -119,7 +119,13 @@ Result<void> SafeExecutor::execute(
 
     auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
-    std::vector<const MoveStep*> appliedSteps;
+    return executePreparedSteps(saved, steps, {});
+}
+
+// 정방향 최초 실행과 복구가 동일한 이동 및 보상 경계를 사용하는 함수.
+Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
+    const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps) {
+    const auto& plan = saved;
     for (const auto* step : steps) {
         auto intent = history_.appendEvent(
             StepStatusChanged{plan.id, step->id, StepStatus::IntentRecorded});
@@ -242,6 +248,68 @@ Result<void> SafeExecutor::execute(
     return Result<void>::success();
 }
 
+// 복구 선택을 기록하기 전에 서비스 구성과 보호 범위를 읽기 전용으로 검사하는 함수.
+Result<void> SafeExecutor::verifyRecoverySupport(const OperationPlan& plan, RecoveryAction action) {
+    if ((action != RecoveryAction::Resume && action != RecoveryAction::Rollback) ||
+        !PlanSignature::validateFormat(plan) || !PlanSignature::validateMovementScope(plan) ||
+        !PlanSignature::isSha256Hex(plan.planHash) || plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan)))
+        return Result<void>::failure({"recovery.plan_invalid", "An intact selected recovery plan is required."});
+    const auto settings = settings_.load();
+    if (!settings) return Result<void>::failure(settings.error());
+    if (plan.settingsRevision != hasher_.sha256(PlanSignature::settings(settings.value())))
+        return Result<void>::failure({"recovery.settings_changed", "Settings changed before recovery execution."});
+    const auto movement = verifyMovement(plan);
+    if (!movement) return movement;
+    std::vector<std::filesystem::path> selected;
+    bool hasCopy = false;
+    for (const auto& step : plan.steps) {
+        if (step.status == StepStatus::Skipped) continue;
+        if ((step.status != StepStatus::Planned && step.status != StepStatus::Applied && step.status != StepStatus::RolledBack) ||
+            (action == RecoveryAction::Resume && step.status == StepStatus::RolledBack) ||
+            !step.fingerprint.sha256 || !PlanSignature::isSha256Hex(*step.fingerprint.sha256))
+            return Result<void>::failure({"recovery.steps_unresolved", "Recovery execution requires normalized, hashed step evidence."});
+        selected.push_back(step.source);
+        hasCopy = hasCopy || (step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy);
+    }
+    if (hasCopy && ((action == RecoveryAction::Resume && !transfers_) || !reversals_))
+        return Result<void>::failure({"recovery.executor_missing", "Recovery requires the existing forward and reverse transfer services."});
+    for (const auto& step : plan.steps) {
+        if (step.status == StepStatus::Skipped) continue;
+        if (!step.source.is_absolute() || !step.destination.is_absolute() || !appDataRoot_.is_absolute())
+            return Result<void>::failure({"recovery.path_invalid", "Recovery paths and application data root must be absolute."});
+        const auto safety = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.value().homeRoot, appDataRoot_);
+        if (!safety) return safety;
+    }
+    return Result<void>::success();
+}
+
+// 공유 잠금 아래 복구 기록과 실제 파일을 다시 검사하고 기존 실행 루프를 재사용하는 함수.
+Result<void> SafeExecutor::runRecoveredPlan(const OperationPlan& plan, RecoveryAction action) {
+    const auto support = verifyRecoverySupport(plan, action);
+    if (!support) return support;
+    const auto loaded = history_.loadPlan(plan.id);
+    if (!loaded) return Result<void>::failure(loaded.error());
+    if (plan.status != (action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack) ||
+        loaded.value().status != plan.status || loaded.value().planHash != plan.planHash ||
+        PlanSignature::planContents(loaded.value()) != PlanSignature::planContents(plan))
+        return Result<void>::failure({"recovery.restart_changed", "The recorded restart no longer matches the selected recovery."});
+    const auto applied = stepsWithStatus(plan, StepStatus::Applied);
+    if (action == RecoveryAction::Rollback) {
+        if (applied.empty()) return history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RolledBack});
+        return rollbackAppliedSteps(plan, applied, PlanStatus::RolledBack, true);
+    }
+    const auto pending = stepsWithStatus(plan, StepStatus::Planned);
+    // 조회 이후 바뀐 대기 원본을 발견하면 이동 전에 멈추고 중단 상태를 유지한다.
+    for (const auto* step : pending) {
+        if (probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches) {
+            const auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({"recovery.source_changed", "A pending source changed immediately before resuming."});
+        }
+    }
+    return executePreparedSteps(plan, pending, applied);
+}
+
 // 확인 불가 상태를 기록하고 작업을 중단하는 함수.
 Result<void> SafeExecutor::markNeedsRecovery(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
@@ -298,8 +366,10 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             });
         }
     }
-    auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RollingBack});
-    if (!started) return started;
+    if (plan.status != PlanStatus::RollingBack) {
+        auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RollingBack});
+        if (!started) return started;
+    }
     for (auto iterator = applied.rbegin(); iterator != applied.rend(); ++iterator) {
         const auto* step = *iterator;
         if (plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {

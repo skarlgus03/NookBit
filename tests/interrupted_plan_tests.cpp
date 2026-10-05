@@ -1,4 +1,5 @@
 #include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
+#include <nookbit/application/recover_interrupted_plan_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include <iostream>
 #include <map>
@@ -24,6 +25,18 @@ struct History final : IHistoryRepository {
     PlanStatus origin{PlanStatus::Executing};
     std::vector<OperationPlan> listed;
     int writes{0};
+    bool failRecovery{false};
+    std::function<void()> onRecovery;
+    // 시험용 원자적 재시작을 반영하고 요청 실패에는 원래 상태를 보존하는 함수.
+    Result<void> beginRecovery(const RecoveryRestart& restart) override {
+        if (failRecovery) return Result<void>::failure({"test.atomic_failure", "Injected restart failure"});
+        ++writes;
+        plan.status = restart.request.action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack;
+        for (size_t i = 0; i < plan.steps.size(); ++i) plan.steps[i].status = restart.steps[i].restored;
+        origin = plan.status;
+        if (onRecovery) onRecovery();
+        return Result<void>::success();
+    }
     // 의도치 않은 계획 저장을 세는 함수.
     Result<void> savePlan(const OperationPlan&) override { ++writes; return Result<void>::success(); }
     // 의도치 않은 승인 저장을 세는 함수.
@@ -138,6 +151,76 @@ struct Fixture {
         return report ? report.value() : InterruptedPlanInspection{};
     }
 };
+
+struct Settings final : ISettingsRepository {
+    UserSettings value;
+    // 선택 시점의 설정을 반환하는 함수.
+    Result<UserSettings> load() const override { return Result<UserSettings>::success(value); }
+    // 테스트에서 사용하지 않는 설정 저장을 거부하는 함수.
+    Result<void> save(const UserSettings&) override { return Result<void>::failure({"test.unused", "Unused"}); }
+};
+struct Rules final : IRuleSetRepository {
+    RuleSet value;
+    // 선택 시점의 규칙을 반환하는 함수.
+    Result<RuleSet> load() const override { return Result<RuleSet>::success(value); }
+};
+struct Runner final : IRecoveredPlanRunner {
+    int executions{0};
+    bool supported{true};
+    // 외부 실행 서비스 미연결을 조회 단계에서 재현하는 함수.
+    Result<void> verifyRecoverySupport(const OperationPlan&, RecoveryAction) override {
+        return supported ? Result<void>::success() : Result<void>::failure({"test.unsupported", "Recovery services missing"});
+    }
+    // 실제 파일 이동 없이 전체 작업 실행 요청 횟수만 세는 함수.
+    Result<void> runRecoveredPlan(const OperationPlan&, RecoveryAction) override { ++executions; return Result<void>::success(); }
+};
+
+// 선택·서명·설정·차단·원자적 기록 실패·기록 중 파일 변경을 검사하는 함수.
+void testExplicitChoices() {
+    for (int scenario = 0; scenario < 9; ++scenario) {
+        Fixture f; f.movedCopy(0);
+        Settings settings; Rules rules; rules.value.version = "rules";
+        f.history.plan.settingsRevision = f.history.plan.rulesRevision = std::string(64, 'b'); f.seal();
+        Runner runner;
+        InspectInterruptedPlanUseCase inspector(f.history, f.journal, f.files, f.hasher, &f.volumes);
+        RecoverInterruptedPlanUseCase recover(inspector, f.history, settings, rules, f.hasher, runner);
+        RecoveryRequest request{f.history.plan.id, f.history.plan.planHash, scenario == 1 ? RecoveryAction::Rollback : RecoveryAction::Resume};
+        if (scenario == 2) request.action = RecoveryAction::Later;
+        if (scenario == 3) request.planHash = std::string(64, 'f');
+        if (scenario == 4) rules.value.version = "changed";
+        if (scenario == 5) f.history.failRecovery = true;
+        if (scenario == 6) runner.supported = false;
+        if (scenario == 7) {
+            // 선택 저장 경계에 같은 내용 다른 객체를 삽입하는 함수.
+            f.history.onRecovery = [&] { auto changed = f.history.plan.steps[1].fingerprint; changed.fileId = "new-occupant";
+                f.present(f.history.plan.steps[1].source, changed); };
+        }
+        if (scenario == 8) { f.history.plan.status = PlanStatus::NeedsRecovery; f.history.origin = PlanStatus::RollingBack; }
+        const auto result = recover.execute(request);
+        if (scenario < 2) {
+            expect(result && runner.executions == 1 && f.history.writes == 1, "explicit intact choice should record one restart and request execution");
+            expect(f.history.plan.status == (scenario == 1 ? PlanStatus::RollingBack : PlanStatus::Executing) &&
+                f.history.plan.steps[0].status == StepStatus::Applied && f.history.plan.steps[1].status == StepStatus::Planned,
+                "restart must retain applied files and pending order");
+        } else if (scenario == 2) expect(result && runner.executions == 0 && f.history.writes == 0 && f.files.reads == 0,
+            "later must neither inspect files nor change records");
+        else expect(!result && runner.executions == 0 && f.history.writes == (scenario == 7 ? 1 : 0),
+            "stale choice, configuration, unsupported service, failed audit or changed files must stop before execution");
+    }
+    Fixture partial;
+    auto attempt = partial.forward(0, TransferPhase::StagingCreated);
+    attempt.stagingFingerprint = FileFingerprint{0, 20, "2", "partial", {}};
+    auto actual = *attempt.stagingFingerprint; actual.size = 3; actual.sha256 = std::string(64, 'd');
+    partial.present(attempt.staging, actual); partial.journal.attempts.push_back(attempt);
+    partial.history.plan.steps[0].status = StepStatus::IntentRecorded;
+    Settings settings; Rules rules; rules.value.version = "rules"; Runner runner;
+    partial.history.plan.settingsRevision = partial.history.plan.rulesRevision = std::string(64, 'b'); partial.seal();
+    InspectInterruptedPlanUseCase inspector(partial.history, partial.journal, partial.files, partial.hasher, &partial.volumes);
+    RecoverInterruptedPlanUseCase recover(inspector, partial.history, settings, rules, partial.hasher, runner);
+    const auto result = recover.execute({partial.history.plan.id, partial.history.plan.planHash, RecoveryAction::Resume});
+    expect(!result && result.error().code == "recovery.step_resolution_required" && partial.history.writes == 0 && runner.executions == 0,
+        "partial transfer must be preserved for explicit per-step resolution, not silently completed");
+}
 
 // 완료·대기·부분 복사를 같은 작업에서 분리하고 자동 완료하지 않는지 검사하는 함수.
 void testMixedProgress() {
@@ -277,5 +360,6 @@ void testStartupFilter() {
 int main() {
     testMixedProgress(); testRenameAndChoices(); testUnsafeFiles(); testUntrustedPlans();
     testReverseEvidence(); testTransferBoundaries(); testStartupFilter();
+    testExplicitChoices();
     return failures ? 1 : 0;
 }

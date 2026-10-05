@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/events.hpp>
+#include <nookbit/application/recover_interrupted_plan.hpp>
 #include <nookbit/domain/model.hpp>
 #include <nookbit/domain/result.hpp>
 #include <nookbit/domain/watch.hpp>
@@ -100,6 +101,11 @@ class IHistoryRepository {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
     virtual ~IHistoryRepository() = default;
+
+    /// 명시적 복구 선택과 검사한 단계 상태를 원자적으로 기록하는 함수.
+    [[nodiscard]] virtual Result<void> beginRecovery(const RecoveryRestart&) {
+        return Result<void>::failure({"history.recovery_unsupported", "Atomic recovery restart is unsupported."});
+    }
     /// 계획을 저장하는 함수.
     [[nodiscard]] virtual Result<void> savePlan(const OperationPlan& plan) = 0;
     /// 명시적으로 승인된 계획을 기록하는 함수.

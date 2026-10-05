@@ -14,6 +14,7 @@ add_library(nookbit_core STATIC
   application/use_cases/execute_transfer_step_use_case.cpp
   application/use_cases/inspect_transfer_recovery_use_case.cpp
   application/use_cases/inspect_interrupted_plan_use_case.cpp
+  application/use_cases/recover_interrupted_plan_use_case.cpp
   application/use_cases/reconcile_transfer_recovery_use_case.cpp
   application/use_cases/resume_committed_transfer_use_case.cpp
   application/use_cases/resume_partial_copy_use_case.cpp
@@ -43,6 +44,7 @@ add_library(nookbit_filesystem STATIC
   infrastructure/filesystem/file_identity.cpp
   infrastructure/filesystem/operation_mutex.cpp
   infrastructure/filesystem/recovery_service.cpp
+  infrastructure/filesystem/interrupted_operation_recovery_service.cpp
   infrastructure/filesystem/windows_file_mover.cpp
   infrastructure/filesystem/windows_staged_copy.cpp
   infrastructure/filesystem/transfer_recovery_service.cpp

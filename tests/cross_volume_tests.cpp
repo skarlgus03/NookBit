@@ -3,12 +3,14 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <nookbit/application/rollback_transfer_use_case.hpp>
 #include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
+#include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "application/use_cases/approve_plan_use_case.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/filesystem/windows_file_mover.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
@@ -34,6 +36,9 @@
 #include <QElapsedTimer>
 #include <QSemaphore>
 #include <QFile>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QUuid>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -287,6 +292,26 @@ public:
     }
 };
 
+// 시험 전용 SQLite에 오류 트리거를 만들거나 선택 감사 개수만 조회하는 함수.
+qlonglong testSql(const QString& database, const QString& sql) {
+    const auto name = QUuid::createUuid().toString();
+    qlonglong result = 0;
+    bool okay = false;
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+        db.setDatabaseName(database);
+        if (db.open()) {
+            QSqlQuery query(db);
+            okay = query.exec(sql);
+            if (okay && query.next()) result = query.value(0).toLongLong();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(name);
+    require(okay, "Owned SQLite diagnostic failed");
+    return result;
+}
+
 // 실제 SQLite 기록 경계에 시험 전용 충돌만 삽입하는 저장소 대리자.
 class BatchHistory final : public IHistoryRepository {
     IHistoryRepository& inner_;
@@ -315,12 +340,13 @@ public:
 
 // 실제 두 볼륨에서 규칙 미리보기부터 승인·혼합 실행·보상·되돌리기를 검사하는 함수.
 void batchScenario(const QString& sourceRun, const QString& targetRun, int index) {
+    const bool recoveringBatch = index >= 5;
     const auto name = QString("case-%1").arg(index);
     const std::filesystem::path cRoot(QDir(sourceRun).filePath(name).toStdWString());
     const std::filesystem::path dRoot(QDir(targetRun).filePath(name).toStdWString());
     require(std::filesystem::create_directory(cRoot) && std::filesystem::create_directory(dRoot), "Cannot create owned batch folders");
     const bool renameFirst = index == 1 || index == 2;
-    const bool copyLast = index == 4;
+    const bool copyLast = index == 4 || index == 14;
     const std::vector<std::filesystem::path> selected{
         (renameFirst ? dRoot : cRoot) / L"첫째.jpg", (renameFirst ? cRoot : dRoot) / L"둘째.jpg",
         (copyLast ? cRoot : dRoot) / L"마지막.jpg"};
@@ -392,6 +418,7 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
                 const auto afterInspection = take(history.loadPlan(plan.id));
                 require(afterInspection.status == running.status && PlanSignature::planContents(afterInspection) == PlanSignature::planContents(running),
                     "Read-only mixed inspection changed operation records");
+                if (recoveringBatch) throw std::runtime_error("owned-batch-stop");
             }
             ++started;
             if (index == 2 && changed->stepId == plan.steps[2].id) {
@@ -400,8 +427,74 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
             }
         }
     };
-    const auto result = executor.execute(plan, approval, selected);
+    auto result = Result<void>::success();
+    bool stopped = false;
+    try { result = executor.execute(plan, approval, selected); }
+    catch (const std::runtime_error& error) {
+        if (!recoveringBatch || std::string(error.what()) != "owned-batch-stop") throw;
+        stopped = true;
+    }
     hooks.beforeEvent = {};
+    if (recoveringBatch) {
+        require(stopped, "Owned batch should stop after two moves and before the third intent");
+        if (index == 5 || index == 6 || index == 10 || index == 14) {
+            for (const auto& step : plan.steps) saved(history.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::NeedsRecovery}));
+            saved(history.appendEvent(PlanStatusChanged{plan.id, PlanStatus::NeedsRecovery}));
+        }
+        if (index == 13) {
+            saved(history.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RollingBack}));
+            saved(history.appendEvent(StepStatusChanged{plan.id, plan.steps[1].id, StepStatus::RollbackIntentRecorded}));
+            saved(WindowsFileMover::moveNoReplace(plan.steps[1].destination, plan.steps[1].source));
+            saved(history.appendEvent(StepStatusChanged{plan.id, plan.steps[1].id, StepStatus::RolledBack}));
+            saved(reverse.rollback(plan.id, plan.steps[0].id, "owned-reverse", plan.steps[0].source.parent_path() / "owned-reverse.tmp"));
+            require(take(history.loadPlan(plan.id)).status == PlanStatus::RollingBack, "Never-started step should leave interrupted undo completion pending");
+        }
+        const auto before = take(history.loadPlan(plan.id));
+        const auto beforeEvents = testSql(database, "SELECT COUNT(*) FROM events");
+        InspectInterruptedPlanUseCase inspector(history, journal, files, hasher, &copy);
+        RecoverInterruptedPlanUseCase recovery(inspector, history, settings, rules, hasher, index == 12 ? static_cast<IRecoveredPlanRunner&>(missingReverse) : executor);
+        InterruptedOperationRecoveryService service(recovery);
+        RecoveryRequest recoveryRequest{plan.id, plan.planHash, (index == 6 || index == 13) ? RecoveryAction::Rollback : index == 7 ? RecoveryAction::Later : RecoveryAction::Resume};
+        if (index == 8) {
+            QFile changed(QString::fromStdWString(selected[2].wstring()));
+            require(changed.open(QIODevice::Append) && changed.write("changed") == 7, "Cannot change owned pending source");
+            changed.close();
+        }
+        if (index == 9) settings.value.homeRoot = dRoot / "different-home";
+        if (index == 10) testSql(database, "CREATE TRIGGER stop_recovery_audit BEFORE INSERT ON events WHEN NEW.event_type='recovery_choice_recorded' BEGIN SELECT RAISE(FAIL,'owned audit failure'); END");
+        if (index == 11) recoveryRequest.planHash = std::string(64, 'e');
+        const auto recovered = service.execute(recoveryRequest);
+        const auto after = take(history.loadPlan(plan.id));
+        if (index == 5 || index == 14) {
+            saved(recovered);
+            require(after.status == PlanStatus::Completed && after.planHash == plan.planHash, "Explicit resume must finish the same approved batch");
+            for (const auto& step : plan.steps) require(!std::filesystem::exists(step.source) &&
+                TransferValidation::sameContent(step.fingerprint, fingerprint(step.destination)), "Resume failed to preserve original content");
+            require(take(journal.forStep(plan.steps[0].id)).size() == 1, "Resume must not create a second copy for the already completed step");
+            require(!service.execute(recoveryRequest), "Completed recovery must not execute twice");
+            saved(executor.rollback(plan.id));
+        } else if (index == 6 || index == 13) {
+            saved(recovered);
+            require(after.status == PlanStatus::RolledBack && after.steps[0].status == StepStatus::RolledBack &&
+                after.steps[1].status == StepStatus::RolledBack && after.steps[2].status == StepStatus::Planned,
+                "Explicit undo must restore moved steps and leave never-started source untouched");
+            require(!service.execute(recoveryRequest), "Completed undo must not repeat");
+        } else {
+            require(index == 7 ? recovered.hasValue() : !recovered, "Deferred/blocked recovery result differs");
+            require(after.status == before.status && PlanSignature::planContents(after) == PlanSignature::planContents(before) &&
+                testSql(database, "SELECT COUNT(*) FROM events") == beforeEvents, "Later or blocked/audit-failed choice changed recovery records");
+            for (size_t i = 0; i < 2; ++i) require(!std::filesystem::exists(plan.steps[i].source) &&
+                TransferValidation::sameContent(plan.steps[i].fingerprint, fingerprint(plan.steps[i].destination)), "Blocked choice changed a moved file");
+            require(std::filesystem::exists(selected[2]) && !std::filesystem::exists(plan.steps[2].destination), "Blocked choice moved the pending file");
+        }
+        if (index == 5 || index == 6 || index == 13 || index == 14) {
+            require(testSql(database, "SELECT COUNT(*) FROM events WHERE event_type='recovery_choice_recorded'") == 1,
+                "One explicit successful choice must have exactly one durable audit record");
+            for (const auto& step : plan.steps) require(std::filesystem::exists(step.source) && !std::filesystem::exists(step.destination) &&
+                TransferValidation::sameContent(step.fingerprint, fingerprint(step.source)), "Recovered batch did not return all originals");
+        }
+        return;
+    }
     const auto moved = take(history.loadPlan(plan.id));
     require(moved.planHash == plan.planHash, "Execution must preserve the exact approval hash");
     if (index == 2) {
@@ -609,8 +702,8 @@ int main(int argc, char** argv) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run, --crash-run or --batch-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --crash-run, --batch-run or --recovery-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -623,6 +716,7 @@ int main(int argc, char** argv) {
             "Two genuinely distinct fixed NTFS volumes required before creating any test folders");
         const bool crashing = args[1] == "--crash-run";
         const bool batching = args[1] == "--batch-run";
+        const bool recovering = args[1] == "--recovery-run";
         // 일반 시험은 전체 잠금, 강제 종료 시험은 각 자식이 독립적으로 잠금을 갖는다.
         std::unique_ptr<OperationMutex> lock;
         if (!crashing) { lock = std::make_unique<OperationMutex>(); saved(lock->acquire()); }
@@ -634,13 +728,14 @@ int main(int argc, char** argv) {
         QJsonArray results;
         int failures = 0;
         const QStringList names = crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
+            recovering ? QStringList{"explicit-resume", "explicit-undo", "later-preserves", "changed-source-blocked", "changed-settings-blocked", "audit-atomic-failure", "stale-choice-blocked", "missing-service-blocked", "undo-record-completion", "resume-final-copy"} :
             batching ? QStringList{"copy-then-renames-roundtrip", "rename-copy-rename-roundtrip", "mixed-late-collision-compensation", "mixed-undo-collision-preflight", "copy-rename-copy-roundtrip"} :
             QStringList{"roundtrip", "forward-collision", "partial-resume-roundtrip", "commit-record-recovery-roundtrip", "removal-record-recovery-roundtrip", "reverse-collision"};
         for (int index = 0; index < names.size(); ++index) {
             try {
                 if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index]));
                 else {
-                    if (batching) batchScenario(source.path(), target.path(), index);
+                    if (batching || recovering) batchScenario(source.path(), target.path(), recovering ? index + 5 : index);
                     else scenario(source.path(), target.path(), index);
                     results.append(QJsonObject{{"case", names[index]}, {"passed", true}});
                 }
@@ -651,11 +746,11 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : batching ? "batch-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
-            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : batching ? "native-mixed-batch" : "record-fault-injection"},
+            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
             {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";

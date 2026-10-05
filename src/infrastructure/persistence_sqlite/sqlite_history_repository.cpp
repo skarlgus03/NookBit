@@ -3,6 +3,7 @@
 #include "application/use_cases/plan_signature.hpp"
 
 #include <QDateTime>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -14,6 +15,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <set>
 #include <chrono>
 #include <type_traits>
 #include <utility>
@@ -496,6 +498,80 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
     if (!database_.commit()) {
         database_.rollback();
         return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
+    }
+    return Result<void>::success();
+}
+
+// 명시적 선택 감사와 단계·상위 상태 복원을 함께 저장하고 실패 시 모두 롤백하는 함수.
+Result<void> SqliteHistoryRepository::beginRecovery(const RecoveryRestart& restart) {
+    const auto& request = restart.request;
+    if ((request.action != RecoveryAction::Resume && request.action != RecoveryAction::Rollback) ||
+        !PlanSignature::isSha256Hex(request.planHash) ||
+        (restart.expectedStatus != PlanStatus::Executing && restart.expectedStatus != PlanStatus::RollingBack && restart.expectedStatus != PlanStatus::NeedsRecovery) ||
+        (request.action == RecoveryAction::Resume && restart.expectedStatus == PlanStatus::RollingBack))
+        return Result<void>::failure({"history.recovery_invalid", "A current interrupted approval and explicit recovery choice are required."});
+    const auto loaded = loadPlan(request.planId);
+    if (!loaded) return Result<void>::failure(loaded.error());
+    const auto& current = loaded.value();
+    const auto digest = QCryptographicHash::hash(QByteArray::fromStdString(PlanSignature::approvalPayload(current)), QCryptographicHash::Sha256).toHex().toStdString();
+    if (current.planHash != request.planHash || digest != request.planHash || current.status != restart.expectedStatus || current.steps.size() != restart.steps.size())
+        return Result<void>::failure({"history.recovery_conflict", "Recovery snapshot changed before recording the choice."});
+    if (restart.expectedStatus == PlanStatus::NeedsRecovery) {
+        const auto origin = interruptedStatus(request.planId);
+        if (!origin || (origin.value() != PlanStatus::Executing && origin.value() != PlanStatus::RollingBack) ||
+            (request.action == RecoveryAction::Resume && origin.value() != PlanStatus::Executing))
+            return Result<void>::failure({"history.recovery_direction", "Forward resume cannot replace an interrupted undo."});
+    }
+    std::set<StepId> ids;
+    for (size_t i = 0; i < restart.steps.size(); ++i) {
+        const auto& step = restart.steps[i];
+        if (step.stepId != current.steps[i].id || step.expected != current.steps[i].status || !ids.insert(step.stepId).second ||
+            (step.restored != StepStatus::Planned && step.restored != StepStatus::Applied && step.restored != StepStatus::RolledBack && step.restored != StepStatus::Skipped) ||
+            ((step.expected == StepStatus::Skipped) != (step.restored == StepStatus::Skipped)) ||
+            (request.action == RecoveryAction::Resume && step.restored == StepStatus::RolledBack))
+            return Result<void>::failure({"history.recovery_steps_invalid", "Every original step must appear once in order without changing skip decisions."});
+    }
+    if (!database_.transaction()) return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
+    // 실패 시 선택·사건·단계·상위 상태를 모두 되돌리는 함수.
+    const auto fail = [&](const QSqlQuery& query) {
+        const auto error = query.lastError().isValid() ? sqlFailure("history.recovery_write_failed", query) :
+            Result<void>::failure({"history.recovery_conflict", "A compared recovery state changed."});
+        database_.rollback(); return error;
+    };
+    const auto target = request.action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack;
+    QSqlQuery plan(database_);
+    plan.prepare("UPDATE plans SET status=? WHERE id=? AND plan_hash=? AND status=? AND approved_at IS NOT NULL");
+    plan.addBindValue(planStatus(target)); plan.addBindValue(QString::fromStdString(request.planId));
+    plan.addBindValue(QString::fromStdString(request.planHash)); plan.addBindValue(planStatus(restart.expectedStatus));
+    if (!plan.exec() || plan.numRowsAffected() != 1) return fail(plan);
+    for (const auto& step : restart.steps) {
+        QSqlQuery update(database_);
+        update.prepare("UPDATE steps SET status=? WHERE id=? AND plan_id=? AND status=?");
+        update.addBindValue(stepStatus(step.restored)); update.addBindValue(QString::fromStdString(step.stepId));
+        update.addBindValue(QString::fromStdString(request.planId)); update.addBindValue(stepStatus(step.expected));
+        if (!update.exec() || update.numRowsAffected() != 1) return fail(update);
+    }
+    QJsonArray states;
+    for (const auto& step : restart.steps) states.append(QJsonObject{{"stepId", QString::fromStdString(step.stepId)},
+        {"before", stepStatus(step.expected)}, {"after", stepStatus(step.restored)}});
+    const QJsonObject choice{{"action", request.action == RecoveryAction::Resume ? "resume" : "rollback"},
+        {"planHash", QString::fromStdString(request.planHash)}, {"beforeStatus", planStatus(restart.expectedStatus)},
+        {"afterStatus", planStatus(target)}, {"steps", states}};
+    // 동일한 트랜잭션 안에 사용자 선택과 중단 방향 추적 사건을 기록하는 함수.
+    const auto event = [&](const QString& type, const QJsonObject& payload) -> Result<void> {
+        QSqlQuery insert(database_);
+        insert.prepare("INSERT INTO events(plan_id,occurred_at,event_type,payload_json) VALUES(?,?,?,?)");
+        insert.addBindValue(QString::fromStdString(request.planId)); insert.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        insert.addBindValue(type); insert.addBindValue(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+        if (!insert.exec()) return fail(insert);
+        return Result<void>::success();
+    };
+    const auto audit = event("recovery_choice_recorded", choice);
+    if (!audit) return audit;
+    const auto direction = event("plan_status_changed", {{"status", planStatus(target)}});
+    if (!direction) return direction;
+    if (!database_.commit()) {
+        database_.rollback(); return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
     }
     return Result<void>::success();
 }
