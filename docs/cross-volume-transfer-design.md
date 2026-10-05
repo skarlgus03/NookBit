@@ -4,6 +4,8 @@
 
 ## 통합 실행 조립 계약
 
+중단된 전체 혼합 작업의 읽기 전용 조회는 [복구 진단 계약](interrupted-operation-recovery.md)을 구현했다. 파일/DB 변경 없이 단계 개수와 선택지 후보·차단 이유를 제공한다. 사용자 선택을 실제 전체 재개/되돌리기로 실행하는 기능은 아직 별도 과제다.
+
 통합 백엔드에서만 `Planner(engine, appDataRoot, CrossVolumeDrafts::Allow)`를 구성한다. 이 정책은 다른 드라이브의 읽기 전용 초안만 허용한다. 미리보기·고정 저장·승인 재검증에는 실제 `ITransferVolumeInspector`를 제공하며, 실행기는 같은 포트와 `ITransferStepExecutor`·`IRollbackTransferStepExecutor`를 빌려 받는다. 단계 전략은 `PrepareTransferPlanUseCase`가 실제 GUID로 선택하고 v2 승인에 고정한다. `SafeExecutor`가 Rename과 VerifiedCopy를 하나의 승인 순서로 실행·되돌리며 UI는 이 선택을 담당하지 않는다.
 
 다른 드라이브 v1 계획은 각 작업 경계의 `PlanSignature::validateMovementScope`로 차단한다. 기존 2인자 Planner와 앱 조립부는 기본 거부 정책을 유지한다. 구형 승인 바이트·규칙 JSON·DB 형식은 변경하지 않는다. 배치가 확실한 이름 변경 실패를 만나면 앞선 적용 단계를 역순 보상하고, 복사/기록 결과가 불확실하면 파일을 임의 정리하지 않고 NeedsRecovery로 중단한다. 혼합 배치 중단 뒤 전체 재개는 이번 정상/충돌 시험과 별개다.

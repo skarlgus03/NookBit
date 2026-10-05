@@ -2,6 +2,7 @@
 #include <nookbit/application/finalize_transfer_use_case.hpp>
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include <nookbit/application/rollback_transfer_use_case.hpp>
+#include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
@@ -382,6 +383,16 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
                 "Mixed batch must stay executing and preserve approved order until every step finishes");
             for (size_t i = 0; i < started; ++i)
                 require(running.steps[i].status == StepStatus::Applied, "Previous mixed step is not durably applied");
+            if (started == 2) {
+                InspectInterruptedPlanUseCase inspect(history, journal, files, hasher, &copy);
+                const auto report = take(inspect.execute(plan.id));
+                require(report.moved == 2 && report.pending == 1 && report.needsAttention == 0 &&
+                    report.resume.readiness == RecoveryReadiness::NeedsRevalidation && report.rollback.readiness == RecoveryReadiness::NeedsRevalidation,
+                    "Read-only native mixed inspection must report two moved and one pending, not execute a recovery");
+                const auto afterInspection = take(history.loadPlan(plan.id));
+                require(afterInspection.status == running.status && PlanSignature::planContents(afterInspection) == PlanSignature::planContents(running),
+                    "Read-only mixed inspection changed operation records");
+            }
             ++started;
             if (index == 2 && changed->stepId == plan.steps[2].id) {
                 createFile(plan.steps[2].destination, "owned collision sentinel");

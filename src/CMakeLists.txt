@@ -13,6 +13,7 @@ add_library(nookbit_core STATIC
   application/use_cases/commit_transfer_copy_use_case.cpp
   application/use_cases/execute_transfer_step_use_case.cpp
   application/use_cases/inspect_transfer_recovery_use_case.cpp
+  application/use_cases/inspect_interrupted_plan_use_case.cpp
   application/use_cases/reconcile_transfer_recovery_use_case.cpp
   application/use_cases/resume_committed_transfer_use_case.cpp
   application/use_cases/resume_partial_copy_use_case.cpp
