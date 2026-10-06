@@ -133,6 +133,7 @@ public:
     StepId target;
     bool partial{false};
     bool interruptedOnce{false};
+    QString crashAt;
     // 시험용 중단 지점만 조율하고 실제 구현체는 외부에서 빌려 받는 함수.
     InterruptedCopyStep(ExecuteTransferStepUseCase& normal, const IHistoryRepository& history, IStagedCopy& copy,
         ITransferSourceRemoval& removal, FaultJournal& journal, const IPlanHasher& hasher)
@@ -142,6 +143,7 @@ public:
         const std::filesystem::path& staging) override {
         if (stepId != target || interruptedOnce) return normal_.execute(planId, stepId, attemptId, staging);
         interruptedOnce = true;
+        if (!crashAt.isEmpty()) journal_.stopAt = crashAt;
         if (!partial) {
             ExecuteTransferStepUseCase stopped(copy_, removal_, journal_, history_, hasher_);
             return stopped.execute(planId, stepId, attemptId, staging);
@@ -156,7 +158,11 @@ public:
         int checks = 0;
         CommitTransferCopyUseCase copy(copy_, journal_);
         // 첫 블록 기록 뒤 취소 요청을 반환하는 함수.
-        const auto result = copy.execute(attempt, [&] { return ++checks >= 3; }, &*step->movement);
+        const auto result = copy.execute(attempt, [&] {
+            if (crashAt == "mid-copy" && std::filesystem::exists(staging) && std::filesystem::file_size(staging) >= 1024 * 1024)
+                checkpoint(crashAt);
+            return ++checks >= 3;
+        }, &*step->movement);
         require(!result && std::filesystem::file_size(staging) == 1024 * 1024, "Expected owned 1MiB partial transfer");
         return Result<void>::failure(result.error());
     }
@@ -386,7 +392,7 @@ public:
 };
 
 // 실제 두 볼륨에서 규칙 미리보기부터 승인·혼합 실행·보상·되돌리기를 검사하는 함수.
-void batchScenario(const QString& sourceRun, const QString& targetRun, int index) {
+void batchScenario(const QString& sourceRun, const QString& targetRun, int index, const QString& crashAt = {}) {
     const bool recoveringBatch = index >= 5 && index < 15;
     const bool recoveringTransfer = index >= 15;
     const auto name = QString("case-%1").arg(index);
@@ -453,6 +459,10 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
     InterruptedCopyStep interruptedForward(forward, history, copy, removal, interruptedJournal, hasher);
     interruptedForward.target = plan.steps[interruptedIndex].id;
     interruptedForward.partial = index == 15 || index >= 21;
+    if (!crashAt.isEmpty()) {
+        interruptedForward.crashAt = crashAt;
+        interruptedForward.partial = crashAt == "mid-copy";
+    }
     if (index == 16) interruptedJournal.throwAt = TransferPhase::CommitIntent;
     if (index == 17) interruptedJournal.throwAt = TransferPhase::DestinationCommitted;
     if (index == 18) interruptedJournal.throwAt = TransferPhase::SourceRemoveIntent;
@@ -484,6 +494,7 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
                 const auto afterInspection = take(history.loadPlan(plan.id));
                 require(afterInspection.status == running.status && PlanSignature::planContents(afterInspection) == PlanSignature::planContents(running),
                     "Read-only mixed inspection changed operation records");
+                if (crashAt == "before-last") checkpoint(crashAt);
                 if (recoveringBatch) throw std::runtime_error("owned-batch-stop");
             }
             ++started;
@@ -501,6 +512,7 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
             (!recoveringTransfer || std::string(error.what()) != "owned-transfer-stop")) throw;
         stopped = true;
     }
+    require(crashAt.isEmpty(), "Mixed worker completed without reaching its requested checkpoint");
     hooks.beforeEvent = {};
     if (recoveringTransfer) {
         require(interruptedForward.interruptedOnce && (stopped || !result), "Owned copy should stop at its requested boundary");
@@ -725,6 +737,144 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
     }
 }
 
+// 혼합 강제 종료 자식이 읽을 DB와 승인 경로를 새 시험 자료로 한정하는 함수.
+OperationPlan ownedMixedPlan(SqliteHistoryRepository& history, const QString& database) {
+    const QFileInfo db(database);
+    const QDir scenario = QFileInfo(db.dir().absolutePath()).dir();
+    require(db.isAbsolute() && db.isFile() && db.fileName() == "history.sqlite" && db.dir().dirName() == "app-data" &&
+        scenario.dirName().startsWith("case-") && QFileInfo(scenario.absolutePath()).dir().dirName().startsWith("NookBit-cross-target-"),
+        "Owned mixed scenario DB required");
+    const auto entries = take(history.recentPlans(2));
+    require(entries.size() == 1, "Exactly one owned mixed plan required");
+    const auto plan = take(history.loadPlan(entries[0].id));
+    QtPlanHasher hasher;
+    require(plan.ruleSetVersion == "native-mixed-v1" && plan.formatVersion == 2 && plan.steps.size() == 3 &&
+        plan.planHash == hasher.sha256(PlanSignature::approvalPayload(plan)), "Owned signed mixed plan required");
+    const std::filesystem::path dRoot(scenario.absolutePath().toStdWString());
+    const auto cRoot = plan.steps[0].source.parent_path();
+    require(cRoot.filename() == dRoot.filename() && QFileInfo(QString::fromStdWString(cRoot.wstring())).dir().dirName().startsWith("NookBit-cross-source-") &&
+        std::filesystem::is_directory(cRoot), "Owned source run required");
+    const std::vector<std::filesystem::path> sources{cRoot / L"첫째.jpg", dRoot / L"둘째.jpg", cRoot / L"마지막.jpg"};
+    for (size_t i = 0; i < sources.size(); ++i) {
+        const auto& step = plan.steps[i];
+        std::string contents = "owned batch contents " + std::to_string(i);
+        if (i == 2) {
+            contents.resize(4 * 1024 * 1024 + 37);
+            for (size_t j = 0; j < contents.size(); ++j) contents[j] = static_cast<char>((j * 31 + j / 257) % 256);
+        }
+        require(step.source == sources[i] && step.destination == dRoot / "organized" / "pictures" / sources[i].filename() &&
+            step.fingerprint.size == contents.size() && step.fingerprint.sha256 == std::optional<std::string>{hasher.sha256(contents)} &&
+            step.movement && step.movement->strategy == (i == 1 ? MoveStrategy::Rename : MoveStrategy::VerifiedCopy),
+            "Unexpected mixed paths, contents or movement contracts");
+    }
+    return plan;
+}
+
+// 시험 전용 혼합 계획을 새 프로세스에서 진단하고 재개 또는 복원하는 함수.
+int mixedRecoveryChild(const QString& database, const QString& choice) {
+    const auto parts = choice.split('|');
+    require(parts.size() == 2 && QStringList{"before-last", "mid-copy", "after-rename", "after-remove", "before-complete"}.contains(parts[0]) &&
+        QStringList{"resume", "undo"}.contains(parts[1]), "Unknown owned mixed recovery choice");
+    // DB가 존재하고 시험 루트 안인지 확인한 다음에만 저장소를 연다.
+    const QFileInfo db(database);
+    require(db.isAbsolute() && db.isFile() && db.fileName() == "history.sqlite" && db.dir().dirName() == "app-data" &&
+        QFileInfo(QFileInfo(db.dir().absolutePath()).dir().absolutePath()).dir().dirName().startsWith("NookBit-cross-target-"),
+        "Existing owned mixed DB required");
+    OperationMutex lock;
+    saved(lock.acquire());
+    const auto migration = QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql";
+    SqliteHistoryRepository history(database, migration);
+    SqliteTransferJournal journal(database, migration);
+    const auto plan = ownedMixedPlan(history, database);
+    require(plan.status == PlanStatus::Executing && plan.steps[0].status == StepStatus::Applied && plan.steps[1].status == StepStatus::Applied &&
+        plan.steps[2].status == (parts[0] == "before-last" ? StepStatus::Planned : StepStatus::IntentRecorded), "Killed mixed durable step states differ");
+    const auto appData = std::filesystem::path(db.dir().absolutePath().toStdWString());
+    BatchSettings settings;
+    settings.value.homeRoot = appData.parent_path() / "organized";
+    BatchRules rules;
+    FilesystemScanner scanner;
+    QtPlanHasher hasher;
+    WindowsStagedCopy copy;
+    WindowsTransferSourceRemoval removal;
+    WindowsTransferFileInspector files;
+    RuleEngine engine;
+    Planner planner(engine, appData, CrossVolumeDrafts::Allow);
+    VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, &copy);
+    ExecuteTransferStepUseCase forward(copy, removal, journal, history, hasher);
+    RollbackTransferUseCase reverse(journal, history, copy, removal, files, hasher);
+    SafeExecutor executor(settings, verifier, scanner, hasher, history, appData, &copy, &forward, &reverse);
+    InspectInterruptedPlanUseCase inspector(history, journal, files, hasher, &copy);
+    WindowsTransferRecoveryGuard removalGuard;
+    WindowsTransferCommitRecoveryGuard commitGuard;
+    ResumeInterruptedTransferUseCase resolver(history, journal, copy, removal, files, removalGuard, commitGuard, hasher);
+    RecoverInterruptedPlanUseCase recovery(inspector, history, settings, rules, hasher, executor, &resolver);
+    InterruptedOperationRecoveryService service(recovery);
+    std::vector<std::pair<std::filesystem::path, std::optional<FileFingerprint>>> observations;
+    for (const auto& step : plan.steps) {
+        for (const auto& path : {step.source, step.destination})
+            observations.emplace_back(path, std::filesystem::exists(path) ? std::optional<FileFingerprint>{fingerprint(path)} : std::nullopt);
+        for (const auto& attempt : take(journal.forStep(step.id)))
+            observations.emplace_back(attempt.staging, std::filesystem::exists(attempt.staging) ? std::optional<FileFingerprint>{fingerprint(attempt.staging)} : std::nullopt);
+    }
+    const auto events = testSql(database, "SELECT COUNT(*) FROM events");
+    const auto report = take(inspector.execute(plan.id));
+    require(report.planIntact && take(inspector.inspectAll()).size() == 1 &&
+        testSql(database, "SELECT COUNT(*) FROM events") == events, "Startup mixed inspection must be read-only");
+    saved(service.execute({plan.id, plan.planHash, RecoveryAction::Later}));
+    require(testSql(database, "SELECT COUNT(*) FROM events") == events &&
+        PlanSignature::planContents(take(history.loadPlan(plan.id))) == PlanSignature::planContents(plan), "Later changed killed mixed records");
+    for (const auto& [path, before] : observations)
+        require(before ? std::filesystem::exists(path) && sameFingerprint(*before, fingerprint(path)) : !std::filesystem::exists(path),
+            "Inspection or Later changed killed mixed files");
+    const auto lastAttempts = take(journal.forStep(plan.steps[2].id));
+    std::optional<FileFingerprint> partial;
+    if (parts[0] == "before-last") require(lastAttempts.empty() && report.moved == 2 && report.pending == 1, "Never-started copy should have no attempt");
+    else {
+        require(lastAttempts.size() == 1, "Killed last copy needs exactly one attempt");
+        const auto& attempt = lastAttempts[0];
+        const auto expected = parts[0] == "mid-copy" ? TransferPhase::StagingCreated : parts[0] == "after-rename" ? TransferPhase::CommitIntent :
+            parts[0] == "after-remove" ? TransferPhase::SourceRemoveIntent : TransferPhase::SourceRemoved;
+        require(attempt.phase == expected, "Killed last copy journal boundary differs");
+        if (parts[0] == "mid-copy") {
+            partial = fingerprint(attempt.staging);
+            require(partial->size == 1024 * 1024 && sameFingerprint(plan.steps[2].fingerprint, fingerprint(plan.steps[2].source)), "Killed mixed partial bytes differ");
+        }
+    }
+    const bool undo = parts[1] == "undo";
+    const RecoveryRequest request{plan.id, plan.planHash, undo ? RecoveryAction::Rollback : RecoveryAction::Resume};
+    saved(service.execute(request));
+    const auto after = take(history.loadPlan(plan.id));
+    require(after.planHash == plan.planHash && after.status == (undo ? PlanStatus::RolledBack : PlanStatus::Completed) &&
+        testSql(database, "SELECT COUNT(*) FROM events WHERE event_type='recovery_choice_recorded'") == 1, "Mixed explicit recovery status/hash/audit differs");
+    require(!service.execute(request), "Finished mixed recovery must not execute twice");
+    require(take(journal.forStep(plan.steps[0].id)).size() == (undo ? 2 : 1) && take(journal.forStep(plan.steps[1].id)).empty(),
+        "Recovery duplicated the completed first copy or created a rename transfer");
+    if (!undo) {
+        for (const auto& step : after.steps) require(step.status == StepStatus::Applied && !std::filesystem::exists(step.source) &&
+            TransferValidation::sameContent(step.fingerprint, fingerprint(step.destination)), "Mixed resume lost approved contents");
+        const auto attempts = take(journal.forStep(plan.steps[2].id));
+        require(attempts.size() == 1 && attempts[0].phase == TransferPhase::Completed &&
+            (lastAttempts.empty() || attempts[0].id == lastAttempts[0].id), "Mixed resume restarted rather than recovered the last attempt");
+        saved(executor.rollback(plan.id));
+    }
+    for (size_t i = 0; i < plan.steps.size(); ++i) {
+        const auto& step = plan.steps[i];
+        require(!std::filesystem::exists(step.destination) && TransferValidation::sameContent(step.fingerprint, fingerprint(step.source)), "Mixed recovery/undo lost an original");
+        if (i == 1 || (undo && i == 2)) require(sameFingerprint(step.fingerprint, fingerprint(step.source)), "Rename or untouched source object changed");
+    }
+    if (undo && partial) {
+        require(sameFingerprint(*partial, fingerprint(lastAttempts[0].staging)) && take(journal.load(lastAttempts[0].id)).phase == TransferPhase::StagingCreated,
+            "Killed partial undo must not finish or delete staging");
+        SqliteHistoryRepository reopened(database, migration);
+        InspectInterruptedPlanUseCase reminders(reopened, journal, files, hasher, &copy);
+        const auto retained = take(reminders.inspectAll());
+        require(take(reopened.preservedTransfers(plan.id)).size() == 1 && retained.size() == 1 && retained[0].preserved == 1,
+            "Killed partial undo lost its durable staging reminder");
+    } else require(take(inspector.inspectAll()).empty(), "Finished non-preserved mixed task remains incomplete");
+    std::cout << "RECOVERED " << choice.toStdString() << " " << QCoreApplication::applicationPid() << std::endl;
+    return 0;
+}
+
 // 새 자식이 읽은 계획을 이번 실행이 만든 전용 시험 자료에만 연결하는 함수.
 OperationPlan ownedPlan(SqliteHistoryRepository& history, const QString& database) {
     const QFileInfo db(database);
@@ -827,21 +977,26 @@ void configureChild(QProcess& process, const QString& mode, const QString& datab
 }
 
 // 체크포인트에 도착한 자기 자식만 강제 종료하고 새 자식의 복구 결과를 검사하는 함수.
-QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, int index, const QString& stopAt) {
+QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, int index, const QString& stopAt, bool mixed = false) {
     QString database;
-    {
+    if (mixed) database = QDir(targetRun).filePath(QString("case-%1/app-data/history.sqlite").arg(index + 32));
+    else {
         OperationMutex lock;
         saved(lock.acquire());
         Fixture fixture(sourceRun, targetRun, QString("case-%1").arg(index));
         database = fixture.database;
     } // 부모의 DB 연결·잠금은 자식 실행 전에 닫는다.
     QProcess worker;
-    configureChild(worker, "--crash-worker", database, stopAt);
+    if (mixed) {
+        worker.setProgram(QCoreApplication::applicationFilePath());
+        worker.setArguments({"--mixed-crash-worker", sourceRun, targetRun, QString::number(index + 32), stopAt.section('|', 0, 0)});
+        worker.setProcessChannelMode(QProcess::SeparateChannels);
+    } else configureChild(worker, "--crash-worker", database, stopAt);
     worker.start();
     require(worker.waitForStarted(5000), "Cannot launch owned crash worker");
     const auto workerPid = worker.processId();
     QByteArray output;
-    const auto marker = QString("CHECKPOINT %1 %2").arg(stopAt).arg(workerPid).toUtf8();
+    const auto marker = QString("CHECKPOINT %1 %2").arg(mixed ? stopAt.section('|', 0, 0) : stopAt).arg(workerPid).toUtf8();
     QElapsedTimer deadline;
     deadline.start();
     while (deadline.elapsed() < 15000 && worker.state() != QProcess::NotRunning && !output.contains(marker)) {
@@ -855,7 +1010,7 @@ QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, in
     require(reached && stopped && worker.exitStatus() == QProcess::CrashExit,
         "Owned worker was not killed at checkpoint: " + worker.readAllStandardError().toStdString());
     QProcess recovery;
-    configureChild(recovery, "--crash-recover", database, stopAt);
+    configureChild(recovery, mixed ? "--mixed-crash-recover" : "--crash-recover", database, stopAt);
     recovery.start();
     require(recovery.waitForStarted(5000), "Cannot launch new recovery process");
     const auto recoveryPid = recovery.processId();
@@ -870,8 +1025,15 @@ QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, in
     saved(lock.acquire());
     SqliteHistoryRepository history(database, migration);
     SqliteTransferJournal journal(database, migration);
-    const auto plan = ownedPlan(history, database);
-    require(plan.status == PlanStatus::RolledBack && plan.steps[0].status == StepStatus::RolledBack &&
+    const auto plan = mixed ? ownedMixedPlan(history, database) : ownedPlan(history, database);
+    require(plan.status == PlanStatus::RolledBack, "Parent found unfinished rollback");
+    if (mixed) {
+        for (const auto& step : plan.steps) require(TransferValidation::sameContent(step.fingerprint, fingerprint(step.source)) &&
+            !std::filesystem::exists(step.destination), "Parent independent mixed original check failed");
+        const auto retained = take(history.preservedTransfers(plan.id));
+        require(retained.size() == (stopAt == "mid-copy|undo" ? 1 : 0), "Parent preserved registration differs");
+        if (!retained.empty()) require(std::filesystem::file_size(retained[0].staging) == 1024 * 1024, "Parent partial staging missing");
+    } else require(plan.steps[0].status == StepStatus::RolledBack &&
         take(journal.load("forward")).phase == TransferPhase::Completed && take(journal.load("reverse")).phase == TransferPhase::Completed &&
         TransferValidation::sameContent(plan.steps[0].fingerprint, fingerprint(plan.steps[0].source)) && !std::filesystem::exists(plan.steps[0].destination),
         "Parent independent check of recovered DB and restored file failed");
@@ -884,12 +1046,30 @@ QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, in
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.size() == 6 && args[1] == "--mixed-crash-worker") {
+        try {
+            require(QDir(args[2]).dirName().startsWith("NookBit-cross-source-") && QDir(args[3]).dirName().startsWith("NookBit-cross-target-") &&
+                QFileInfo(args[2]).isDir() && QFileInfo(args[3]).isDir(), "Owned mixed run directories required");
+            bool valid = false;
+            const int index = args[4].toInt(&valid);
+            require(valid && index >= 32 && index < 39 && QStringList{"before-last", "mid-copy", "after-rename", "after-remove", "before-complete"}.contains(args[5]),
+                "Owned mixed worker arguments required");
+            OperationMutex lock;
+            saved(lock.acquire());
+            batchScenario(args[2], args[3], index, args[5]);
+            return 2;
+        } catch (const std::exception& error) { std::cerr << "Mixed worker failed: " << error.what() << '\n'; return 2; }
+    }
+    if (args.size() == 4 && args[1] == "--mixed-crash-recover") {
+        try { return mixedRecoveryChild(args[2], args[3]); }
+        catch (const std::exception& error) { std::cerr << "Mixed recovery failed: " << error.what() << '\n'; return 2; }
+    }
     if (args.size() == 4 && (args[1] == "--crash-worker" || args[1] == "--crash-recover")) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run, --crash-run, --batch-run, --recovery-run, --transfer-recovery-run or --preserved-undo-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--mixed-crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --crash-run, --mixed-crash-run, --batch-run, --recovery-run, --transfer-recovery-run or --preserved-undo-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -900,7 +1080,8 @@ int main(int argc, char** argv) {
         const auto targetVolume = take(inspector.inspectVolume(std::filesystem::path(args[5].toStdWString())));
         require(sourceVolume.localNtfs && targetVolume.localNtfs && sourceVolume.name != targetVolume.name,
             "Two genuinely distinct fixed NTFS volumes required before creating any test folders");
-        const bool crashing = args[1] == "--crash-run";
+        const bool mixedCrash = args[1] == "--mixed-crash-run";
+        const bool crashing = args[1] == "--crash-run" || mixedCrash;
         const bool batching = args[1] == "--batch-run";
         const bool recovering = args[1] == "--recovery-run";
         const bool resolving = args[1] == "--transfer-recovery-run";
@@ -915,7 +1096,8 @@ int main(int argc, char** argv) {
         std::cout << "Source fixtures: " << source.path().toStdString() << "\nTarget fixtures/report: " << target.path().toStdString() << '\n';
         QJsonArray results;
         int failures = 0;
-        const QStringList names = crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
+        const QStringList names = mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :
+            crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
             preserving ? QStringList{"undo-prefix-preserve-partial", "preserved-undo-audit-failure", "changed-partial-source-blocked", "replaced-staging-blocked", "no-moves-partial-preserved", "late-undo-collision-retains-registration"} :
             resolving ? QStringList{"partial-then-whole-resume", "verified-stage-then-whole-resume", "commit-record-then-whole-resume", "committed-source-retained-resume", "removed-source-record-resume", "completion-record-resume", "last-partial-completes-whole", "partial-collision-preserved", "partial-audit-failure-preserved", "partial-undo-preserves-staging", "corrupt-prefix-stops-whole"} :
             recovering ? QStringList{"explicit-resume", "explicit-undo", "later-preserves", "changed-source-blocked", "changed-settings-blocked", "audit-atomic-failure", "stale-choice-blocked", "missing-service-blocked", "undo-record-completion", "resume-final-copy"} :
@@ -923,7 +1105,7 @@ int main(int argc, char** argv) {
             QStringList{"roundtrip", "forward-collision", "partial-resume-roundtrip", "commit-record-recovery-roundtrip", "removal-record-recovery-roundtrip", "reverse-collision"};
         for (int index = 0; index < names.size(); ++index) {
             try {
-                if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index]));
+                if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index], mixedCrash));
                 else {
                     if (batching || recovering || resolving || preserving) batchScenario(source.path(), target.path(), preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
                     else scenario(source.path(), target.path(), index);
@@ -936,11 +1118,11 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(mixedCrash ? "mixed-crash-report.json" : crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
-            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
+            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", mixedCrash ? "mixed-forced-process-termination" : crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
             {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";
