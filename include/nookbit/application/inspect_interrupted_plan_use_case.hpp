@@ -5,7 +5,10 @@
 
 namespace nookbit {
 
-enum class InterruptedStepState { Pending, Moved, Restored, Skipped, NeedsAttention };
+enum class InterruptedStepState { Pending, Moved, Restored, Skipped, NeedsAttention, Preserved };
+
+/// 부분 복사를 완료/삭제하지 않고 보존할 수 있는 관찰 경계인지 검사하는 함수.
+[[nodiscard]] bool canPreservePartialTransfer(const TransferRecoveryInspection& inspection);
 
 /// 후보 판단일 뿐 실행 허가가 아니며 선택 후 잠금 아래에서 반드시 다시 검사한다.
 enum class RecoveryReadiness { NeedsRevalidation, NeedsStepRecovery, Blocked, NotApplicable };
@@ -34,6 +37,8 @@ struct InterruptedPlanInspection {
     std::vector<InterruptedStepInspection> steps;
     RecoveryChoice resume;
     RecoveryChoice rollback;
+    std::vector<PreservedTransfer> preservedTransfers;
+    std::size_t preserved{0};
     // 나중에는 아무 변경도 요청하지 않고 미해결 작업을 보존하는 선택이다.
 };
 
@@ -51,7 +56,7 @@ public:
     [[nodiscard]] Result<std::vector<InterruptedPlanInspection>> inspectAll();
 private:
     /// 중단 작업과 재개 직후 완료 작업의 공통 파일 진단을 수행하는 함수.
-    [[nodiscard]] Result<InterruptedPlanInspection> inspectPlan(const PlanId& planId, bool allowCompleted);
+    [[nodiscard]] Result<InterruptedPlanInspection> inspectPlan(const PlanId& planId, bool allowCompleted, bool allowPreserved = false);
     const IHistoryRepository& history_;
     const ITransferJournal& journal_;
     ITransferFileInspector& files_;

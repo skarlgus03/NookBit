@@ -50,11 +50,17 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
     if (!report) return Result<void>::failure(report.error());
     const auto readiness = request.action == RecoveryAction::Resume ? report.value().resume.readiness : report.value().rollback.readiness;
     const bool finishUndo = request.action == RecoveryAction::Rollback && readiness == RecoveryReadiness::NotApplicable &&
-        report.value().interruptedStatus == PlanStatus::RollingBack && report.value().restored > 0;
+        report.value().interruptedStatus == PlanStatus::RollingBack && (report.value().restored > 0 || report.value().preserved > 0);
+    const bool preservePartial = request.action == RecoveryAction::Rollback && readiness == RecoveryReadiness::NeedsStepRecovery;
     const bool resolveTransfers = request.action == RecoveryAction::Resume && readiness == RecoveryReadiness::NeedsStepRecovery && transfers_;
-    if (readiness != RecoveryReadiness::NeedsRevalidation && !finishUndo && !resolveTransfers)
+    if (readiness != RecoveryReadiness::NeedsRevalidation && !finishUndo && !resolveTransfers && !preservePartial)
         return Result<void>::failure({readiness == RecoveryReadiness::NeedsStepRecovery ? "recovery.step_resolution_required" : "recovery.choice_blocked",
             "Recovery is blocked or individual transfer evidence needs explicit resolution first; no changes made."});
+    if (preservePartial) for (const auto& item : report.value().steps) {
+        if (item.state != InterruptedStepState::NeedsAttention) continue;
+        if (!item.transfer || !canPreservePartialTransfer(*item.transfer))
+            return Result<void>::failure({"recovery.preserve_unsupported", "Only an intact original with an owned partial stage and absent final may be preserved for undo."});
+    }
     if (resolveTransfers) {
         for (const auto& item : report.value().steps) {
             if (item.state != InterruptedStepState::NeedsAttention) continue;
@@ -65,6 +71,7 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
     }
     // 두 조회 사이에 단계 상태가 바뀌면 원자적 재시작 요청의 비교가 실패하도록 처음 상태를 유지한다.
     RecoveryRestart restart{request, plan.status, {}};
+    restart.preserved = report.value().preservedTransfers;
     auto normalized = plan;
     normalized.status = request.action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack;
     if (plan.steps.size() != report.value().steps.size()) return Result<void>::failure({"recovery.snapshot_changed", "Step count changed during inspection."});
@@ -77,9 +84,14 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
         case InterruptedStepState::Moved: restored = StepStatus::Applied; break;
         case InterruptedStepState::Restored: restored = StepStatus::RolledBack; break;
         case InterruptedStepState::Skipped: restored = StepStatus::Skipped; break;
+        case InterruptedStepState::Preserved: restored = StepStatus::Planned; break;
         case InterruptedStepState::NeedsAttention:
-            if (!resolveTransfers) return Result<void>::failure({"recovery.step_unresolved", "A step is still uncertain."});
-            restored = StepStatus::IntentRecorded; break;
+            if (preservePartial) {
+                restart.preserved.push_back({item.transfer->attempt.id, item.stepId, item.transfer->attempt.staging});
+                restored = StepStatus::Planned;
+            } else if (resolveTransfers) restored = StepStatus::IntentRecorded;
+            else return Result<void>::failure({"recovery.step_unresolved", "A step is still uncertain."});
+            break;
         default: return Result<void>::failure({"recovery.step_unresolved", "A step is still uncertain."});
         }
         restart.steps.push_back({item.stepId, plan.steps[i].status, restored});

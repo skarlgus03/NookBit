@@ -394,11 +394,11 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
     const std::filesystem::path dRoot(QDir(targetRun).filePath(name).toStdWString());
     require(std::filesystem::create_directory(cRoot) && std::filesystem::create_directory(dRoot), "Cannot create owned batch folders");
     const bool renameFirst = index == 1 || index == 2;
-    const bool copyLast = index == 4 || index == 14 || index == 21;
+    const bool copyLast = index == 4 || index == 14 || index == 21 || (index >= 26 && index != 30);
     const std::vector<std::filesystem::path> selected{
         (renameFirst ? dRoot : cRoot) / L"첫째.jpg", (renameFirst ? cRoot : dRoot) / L"둘째.jpg",
         (copyLast ? cRoot : dRoot) / L"마지막.jpg"};
-    const size_t interruptedIndex = index == 21 ? 2 : 0;
+    const size_t interruptedIndex = index == 21 || (index >= 26 && index != 30) ? 2 : 0;
     for (size_t i = 0; i < selected.size(); ++i) {
         std::string contents = "owned batch contents " + std::to_string(i);
         if (recoveringTransfer && i == interruptedIndex) {
@@ -517,7 +517,8 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
         ResumeInterruptedTransferUseCase resolver(history, journal, copy, removal, files, removalGuard, commitGuard, hasher);
         RecoverInterruptedPlanUseCase recovery(inspector, history, settings, rules, hasher, executor, &resolver);
         InterruptedOperationRecoveryService service(recovery);
-        RecoveryRequest recoveryRequest{plan.id, plan.planHash, index == 24 ? RecoveryAction::Rollback : RecoveryAction::Resume};
+        const bool preservingUndo = index == 24 || index >= 26;
+        RecoveryRequest recoveryRequest{plan.id, plan.planHash, preservingUndo ? RecoveryAction::Rollback : RecoveryAction::Resume};
         std::optional<FileFingerprint> collisionBefore;
         if (index == 22) {
             createFile(attempt.destination, "owned collision sentinel");
@@ -529,8 +530,68 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
             require(changed.open(QIODevice::Append) && changed.write("!") == 1, "Cannot corrupt owned partial prefix");
             changed.close(); stageBefore = fingerprint(attempt.staging);
         }
+        if (index == 27) testSql(database, "CREATE TRIGGER stop_preserved_undo BEFORE INSERT ON events WHEN NEW.event_type='recovery_choice_recorded' BEGIN SELECT RAISE(FAIL,'owned undo audit failure'); END");
+        if (index == 28) {
+            QFile changed(QString::fromStdWString(attempt.source.wstring()));
+            require(changed.open(QIODevice::Append) && changed.write("changed") == 7, "Cannot change owned partial source"); changed.close();
+        }
+        std::optional<FileFingerprint> originalStage;
+        std::filesystem::path stageBackup;
+        if (index == 29) {
+            originalStage = stageBefore; stageBackup = attempt.staging; stageBackup += ".owned-backup";
+            require(!std::filesystem::exists(stageBackup), "Owned backup must be absent");
+            std::filesystem::rename(attempt.staging, stageBackup); createFile(attempt.staging, "replacement stage");
+            stageBefore = fingerprint(attempt.staging);
+        }
+        std::optional<FileFingerprint> lateOccupant;
+        if (index == 31) {
+            // 역순 이름 변경 뒤 원래 복사 위치에 새 파일을 놓아 두 번째 복원을 막는 함수.
+            hooks.beforeEvent = [&](const DomainEvent& event) {
+                const auto* changed = std::get_if<StepStatusChanged>(&event);
+                if (changed && changed->stepId == plan.steps[1].id && changed->status == StepStatus::RolledBack) {
+                    createFile(plan.steps[0].source, "owned late occupant"); lateOccupant = fingerprint(plan.steps[0].source);
+                }
+            };
+        }
         const auto recovered = service.execute(recoveryRequest);
+        hooks.beforeEvent = {};
         const auto after = take(history.loadPlan(plan.id));
+        if (preservingUndo) {
+            if (index == 27 || index == 28 || index == 29) {
+                require(!recovered && after.status == before.status && PlanSignature::planContents(after) == PlanSignature::planContents(before) &&
+                    testSql(database, "SELECT COUNT(*) FROM events") == beforeEvents && take(history.preservedTransfers(plan.id)).empty(),
+                    "Audit failure or unsafe partial evidence must not start undo or register preservation");
+                require(stageBefore && sameFingerprint(*stageBefore, fingerprint(attempt.staging)), "Rejected undo changed staging");
+                if (index == 29) require(originalStage && sameFingerprint(*originalStage, fingerprint(stageBackup)), "Rejected undo lost the original stage backup");
+            } else {
+                if (index == 31) {
+                    require(!recovered && after.status == PlanStatus::NeedsRecovery && after.steps[1].status == StepStatus::RolledBack &&
+                        lateOccupant && sameFingerprint(*lateOccupant, fingerprint(plan.steps[0].source)) &&
+                        TransferValidation::sameContent(plan.steps[0].fingerprint, fingerprint(plan.steps[0].destination)),
+                        "Late undo collision must preserve the occupant, moved copy and already-restored step");
+                } else {
+                    saved(recovered);
+                    require(after.status == PlanStatus::RolledBack && after.planHash == plan.planHash, "Partial-preserving undo must finish the movement portion");
+                    for (const auto& step : plan.steps) require(!std::filesystem::exists(step.destination) &&
+                        TransferValidation::sameContent(step.fingerprint, fingerprint(step.source)), "Partial-preserving undo did not return original contents");
+                    require(!service.execute(recoveryRequest), "Finished preserved undo must not repeat");
+                }
+                require(stageBefore && sameFingerprint(*stageBefore, fingerprint(attempt.staging)) &&
+                    sameFingerprint(attempt.sourceFingerprint, fingerprint(attempt.source)) &&
+                    take(journal.load(attempt.id)).phase == attempt.phase && take(journal.load(attempt.id)).copyResume == attempt.copyResume,
+                    "Undo must neither finish the partial copy nor delete/change its source or stage");
+                SqliteHistoryRepository restarted(database, migration);
+                const auto retained = take(restarted.preservedTransfers(plan.id));
+                require(retained.size() == 1 && retained[0].attemptId == attempt.id && retained[0].staging == attempt.staging &&
+                    testSql(database, "SELECT COUNT(*) FROM events WHERE event_type='recovery_choice_recorded'") == 1,
+                    "Preserved staging registration must survive reopening SQLite under one explicit choice");
+                InspectInterruptedPlanUseCase refreshed(restarted, journal, files, hasher, &copy);
+                const auto reminders = take(refreshed.inspectAll());
+                require(reminders.size() == 1 && reminders[0].preserved == 1 && reminders[0].resume.readiness == RecoveryReadiness::Blocked,
+                    "Preserved stage reminder must remain visible even after movement undo finishes");
+            }
+            return;
+        }
         if (index >= 22) {
             require(!recovered, "Unsafe partial recovery should stop");
             if (index == 25) {
@@ -827,8 +888,8 @@ int main(int argc, char** argv) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run, --crash-run, --batch-run, --recovery-run or --transfer-recovery-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --crash-run, --batch-run, --recovery-run, --transfer-recovery-run or --preserved-undo-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -843,6 +904,7 @@ int main(int argc, char** argv) {
         const bool batching = args[1] == "--batch-run";
         const bool recovering = args[1] == "--recovery-run";
         const bool resolving = args[1] == "--transfer-recovery-run";
+        const bool preserving = args[1] == "--preserved-undo-run";
         // 일반 시험은 전체 잠금, 강제 종료 시험은 각 자식이 독립적으로 잠금을 갖는다.
         std::unique_ptr<OperationMutex> lock;
         if (!crashing) { lock = std::make_unique<OperationMutex>(); saved(lock->acquire()); }
@@ -854,7 +916,8 @@ int main(int argc, char** argv) {
         QJsonArray results;
         int failures = 0;
         const QStringList names = crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
-            resolving ? QStringList{"partial-then-whole-resume", "verified-stage-then-whole-resume", "commit-record-then-whole-resume", "committed-source-retained-resume", "removed-source-record-resume", "completion-record-resume", "last-partial-completes-whole", "partial-collision-preserved", "partial-audit-failure-preserved", "partial-undo-still-blocked", "corrupt-prefix-stops-whole"} :
+            preserving ? QStringList{"undo-prefix-preserve-partial", "preserved-undo-audit-failure", "changed-partial-source-blocked", "replaced-staging-blocked", "no-moves-partial-preserved", "late-undo-collision-retains-registration"} :
+            resolving ? QStringList{"partial-then-whole-resume", "verified-stage-then-whole-resume", "commit-record-then-whole-resume", "committed-source-retained-resume", "removed-source-record-resume", "completion-record-resume", "last-partial-completes-whole", "partial-collision-preserved", "partial-audit-failure-preserved", "partial-undo-preserves-staging", "corrupt-prefix-stops-whole"} :
             recovering ? QStringList{"explicit-resume", "explicit-undo", "later-preserves", "changed-source-blocked", "changed-settings-blocked", "audit-atomic-failure", "stale-choice-blocked", "missing-service-blocked", "undo-record-completion", "resume-final-copy"} :
             batching ? QStringList{"copy-then-renames-roundtrip", "rename-copy-rename-roundtrip", "mixed-late-collision-compensation", "mixed-undo-collision-preflight", "copy-rename-copy-roundtrip"} :
             QStringList{"roundtrip", "forward-collision", "partial-resume-roundtrip", "commit-record-recovery-roundtrip", "removal-record-recovery-roundtrip", "reverse-collision"};
@@ -862,7 +925,7 @@ int main(int argc, char** argv) {
             try {
                 if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index]));
                 else {
-                    if (batching || recovering || resolving) batchScenario(source.path(), target.path(), resolving ? index + 15 : recovering ? index + 5 : index);
+                    if (batching || recovering || resolving || preserving) batchScenario(source.path(), target.path(), preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
                     else scenario(source.path(), target.path(), index);
                     results.append(QJsonObject{{"case", names[index]}, {"passed", true}});
                 }
@@ -873,11 +936,11 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
-            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
+            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
             {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";

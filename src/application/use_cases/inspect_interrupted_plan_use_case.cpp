@@ -33,9 +33,26 @@ void count(InterruptedPlanInspection& report, InterruptedStepState state) {
     case InterruptedStepState::Restored: ++report.restored; break;
     case InterruptedStepState::Skipped: ++report.skipped; break;
     case InterruptedStepState::NeedsAttention: ++report.needsAttention; break;
+    case InterruptedStepState::Preserved: ++report.preserved; break;
     }
 }
 
+} // namespace
+
+// 원본은 온전하고 최종 파일은 없으며 소유한 부분 임시 객체만 남은 경우를 구분하는 함수.
+bool canPreservePartialTransfer(const TransferRecoveryInspection& inspection) {
+    const auto& attempt = inspection.attempt;
+    return inspection.finding == TransferRecoveryFinding::PartialCopy &&
+        inspection.source == TransferRecoveryFileState::Matches && inspection.staging == TransferRecoveryFileState::ObjectOnly &&
+        inspection.destination == TransferRecoveryFileState::Missing && inspection.observationErrors.empty() &&
+        attempt.direction == TransferDirection::Forward && attempt.stagingFingerprint && !attempt.destinationFingerprint &&
+        attempt.stagingCleanup == StagingCleanup::None && attempt.stagingCommit == StagingCommit::None &&
+        attempt.copyResume != CopyResume::Verified && !attempt.recoveryRemovalIntent && !attempt.recoveryCompleted &&
+        (attempt.phase == TransferPhase::StagingCreated || attempt.phase == TransferPhase::Cancelled ||
+         attempt.phase == TransferPhase::Failed || attempt.phase == TransferPhase::NeedsRecovery);
+}
+
+namespace {
 // 불확실한 파일 상태에 설명을 붙이되 기록이나 파일은 변경하지 않는 함수.
 void block(InterruptedStepInspection& item, const char* code, const char* message) {
     item.state = InterruptedStepState::NeedsAttention;
@@ -99,15 +116,19 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectAfterRes
 }
 
 // 명시적 재개 후 완료 검사를 제외하면 기존 중단 작업만 검사하는 함수.
-Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(const PlanId& planId, bool allowCompleted) {
+Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(const PlanId& planId, bool allowCompleted, bool allowPreserved) {
     using Return = Result<InterruptedPlanInspection>;
     const auto loaded = history_.loadPlan(planId);
     if (!loaded) return Return::failure(loaded.error());
     const auto& plan = loaded.value();
-    if (!interrupted(plan.status) && !(allowCompleted && plan.status == PlanStatus::Completed))
+    const auto preserved = history_.preservedTransfers(planId);
+    if (!preserved) return Return::failure(preserved.error());
+    if (!interrupted(plan.status) && !(allowCompleted && plan.status == PlanStatus::Completed) &&
+        !(allowPreserved && plan.status == PlanStatus::RolledBack && !preserved.value().empty()))
         return Return::failure({"recovery.not_interrupted", "Only interrupted operations need this inspection."});
     InterruptedPlanInspection report;
     report.planId = plan.id; report.status = plan.status;
+    report.preservedTransfers = preserved.value();
     bool unsafe = false;
     std::set<StepId> ids;
     report.planIntact = plan.id == planId && !plan.steps.empty() && PlanSignature::validateFormat(plan) &&
@@ -123,7 +144,8 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     if (plan.status == PlanStatus::NeedsRecovery) {
         const auto origin = history_.interruptedStatus(plan.id);
         if (origin && (origin.value() == PlanStatus::Executing || origin.value() == PlanStatus::RollingBack)) report.interruptedStatus = origin.value();
-    } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing : plan.status;
+    } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing :
+        plan.status == PlanStatus::RolledBack ? PlanStatus::RollingBack : plan.status;
     std::vector<Error> globalReasons;
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});
@@ -147,6 +169,8 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
             const auto loadedAttempts = journal_.forStep(step.id);
             if (!loadedAttempts) return Return::failure(loadedAttempts.error());
             std::vector<TransferAttempt> forward, reverse;
+            const bool preservationRecorded = std::any_of(report.preservedTransfers.begin(), report.preservedTransfers.end(),
+                [&](const PreservedTransfer& entry) { return entry.stepId == step.id; });
             for (const auto& attempt : loadedAttempts.value()) {
                 if (attempt.planId != plan.id) continue;
                 (attempt.direction == TransferDirection::Forward ? forward : reverse).push_back(attempt);
@@ -156,13 +180,23 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
                 block(item, "recovery.attempt_ambiguous", "Transfer records do not identify one safe forward/reverse pair.");
                 unsafe = true;
             } else if (forward.empty()) {
-                inspectUntracked(step, copy, *report.interruptedStatus, files_, item);
+                if (preservationRecorded) block(item, "recovery.preservation_untrusted", "Preserved transfer record no longer has its owned journal evidence.");
+                else inspectUntracked(step, copy, *report.interruptedStatus, files_, item);
                 if (item.state == InterruptedStepState::NeedsAttention) unsafe = true;
             } else {
                 const auto forwardReport = inspect.execute(forward[0].id);
                 if (!forwardReport) return Return::failure(forwardReport.error());
                 item.transfer = forwardReport.value();
-                if (!reverse.empty()) {
+                const bool retained = std::any_of(report.preservedTransfers.begin(), report.preservedTransfers.end(), [&](const PreservedTransfer& entry) {
+                    return entry.stepId == step.id && entry.attemptId == forward[0].id && entry.staging == forward[0].staging;
+                });
+                if (retained && reverse.empty() && report.interruptedStatus == PlanStatus::RollingBack && canPreservePartialTransfer(*item.transfer)) {
+                    item.state = InterruptedStepState::Preserved;
+                    item.reasons.push_back({"recovery.staging_preserved", "Original and partial staging were left untouched; staging still needs separate review."});
+                } else if (preservationRecorded) {
+                    block(item, "recovery.preservation_changed", "Preserved transfer no longer matches its recorded ownership or original file state.");
+                    unsafe = true;
+                } else if (!reverse.empty()) {
                     if (forwardReport.value().finding == TransferRecoveryFinding::UntrustedRecord || forward[0].phase != TransferPhase::Completed ||
                         !forward[0].destinationFingerprint || !TransferValidation::sameObject(*forward[0].destinationFingerprint, reverse[0].sourceFingerprint) ||
                         !TransferValidation::sameContent(*forward[0].destinationFingerprint, reverse[0].sourceFingerprint) ||
@@ -192,12 +226,13 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     const auto readiness = unsafe ? RecoveryReadiness::Blocked : report.needsAttention ?
         RecoveryReadiness::NeedsStepRecovery : RecoveryReadiness::NeedsRevalidation;
     report.resume.readiness = readiness; report.rollback.readiness = readiness;
-    if (report.interruptedStatus == PlanStatus::RollingBack || report.restored > 0) {
+    if (report.interruptedStatus == PlanStatus::RollingBack || report.restored > 0 || !report.preservedTransfers.empty()) {
         report.resume.readiness = RecoveryReadiness::Blocked;
         report.resume.reasons.push_back({"recovery.undo_in_progress", "Undo has begun; do not silently switch back to forward execution."});
     }
     if (!unsafe && report.needsAttention == 0) {
-        if (report.pending == 0 && report.moved == 0) report.resume.readiness = RecoveryReadiness::NotApplicable;
+        if (report.pending == 0 && report.moved == 0 && report.interruptedStatus == PlanStatus::Executing && report.preservedTransfers.empty())
+            report.resume.readiness = RecoveryReadiness::NotApplicable;
         if (report.moved == 0) report.rollback.readiness = RecoveryReadiness::NotApplicable;
         if (report.pending == 0 && report.moved > 0 && report.interruptedStatus == PlanStatus::Executing)
             report.resume.reasons.push_back({"recovery.completion_record_pending", "All files appear moved; completion records still require explicit revalidation."});
@@ -211,9 +246,20 @@ Result<std::vector<InterruptedPlanInspection>> InspectInterruptedPlanUseCase::in
     const auto plans = history_.incompletePlans();
     if (!plans) return Result<std::vector<InterruptedPlanInspection>>::failure(plans.error());
     std::vector<InterruptedPlanInspection> reports;
+    std::set<PlanId> inspected;
     for (const auto& plan : plans.value()) {
         if (!interrupted(plan.status)) continue;
         const auto report = execute(plan.id);
+        if (!report && report.error().code == "recovery.not_interrupted") continue;
+        if (!report) return Result<std::vector<InterruptedPlanInspection>>::failure(report.error());
+        reports.push_back(report.value());
+        inspected.insert(plan.id);
+    }
+    const auto retained = history_.preservedTransferPlans();
+    if (!retained) return Result<std::vector<InterruptedPlanInspection>>::failure(retained.error());
+    for (const auto& id : retained.value()) {
+        if (inspected.contains(id)) continue;
+        const auto report = inspectPlan(id, false, true);
         if (!report && report.error().code == "recovery.not_interrupted") continue;
         if (!report) return Result<std::vector<InterruptedPlanInspection>>::failure(report.error());
         reports.push_back(report.value());

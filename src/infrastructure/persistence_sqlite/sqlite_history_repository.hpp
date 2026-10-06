@@ -27,6 +27,10 @@ public:
 
     /// 검사한 승인·단계 상태를 비교하고 복구 선택과 재시작 상태를 원자적으로 저장하는 함수.
     [[nodiscard]] Result<void> beginRecovery(const RecoveryRestart& restart) override;
+    /// 선택 감사에 남긴 보존 임시 파일의 추적 정보를 읽는 함수.
+    [[nodiscard]] Result<std::vector<PreservedTransfer>> preservedTransfers(const PlanId& planId) const override;
+    /// 완료된 되돌리기에서도 보존 임시 파일을 확인할 작업을 읽는 함수.
+    [[nodiscard]] Result<std::vector<PlanId>> preservedTransferPlans() const override;
 
     /// 아직 완료되지 않은 저장 계획을 읽어오는 함수.
     [[nodiscard]] Result<std::vector<OperationPlan>> incompletePlans() const override;

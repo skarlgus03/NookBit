@@ -15,10 +15,17 @@ struct RecoveryStepReset {
     StepStatus expected;
     StepStatus restored;
 };
+/// 삭제/완료 증거가 아니라 되돌리기 뒤 남겨둔 임시 파일의 추적 기록.
+struct PreservedTransfer {
+    std::string attemptId;
+    StepId stepId;
+    std::filesystem::path staging;
+};
 /// 현재 상태 비교와 선택 감사·재시작 상태 복원을 한 트랜잭션에 요청한다.
 struct RecoveryRestart {
     RecoveryRequest request;
     PlanStatus expectedStatus;
     std::vector<RecoveryStepReset> steps;
+    std::vector<PreservedTransfer> preserved;
 };
 } // namespace nookbit

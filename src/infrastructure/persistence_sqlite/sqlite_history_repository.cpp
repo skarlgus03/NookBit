@@ -534,6 +534,31 @@ Result<void> SqliteHistoryRepository::beginRecovery(const RecoveryRestart& resta
             (request.action == RecoveryAction::Resume && step.restored == StepStatus::RolledBack))
             return Result<void>::failure({"history.recovery_steps_invalid", "Every original step must appear once in order without changing skip decisions."});
     }
+    const auto previousPreserved = preservedTransfers(request.planId);
+    if (!previousPreserved) return Result<void>::failure(previousPreserved.error());
+    if (request.action != RecoveryAction::Rollback && (!restart.preserved.empty() || !previousPreserved.value().empty()))
+        return Result<void>::failure({"history.preservation_direction", "Preserved partial transfers belong to undo, not forward resume."});
+    for (const auto& previous : previousPreserved.value()) {
+        if (std::none_of(restart.preserved.begin(), restart.preserved.end(), [&](const PreservedTransfer& entry) {
+            return entry.attemptId == previous.attemptId && entry.stepId == previous.stepId && entry.staging == previous.staging;
+        })) return Result<void>::failure({"history.preservation_lost", "Existing preserved staging records cannot be silently dropped."});
+    }
+    std::set<StepId> preservedIds;
+    for (const auto& entry : restart.preserved) {
+        const auto step = std::find_if(current.steps.begin(), current.steps.end(), [&](const MoveStep& item) { return item.id == entry.stepId; });
+        const auto reset = std::find_if(restart.steps.begin(), restart.steps.end(), [&](const RecoveryStepReset& item) { return item.stepId == entry.stepId; });
+        if (step == current.steps.end() || reset == restart.steps.end() || reset->restored != StepStatus::Planned ||
+            !step->movement || step->movement->strategy != MoveStrategy::VerifiedCopy || !preservedIds.insert(entry.stepId).second)
+            return Result<void>::failure({"history.preservation_invalid", "Preserved staging must belong to a unique unexecuted copy step."});
+        QSqlQuery owner(database_);
+        owner.prepare("SELECT 1 FROM transfer_attempts WHERE id=? AND plan_id=? AND step_id=? AND direction='forward' "
+            "AND source_path=? AND destination_path=? AND staging_path=? AND staging_fingerprint_json IS NOT NULL "
+            "AND destination_fingerprint_json IS NULL AND phase IN ('staging_created','failed','cancelled','needs_recovery')");
+        owner.addBindValue(QString::fromStdString(entry.attemptId)); owner.addBindValue(QString::fromStdString(request.planId));
+        owner.addBindValue(QString::fromStdString(entry.stepId)); owner.addBindValue(QDir::cleanPath(QString::fromStdWString(step->source.wstring())));
+        owner.addBindValue(QDir::cleanPath(QString::fromStdWString(step->destination.wstring()))); owner.addBindValue(QDir::cleanPath(QString::fromStdWString(entry.staging.wstring())));
+        if (!owner.exec() || !owner.next()) return Result<void>::failure({"history.preservation_owner", "Owned partial transfer record is missing or changed."});
+    }
     if (!database_.transaction()) return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
     // 실패 시 선택·사건·단계·상위 상태를 모두 되돌리는 함수.
     const auto fail = [&](const QSqlQuery& query) {
@@ -557,9 +582,12 @@ Result<void> SqliteHistoryRepository::beginRecovery(const RecoveryRestart& resta
     QJsonArray states;
     for (const auto& step : restart.steps) states.append(QJsonObject{{"stepId", QString::fromStdString(step.stepId)},
         {"before", stepStatus(step.expected)}, {"after", stepStatus(step.restored)}});
+    QJsonArray preserved;
+    for (const auto& entry : restart.preserved) preserved.append(QJsonObject{{"attemptId", QString::fromStdString(entry.attemptId)},
+        {"stepId", QString::fromStdString(entry.stepId)}, {"staging", QString::fromStdWString(entry.staging.wstring())}});
     const QJsonObject choice{{"action", request.action == RecoveryAction::Resume ? "resume" : "rollback"},
         {"planHash", QString::fromStdString(request.planHash)}, {"beforeStatus", planStatus(restart.expectedStatus)},
-        {"afterStatus", planStatus(target)}, {"steps", states}};
+        {"afterStatus", planStatus(target)}, {"steps", states}, {"preservedTransfers", preserved}};
     // 동일한 트랜잭션 안에 사용자 선택과 중단 방향 추적 사건을 기록하는 함수.
     const auto event = [&](const QString& type, const QJsonObject& payload) -> Result<void> {
         QSqlQuery insert(database_);
@@ -577,6 +605,63 @@ Result<void> SqliteHistoryRepository::beginRecovery(const RecoveryRestart& resta
         database_.rollback(); return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
     }
     return Result<void>::success();
+}
+
+// 보존 목록을 감사에서 읽고 승인 해시와 단계 경로에 연결된 기록만 반환하는 함수.
+Result<std::vector<PreservedTransfer>> SqliteHistoryRepository::preservedTransfers(const PlanId& planId) const {
+    using Return = Result<std::vector<PreservedTransfer>>;
+    const auto opened = ensureOpen();
+    if (!opened) return Return::failure(opened.error());
+    QSqlQuery query(database_);
+    query.prepare("SELECT payload_json FROM events WHERE plan_id=? AND event_type='recovery_choice_recorded' ORDER BY id DESC LIMIT 1");
+    query.addBindValue(QString::fromStdString(planId));
+    if (!query.exec()) return Return::failure({"history.preservation_read_failed", query.lastError().text().toStdString()});
+    if (!query.next()) return Return::success({});
+    const auto document = QJsonDocument::fromJson(query.value(0).toString().toUtf8());
+    if (!document.isObject()) return Return::failure({"history.preservation_corrupt", "Recovery audit is not a valid object."});
+    const auto payload = document.object();
+    if (!payload.contains("preservedTransfers")) return Return::success({});
+    if (!payload.value("preservedTransfers").isArray()) return Return::failure({"history.preservation_corrupt", "Preserved transfer list is invalid."});
+    const auto entries = payload.value("preservedTransfers").toArray();
+    if (entries.empty()) return Return::success({});
+    const auto loaded = loadPlan(planId);
+    if (!loaded) return Return::failure(loaded.error());
+    if (payload.value("action").toString() != "rollback" || payload.value("planHash").toString().toStdString() != loaded.value().planHash)
+        return Return::failure({"history.preservation_corrupt", "Preservation audit does not belong to this undo approval."});
+    std::vector<PreservedTransfer> result;
+    std::set<StepId> ids;
+    for (const auto& value : entries) {
+        if (!value.isObject()) return Return::failure({"history.preservation_corrupt", "Preserved transfer entry is invalid."});
+        const auto entry = value.toObject();
+        PreservedTransfer item{entry.value("attemptId").toString().toStdString(), entry.value("stepId").toString().toStdString(),
+            std::filesystem::path(entry.value("staging").toString().toStdWString())};
+        const auto step = std::find_if(loaded.value().steps.begin(), loaded.value().steps.end(), [&](const MoveStep& candidate) { return candidate.id == item.stepId; });
+        if (item.attemptId.empty() || !ids.insert(item.stepId).second || step == loaded.value().steps.end() ||
+            !step->movement || step->movement->strategy != MoveStrategy::VerifiedCopy || !item.staging.is_absolute() ||
+            item.staging.parent_path() != step->destination.parent_path() || item.staging == step->destination || item.staging == step->source)
+            return Return::failure({"history.preservation_corrupt", "Preserved transfer identity or staging path is invalid."});
+        result.push_back(std::move(item));
+    }
+    return Return::success(std::move(result));
+}
+
+// 이동 복원이 끝나도 임시 파일 확인이 남은 작업 ID를 읽는 함수.
+Result<std::vector<PlanId>> SqliteHistoryRepository::preservedTransferPlans() const {
+    using Return = Result<std::vector<PlanId>>;
+    const auto opened = ensureOpen();
+    if (!opened) return Return::failure(opened.error());
+    QSqlQuery query(database_);
+    if (!query.exec("SELECT DISTINCT p.id FROM plans p JOIN events e ON e.plan_id=p.id WHERE e.event_type='recovery_choice_recorded' "
+        "AND p.status IN ('rolling_back','needs_recovery','rolled_back') ORDER BY p.id"))
+        return Return::failure({"history.preservation_read_failed", query.lastError().text().toStdString()});
+    std::vector<PlanId> candidates, result;
+    while (query.next()) candidates.push_back(query.value(0).toString().toStdString());
+    for (const auto& id : candidates) {
+        const auto entries = preservedTransfers(id);
+        if (!entries) return Return::failure(entries.error());
+        if (!entries.value().empty()) result.push_back(id);
+    }
+    return Return::success(std::move(result));
 }
 
 // 아직 완료되지 않은 저장 계획을 읽어오는 함수.

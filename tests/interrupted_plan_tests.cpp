@@ -27,6 +27,13 @@ struct History final : IHistoryRepository {
     int writes{0};
     bool failRecovery{false};
     std::function<void()> onRecovery;
+    std::vector<PreservedTransfer> preserved;
+    // 보존한 임시 파일의 추적 정보를 반환하는 함수.
+    Result<std::vector<PreservedTransfer>> preservedTransfers(const PlanId&) const override { return Result<std::vector<PreservedTransfer>>::success(preserved); }
+    // 보존 추적이 남은 작업만 시작 조회에 포함하는 함수.
+    Result<std::vector<PlanId>> preservedTransferPlans() const override {
+        return Result<std::vector<PlanId>>::success(preserved.empty() ? std::vector<PlanId>{} : std::vector<PlanId>{plan.id});
+    }
     // 시험용 원자적 재시작을 반영하고 요청 실패에는 원래 상태를 보존하는 함수.
     Result<void> beginRecovery(const RecoveryRestart& restart) override {
         if (failRecovery) return Result<void>::failure({"test.atomic_failure", "Injected restart failure"});
@@ -34,6 +41,7 @@ struct History final : IHistoryRepository {
         plan.status = restart.request.action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack;
         for (size_t i = 0; i < plan.steps.size(); ++i) plan.steps[i].status = restart.steps[i].restored;
         origin = plan.status;
+        preserved = restart.preserved;
         if (onRecovery) onRecovery();
         return Result<void>::success();
     }
@@ -237,10 +245,35 @@ void testTransferToWholeResume() {
             "one explicit choice must resolve the tracked partial then request whole-plan execution");
         else if (scenario == 7) expect(result && resolver.executions == 1 && runner.executions == 0 && f.history.plan.status == PlanStatus::Completed,
             "last transfer completing the whole plan must be verified without restarting a completed runner");
+        else if (scenario == 1) expect(result && runner.executions == 1 && resolver.executions == 0 &&
+            f.history.preserved.size() == 1 && f.journal.writes == 0, "partial undo must preserve rather than finish the forward copy");
         else expect(!result && runner.executions == 0 && resolver.executions == ((scenario == 3 || scenario == 5) ? 1 : 0) &&
             f.history.writes == ((scenario == 3 || scenario == 4 || scenario == 5 || scenario == 8) ? 1 : 0),
             "undo, failed audit, changed file/configuration, unsupported route or resolver failure must stop safely");
     }
+}
+
+// 보존된 부분 파일이 되돌리기 완료 후에도 조회되고 변경되면 경고하는지 검사하는 함수.
+void testPreservedStartup() {
+    Fixture f;
+    auto attempt = f.forward(0, TransferPhase::Cancelled);
+    attempt.stagingFingerprint = FileFingerprint{0, 20, "2", "partial", {}};
+    auto actual = *attempt.stagingFingerprint; actual.size = 3; actual.sha256 = std::string(64, 'd');
+    f.present(attempt.staging, actual); f.journal.attempts.push_back(attempt);
+    f.history.plan.status = PlanStatus::RolledBack;
+    f.history.preserved = {{attempt.id, attempt.stepId, attempt.staging}};
+    InspectInterruptedPlanUseCase inspector(f.history, f.journal, f.files, f.hasher, &f.volumes);
+    const auto reports = inspector.inspectAll();
+    expect(reports && reports.value().size() == 1 && reports.value()[0].preserved == 1 && reports.value()[0].pending == 2 &&
+        reports.value()[0].resume.readiness == RecoveryReadiness::Blocked, "finished undo must retain a staging-review reminder without permitting forward execution");
+    expect(f.history.writes == 0 && f.journal.writes == 0, "staging reminder must be read-only");
+    auto changed = actual; changed.fileId = "replacement"; f.present(attempt.staging, changed);
+    const auto replaced = inspector.inspectAll();
+    expect(replaced && replaced.value()[0].needsAttention == 1 && replaced.value()[0].preservedTransfers.size() == 1,
+        "same-name replacement must remain registered but not be treated as the owned partial file");
+    f.journal.attempts.clear();
+    const auto missing = inspector.inspectAll();
+    expect(missing && missing.value()[0].needsAttention == 1, "lost journal evidence must not silently erase preservation tracking");
 }
 
 // 선택·서명·설정·차단·원자적 기록 실패·기록 중 파일 변경을 검사하는 함수.
@@ -430,5 +463,6 @@ int main() {
     testReverseEvidence(); testTransferBoundaries(); testStartupFilter();
     testExplicitChoices();
     testTransferToWholeResume();
+    testPreservedStartup();
     return failures ? 1 : 0;
 }

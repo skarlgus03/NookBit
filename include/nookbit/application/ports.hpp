@@ -106,6 +106,14 @@ public:
     [[nodiscard]] virtual Result<void> beginRecovery(const RecoveryRestart&) {
         return Result<void>::failure({"history.recovery_unsupported", "Atomic recovery restart is unsupported."});
     }
+    /// 마지막 명시적 복구 선택에서 보존한 임시 전송 목록을 읽는 함수.
+    [[nodiscard]] virtual Result<std::vector<PreservedTransfer>> preservedTransfers(const PlanId&) const {
+        return Result<std::vector<PreservedTransfer>>::success({});
+    }
+    /// 이동 되돌리기가 끝나도 보존 임시 파일의 확인이 남은 작업 ID를 읽는 함수.
+    [[nodiscard]] virtual Result<std::vector<PlanId>> preservedTransferPlans() const {
+        return Result<std::vector<PlanId>>::success({});
+    }
     /// 계획을 저장하는 함수.
     [[nodiscard]] virtual Result<void> savePlan(const OperationPlan& plan) = 0;
     /// 명시적으로 승인된 계획을 기록하는 함수.
