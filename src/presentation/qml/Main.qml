@@ -1298,6 +1298,7 @@ ApplicationWindow {
 
     Dialog {
         id: recoveryDialog
+        objectName: "recoveryDialog"
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 760)
         height: Math.min(root.height - 32, 560)
@@ -1311,11 +1312,12 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("파일을 자동으로 옮기거나 삭제하지 않습니다. 원본과 목적지를 직접 확인해 주세요.")
+                text: qsTr("시작 검사와 '나중에'는 파일을 변경하지 않습니다. 재개·되돌리기는 직접 선택하고 확인해야 실행됩니다.")
                 wrapMode: Text.WordWrap
             }
             Button {
                 text: qsTr("파일 상태 다시 검사")
+                enabled: !recoveryController.recoveryBusy
                 onClicked: recoveryController.refreshRecoveryCases()
             }
             Label {
@@ -1337,6 +1339,7 @@ ApplicationWindow {
                     Repeater {
                         model: recoveryController.recoveryCases
                         delegate: Frame {
+                            id: recoveryCaseFrame
                             required property var modelData
                             width: parent.width
 
@@ -1345,17 +1348,27 @@ ApplicationWindow {
                                 Label {
                                     Layout.fillWidth: true
                                     text: qsTr("작업 기록: ") + modelData.planId +
-                                          qsTr(" · 파일 ") + modelData.partIndex + "/" + modelData.partCount
+                                          (modelData.whole ? "" : qsTr(" · 파일 ") + modelData.partIndex + "/" + modelData.partCount)
                                     font.bold: true
                                     elide: Text.ElideMiddle
                                 }
                                 Label {
                                     Layout.fillWidth: true
+                                    visible: !!modelData.whole
+                                    text: qsTr("이동 완료 %1 · 미시작 %2 · 복원 완료 %3\n확인 필요 %4 · 보존 임시 파일 %5")
+                                        .arg(modelData.moved || 0).arg(modelData.pending || 0).arg(modelData.restored || 0)
+                                        .arg(modelData.needsAttention || 0).arg(modelData.preserved || 0)
+                                    wrapMode: Text.WordWrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: !modelData.whole
                                     text: qsTr("원본 (") + modelData.sourceState + "): " + modelData.source
                                     wrapMode: Text.WrapAnywhere
                                 }
                                 Label {
                                     Layout.fillWidth: true
+                                    visible: !modelData.whole
                                     text: qsTr("목적지 (") + modelData.destinationState + "): " + modelData.destination
                                     wrapMode: Text.WrapAnywhere
                                 }
@@ -1365,10 +1378,44 @@ ApplicationWindow {
                                     wrapMode: Text.WordWrap
                                     color: "#9b5c23"
                                 }
+                                CheckBox {
+                                    id: recoveryPathsToggle
+                                    visible: !!modelData.whole
+                                    text: qsTr("파일 경로 보기")
+                                }
+                                Repeater {
+                                    model: recoveryPathsToggle.checked && recoveryCaseFrame.modelData.whole ? recoveryCaseFrame.modelData.files : []
+                                    delegate: Label {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        text: "[" + modelData.state + qsTr("] 원본: ") + modelData.source + qsTr("\n목적지: ") + modelData.destination +
+                                            (modelData.staging ? qsTr("\n임시 경로: ") + modelData.staging : "")
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                                RowLayout {
+                                    visible: !!modelData.whole
+                                    Button {
+                                        text: qsTr("재개")
+                                        enabled: recoveryCaseFrame.modelData.canResume && !recoveryController.recoveryBusy
+                                        onClicked: recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "resume")
+                                    }
+                                    Button {
+                                        text: qsTr("되돌리기")
+                                        enabled: recoveryCaseFrame.modelData.canRollback && !recoveryController.recoveryBusy
+                                        onClicked: recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "rollback")
+                                    }
+                                    Button {
+                                        text: qsTr("나중에")
+                                        enabled: !recoveryController.recoveryBusy
+                                        onClicked: { recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "later"); recoveryDialog.close() }
+                                    }
+                                }
                                 Button {
                                     text: qsTr("현재 상태로 기록 확정")
-                                    visible: modelData.partIndex === 1
-                                    enabled: modelData.canResolve
+                                    visible: modelData.partIndex === 1 && (!modelData.whole || modelData.canResolve)
+                                    enabled: modelData.canResolve && !recoveryController.recoveryBusy
                                     onClicked: recoveryController.resolveRecoveryCase(modelData.planId)
                                 }
                             }
@@ -1376,6 +1423,30 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+    Connections {
+        target: recoveryController
+        function onRecoveryConfirmationChanged() {
+            if (recoveryController.awaitingRecoveryConfirmation) recoveryConfirmDialog.open()
+            else recoveryConfirmDialog.close()
+        }
+    }
+    Dialog {
+        id: recoveryConfirmDialog
+        objectName: "recoveryConfirmDialog"
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 560)
+        modal: true
+        title: qsTr("중단 작업 실행 확인")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: recoveryController.confirmRecoveryChoice()
+        onRejected: recoveryController.cancelRecoveryChoice()
+        Label {
+            width: parent.width
+            text: recoveryController.recoveryConfirmationText
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAnywhere
         }
     }
 }

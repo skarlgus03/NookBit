@@ -9,6 +9,11 @@
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
+#include "infrastructure/filesystem/windows_transfer_recovery.hpp"
+#include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
+#include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/configuration/runtime_settings_repository.hpp"
+#include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
@@ -40,6 +45,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <algorithm>
 
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
 int main(int argc, char* argv[]) {
@@ -98,24 +104,6 @@ int main(int argc, char* argv[]) {
     const auto databasePath = QDir(appData).filePath(QStringLiteral("history.sqlite"));
     const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
     nookbit::SqliteTransferJournal transferJournal(databasePath, migrationPath);
-    QString recoveryNotice;
-    if (!verifyUi && QFileInfo::exists(databasePath)) {
-        nookbit::SqliteHistoryRepository recoveryHistory(databasePath, migrationPath);
-        nookbit::FilesystemScanner recoveryScanner;
-        nookbit::QtPlanHasher recoveryHasher;
-        nookbit::RecoveryService recovery(recoveryHistory, recoveryScanner, recoveryHasher, &transferJournal);
-        const auto result = recovery.reconcile();
-        if (!result) {
-            recoveryNotice = QStringLiteral("이전 작업 상태를 확인하지 못했어요: %1")
-                                 .arg(QString::fromStdString(result.error().message));
-        } else if (!result.value().needsAttention.empty()) {
-            recoveryNotice = QStringLiteral("중단된 작업 %1건은 자동으로 판단할 수 없어 확인이 필요해요. 파일은 건드리지 않았어요.")
-                                 .arg(result.value().needsAttention.size());
-        } else if (result.value().reconciled > 0) {
-            recoveryNotice = QStringLiteral("이전 중단 작업 %1건의 기록을 실제 파일 상태와 맞췄어요. 파일은 이동하지 않았어요.")
-                                 .arg(result.value().reconciled);
-        }
-    }
     const auto treeSchema = QStringLiteral(":/nookbit/rules-tree-v3.schema.json");
     const auto legacyTreeSchema = QStringLiteral(":/nookbit/rules-tree.schema.json");
     const auto bundledTree = QStringLiteral(":/nookbit/default-v3.json");
@@ -182,7 +170,29 @@ int main(int argc, char* argv[]) {
         uiPreferences.setValue(QStringLiteral("destinationRoot"), root);
         uiPreferences.sync();
     });
-    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal);
+    nookbit::UserSettings currentSettings;
+    currentSettings.homeRoot = std::filesystem::path(defaultDestination.toStdWString());
+    // 화면의 공통 충돌 정책을 코어의 현재 설정 값으로 변환하는 함수.
+    const auto currentPolicy = [&previewController] {
+        const auto key = previewController.collisionPolicy();
+        return key == "abort" ? nookbit::CollisionPolicy::Abort : key == "skip" ? nookbit::CollisionPolicy::Skip : nookbit::CollisionPolicy::Rename;
+    };
+    currentSettings.defaultCollisionPolicy = currentPolicy();
+    nookbit::RuntimeSettingsRepository recoverySettings(currentSettings);
+    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted, &application,
+        [&recoverySettings](const QString& root) { recoverySettings.setHomeRoot(std::filesystem::path(root.toStdWString())); });
+    QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged, &application,
+        [&recoverySettings, &currentPolicy] { recoverySettings.setCollisionPolicy(currentPolicy()); });
+    nookbit::SafeExecutor recoveredRunner(recoverySettings, verifySavedPlan, previewScanner, previewHasher, history,
+        std::filesystem::path(appData.toStdWString()), &transferCopy, &forwardTransfer, &reverseTransfer);
+    nookbit::InspectInterruptedPlanUseCase interruptedInspector(history, transferJournal, transferFiles, previewHasher, &transferCopy);
+    nookbit::WindowsTransferRecoveryGuard transferRecoveryGuard;
+    nookbit::WindowsTransferCommitRecoveryGuard transferCommitGuard;
+    nookbit::ResumeInterruptedTransferUseCase transferResolver(history, transferJournal, transferCopy, transferRemoval,
+        transferFiles, transferRecoveryGuard, transferCommitGuard, previewHasher);
+    nookbit::RecoverInterruptedPlanUseCase recoverInterrupted(interruptedInspector, history, recoverySettings, previewRules, previewHasher, recoveredRunner, &transferResolver);
+    nookbit::InterruptedOperationRecoveryService interruptedOperations(interruptedInspector, history, recoverInterrupted);
+    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &interruptedOperations);
     nookbit::HistoryController historyController(history, fileOperations);
     QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                      &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
@@ -192,7 +202,20 @@ int main(int argc, char* argv[]) {
                      &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &previewController, &nookbit::PreviewController::refreshActiveRules);
-    recoveryController.setRecoveryNotice(recoveryNotice);
+    QObject::connect(&recoveryController, &nookbit::RecoveryController::recoveryAttempted, &historyController,
+        [&historyController, &pendingFiles](const QString&) { historyController.refreshHistory(); pendingFiles.refreshAvailability(); });
+    QObject::connect(&recoveryController, &nookbit::RecoveryController::recoveryCompleted, &application,
+        [&history, &pendingFiles, &previewController](const QString& id, const QString& action) {
+            if (action == "rollback") { previewController.refreshLastUndoAfterHistoryRollback(id); return; }
+            const auto plan = history.loadPlan(id.toStdString());
+            if (!plan || plan.value().status != nookbit::PlanStatus::Completed) return;
+            for (int i = pendingFiles.count() - 1; i >= 0; --i) {
+                const std::filesystem::path path(pendingFiles.filePaths()[i].toStdWString());
+                if (std::any_of(plan.value().steps.begin(), plan.value().steps.end(), [&](const nookbit::MoveStep& step) {
+                    return step.status == nookbit::StepStatus::Applied && step.source == path;
+                })) pendingFiles.removeAt(i);
+            }
+        });
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         recoveryController.refreshRecoveryCases();
     }
@@ -234,18 +257,26 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("watchSettingsDialog"));
         QObject* historyDialog = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("historyDialog"));
+        QObject* recoveryDialog = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryDialog"));
+        QObject* recoveryConfirmDialog = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
         const bool ready = !engine.rootObjects().isEmpty() &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&
                            QMetaObject::invokeMethod(ruleTestPanel, "close") &&
-                           watchSettingsDialog != nullptr && historyDialog != nullptr &&
+                           watchSettingsDialog != nullptr && historyDialog != nullptr && recoveryDialog != nullptr && recoveryConfirmDialog != nullptr &&
                            QMetaObject::invokeMethod(engine.rootObjects().first(), "openWatchSettings") &&
                            watchSettingsDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(watchSettingsDialog, "close") &&
                            QMetaObject::invokeMethod(historyDialog, "open") &&
                            historyDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(historyDialog, "close") &&
+                           QMetaObject::invokeMethod(recoveryDialog, "open") && recoveryDialog->property("visible").toBool() &&
+                           QMetaObject::invokeMethod(recoveryDialog, "close") &&
+                           QMetaObject::invokeMethod(recoveryConfirmDialog, "open") && recoveryConfirmDialog->property("visible").toBool() &&
+                           QMetaObject::invokeMethod(recoveryConfirmDialog, "close") &&
                            pendingFiles.count() == 0 && !previewController.hasPreview() &&
                            bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&

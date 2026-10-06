@@ -33,7 +33,16 @@ public:
         IRecoveredPlanRunner& runner, IInterruptedTransferResolver* transfers = nullptr);
     /// 호출자가 공유 잠금을 보유한 상태에서 사용자 선택을 실행하는 함수.
     [[nodiscard]] Result<void> execute(const RecoveryRequest& request);
+    /// 선택 가능 여부를 실행과 같은 사전 검사로 확인하되 감사·파일을 변경하지 않는 함수.
+    [[nodiscard]] Result<void> checkChoice(const RecoveryRequest& request);
 private:
+    struct Preparation {
+        OperationPlan plan;
+        RecoveryRestart restart;
+        bool resolveTransfers{false};
+    };
+    /// 승인·설정·진단·포트·정규화된 단계 상태를 변경 없이 준비하는 함수.
+    [[nodiscard]] Result<Preparation> prepareChoice(const RecoveryRequest& request);
     /// 원래 승인과 현재 설정·규칙의 일치 여부를 다시 검사하는 함수.
     [[nodiscard]] Result<void> verifyConfiguration(const OperationPlan& plan) const;
     /// 선택 이후에도 동일한 승인 내용과 단계 식별자를 사용하는지 검사하는 함수.

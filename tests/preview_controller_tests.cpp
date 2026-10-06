@@ -22,6 +22,11 @@
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
+#include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
+#include "infrastructure/filesystem/windows_transfer_recovery.hpp"
+#include "infrastructure/filesystem/safe_executor.hpp"
+#include "infrastructure/configuration/runtime_settings_repository.hpp"
+#include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
@@ -42,6 +47,7 @@
 #include <QVariantMap>
 #include <QSaveFile>
 #include <QDateTime>
+#include <QUuid>
 
 #include <filesystem>
 #include <iostream>
@@ -1224,6 +1230,165 @@ void testV2StartupRecoveryNotice() {
         QFile::exists(source), "old screen action cannot erase v2 restored evidence");
 }
 
+// 확인 전·취소·나중에·오래된 승인·중복 확인의 화면 흐름을 검사하는 대역.
+class RecoveryChoices final : public nookbit::IInterruptedOperations {
+public:
+    std::string hash = std::string(64, 'a');
+    int executions{0}, mutations{0};
+    bool remaining{true}, unavailable{false};
+    // 파일·DB 접근 없이 표시 후보만 반환하는 함수.
+    nookbit::Result<std::vector<nookbit::InterruptedOperationView>> inspectAll() override {
+        if (unavailable) return nookbit::Result<std::vector<nookbit::InterruptedOperationView>>::failure({"test.unavailable", "Owned inspection failed"});
+        nookbit::InterruptedOperationView view;
+        view.inspection.planId = "owned-plan"; view.inspection.pending = 1; view.inspection.moved = 1;
+        view.planHash = hash; view.formatVersion = 2; view.canResume = true; view.canRollback = false;
+        view.rollbackBlock = nookbit::Error{"recovery.choice_blocked", "Owned rollback blocker"};
+        return nookbit::Result<std::vector<nookbit::InterruptedOperationView>>::success(remaining ? std::vector{view} : std::vector<nookbit::InterruptedOperationView>{});
+    }
+    // 표시 해시가 바뀌면 실패하고 명시적 실행만 변경으로 세는 함수.
+    nookbit::Result<void> execute(const nookbit::RecoveryRequest& request) override {
+        ++executions;
+        if (request.action == nookbit::RecoveryAction::Later) return nookbit::Result<void>::success();
+        if (request.planHash != hash) return nookbit::Result<void>::failure({"recovery.choice_stale", "Owned approval changed"});
+        ++mutations; remaining = false; return nookbit::Result<void>::success();
+    }
+};
+
+// 화면 선택만으로 실행되지 않고 확인·취소·재검사가 안전한지 검사하는 함수.
+void testRecoveryConfirmationFlow() {
+    QTemporaryDir directory;
+    PreviewWorkflow workflow(std::filesystem::path(directory.filePath("app-data").toStdWString()));
+    RecoveryChoices operations;
+    nookbit::RecoveryController controller(workflow.history, nullptr, &workflow.journal, &operations);
+    controller.refreshRecoveryCases();
+    expect(controller.recoveryCases().size() == 1 && !controller.recoveryNotice().isEmpty() && operations.executions == 0, "startup recovery only inspects");
+    controller.requestRecoveryChoice("owned-plan", "rollback");
+    expect(!controller.awaitingRecoveryConfirmation() && operations.executions == 0, "blocked choice cannot open execution confirmation");
+    controller.requestRecoveryChoice("owned-plan", "resume");
+    expect(controller.awaitingRecoveryConfirmation() && operations.executions == 0, "request opens confirmation without file execution");
+    controller.cancelRecoveryChoice(); controller.confirmRecoveryChoice();
+    expect(!controller.awaitingRecoveryConfirmation() && operations.executions == 0, "cancel and repeated confirmation do nothing");
+    controller.requestRecoveryChoice("owned-plan", "later");
+    expect(operations.executions == 1 && operations.mutations == 0 && controller.recoveryCases().size() == 1, "Later retains the unresolved operation without changes");
+    controller.requestRecoveryChoice("owned-plan", "resume"); operations.hash = std::string(64, 'b'); controller.confirmRecoveryChoice();
+    expect(operations.executions == 2 && operations.mutations == 0 && !controller.awaitingRecoveryConfirmation(), "confirmation retains old hash and rejects stale approval");
+    controller.confirmRecoveryChoice();
+    expect(operations.executions == 2, "failed confirmation cannot repeat automatically");
+    controller.requestRecoveryChoice("owned-plan", "resume"); controller.confirmRecoveryChoice(); controller.confirmRecoveryChoice();
+    expect(operations.executions == 3 && operations.mutations == 1 && controller.recoveryCases().isEmpty(), "explicit confirmed recovery completes once");
+    operations.remaining = true; controller.refreshRecoveryCases(); controller.requestRecoveryChoice("owned-plan", "resume");
+    operations.unavailable = true; controller.refreshRecoveryCases(); controller.confirmRecoveryChoice();
+    expect(controller.recoveryCases().isEmpty() && !controller.awaitingRecoveryConfirmation() && operations.executions == 3 &&
+        !controller.recoveryNotice().isEmpty(), "failed inspection clears actionable stale cards and confirmation, not the warning");
+}
+
+// 시험 전용 DB의 감사 사건 수만 읽는 함수.
+qlonglong ownedEventCount(const QString& path) {
+    const auto name = QUuid::createUuid().toString();
+    qlonglong result = -1;
+    { auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
+      if (db.open()) { QSqlQuery query(db); if (query.exec("SELECT COUNT(*) FROM events") && query.next()) result = query.value(0).toLongLong(); }
+      db.close(); }
+    QSqlDatabase::removeDatabase(name); expect(result >= 0, "owned recovery audit count"); return result;
+}
+
+// 실제 혼합 중단을 화면의 명시적 확인을 거쳐 재개·복원하는 함수.
+void testNativeRecoveryChoice(const QString& sourceRun, const QString& targetRun, int scenario) {
+    nookbit::OperationMutex lock; if (!lock.acquire()) { expect(false, "owned UI recovery lock"); return; }
+    const int index = 10 + scenario;
+    const auto c = QDir(sourceRun).filePath(QString("case-%1/incoming").arg(index));
+    const auto d = QDir(targetRun).filePath(QString("case-%1").arg(index));
+    expect(QDir().mkpath(c) && QDir().mkpath(QDir(d).filePath("incoming")), "owned interrupted UI directories");
+    const QStringList sources{QDir(c).filePath("first.jpg"), QDir(d).filePath("incoming/second.jpg"), QDir(c).filePath("third.jpg")};
+    for (int i = 0; i < sources.size(); ++i) {
+        QFile file(sources[i]); const auto bytes = i == 2 ? QByteArray(4 * 1024 * 1024 + 37, 'x') : QByteArray("owned UI recovery ") + QByteArray::number(i);
+        expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(bytes) == bytes.size(), "owned interrupted UI originals");
+    }
+    const auto home = QDir(d).filePath("organized");
+    const auto appData = std::filesystem::path(QDir(d).filePath("app-data").toStdWString());
+    PreviewWorkflow workflow(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), appData, true);
+    nookbit::PendingFilesModel pending; for (const auto& source : sources) pending.addUrl(QUrl::fromLocalFile(source));
+    nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase, workflow.approveUseCase,
+        workflow.history, workflow.operations, projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), home);
+    preview.createPreview(home); preview.freezePreview(); preview.approvePlan();
+    const auto entries = workflow.history.incompletePlans();
+    if (!entries || entries.value().size() != 1) { expect(false, "owned recovery approved plan"); return; }
+    const auto plan = entries.value()[0];
+    expect(plan.status == nookbit::PlanStatus::Approved && plan.steps.size() == 3, "owned recovery plan approval and steps");
+    if (plan.steps.size() != 3) return;
+    expect(workflow.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(), "owned recovery execution intent");
+    for (int i = 0; i < 2; ++i) {
+        const auto& step = plan.steps[i];
+        expect(workflow.history.appendEvent(nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::IntentRecorded}).hasValue(), "owned moved prefix intent");
+        if (step.movement->strategy == nookbit::MoveStrategy::VerifiedCopy)
+            expect(workflow.forward.execute(plan.id, step.id, "owned-prefix", step.destination.parent_path() / "owned-prefix.tmp").hasValue(), "owned moved prefix transfer");
+        else expect(nookbit::WindowsFileMover::moveNoReplace(step.source, step.destination).hasValue() &&
+            workflow.history.appendEvent(nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::Applied}).hasValue(), "owned moved prefix rename");
+    }
+    std::optional<nookbit::TransferAttempt> partial;
+    if (scenario >= 3) {
+        const auto& step = plan.steps[2];
+        expect(workflow.history.appendEvent(nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::IntentRecorded}).hasValue(), "owned last copy intent");
+        nookbit::TransferAttempt attempt; attempt.id = "owned-partial"; attempt.planId = plan.id; attempt.stepId = step.id;
+        attempt.source = step.source; attempt.destination = step.destination; attempt.staging = step.destination.parent_path() / "owned-partial.tmp";
+        attempt.sourceFingerprint = step.fingerprint;
+        if (scenario == 5) expect(workflow.journal.begin(attempt).hasValue(), "owned prepared-only transfer");
+        else {
+            int checks = 0; nookbit::CommitTransferCopyUseCase copy(workflow.copy, workflow.journal);
+            expect(!copy.execute(attempt, [&] { return ++checks >= 3; }, &*step.movement) && std::filesystem::file_size(attempt.staging) == 1024 * 1024,
+                "owned real 1MiB UI partial copy");
+        }
+        const auto state = workflow.journal.load(attempt.id); if (state) partial = state.value(); else expect(false, "owned partial evidence");
+    }
+    nookbit::UserSettings settings; settings.homeRoot = std::filesystem::path(home.toStdWString());
+    nookbit::RuntimeSettingsRepository current(settings);
+    nookbit::SafeExecutor runner(current, workflow.verifyUseCase, workflow.scanner, workflow.hasher, workflow.history, appData, &workflow.copy, &workflow.forward, &workflow.reverse);
+    nookbit::InspectInterruptedPlanUseCase inspector(workflow.history, workflow.journal, workflow.files, workflow.hasher, &workflow.copy);
+    nookbit::WindowsTransferRecoveryGuard removalGuard; nookbit::WindowsTransferCommitRecoveryGuard commitGuard;
+    nookbit::ResumeInterruptedTransferUseCase resolver(workflow.history, workflow.journal, workflow.copy, workflow.removal, workflow.files, removalGuard, commitGuard, workflow.hasher);
+    nookbit::RecoverInterruptedPlanUseCase recover(inspector, workflow.history, current, workflow.rules, workflow.hasher, runner, &resolver);
+    nookbit::InterruptedOperationRecoveryService operations(inspector, workflow.history, recover);
+    nookbit::RecoveryController controller(workflow.history, nullptr, &workflow.journal, &operations);
+    const auto database = QDir(d).filePath("history.sqlite");
+    const auto before = workflow.history.loadPlan(plan.id); const auto events = ownedEventCount(database);
+    controller.refreshRecoveryCases();
+    expect(controller.recoveryCases().size() == 1 && ownedEventCount(database) == events && before &&
+        nookbit::PlanSignature::planContents(workflow.history.loadPlan(plan.id).value()) == nookbit::PlanSignature::planContents(before.value()), "startup card inspection cannot change records");
+    if (controller.recoveryCases().size() != 1) return;
+    const auto row = controller.recoveryCases()[0].toMap();
+    expect(row.value("moved").toInt() == 2, "recovery card must report completed prefix");
+    controller.requestRecoveryChoice(QString::fromStdString(plan.id), "later");
+    expect(ownedEventCount(database) == events, "native UI Later has no audit writes");
+    if (scenario == 5) {
+        expect(!row.value("canResume").toBool() && !row.value("canRollback").toBool(), "unsupported copy-before-start UI choices are disabled");
+        controller.requestRecoveryChoice(QString::fromStdString(plan.id), "resume"); controller.confirmRecoveryChoice();
+        expect(!controller.awaitingRecoveryConfirmation() && ownedEventCount(database) == events, "unsupported UI request cannot execute"); return;
+    }
+    const auto action = scenario == 1 || scenario == 4 ? "rollback" : "resume";
+    controller.requestRecoveryChoice(QString::fromStdString(plan.id), action);
+    expect(controller.awaitingRecoveryConfirmation() && ownedEventCount(database) == events, "native UI confirmation is not execution");
+    controller.cancelRecoveryChoice(); expect(ownedEventCount(database) == events, "native confirmation cancellation is read-only");
+    controller.requestRecoveryChoice(QString::fromStdString(plan.id), action);
+    if (scenario == 2) current.setCollisionPolicy(nookbit::CollisionPolicy::Abort);
+    controller.confirmRecoveryChoice(); controller.confirmRecoveryChoice();
+    const auto after = workflow.history.loadPlan(plan.id);
+    if (scenario == 2) {
+        expect(after && before && after.value().status == before.value().status && ownedEventCount(database) == events &&
+            nookbit::PlanSignature::planContents(after.value()) == nookbit::PlanSignature::planContents(before.value()), "changed current settings after confirmation cannot reuse old approval"); return;
+    }
+    expect(after && after.value().planHash == plan.planHash && after.value().status == (QString(action) == "resume" ? nookbit::PlanStatus::Completed : nookbit::PlanStatus::RolledBack),
+        "native confirmed UI recovery finishes under original approval");
+    for (const auto& step : plan.steps) {
+        const auto at = QString(action) == "resume" ? step.destination : step.source;
+        const auto hash = workflow.hasher.sha256File(at);
+        expect(hash && hash.value() == *step.fingerprint.sha256 && !std::filesystem::exists(QString(action) == "resume" ? step.source : step.destination), "native UI recovery conserves original bytes");
+    }
+    if (scenario == 4 && partial) {
+        expect(std::filesystem::file_size(partial->staging) == 1024 * 1024 && workflow.history.preservedTransfers(plan.id).value().size() == 1 &&
+            controller.recoveryCases().size() == 1 && controller.recoveryCases()[0].toMap().value("preserved").toInt() == 1, "partial undo UI retains its separate staging reminder");
+    } else expect(controller.recoveryCases().isEmpty(), "finished recovery must leave the interrupted list");
+}
+
 // 화면의 실제 미리보기·승인·이동·마지막/기록 되돌리기를 같은 서비스로 검사하는 함수.
 void testNativeControllerCase(const QString& sourceRun, const QString& targetRun, int index) {
 #ifdef _WIN32
@@ -1332,6 +1497,12 @@ int runNativeControllerTests(const QStringList& args) {
         cases.append(QJsonObject{{"case", names[i]}, {"passed", failures == before}});
         std::cout << (failures == before ? "PASS " : "FAIL ") << names[i].toStdString() << '\n';
     }
+    const QStringList recoveryNames{"confirmed-mixed-resume", "confirmed-mixed-undo", "changed-settings-after-confirmation", "confirmed-partial-resume", "confirmed-partial-preserving-undo", "unsupported-start-disabled"};
+    for (int i = 0; i < recoveryNames.size(); ++i) {
+        const auto before = failures; testNativeRecoveryChoice(source.path(), target.path(), i);
+        cases.append(QJsonObject{{"case", recoveryNames[i]}, {"passed", failures == before}});
+        std::cout << (failures == before ? "PASS " : "FAIL ") << recoveryNames[i].toStdString() << '\n';
+    }
     QSaveFile report(QDir(target.path()).filePath("ui-backend-report.json"));
     const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
         {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"passed", failures == 0}, {"cases", cases}}).toJson();
@@ -1367,6 +1538,7 @@ int main(int argc, char* argv[]) {
     testHistoryUndoAfterRestart();
     testRecoveryCasesInController();
     testV2StartupRecoveryNotice();
+    testRecoveryConfirmationFlow();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";
         return 0;

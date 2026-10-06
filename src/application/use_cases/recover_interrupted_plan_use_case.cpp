@@ -34,39 +34,39 @@ Result<void> RecoverInterruptedPlanUseCase::verifyChosenApproval(const Operation
     return Result<void>::success();
 }
 
-// 선택한 순간의 상태를 검사하고 기록이 성공한 뒤에만 실행을 요청하는 함수.
-Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& request) {
-    if (request.action == RecoveryAction::Later) return Result<void>::success();
+// 실행과 조회가 공유하는 복구 사전 검사를 변경 없이 준비하는 함수.
+Result<RecoverInterruptedPlanUseCase::Preparation> RecoverInterruptedPlanUseCase::prepareChoice(const RecoveryRequest& request) {
+    using Return = Result<Preparation>;
     if (request.action != RecoveryAction::Resume && request.action != RecoveryAction::Rollback)
-        return Result<void>::failure({"recovery.action_invalid", "Unknown recovery choice."});
+        return Return::failure({"recovery.action_invalid", "Unknown recovery choice."});
     const auto loaded = history_.loadPlan(request.planId);
-    if (!loaded) return Result<void>::failure(loaded.error());
+    if (!loaded) return Return::failure(loaded.error());
     const auto& plan = loaded.value();
     if (!PlanSignature::isSha256Hex(request.planHash) || request.planHash != plan.planHash)
-        return Result<void>::failure({"recovery.choice_stale", "The chosen approval snapshot no longer matches."});
+        return Return::failure({"recovery.choice_stale", "The chosen approval snapshot no longer matches."});
     const auto configuration = verifyConfiguration(plan);
-    if (!configuration) return configuration;
+    if (!configuration) return Return::failure(configuration.error());
     const auto report = inspector_.execute(request.planId);
-    if (!report) return Result<void>::failure(report.error());
+    if (!report) return Return::failure(report.error());
     const auto readiness = request.action == RecoveryAction::Resume ? report.value().resume.readiness : report.value().rollback.readiness;
     const bool finishUndo = request.action == RecoveryAction::Rollback && readiness == RecoveryReadiness::NotApplicable &&
         report.value().interruptedStatus == PlanStatus::RollingBack && (report.value().restored > 0 || report.value().preserved > 0);
     const bool preservePartial = request.action == RecoveryAction::Rollback && readiness == RecoveryReadiness::NeedsStepRecovery;
     const bool resolveTransfers = request.action == RecoveryAction::Resume && readiness == RecoveryReadiness::NeedsStepRecovery && transfers_;
     if (readiness != RecoveryReadiness::NeedsRevalidation && !finishUndo && !resolveTransfers && !preservePartial)
-        return Result<void>::failure({readiness == RecoveryReadiness::NeedsStepRecovery ? "recovery.step_resolution_required" : "recovery.choice_blocked",
+        return Return::failure({readiness == RecoveryReadiness::NeedsStepRecovery ? "recovery.step_resolution_required" : "recovery.choice_blocked",
             "Recovery is blocked or individual transfer evidence needs explicit resolution first; no changes made."});
     if (preservePartial) for (const auto& item : report.value().steps) {
         if (item.state != InterruptedStepState::NeedsAttention) continue;
         if (!item.transfer || !canPreservePartialTransfer(*item.transfer))
-            return Result<void>::failure({"recovery.preserve_unsupported", "Only an intact original with an owned partial stage and absent final may be preserved for undo."});
+            return Return::failure({"recovery.preserve_unsupported", "Only an intact original with an owned partial stage and absent final may be preserved for undo."});
     }
     if (resolveTransfers) {
         for (const auto& item : report.value().steps) {
             if (item.state != InterruptedStepState::NeedsAttention) continue;
-            if (!item.transfer) return Result<void>::failure({"recovery.step_unresolved", "Uncertain step has no tracked transfer."});
+            if (!item.transfer) return Return::failure({"recovery.step_unresolved", "Uncertain step has no tracked transfer."});
             const auto supported = transfers_->verifyResume(*item.transfer);
-            if (!supported) return supported;
+            if (!supported) return Return::failure(supported.error());
         }
     }
     // 두 조회 사이에 단계 상태가 바뀌면 원자적 재시작 요청의 비교가 실패하도록 처음 상태를 유지한다.
@@ -74,10 +74,10 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
     restart.preserved = report.value().preservedTransfers;
     auto normalized = plan;
     normalized.status = request.action == RecoveryAction::Resume ? PlanStatus::Executing : PlanStatus::RollingBack;
-    if (plan.steps.size() != report.value().steps.size()) return Result<void>::failure({"recovery.snapshot_changed", "Step count changed during inspection."});
+    if (plan.steps.size() != report.value().steps.size()) return Return::failure({"recovery.snapshot_changed", "Step count changed during inspection."});
     for (size_t i = 0; i < plan.steps.size(); ++i) {
         const auto& item = report.value().steps[i];
-        if (item.stepId != plan.steps[i].id) return Result<void>::failure({"recovery.snapshot_changed", "Step order changed during inspection."});
+        if (item.stepId != plan.steps[i].id) return Return::failure({"recovery.snapshot_changed", "Step order changed during inspection."});
         StepStatus restored;
         switch (item.state) {
         case InterruptedStepState::Pending: restored = StepStatus::Planned; break;
@@ -90,9 +90,9 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
                 restart.preserved.push_back({item.transfer->attempt.id, item.stepId, item.transfer->attempt.staging});
                 restored = StepStatus::Planned;
             } else if (resolveTransfers) restored = StepStatus::IntentRecorded;
-            else return Result<void>::failure({"recovery.step_unresolved", "A step is still uncertain."});
+            else return Return::failure({"recovery.step_unresolved", "A step is still uncertain."});
             break;
-        default: return Result<void>::failure({"recovery.step_unresolved", "A step is still uncertain."});
+        default: return Return::failure({"recovery.step_unresolved", "A step is still uncertain."});
         }
         restart.steps.push_back({item.stepId, plan.steps[i].status, restored});
         normalized.steps[i].status = restored;
@@ -101,7 +101,25 @@ Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& reque
     auto supportPlan = normalized;
     for (auto& step : supportPlan.steps) if (step.status == StepStatus::IntentRecorded) step.status = StepStatus::Planned;
     const auto support = runner_.verifyRecoverySupport(supportPlan, request.action);
-    if (!support) return support;
+    if (!support) return Return::failure(support.error());
+    return Return::success({plan, std::move(restart), resolveTransfers});
+}
+
+// 현재 증거와 구성으로 복구 선택을 제공할 수 있는지 변경 없이 확인하는 함수.
+Result<void> RecoverInterruptedPlanUseCase::checkChoice(const RecoveryRequest& request) {
+    if (request.action == RecoveryAction::Later) return Result<void>::success();
+    const auto prepared = prepareChoice(request);
+    return prepared ? Result<void>::success() : Result<void>::failure(prepared.error());
+}
+
+// 명시적 선택 직후 다시 검사하고 감사가 저장된 경우에만 실행하는 함수.
+Result<void> RecoverInterruptedPlanUseCase::execute(const RecoveryRequest& request) {
+    if (request.action == RecoveryAction::Later) return Result<void>::success();
+    const auto prepared = prepareChoice(request);
+    if (!prepared) return Result<void>::failure(prepared.error());
+    const auto& plan = prepared.value().plan;
+    const auto& restart = prepared.value().restart;
+    const bool resolveTransfers = prepared.value().resolveTransfers;
     const auto recorded = history_.beginRecovery(restart);
     if (!recorded) return recorded;
     const auto chosen = verifyChosenApproval(plan);
