@@ -62,7 +62,9 @@ void RecoveryController::refreshRecoveryCases() {
     QSet<QString> planIds;
     for (const auto& item : inspected.value()) {
         QString detail;
-        if (item.transferTracked) {
+        if (item.requiresWholeRecovery) {
+            detail = QStringLiteral("새 전체 작업 복구가 필요한 기록이에요. 기존 단계 상태를 유지하고 구형 기록 정리는 차단해요. 파일은 건드리지 않아요.");
+        } else if (item.transferTracked) {
             detail = QStringLiteral("별도 전송 기록이 있어 원본·임시 파일·최종 파일의 확인이 필요해요. 기존 기록 정리는 차단하며 파일은 건드리지 않아요.");
         } else if (!item.contentHashAvailable) {
             detail = QStringLiteral("이전 기록에는 파일 내용 해시가 없어 자동 확정할 수 없어요.");

@@ -88,6 +88,11 @@ Result<RecoveryReport> RecoveryService::reconcile() {
         if (plan.status != PlanStatus::Executing && plan.status != PlanStatus::RollingBack) {
             continue;
         }
+        // v2의 단계 증거는 새 전체 복구에서 해석하며 구형 시작 복구는 기록도 변경하지 않는다.
+        if (plan.formatVersion != 1) {
+            report.needsAttention.push_back(plan.id);
+            continue;
+        }
         const auto active = activeSteps(plan);
         const bool intact = active.size() == 1 && canTrustRecoveryPlan(plan, hasher_);
         if (!intact) {
@@ -199,10 +204,13 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
     for (const auto& plan : loaded.value()) {
         const auto tracked = hasTransfers(plan);
         if (!tracked) return Result<std::vector<RecoveryCase>>::failure(tracked.error());
-        if (plan.status != PlanStatus::NeedsRecovery && !tracked.value()) continue;
+        const bool modernInterrupted = plan.formatVersion != 1 &&
+            (plan.status == PlanStatus::Executing || plan.status == PlanStatus::RollingBack);
+        if (plan.status != PlanStatus::NeedsRecovery && !tracked.value() && !modernInterrupted) continue;
         const auto active = activeSteps(plan);
         if (active.empty()) {
             RecoveryCase item;
+            item.requiresWholeRecovery = plan.formatVersion != 1;
             item.planId = plan.id;
             item.partIndex = 1;
             item.partCount = 1;
@@ -220,6 +228,7 @@ Result<std::vector<RecoveryCase>> RecoveryService::inspectCases() {
         for (std::size_t index = 0; index < active.size(); ++index) {
             const auto* step = active[index];
             RecoveryCase item;
+            item.requiresWholeRecovery = plan.formatVersion != 1;
             item.planId = plan.id;
             item.partIndex = index + 1;
             item.partCount = active.size();

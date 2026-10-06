@@ -14,6 +14,8 @@ struct RecoveryReport {
 
 /// 사용자가 검토할 중단 작업의 실제 파일 상태를 담는다.
 struct RecoveryCase {
+    /// v2 이상은 구형 기록 확정이 아니라 별도 전체 작업 복구가 필요하다.
+    bool requiresWholeRecovery{false};
     PlanId planId;
     std::size_t partIndex{0};
     std::size_t partCount{0};

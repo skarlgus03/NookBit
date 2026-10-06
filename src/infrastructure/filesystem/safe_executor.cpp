@@ -315,7 +315,9 @@ Result<void> SafeExecutor::markNeedsRecovery(const PlanId& planId) {
     auto loaded = history_.loadPlan(planId);
     if (!loaded) return Result<void>::failure(loaded.error());
     for (const auto& step : loaded.value().steps) {
-        if (step.status == StepStatus::Skipped || step.status == StepStatus::NeedsRecovery || step.status == StepStatus::RolledBack) continue;
+        // 미시작·제외·복원 완료의 확정 증거는 불확실한 진행 상태로 덮어쓰지 않는다.
+        if (step.status == StepStatus::Planned || step.status == StepStatus::Skipped ||
+            step.status == StepStatus::NeedsRecovery || step.status == StepStatus::RolledBack) continue;
         auto changed = history_.appendEvent(
             StepStatusChanged{planId, step.id, StepStatus::NeedsRecovery});
         if (!changed) return changed;

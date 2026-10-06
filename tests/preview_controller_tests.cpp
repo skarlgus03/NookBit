@@ -18,6 +18,7 @@
 #include "infrastructure/filesystem/file_operation_service.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_file_mover.hpp"
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
@@ -1189,6 +1190,40 @@ void testRecoveryCasesInController() {
            "screen confirmation should clear the record without moving the source");
 }
 
+// 시작 복구가 v2 복원 완료 기록을 보존하고 화면 경고도 유지하는지 검사하는 함수.
+void testV2StartupRecoveryNotice() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "v2 startup screen fixture"); return; }
+    const auto source = directory.filePath("photo.jpg"), home = directory.filePath("organized");
+    QFile original(source); expect(original.open(QIODevice::WriteOnly | QIODevice::NewOnly) && original.write("owned startup original") > 0, "v2 startup source"); original.close();
+    const auto appData = std::filesystem::path(directory.filePath("app-data").toStdWString());
+    PreviewWorkflow workflow(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), appData, true);
+    nookbit::PendingFilesModel pending; pending.addUrl(QUrl::fromLocalFile(source));
+    nookbit::PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase, workflow.approveUseCase,
+        workflow.history, workflow.operations, projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), home);
+    controller.createPreview(home); controller.freezePreview(); controller.approvePlan(); controller.moveApprovedFile();
+    const auto entries = workflow.history.recentPlans(1);
+    if (!entries || entries.value().empty()) { expect(false, "v2 startup completed plan"); return; }
+    const auto loaded = workflow.history.loadPlan(entries.value()[0].id);
+    if (!loaded || loaded.value().status != nookbit::PlanStatus::Completed) { expect(false, "v2 startup move completes"); return; }
+    const auto plan = loaded.value();
+    const auto& step = plan.steps[0];
+    expect(workflow.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::RollingBack}).hasValue() &&
+        workflow.history.appendEvent(nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::RollbackIntentRecorded}).hasValue() &&
+        nookbit::WindowsFileMover::moveNoReplace(step.destination, step.source).hasValue() &&
+        workflow.history.appendEvent(nookbit::StepStatusChanged{plan.id, step.id, nookbit::StepStatus::RolledBack}).hasValue(), "v2 startup interrupted final undo record");
+    nookbit::RecoveryService startup(workflow.history, workflow.scanner, workflow.hasher, &workflow.journal);
+    expect(startup.reconcile().hasValue(), "v2 startup inspection succeeds");
+    nookbit::RecoveryController recovery(workflow.history, nullptr, &workflow.journal);
+    recovery.setRecoveryNotice("pending startup review"); recovery.refreshRecoveryCases();
+    expect(recovery.recoveryCases().size() == 1 && !recovery.recoveryNotice().isEmpty() &&
+        !recovery.recoveryCases()[0].toMap().value("canResolve").toBool(), "v2 startup warning must remain visible with legacy resolution disabled");
+    recovery.resolveRecoveryCase(QString::fromStdString(plan.id));
+    const auto retained = workflow.history.loadPlan(plan.id);
+    expect(retained && retained.value().status == nookbit::PlanStatus::RollingBack && retained.value().steps[0].status == nookbit::StepStatus::RolledBack &&
+        QFile::exists(source), "old screen action cannot erase v2 restored evidence");
+}
+
 // 화면의 실제 미리보기·승인·이동·마지막/기록 되돌리기를 같은 서비스로 검사하는 함수.
 void testNativeControllerCase(const QString& sourceRun, const QString& targetRun, int index) {
 #ifdef _WIN32
@@ -1331,6 +1366,7 @@ int main(int argc, char* argv[]) {
     testHistoryUndoUpdatesLastMove();
     testHistoryUndoAfterRestart();
     testRecoveryCasesInController();
+    testV2StartupRecoveryNotice();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";
         return 0;

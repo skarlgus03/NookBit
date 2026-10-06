@@ -8,6 +8,12 @@
 #include "infrastructure/filesystem/recovery_service.hpp"
 #include "infrastructure/filesystem/safe_executor.hpp"
 #include "infrastructure/filesystem/windows_file_mover.hpp"
+#include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
+#include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
+#include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
@@ -77,6 +83,7 @@ struct Scenario {
     nookbit::RuleEngine ruleEngine;
     nookbit::Planner planner{ruleEngine, std::filesystem::path(appData.toStdWString())};
     nookbit::QtPlanHasher hasher;
+    nookbit::WindowsStagedCopy volumes;
     nookbit::SqliteHistoryRepository history{
         databasePath,
         projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")};
@@ -98,16 +105,16 @@ struct Scenario {
 
     // 선택한 파일들의 계획을 미리보기·고정·검증 후 승인하는 함수.
     [[nodiscard]] nookbit::Result<ApprovedBundle> approveFiles(
-        const std::vector<std::filesystem::path>& selected) {
+        const std::vector<std::filesystem::path>& selected, bool native = false) {
         auto loadedRules = rules.load();
         if (!loadedRules) return nookbit::Result<ApprovedBundle>::failure(loadedRules.error());
-        nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher);
+        nookbit::CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, native ? &volumes : nullptr);
         auto draft = preview.execute({loadedRules.value().version, selected});
         if (!draft) return nookbit::Result<ApprovedBundle>::failure(draft.error());
-        nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history);
+        nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history, native ? &volumes : nullptr);
         auto frozen = freeze.execute(draft.value(), selected, settings.settings);
         if (!frozen) return nookbit::Result<ApprovedBundle>::failure(frozen.error());
-        nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history);
+        nookbit::VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, native ? &volumes : nullptr);
         nookbit::ApprovePlanUseCase approver(verifier, history);
         auto approval = approver.execute(frozen.value().id, selected, settings.settings);
         if (!approval) return nookbit::Result<ApprovedBundle>::failure(approval.error());
@@ -394,6 +401,102 @@ void testInterruptedBatchNeedsManualReview() {
            "manual confirmation should preserve both source files");
 }
 
+// 테스트가 소유한 새 원본만 만들어 승인 목록에 추가하는 함수.
+std::filesystem::path addOwnedSource(Scenario& scenario, const QString& name) {
+    const auto source = QDir(scenario.incoming).filePath(name);
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write("untouched original") == 18, "owned recovery regression source");
+    return std::filesystem::path(source.toStdWString());
+}
+
+// 앱 시작의 구형 복구가 v2의 복원 완료 증거를 바꾸지 않는지 검사하는 함수.
+void testLegacyStartupPreservesV2Undo() {
+    Scenario scenario;
+    if (!scenario.ready) { expect(false, "v2 startup fixture"); return; }
+    const auto second = addOwnedSource(scenario, "second.jpg");
+    const std::vector<std::filesystem::path> selected{scenario.sourcePath(), second};
+    const auto approved = scenario.approveFiles(selected, true);
+    if (!approved) { expect(false, "v2 startup approval"); return; }
+    const auto& plan = approved.value().plan;
+    nookbit::VerifySavedPlanUseCase verifier(scenario.rules, scenario.scanner, scenario.planner, scenario.hasher, scenario.history, &scenario.volumes);
+    nookbit::SafeExecutor executor(scenario.settings, verifier, scenario.scanner, scenario.hasher, scenario.history,
+        std::filesystem::path(scenario.appData.toStdWString()), &scenario.volumes);
+    expect(executor.execute(plan, approved.value().approval, selected).hasValue(), "v2 startup rename batch completes");
+    expect(scenario.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::RollingBack}).hasValue(), "v2 interrupted undo starts");
+    expect(scenario.history.appendEvent(nookbit::StepStatusChanged{plan.id, plan.steps[0].id, nookbit::StepStatus::RollbackIntentRecorded}).hasValue() &&
+        nookbit::WindowsFileMover::moveNoReplace(plan.steps[0].destination, plan.steps[0].source).hasValue() &&
+        scenario.history.appendEvent(nookbit::StepStatusChanged{plan.id, plan.steps[0].id, nookbit::StepStatus::RolledBack}).hasValue(), "first v2 rename restored before interruption");
+    const auto before = scenario.history.loadPlan(plan.id);
+    nookbit::SqliteTransferJournal journal(scenario.databasePath, projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    nookbit::RecoveryService legacy(scenario.history, scenario.scanner, scenario.hasher, &journal);
+    for (int pass = 0; pass < 2; ++pass) {
+        const auto result = legacy.reconcile();
+        const auto after = scenario.history.loadPlan(plan.id);
+        expect(result && result.value().reconciled == 0 && result.value().needsAttention.size() == 1 && before && after &&
+            after.value().status == before.value().status && nookbit::PlanSignature::planContents(after.value()) == nookbit::PlanSignature::planContents(before.value()),
+            "legacy startup must not rewrite v2 RolledBack/Applied step evidence");
+    }
+    const auto visible = legacy.inspectCases();
+    expect(visible && visible.value().size() == 2 && !visible.value()[0].canResolve && !visible.value()[1].canResolve,
+        "preserved v2 interrupted states must remain visible without offering legacy resolution");
+    nookbit::WindowsTransferFileInspector files;
+    nookbit::InspectInterruptedPlanUseCase inspector(scenario.history, journal, files, scenario.hasher, &scenario.volumes);
+    const auto report = inspector.execute(plan.id);
+    expect(report && report.value().restored == 1 && report.value().moved == 1 && report.value().needsAttention == 0,
+        "startup-preserved v2 undo must remain diagnosable as restored plus moved");
+    nookbit::RecoverInterruptedPlanUseCase recover(inspector, scenario.history, scenario.settings, scenario.rules, scenario.hasher, executor);
+    nookbit::InterruptedOperationRecoveryService service(recover);
+    expect(service.execute({plan.id, plan.planHash, nookbit::RecoveryAction::Rollback}).hasValue(), "explicit v2 undo remains possible after startup inspection");
+    const auto final = scenario.history.loadPlan(plan.id);
+    expect(final && final.value().status == nookbit::PlanStatus::RolledBack && final.value().planHash == plan.planHash, "v2 undo finishes with original approval");
+}
+
+// 복구 되돌리기 충돌이 아직 시작하지 않은 단계의 증거를 보존하는지 검사하는 함수.
+void testUndoFailurePreservesPending(bool native) {
+    Scenario scenario;
+    if (!scenario.ready) { expect(false, "pending recovery fixture"); return; }
+    const auto second = addOwnedSource(scenario, "pending-second.jpg"), third = addOwnedSource(scenario, "pending-third.jpg");
+    const std::vector<std::filesystem::path> selected{scenario.sourcePath(), second, third};
+    const auto approved = scenario.approveFiles(selected, native);
+    if (!approved) { expect(false, "pending recovery approval"); return; }
+    const auto& plan = approved.value().plan;
+    expect(scenario.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue() &&
+        scenario.history.appendEvent(nookbit::StepStatusChanged{plan.id, plan.steps[0].id, nookbit::StepStatus::IntentRecorded}).hasValue() &&
+        nookbit::WindowsFileMover::moveNoReplace(plan.steps[0].source, plan.steps[0].destination).hasValue() &&
+        scenario.history.appendEvent(nookbit::StepStatusChanged{plan.id, plan.steps[0].id, nookbit::StepStatus::Applied}).hasValue() &&
+        scenario.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::RollingBack}).hasValue(), "owned interrupted undo with two pending originals");
+    QFile occupant(scenario.source);
+    expect(occupant.open(QIODevice::WriteOnly | QIODevice::NewOnly) && occupant.write("owned collision") == 15, "late undo collision occupant"); occupant.close();
+    nookbit::VerifySavedPlanUseCase verifier(scenario.rules, scenario.scanner, scenario.planner, scenario.hasher, scenario.history, native ? &scenario.volumes : nullptr);
+    nookbit::SafeExecutor executor(scenario.settings, verifier, scenario.scanner, scenario.hasher, scenario.history,
+        std::filesystem::path(scenario.appData.toStdWString()), native ? &scenario.volumes : nullptr);
+    const auto interrupted = scenario.history.loadPlan(plan.id);
+    if (!interrupted) { expect(false, "pending recovery plan load"); return; }
+    expect(!executor.runRecoveredPlan(interrupted.value(), nookbit::RecoveryAction::Rollback), "undo collision must stop without overwriting");
+    const auto blocked = scenario.history.loadPlan(plan.id);
+    expect(blocked && blocked.value().status == nookbit::PlanStatus::NeedsRecovery &&
+        blocked.value().steps[0].status == nookbit::StepStatus::NeedsRecovery && blocked.value().steps[1].status == nookbit::StepStatus::Planned &&
+        blocked.value().steps[2].status == nookbit::StepStatus::Planned, "undo failure must retain never-started Planned steps");
+    QFile preserved(scenario.source); expect(preserved.open(QIODevice::ReadOnly) && preserved.readAll() == "owned collision", "collision occupant remains unchanged"); preserved.close();
+    // 다른 파일이 아니라 이번 시험이 만든 점유 파일만 제거해 재시도 경계를 준비한다.
+    expect(QFile::remove(scenario.source), "remove only owned regression collision occupant");
+    nookbit::SqliteTransferJournal journal(scenario.databasePath, projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    nookbit::WindowsTransferFileInspector files;
+    nookbit::InspectInterruptedPlanUseCase inspector(scenario.history, journal, files, scenario.hasher, native ? &scenario.volumes : nullptr);
+    const auto report = inspector.execute(plan.id);
+    expect(report && report.value().moved == 1 && report.value().pending == 2 && report.value().needsAttention == 0,
+        "collision cleared: moved/pending evidence still permits explicit undo");
+    nookbit::RecoverInterruptedPlanUseCase recover(inspector, scenario.history, scenario.settings, scenario.rules, scenario.hasher, executor);
+    nookbit::InterruptedOperationRecoveryService service(recover);
+    expect(service.execute({plan.id, plan.planHash, nookbit::RecoveryAction::Rollback}).hasValue(), "undo retry uses preserved pending evidence");
+    const auto final = scenario.history.loadPlan(plan.id);
+    expect(final && final.value().status == nookbit::PlanStatus::RolledBack && final.value().steps[1].status == nookbit::StepStatus::Planned &&
+        final.value().steps[2].status == nookbit::StepStatus::Planned, "undo retry does not move never-started files");
+    for (const auto& step : plan.steps) {
+        const auto hash = scenario.hasher.sha256File(step.source);
+        expect(hash && hash.value() == *step.fingerprint.sha256 && !std::filesystem::exists(step.destination), "regression undo conserves original contents");
+    }
+}
 } // namespace
 
 // 중단 시점별 복구 테스트를 실행하는 함수.
@@ -405,6 +508,9 @@ int main(int argc, char* argv[]) {
     testUndoIntentBeforeMove();
     testAmbiguousFilesNeedAttention();
     testInterruptedBatchNeedsManualReview();
+    testLegacyStartupPreservesV2Undo();
+    testUndoFailurePreservesPending(false);
+    testUndoFailurePreservesPending(true);
     if (failures == 0) {
         std::cout << "All recovery-service tests passed.\n";
         return 0;
