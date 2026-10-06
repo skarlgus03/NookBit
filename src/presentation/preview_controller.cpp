@@ -93,6 +93,7 @@ QString PreviewController::collisionPolicy() const {
 
 // 유효한 정책만 적용하고 낡은 미리보기·승인을 무효화하는 함수.
 void PreviewController::setCollisionPolicy(const QString& policy) {
+    if (runner_ && runner_->busy()) return;
     CollisionPolicy next;
     if (policy == QStringLiteral("rename")) next = CollisionPolicy::Rename;
     else if (policy == QStringLiteral("skip")) next = CollisionPolicy::Skip;
@@ -106,6 +107,7 @@ void PreviewController::setCollisionPolicy(const QString& policy) {
 
 // 저장된 규칙을 다시 읽고 이전 규칙으로 만든 미리보기를 무효화하는 함수.
 void PreviewController::refreshActiveRules() {
+    if (runner_ && runner_->busy()) return;
     const auto loaded = rules_.load();
     const auto label = loaded
         ? QStringLiteral("%1 · %2").arg(QString::fromStdString(loaded.value().id),
@@ -120,6 +122,7 @@ void PreviewController::refreshActiveRules() {
 
 // 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
 void PreviewController::createPreview(const QString& destinationRoot) {
+    if (runner_ && runner_->busy()) return;
     refreshActiveRules();
     pendingFiles_.refreshAvailability();
     if (pendingFiles_.unavailableCount() > 0) {
@@ -241,6 +244,7 @@ QVariantList PreviewController::confirmationSteps() const {
 
 // 계획을 고정·검사하고 실제 이동 없이 최종 확인을 준비하는 함수.
 bool PreviewController::prepareSort() {
+    if (runner_ && runner_->busy()) return false;
     awaitingConfirmation_ = false;
     if (!hasPreview_ || !hasMovableSteps() || approval_) {
         message_ = QStringLiteral("먼저 이동 예정인 파일의 미리보기를 만들어 주세요.");
@@ -261,6 +265,7 @@ bool PreviewController::prepareSort() {
 
 // 준비된 최종 확인을 취소하고 파일을 그대로 두는 함수.
 void PreviewController::cancelSort() {
+    if (runner_ && runner_->busy()) return;
     if (!awaitingConfirmation_) return;
     awaitingConfirmation_ = false;
     message_ = QStringLiteral("정리를 취소했어요. 파일은 그대로 있어요.");
@@ -269,6 +274,7 @@ void PreviewController::cancelSort() {
 
 // 사용자가 확인한 고정 계획만 다시 검사·승인하고 실행하는 함수.
 void PreviewController::confirmSort() {
+    if (runner_ && runner_->busy()) return;
     if (!awaitingConfirmation_) return;
     awaitingConfirmation_ = false;
     approvePlan();
@@ -277,11 +283,12 @@ void PreviewController::confirmSort() {
         return;
     }
     moveApprovedFile();
-    if (hasPreview_) showError(message_);
+    if (!runner_ && hasPreview_) showError(message_);
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
 void PreviewController::freezePreview() {
+    if (runner_ && runner_->busy()) return;
     if (!draft_ || !hasPreview_ || hasFrozenPlan_) {
         showError(QStringLiteral("먼저 새 미리보기를 만들어 주세요."));
         return;
@@ -308,6 +315,7 @@ void PreviewController::freezePreview() {
 
 // 저장된 계획을 DB에서 다시 읽고 현재 상태와 비교하는 함수.
 bool PreviewController::verifySavedPlan() {
+    if (runner_ && runner_->busy()) return false;
     if (!draft_ || !hasFrozenPlan_) {
         message_ = QStringLiteral("먼저 계획을 고정·저장해 주세요.");
         emit previewChanged();
@@ -335,6 +343,7 @@ bool PreviewController::verifySavedPlan() {
 
 // 저장된 파일 계획을 다시 검사한 뒤 승인 기록을 저장하는 함수.
 void PreviewController::approvePlan() {
+    if (runner_ && runner_->busy()) return;
     if (!draft_ || !hasFrozenPlan_ || approval_ || pendingFiles_.count() == 0 ||
         !hasMovableSteps()) {
         message_ = QStringLiteral("승인하려면 이동 예정인 파일의 계획을 고정·저장해 주세요.");
@@ -362,6 +371,7 @@ void PreviewController::approvePlan() {
 
 // 승인된 파일들을 다시 검사한 뒤 순서대로 이동하는 함수.
 void PreviewController::moveApprovedFile() {
+    if (runner_ && runner_->busy()) return;
     if (!draft_ || !approval_ || pendingFiles_.count() == 0 || previewHomeRoot_.isEmpty()) {
         message_ = QStringLiteral("먼저 파일 이동 계획을 승인해 주세요.");
         emit previewChanged();
@@ -381,56 +391,66 @@ void PreviewController::moveApprovedFile() {
     UserSettings settings;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    const auto result = operations_.executeApproved(loaded.value(), *approval_, selectedFiles, settings);
-    if (!result) {
-        const auto current = history_.loadPlan(draft_->id);
-        if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
-        emit recoveryReconcileRequested();
-        message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
-                       .arg(QString::fromStdString(result.error().message));
-        emit previewChanged();
-        return;
-    }
     const auto movedPlanId = draft_->id;
     const auto movedSteps = loaded.value().steps;
-    for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
-        const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
-        if (std::any_of(movedSteps.begin(), movedSteps.end(), [&path](const MoveStep& step) {
-                return step.status == StepStatus::Planned && step.source == path;
-            })) {
-            pendingFiles_.removeAt(index);
-        }
-    }
-    undoPlanId_ = movedPlanId;
-    message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
-                   .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
-                       return step.status == StepStatus::Planned;
-                   }));
+    message_ = QStringLiteral("파일을 정리하고 있어요. 작업이 끝날 때까지 앱을 닫지 마세요.");
     emit previewChanged();
+    dispatchOperation(runner_, this,
+        [operations = &operations_, plan = loaded.value(), approval = *approval_, selectedFiles, settings] {
+            return operations->executeApproved(plan, approval, selectedFiles, settings);
+        }, [this, movedPlanId, movedSteps](const Result<void>& result) {
+        if (!result) {
+            const auto current = history_.loadPlan(movedPlanId);
+            if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
+            emit recoveryReconcileRequested();
+            message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
+                           .arg(QString::fromStdString(result.error().message));
+            emit previewChanged();
+            return;
+        }
+        for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
+            const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
+            if (std::any_of(movedSteps.begin(), movedSteps.end(), [&path](const MoveStep& step) {
+                    return step.status == StepStatus::Planned && step.source == path;
+                })) {
+                pendingFiles_.removeAt(index);
+            }
+        }
+        undoPlanId_ = movedPlanId;
+        message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
+                       .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
+                           return step.status == StepStatus::Planned;
+                       }));
+        emit previewChanged();
+    });
 }
 
 // 마지막으로 이동한 계획의 파일들을 안전하게 되돌리는 함수.
 void PreviewController::undoLastMove() {
+    if (runner_ && runner_->busy()) return;
     if (!undoPlanId_) {
         message_ = QStringLiteral("되돌릴 이동 작업이 없어요.");
         emit previewChanged();
         return;
     }
-    const auto result = operations_.rollback(*undoPlanId_);
-    if (!result) {
-        const auto current = history_.loadPlan(*undoPlanId_);
-        if (current && current.value().status != PlanStatus::Completed &&
-            current.value().status != PlanStatus::Failed) {
-            undoPlanId_.reset();
+    const auto id = *undoPlanId_;
+    dispatchOperation(runner_, this, [operations = &operations_, id] { return operations->rollback(id); },
+        [this, id](const Result<void>& result) {
+        if (!result) {
+            const auto current = history_.loadPlan(id);
+            if (current && current.value().status != PlanStatus::Completed &&
+                current.value().status != PlanStatus::Failed) {
+                undoPlanId_.reset();
+            }
+            message_ = QStringLiteral("되돌리지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
+                           .arg(QString::fromStdString(result.error().message));
+            emit previewChanged();
+            return;
         }
-        message_ = QStringLiteral("되돌리지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
-                       .arg(QString::fromStdString(result.error().message));
+        undoPlanId_.reset();
+        message_ = QStringLiteral("파일을 원래 위치로 되돌렸어요.");
         emit previewChanged();
-        return;
-    }
-    undoPlanId_.reset();
-    message_ = QStringLiteral("파일을 원래 위치로 되돌렸어요.");
-    emit previewChanged();
+    });
 }
 
 // 기록에서 되돌린 작업이 마지막 이동이면 버튼 상태를 갱신하는 함수.
@@ -446,6 +466,7 @@ void PreviewController::refreshLastUndoAfterHistoryRollback(const QString& planI
 
 // 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
 void PreviewController::clear() {
+    if (runner_ && runner_->busy()) return;
     if (steps_.isEmpty() && outcomes_.isEmpty() && warnings_.isEmpty() && message_.isEmpty() &&
         !hasPreview_ && !hasFrozenPlan_ && !draft_ && !approval_) return;
     steps_.clear();

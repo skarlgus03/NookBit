@@ -7,6 +7,7 @@
 #include <nookbit/application/interrupted_operations.hpp>
 
 #include <QObject>
+#include "presentation/background_task_runner.hpp"
 #include <QString>
 #include <QVariantList>
 
@@ -23,6 +24,8 @@ class RecoveryController final : public QObject {
     Q_PROPERTY(bool recoveryBusy READ recoveryBusy NOTIFY recoveryBusyChanged)
 
 public:
+    /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
+    void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
     /// 복구 기록 저장소를 받아 화면의 복구 작업을 준비하는 생성자.
     explicit RecoveryController(IHistoryRepository& history, QObject* parent = nullptr,
         const ITransferJournal* transfers = nullptr, IInterruptedOperations* operations = nullptr);
@@ -69,6 +72,7 @@ signals:
     void recoveryCompleted(const QString& planId, const QString& action);
 
 private:
+    BackgroundTaskRunner* runner_{nullptr};
     IHistoryRepository& history_;
     const ITransferJournal* transfers_;
     IInterruptedOperations* operations_;

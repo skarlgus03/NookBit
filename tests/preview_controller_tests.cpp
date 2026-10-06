@@ -46,6 +46,11 @@
 #include <QUrl>
 #include <QVariantMap>
 #include <QSaveFile>
+#include <QEventLoop>
+#include <QTimer>
+#include <QSemaphore>
+#include <atomic>
+#include "app/thread_local_operations.hpp"
 #include <QDateTime>
 #include <QUuid>
 
@@ -56,6 +61,53 @@
 namespace {
 
 int failures = 0;
+void expect(bool condition, const std::string& message);
+
+// 화면 이벤트를 계속 처리하면서 정해진 시간 안에 작업 완료를 기다리는 함수.
+bool waitForBackground(nookbit::BackgroundTaskRunner& runner) {
+    if (!runner.busy()) return true;
+    QEventLoop loop;
+    QTimer deadline;
+    deadline.setSingleShot(true);
+    QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&runner, &nookbit::BackgroundTaskRunner::busyChanged, &loop, [&] { if (!runner.busy()) loop.quit(); });
+    deadline.start(30000); loop.exec();
+    return !runner.busy();
+}
+
+// 화면 반응·단일 실행·결과 스레드·수신자 소멸·예외 처리를 검사하는 함수.
+void testBackgroundRunner() {
+    nookbit::BackgroundTaskRunner runner;
+    QObject receiver;
+    QSemaphore gate;
+    std::atomic<bool> otherThread{false};
+    bool completed = false, heartbeat = false;
+    auto* screenThread = QThread::currentThread();
+    expect(runner.submit(&receiver, [&] {
+        otherThread = QThread::currentThread() != screenThread;
+        gate.acquire(); return nookbit::Result<void>::success();
+    }, [&](const nookbit::Result<void>& result) {
+        completed = result.hasValue(); expect(QThread::currentThread() == screenThread, "completion must run on screen thread");
+    }), "background job must be accepted");
+    expect(runner.busy() && !runner.submit(&receiver, [] { return nookbit::Result<void>::success(); }, [](const auto&) {}), "busy job must refuse duplicate");
+    QTimer::singleShot(0, &receiver, [&] { heartbeat = true; gate.release(); });
+    expect(waitForBackground(runner) && completed && heartbeat && otherThread, "UI events must run while work is on another thread");
+    QObject* removed = new QObject;
+    bool obsoleteCallback = false;
+    runner.submit(removed, [] { return nookbit::Result<void>::success(); }, [&](const auto&) { obsoleteCallback = true; });
+    delete removed;
+    expect(waitForBackground(runner) && !obsoleteCallback, "deleted controller must not receive completion");
+    bool exceptionReported = false;
+    runner.submit(&receiver, []() -> nookbit::Result<void> { throw std::runtime_error("owned test exception"); },
+        [&](const auto& result) { exceptionReported = !result && result.error().code == "background.exception"; });
+    expect(waitForBackground(runner) && exceptionReported, "exception must release busy state and report failure");
+    std::atomic<bool> drained{false};
+    {
+        nookbit::BackgroundTaskRunner finishing;
+        finishing.submit(&receiver, [&] { drained = true; return nookbit::Result<void>::success(); }, [](const auto&) {});
+    }
+    expect(drained, "runner destruction must wait for worker instead of terminating it");
+}
 
 // 테스트가 미리보기 중간에 설정을 바꿀 수 있게 하는 저장소.
 class MutableSettingsRepository final : public nookbit::ISettingsRepository {
@@ -139,6 +191,82 @@ struct PreviewWorkflow {
         : PreviewWorkflow(projectPath("resources/rules/default.example.json"),
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
+
+// 독립 DB 연결로 이동·두 종류 되돌리기·중단 재개를 비동기 검사하는 함수.
+void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot) {
+#ifdef _WIN32
+    const auto home = QDir(targetRoot).filePath("organized");
+    const auto appData = std::filesystem::path(QDir(targetRoot).filePath("app-data").toStdWString());
+    const auto rules = projectPath("resources/rules/default.v3.json"), schema = projectPath("schemas/rules-tree-v3.schema.json");
+    PreviewWorkflow workflow(rules, schema, appData, true);
+    nookbit::UserSettings settings; settings.homeRoot = std::filesystem::path(home.toStdWString());
+    nookbit::RuntimeSettingsRepository current(settings);
+    nookbit::ThreadLocalOperations operations(QDir(targetRoot).filePath("history.sqlite"),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"), rules, schema, {}, appData, current);
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, operations, rules, schema, home);
+    nookbit::HistoryController history(workflow.history, operations);
+    nookbit::RecoveryController recovery(workflow.history, nullptr, &workflow.journal, &operations);
+    preview.setTaskRunner(&runner); history.setTaskRunner(&runner); recovery.setTaskRunner(&runner);
+    QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
+        &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
+    const QStringList sources{QDir(sourceRoot).filePath("background.jpg"), QDir(targetRoot).filePath("local.png")};
+    for (const auto& source : sources) {
+        QFile file(source); expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(QByteArray(2 * 1024 * 1024 + 37, 'b')) > 0, "owned background source");
+        file.close(); pending.addUrl(QUrl::fromLocalFile(source));
+    }
+    preview.createPreview(home); expect(preview.prepareSort(), "background frozen confirmation");
+    preview.confirmSort(); expect(runner.busy(), "sort must return before background completion");
+    preview.confirmSort(); preview.undoLastMove();
+    expect(waitForBackground(runner) && pending.count() == 0 && preview.canUndo(), "background movement updates queue and undo on UI thread");
+    for (const auto& source : sources) expect(!QFile::exists(source), "background source moved");
+    preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
+    expect(waitForBackground(runner) && !preview.canUndo(), "background last undo completes");
+    for (const auto& source : sources) { expect(QFile::exists(source), "background original restored"); pending.addUrl(QUrl::fromLocalFile(source)); }
+    preview.createPreview(home); expect(preview.prepareSort(), "second background confirmation"); preview.confirmSort();
+    expect(waitForBackground(runner) && preview.canUndo(), "second background move");
+    history.refreshHistory();
+    if (history.historyEntries().isEmpty()) { expect(false, "background recent history"); return; }
+    history.selectHistoryPlan(history.historyEntries().front().toMap().value("planId").toString());
+    history.undoSelectedHistory(); expect(runner.busy(), "history undo must dispatch to background");
+    expect(waitForBackground(runner) && !preview.canUndo(), "history completion refreshes last undo");
+    for (const auto& source : sources) pending.addUrl(QUrl::fromLocalFile(source));
+    preview.createPreview(home); preview.freezePreview(); preview.approvePlan();
+    const auto plans = workflow.history.incompletePlans();
+    if (!plans || plans.value().size() != 1) { expect(false, "background interruption plan"); return; }
+    const auto plan = plans.value()[0];
+    // 새 고유 시험 계획만 미시작 중단 상태로 만들어 명시적 재개를 검사한다.
+    expect(workflow.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(), "owned background interruption");
+    recovery.refreshRecoveryCases();
+    recovery.requestRecoveryChoice(QString::fromStdString(plan.id), "resume");
+    expect(recovery.awaitingRecoveryConfirmation(), "background recovery explicit confirmation");
+    recovery.confirmRecoveryChoice(); expect(runner.busy(), "recovery must dispatch to background");
+    recovery.confirmRecoveryChoice();
+    expect(waitForBackground(runner) && workflow.history.loadPlan(plan.id).value().status == nookbit::PlanStatus::Completed,
+        "background recovery finishes without sharing GUI SQLite connection");
+    expect(operations.rollback(plan.id).hasValue(), "owned background fixture final restoration");
+#else
+    (void)sourceRoot; (void)targetRoot;
+#endif
+}
+
+// 새 고유 두 볼륨 자료만 사용하여 백그라운드 화면 연결을 시험하는 함수.
+int runBackgroundCrossTests(const QStringList& args) {
+    if (args.size() != 6 || args[2] != "--source-parent" || args[4] != "--destination-parent") return 2;
+    for (const auto& parent : {args[3], args[5]}) if (!QFileInfo(parent).isAbsolute() || !QFileInfo(parent).isDir()) return 2;
+    nookbit::WindowsStagedCopy volumes;
+    const auto a = volumes.inspectVolume(std::filesystem::path(args[3].toStdWString())), b = volumes.inspectVolume(std::filesystem::path(args[5].toStdWString()));
+    if (!a || !b || !a.value().localNtfs || !b.value().localNtfs || a.value().name == b.value().name) return 2;
+    QTemporaryDir source(QDir(args[3]).filePath("NookBit-bg-source-XXXXXX")), target(QDir(args[5]).filePath("NookBit-bg-target-XXXXXX"));
+    source.setAutoRemove(false); target.setAutoRemove(false);
+    if (!source.isValid() || !target.isValid()) return 2;
+    std::cout << "Background fixtures: " << source.path().toStdString() << " -> " << target.path().toStdString() << '\n';
+    testBackgroundWorkflow(source.path(), target.path());
+    std::cout << (failures ? "FAIL" : "PASS") << " background move/last undo/history undo/recovery\nOwned fixtures retained.\n";
+    return failures ? 1 : 0;
+}
 
 // 감시 제안도 기존 대기 목록·고정·확인·이동·저장 흐름을 따르는지 검사하는 함수.
 void testWatchedFilesUseNormalSortWorkflow() {
@@ -1515,8 +1643,12 @@ int runNativeControllerTests(const QStringList& args) {
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    if (application.arguments().size() > 1 && application.arguments()[1] == "--background-cross-run") return runBackgroundCrossTests(application.arguments());
     if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
     if (application.arguments().size() > 1) return 2;
+    testBackgroundRunner();
+    QTemporaryDir backgroundSameVolume;
+    if (backgroundSameVolume.isValid()) testBackgroundWorkflow(backgroundSameVolume.path(), backgroundSameVolume.path());
     QTemporaryDir nativeSameVolume;
     if (nativeSameVolume.isValid()) testNativeControllerCase(nativeSameVolume.path(), nativeSameVolume.path(), 0);
     else expect(false, "native v2 same-volume UI fixture");

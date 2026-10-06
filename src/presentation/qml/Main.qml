@@ -5,6 +5,38 @@ import QtQuick.Templates as T
 
 ApplicationWindow {
     id: root
+    // 파일 작업 중에는 입력과 창 닫기를 막고 화면 렌더링은 계속하는 함수.
+    onClosing: function(close) {
+        if (backgroundTasks.busy) close.accepted = false
+    }
+    contentItem.enabled: !backgroundTasks.busy
+    Popup {
+        parent: Overlay.overlay
+        visible: backgroundTasks.busy
+        modal: true
+        dim: false
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        x: (parent.width - width) / 2
+        y: parent.height - height - 24
+        width: 360
+        height: 64
+        padding: 10
+        background: Rectangle {
+            radius: 12
+            color: root.editorDark ? "#243044" : "#edf4ef"
+            border.color: root.editorDark ? "#617a9c" : "#739b83"
+        }
+        contentItem: RowLayout {
+            BusyIndicator { running: backgroundTasks.busy; implicitWidth: 36; implicitHeight: 36 }
+            Label {
+                text: "파일 작업 중이에요. 완료 후 닫아 주세요."
+                color: root.editorDark ? "#edf2f8" : "#253428"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
     property int currentPage: 0
     property string selectedRulePath: ""
     property var selectedRuleDetail: ({})

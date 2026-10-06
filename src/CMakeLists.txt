@@ -95,6 +95,7 @@ if(NOOKBIT_BUILD_QT_APP)
 
     qt_add_executable(nookbit
       presentation/main.cpp
+      presentation/background_task_runner.hpp
       presentation/pending_files_model.hpp
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp

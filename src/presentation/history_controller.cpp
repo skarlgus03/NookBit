@@ -79,6 +79,7 @@ int HistoryController::selectedHistoryFileCount() const noexcept {
 
 // 최근 실행 작업 목록을 SQLite에서 다시 읽는 함수.
 void HistoryController::refreshHistory() {
+    if (runner_ && runner_->busy()) return;
     selectedHistoryPlan_.reset();
     historySteps_.clear();
     historyEntries_.clear();
@@ -111,6 +112,7 @@ void HistoryController::refreshHistory() {
 
 // 기록에서 작업 하나를 골라 저장된 파일별 경로를 보여주는 함수.
 void HistoryController::selectHistoryPlan(const QString& planId) {
+    if (runner_ && runner_->busy()) return;
     selectedHistoryPlan_.reset();
     historySteps_.clear();
     const bool listed = std::any_of(historyEntries_.begin(), historyEntries_.end(),
@@ -146,26 +148,29 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
 
 // 선택한 과거 작업의 파일을 재검증하고 안전한 되돌리기를 실행하는 함수.
 void HistoryController::undoSelectedHistory() {
+    if (runner_ && runner_->busy()) return;
     if (!canUndoSelectedHistory()) {
         historyMessage_ = QStringLiteral("되돌릴 수 있는 작업을 먼저 선택해 주세요.");
         emit historyChanged();
         return;
     }
     const auto planId = selectedHistoryPlan_->id;
-    const auto result = operations_.rollback(planId);
-    emit rollbackAttempted(QString::fromStdString(planId));
-    refreshHistory();
-    if (!result) {
-        const auto current = history_.loadPlan(planId);
-        if (current && current.value().status == PlanStatus::NeedsRecovery) {
-            emit recoveryRefreshRequested();
+    dispatchOperation(runner_, this, [operations = &operations_, planId] { return operations->rollback(planId); },
+        [this, planId](const Result<void>& result) {
+        emit rollbackAttempted(QString::fromStdString(planId));
+        refreshHistory();
+        if (!result) {
+            const auto current = history_.loadPlan(planId);
+            if (current && current.value().status == PlanStatus::NeedsRecovery) {
+                emit recoveryRefreshRequested();
+            }
+            historyMessage_ = QStringLiteral("되돌리지 못했어요. 파일은 덮어쓰지 않았어요: %1")
+                                  .arg(QString::fromStdString(result.error().message));
+        } else {
+            historyMessage_ = QStringLiteral("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
         }
-        historyMessage_ = QStringLiteral("되돌리지 못했어요. 파일은 덮어쓰지 않았어요: %1")
-                              .arg(QString::fromStdString(result.error().message));
-    } else {
-        historyMessage_ = QStringLiteral("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
-    }
-    emit historyChanged();
+        emit historyChanged();
+    });
 }
 
 } // namespace nookbit

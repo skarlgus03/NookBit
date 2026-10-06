@@ -67,6 +67,7 @@ QString RecoveryController::recoveryConfirmationText() const {
 
 // 실행 없이 표시된 승인 해시에 사용자 선택을 묶어 확인 대기를 만드는 함수.
 void RecoveryController::requestRecoveryChoice(const QString& planId, const QString& action) {
+    if (runner_ && runner_->busy()) return;
     if (busy_ || !operations_) return;
     const auto entry = std::find_if(recoveryCases_.begin(), recoveryCases_.end(), [&](const QVariant& value) {
         return value.toMap().value("whole").toBool() && value.toMap().value("planId").toString() == planId;
@@ -87,6 +88,7 @@ void RecoveryController::requestRecoveryChoice(const QString& planId, const QStr
 
 // 확인 창에서 승인한 스냅샷만 실행 요청으로 전달하는 함수.
 void RecoveryController::confirmRecoveryChoice() {
+    if (runner_ && runner_->busy()) return;
     if (busy_ || !confirmation_ || !operations_) return;
     const auto request = *confirmation_;
     cancelRecoveryChoice(); applyChoice(request);
@@ -101,20 +103,23 @@ void RecoveryController::cancelRecoveryChoice() {
 // 명시적 선택을 실행하고 최신 기록·화면 목록을 갱신하는 함수.
 void RecoveryController::applyChoice(const RecoveryRequest& request) {
     busy_ = true; emit recoveryBusyChanged();
-    const auto result = operations_->execute(request);
-    busy_ = false; emit recoveryBusyChanged();
-    if (request.action == RecoveryAction::Later) {
-        recoveryMessage_ = QStringLiteral("나중에 확인하도록 남겨뒀어요. 파일과 기록은 변경하지 않았어요."); emit recoveryCasesChanged(); return;
-    }
-    refreshRecoveryCases();
-    recoveryMessage_ = result ? (request.action == RecoveryAction::Resume
-        ? QStringLiteral("중단된 작업을 재개했어요. 기록 화면에서 결과를 확인할 수 있어요.")
-        : QStringLiteral("이동된 파일을 되돌렸어요. 보존된 임시 파일이 있다면 확인 목록에 남습니다."))
-        : QStringLiteral("복구를 완료하지 못했어요: %1").arg(recoveryError(result.error()));
-    const auto id = QString::fromStdString(request.planId);
-    emit recoveryAttempted(id);
-    if (result) emit recoveryCompleted(id, request.action == RecoveryAction::Resume ? "resume" : "rollback");
-    emit recoveryCasesChanged();
+    dispatchOperation(request.action == RecoveryAction::Later ? nullptr : runner_, this,
+        [operations = operations_, request] { return operations->execute(request); },
+        [this, request](const Result<void>& result) {
+        busy_ = false; emit recoveryBusyChanged();
+        if (request.action == RecoveryAction::Later) {
+            recoveryMessage_ = QStringLiteral("나중에 확인하도록 남겨뒀어요. 파일과 기록은 변경하지 않았어요."); emit recoveryCasesChanged(); return;
+        }
+        refreshRecoveryCases();
+        recoveryMessage_ = result ? (request.action == RecoveryAction::Resume
+            ? QStringLiteral("중단된 작업을 재개했어요. 기록 화면에서 결과를 확인할 수 있어요.")
+            : QStringLiteral("이동된 파일을 되돌렸어요. 보존된 임시 파일이 있다면 확인 목록에 남습니다."))
+            : QStringLiteral("복구를 완료하지 못했어요: %1").arg(recoveryError(result.error()));
+        const auto id = QString::fromStdString(request.planId);
+        emit recoveryAttempted(id);
+        if (result) emit recoveryCompleted(id, request.action == RecoveryAction::Resume ? "resume" : "rollback");
+        emit recoveryCasesChanged();
+    });
 }
 
 // 진단·선택 후보·차단 이유를 작업당 한 항목으로 표시하는 함수.
@@ -184,6 +189,7 @@ void RecoveryController::setRecoveryNotice(QString notice) {
 
 // 중단 작업의 현재 원본·목적지 상태를 다시 읽는 함수.
 void RecoveryController::refreshRecoveryCases() {
+    if (runner_ && runner_->busy()) return;
     if (busy_) return;
     if (operations_) { refreshWholeCases(); return; }
     RecoveryService recovery(history_, scanner_, hasher_, transfers_);
@@ -234,6 +240,7 @@ void RecoveryController::refreshRecoveryCases() {
 
 // 파일 위치를 다시 검증하고 확실한 작업 기록만 정리하는 함수.
 void RecoveryController::resolveRecoveryCase(const QString& planId) {
+    if (runner_ && runner_->busy()) return;
     RecoveryService recovery(history_, scanner_, hasher_, transfers_);
     auto resolved = recovery.resolveCase(planId.toStdString());
     if (!resolved) {

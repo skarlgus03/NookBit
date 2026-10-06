@@ -9,6 +9,7 @@
 #include <nookbit/application/use_cases/approve_plan.hpp>
 
 #include <QObject>
+#include "presentation/background_task_runner.hpp"
 #include <QString>
 #include <QVariantList>
 
@@ -36,6 +37,8 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
 
 public:
+    /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
+    void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
     /// 화면 모델·계획 작업·파일 실행 계약과 기본 목적지를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
                       ICreatePreviewUseCase& createPreview,
@@ -137,6 +140,7 @@ signals:
     void recoveryReconcileRequested();
 
 private:
+    BackgroundTaskRunner* runner_{nullptr};
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
     void showError(const QString& message);
 

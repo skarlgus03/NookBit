@@ -3,6 +3,7 @@
 #include <nookbit/application/file_operations.hpp>
 
 #include <QObject>
+#include "presentation/background_task_runner.hpp"
 #include <QString>
 #include <QVariantList>
 
@@ -22,6 +23,8 @@ class HistoryController final : public QObject {
     Q_PROPERTY(int selectedHistoryFileCount READ selectedHistoryFileCount NOTIFY historyChanged)
 
 public:
+    /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
+    void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
     /// 기록 조회와 외부 소유 파일 실행 계약으로 기록 화면을 준비하는 생성자.
     HistoryController(IHistoryRepository& history, IFileOperations& operations, QObject* parent = nullptr);
 
@@ -58,6 +61,7 @@ signals:
     void recoveryRefreshRequested();
 
 private:
+    BackgroundTaskRunner* runner_{nullptr};
     IHistoryRepository& history_;
     IFileOperations& operations_;
     std::optional<OperationPlan> selectedHistoryPlan_;

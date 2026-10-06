@@ -143,6 +143,7 @@ if(TARGET nookbit_json_config)
     ${PROJECT_SOURCE_DIR}/src/presentation/preview_controller.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/recovery_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/recovery_controller.cpp
   )

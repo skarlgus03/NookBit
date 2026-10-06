@@ -46,6 +46,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
+#include "app/thread_local_operations.hpp"
+#include "presentation/background_task_runner.hpp"
 
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
 int main(int argc, char* argv[]) {
@@ -124,8 +126,6 @@ int main(int argc, char* argv[]) {
         verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
         &previewRules, &testRule, &previewRules);
     nookbit::WindowsStagedCopy transferCopy;
-    nookbit::WindowsTransferSourceRemoval transferRemoval;
-    nookbit::WindowsTransferFileInspector transferFiles;
     nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()), nookbit::CrossVolumeDrafts::Allow);
     nookbit::QtPlanHasher previewHasher;
     nookbit::CreatePreviewUseCase createPreview(
@@ -136,10 +136,12 @@ int main(int argc, char* argv[]) {
     nookbit::VerifySavedPlanUseCase verifySavedPlan(
         previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy);
     nookbit::ApprovePlanUseCase approvePlan(verifySavedPlan, history);
-    nookbit::ExecuteTransferStepUseCase forwardTransfer(transferCopy, transferRemoval, transferJournal, history, previewHasher);
-    nookbit::RollbackTransferUseCase reverseTransfer(transferJournal, history, transferCopy, transferRemoval, transferFiles, previewHasher);
-    nookbit::FileOperationService fileOperations(verifySavedPlan, previewScanner, previewHasher, history,
-        std::filesystem::path(appData.toStdWString()), &transferCopy, &forwardTransfer, &reverseTransfer);
+    nookbit::UserSettings currentSettings;
+    currentSettings.homeRoot = std::filesystem::path(defaultDestination.toStdWString());
+    nookbit::RuntimeSettingsRepository recoverySettings(currentSettings);
+    nookbit::ThreadLocalOperations fileOperations(databasePath, migrationPath, rulesPath, treeSchema, legacyTreeSchema,
+        std::filesystem::path(appData.toStdWString()), recoverySettings);
+    nookbit::BackgroundTaskRunner backgroundTasks;
     nookbit::PreviewController previewController(
         pendingFiles,
         createPreview,
@@ -170,30 +172,21 @@ int main(int argc, char* argv[]) {
         uiPreferences.setValue(QStringLiteral("destinationRoot"), root);
         uiPreferences.sync();
     });
-    nookbit::UserSettings currentSettings;
-    currentSettings.homeRoot = std::filesystem::path(defaultDestination.toStdWString());
     // 화면의 공통 충돌 정책을 코어의 현재 설정 값으로 변환하는 함수.
     const auto currentPolicy = [&previewController] {
         const auto key = previewController.collisionPolicy();
         return key == "abort" ? nookbit::CollisionPolicy::Abort : key == "skip" ? nookbit::CollisionPolicy::Skip : nookbit::CollisionPolicy::Rename;
     };
-    currentSettings.defaultCollisionPolicy = currentPolicy();
-    nookbit::RuntimeSettingsRepository recoverySettings(currentSettings);
+    recoverySettings.setCollisionPolicy(currentPolicy());
     QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted, &application,
         [&recoverySettings](const QString& root) { recoverySettings.setHomeRoot(std::filesystem::path(root.toStdWString())); });
     QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged, &application,
         [&recoverySettings, &currentPolicy] { recoverySettings.setCollisionPolicy(currentPolicy()); });
-    nookbit::SafeExecutor recoveredRunner(recoverySettings, verifySavedPlan, previewScanner, previewHasher, history,
-        std::filesystem::path(appData.toStdWString()), &transferCopy, &forwardTransfer, &reverseTransfer);
-    nookbit::InspectInterruptedPlanUseCase interruptedInspector(history, transferJournal, transferFiles, previewHasher, &transferCopy);
-    nookbit::WindowsTransferRecoveryGuard transferRecoveryGuard;
-    nookbit::WindowsTransferCommitRecoveryGuard transferCommitGuard;
-    nookbit::ResumeInterruptedTransferUseCase transferResolver(history, transferJournal, transferCopy, transferRemoval,
-        transferFiles, transferRecoveryGuard, transferCommitGuard, previewHasher);
-    nookbit::RecoverInterruptedPlanUseCase recoverInterrupted(interruptedInspector, history, recoverySettings, previewRules, previewHasher, recoveredRunner, &transferResolver);
-    nookbit::InterruptedOperationRecoveryService interruptedOperations(interruptedInspector, history, recoverInterrupted);
-    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &interruptedOperations);
+    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &fileOperations);
     nookbit::HistoryController historyController(history, fileOperations);
+    previewController.setTaskRunner(&backgroundTasks);
+    historyController.setTaskRunner(&backgroundTasks);
+    recoveryController.setTaskRunner(&backgroundTasks);
     QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                      &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     QObject::connect(&historyController, &nookbit::HistoryController::recoveryRefreshRequested,
@@ -233,6 +226,7 @@ int main(int argc, char* argv[]) {
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
+    engine.rootContext()->setContextProperty(QStringLiteral("backgroundTasks"), &backgroundTasks);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
     engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);

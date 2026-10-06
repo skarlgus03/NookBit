@@ -1,5 +1,13 @@
 # Real two-volume backend test
 
+## 2026-10-06 백그라운드 실행 검증
+
+클린 빌드·자동 19/19 및 새 고유 C:/D: 자료의 `--background-cross-run`이 통과했다. 실제 혼합 이동·마지막 되돌리기·기록 되돌리기·중단 작업 재개를 컨트롤러에서 비동기 실행하고 결과와 파일/DB 상태를 검사했다. 기본 자동 묶음은 같은 볼륨 비동기 실행과 화면 이벤트 계속 처리·별도 작업 스레드·화면 스레드 완료·중복 요청 거부·수신자 소멸·예외 전달·종료 대기도 검사한다. QML 로딩 검사도 통과했으며 시각적 시험은 사용자가 한다.
+
+- 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-bg-source-yVOJvr`와 `D:/NookBit/out/build/dev/tests/NookBit-bg-target-JwGjvc` (보존).
+- 재실행: `nookbit_preview_controller_tests.exe --background-cross-run --source-parent <기존 C: 부모> --destination-parent <기존 D: 부모>`. 기존 NTFS·서로 다른 볼륨을 검사하고 새 고유 폴더만 사용한다. CTest와 동시에 실행하지 않는다.
+- 미리보기·고정/승인·시작 복구 조회는 동기다. 정확한 진행률·안전 취소·보존 임시 파일 정리 UI는 아직 없다. 실행 중 입력/닫기를 막고 작업 표시만 제공한다.
+
 ## 2026-10-06 앱의 명시적 중단 복구 선택 검증
 
 전체 빌드와 자동 테스트 19/19, 실제 C:/D: 시험 33/33을 순차 실행해 통과했다. 33개는 `--edge-crash-run` 5개, `--transfer-recovery-run` 11개, `--preserved-undo-run` 6개, Qt 컨트롤러 `--native-cross-run` 11개다. 공유 작업 잠금 때문에 동시에 실행하지 않는다.
@@ -9,7 +17,7 @@ Qt 시험의 기존 이동/되돌리기 5개에 명시적 혼합 재개·혼합 
 - 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-ui-source-mYYbuE`
 - DB와 보고서: `D:/NookBit/out/build/dev/tests/NookBit-ui-target-sDDzmR/ui-backend-report.json`
 - 보고서 UTC: `2026-10-06T10:45:32.613Z`
-- 보존 부분 파일의 별도 승인 정리 화면·작업 스레드·진행률·취소 UI는 미구현이다. Schema v8·승인 계획 v2·규칙 JSON v3는 그대로다. 시험 자료는 보존했고 사용자 파일/실행 앱은 건드리지 않았다.
+- 보존 부분 파일의 별도 승인 정리 화면·정확한 진행률·안전 취소 UI는 미구현이다. Schema v8·승인 계획 v2·규칙 JSON v3는 그대로다. 시험 자료는 보존했고 사용자 파일/실행 앱은 건드리지 않았다.
 
 ## 2026-10-04 실행 결과
 
@@ -193,7 +201,7 @@ Qt 버전과 부모 경로는 각 PC에 맞게 바꾼다. 부모 디렉터리 �
 - 같은 볼륨 v2 화면 실행과 기존 v1 호환 검사를 포함한 자동 테스트 19/19도 통과했다.
 - 재실행: `nookbit_preview_controller_tests.exe --native-cross-run --source-parent <기존 C: 부모> --destination-parent <기존 D: 부모>`. 절대 부모·서로 다른 고정 NTFS를 확인한 뒤 `NookBit-ui-source-*`/`NookBit-ui-target-*`의 새 고유 자료만 사용한다. CTest와 동시에 돌리지 않으며 자료는 자동 삭제하지 않는다.
 
-정상 정리·완료 작업 되돌리기는 앱에서 활성화했다. 전체 중단 복구 선택은 앱에서 활성화했다. 부분 파일의 별도 승인 정리 화면은 남아 있다. 현재 파일 실행은 동기 호출이므로 큰 복사에서 화면 응답이 지연될 수 있다. 작업 스레드·진행률·취소 UI는 다음 단계이며, 자동 재개나 비지원 파일/사고 경계의 삭제 폴백은 제공하지 않는다.
+정상 정리·완료 작업 되돌리기는 앱에서 활성화했다. 전체 중단 복구 선택은 앱에서 활성화했다. 부분 파일의 별도 승인 정리 화면은 남아 있다. 파일 실행은 백그라운드 호출이며 검사 준비는 아직 동기다. 정확한 진행률·안전 취소 UI는 다음 단계이며, 자동 재개나 비지원 파일/사고 경계의 삭제 폴백은 제공하지 않는다.
 
 ## 추가 검증과 남은 범위
 
