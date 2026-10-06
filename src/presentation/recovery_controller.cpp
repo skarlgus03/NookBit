@@ -147,6 +147,9 @@ void RecoveryController::refreshWholeCases() {
             if (old.planId == report.planId && old.canResolve) row["canResolve"] = true;
         QStringList details;
         for (const auto& step : report.steps) for (const auto& reason : step.reasons)
+            if (reason.code == "recovery.zone_unsupported" && !details.contains(QStringLiteral("다운로드 표식 보존 전송의 중단 복구는 아직 지원하지 않아요. 원본·복사본·기록을 보존하며 별도 확인이 필요해요.")))
+                details << QStringLiteral("다운로드 표식 보존 전송의 중단 복구는 아직 지원하지 않아요. 원본·복사본·기록을 보존하며 별도 확인이 필요해요.");
+        for (const auto& step : report.steps) for (const auto& reason : step.reasons)
             if (reason.code == "recovery.metadata_unsupported" && !details.contains(QStringLiteral("빠른 같은 볼륨 이동의 중단 복구는 아직 지원하지 않아요. 파일과 기록을 보존하며 별도 확인이 필요해요.")))
                 details << QStringLiteral("빠른 같은 볼륨 이동의 중단 복구는 아직 지원하지 않아요. 파일과 기록을 보존하며 별도 확인이 필요해요.");
         if (report.status == PlanStatus::RolledBack && report.preserved)

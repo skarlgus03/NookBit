@@ -69,8 +69,9 @@ Result<TransferAttempt> RollbackTransferUseCase::executeImpl(const std::string& 
             (prior.direction == TransferDirection::Rollback && prior.phase == TransferPhase::Completed))
             return Result<TransferAttempt>::failure({"transfer.attempt_conflict", "Rollback is unresolved, already completed or the ID is reused"});
     }
-    const auto source = files_.inspect(undo.source);
-    const auto target = files_.inspect(undo.destination);
+    const bool withZone = reverseMovement && reverseMovement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    const auto source = withZone ? files_.inspectWithZone(undo.source) : files_.inspect(undo.source);
+    const auto target = withZone ? files_.inspectWithZone(undo.destination) : files_.inspect(undo.destination);
     if (source.presence != TransferPathPresence::Present || !source.fingerprint ||
         !TransferValidation::sameObject(undo.sourceFingerprint, *source.fingerprint) ||
         !TransferValidation::sameContent(undo.sourceFingerprint, *source.fingerprint) ||

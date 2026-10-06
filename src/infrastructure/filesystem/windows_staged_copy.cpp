@@ -61,6 +61,11 @@ struct Handle {
     // 핸들 소유권을 이전하는 함수.
     Handle(Handle&& other) noexcept : value(std::exchange(other.value, INVALID_HANDLE_VALUE)) {}
     Handle(const Handle&) = delete;
+    // 기존 핸들을 닫고 새 소유권을 이전하는 함수.
+    Handle& operator=(Handle&& other) noexcept {
+        if (this != &other) { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); value = std::exchange(other.value, INVALID_HANDLE_VALUE); }
+        return *this;
+    }
     // 파일을 삭제하지 않고 핸들만 닫는 함수.
     ~Handle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
 };
@@ -229,7 +234,7 @@ Result<std::string> digest(HANDLE file, const std::function<bool()>& cancelled) 
 }
 
 // 이름 있는 스트림이나 지원하지 않는 파일 형태가 생기지 않았는지 확인하는 함수.
-Result<void> ordinarySource(HANDLE handle, const std::filesystem::path& path) {
+Result<void> ordinarySource(HANDLE handle, const std::filesystem::path& path, bool allowZone = false) {
     BY_HANDLE_FILE_INFORMATION info{};
     if (!GetFileInformationByHandle(handle, &info))
         return Result<void>::failure(failure("transfer.stat"));
@@ -242,13 +247,71 @@ Result<void> ordinarySource(HANDLE handle, const std::filesystem::path& path) {
     HANDLE streams = FindFirstStreamW(path.c_str(), FindStreamInfoStandard, &stream, 0);
     if (streams == INVALID_HANDLE_VALUE) return Result<void>::failure(failure("transfer.streams"));
     bool ordinary = true;
-    do { if (std::wstring(stream.cStreamName) != L"::$DATA") ordinary = false; }
+    do {
+        if (std::wstring(stream.cStreamName) != L"::$DATA" &&
+            !(allowZone && _wcsicmp(stream.cStreamName, L":Zone.Identifier:$DATA") == 0 && stream.StreamSize.QuadPart <= 65536)) ordinary = false;
+    }
     while (FindNextStreamW(streams, &stream));
     const auto streamError = GetLastError();
     FindClose(streams);
     if (!ordinary || streamError != ERROR_HANDLE_EOF)
         return Result<void>::failure({"transfer.streams", "Named streams or unreadable stream list unsupported"});
     return Result<void>::success();
+}
+
+/// 다운로드 표식의 보호 핸들과 원문 바이트를 보관한다.
+struct ZoneSnapshot {
+    Handle handle{};
+    std::optional<std::vector<unsigned char>> bytes;
+};
+// 최대 64 KiB 다운로드 표식만 보호해 읽으며 부재와 접근 실패를 구분하는 함수.
+Result<ZoneSnapshot> captureZone(const std::filesystem::path& path) {
+    using Return = Result<ZoneSnapshot>;
+    Handle handle(CreateFileW((path.wstring() + L":Zone.Identifier").c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (handle.value == INVALID_HANDLE_VALUE) {
+        if (GetLastError() == ERROR_FILE_NOT_FOUND) return Return::success(ZoneSnapshot{});
+        return Return::failure(failure("transfer.zone_open"));
+    }
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(handle.value, &size) || size.QuadPart < 0 || size.QuadPart > 65536)
+        return Return::failure({"transfer.zone_size", "Download marker exceeds the supported 64 KiB limit."});
+    std::vector<unsigned char> bytes(static_cast<size_t>(size.QuadPart));
+    DWORD offset = 0;
+    while (offset < bytes.size()) {
+        DWORD read = 0;
+        if (!ReadFile(handle.value, bytes.data() + offset, static_cast<DWORD>(bytes.size() - offset), &read, nullptr) || !read)
+            return Return::failure(failure("transfer.zone_read"));
+        offset += read;
+    }
+    return Return::success(ZoneSnapshot{std::move(handle), std::move(bytes)});
+}
+// 앱 소유 임시 파일에만 표식을 새로 쓰고 flush·재읽기로 원문 보존을 검증하는 함수.
+Result<ZoneSnapshot> createZone(const std::filesystem::path& path, const std::vector<unsigned char>& bytes) {
+    using Return = Result<ZoneSnapshot>;
+    Handle handle(CreateFileW((path.wstring() + L":Zone.Identifier").c_str(), GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (handle.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.zone_create"));
+    DWORD offset = 0;
+    while (offset < bytes.size()) {
+        DWORD written = 0;
+        if (!WriteFile(handle.value, bytes.data() + offset, static_cast<DWORD>(bytes.size() - offset), &written, nullptr) || !written)
+            return Return::failure(failure("transfer.zone_write"));
+        offset += written;
+    }
+    if (!FlushFileBuffers(handle.value)) return Return::failure(failure("transfer.zone_flush"));
+    LARGE_INTEGER start{};
+    if (!SetFilePointerEx(handle.value, start, nullptr, FILE_BEGIN)) return Return::failure(failure("transfer.zone_seek"));
+    std::vector<unsigned char> readback(bytes.size());
+    DWORD read = 0;
+    if (!readback.empty() && (!ReadFile(handle.value, readback.data(), static_cast<DWORD>(readback.size()), &read, nullptr) || read != readback.size()))
+        return Return::failure(failure("transfer.zone_verify"));
+    if (readback != bytes) return Return::failure({"transfer.zone_changed", "Copied download marker differs from source."});
+    handle = Handle{};
+    auto protectedCopy = captureZone(path);
+    if (!protectedCopy || protectedCopy.value().bytes != std::optional<std::vector<unsigned char>>{bytes})
+        return Return::failure({"transfer.zone_changed", "Cannot protect the verified copied download marker."});
+    return protectedCopy;
 }
 
 class Session final : public IStagedCopySession {
@@ -263,6 +326,17 @@ public:
     bool attempted{false};
     bool commitAttempted{false};
     uintmax_t resumeOffset{};
+    bool allowZone{false};
+    ZoneSnapshot sourceZone, stagingZone;
+    // 현재 원본·임시/최종 표식이 보호한 원문과 같은지 확인하는 함수.
+    Result<void> verifyZones(const std::filesystem::path& target) {
+        if (!allowZone) return Result<void>::success();
+        const auto input = captureZone(sourcePath), output = captureZone(target);
+        if (!input || !output) return Result<void>::failure(!input ? input.error() : output.error());
+        if (input.value().bytes != sourceZone.bytes || output.value().bytes != sourceZone.bytes)
+            return Result<void>::failure({"transfer.zone_changed", "Source and copied download markers differ; source retained."});
+        return Result<void>::success();
+    }
 
     // 열린 파일의 소유권과 복사 전 증거를 받는 함수.
     Session(std::vector<Handle> locks, Handle input, Handle output, FileFingerprint fp,
@@ -316,7 +390,14 @@ public:
         if (!sameFingerprint(expected, current.value()) || total != expected.size ||
             copiedHash.value() != expected.sha256)
             return Result<FileFingerprint>::failure({"transfer.source_changed", "Copy content or source changed"});
-        const auto supported = ordinarySource(source.value, sourcePath);
+        if (allowZone && sourceZone.bytes) {
+            auto copiedZone = createZone(stagingPath, *sourceZone.bytes);
+            if (!copiedZone) return Result<FileFingerprint>::failure(copiedZone.error());
+            stagingZone = std::move(copiedZone.value());
+        }
+        const auto zones = verifyZones(stagingPath);
+        if (!zones) return Result<FileFingerprint>::failure(zones.error());
+        const auto supported = ordinarySource(source.value, sourcePath, allowZone);
         if (!supported) return Result<FileFingerprint>::failure(supported.error());
         FILE_BASIC_INFO sourceBasic{};
         if (!GetFileInformationByHandleEx(source.value, FileBasicInfo, &sourceBasic, sizeof(sourceBasic)) ||
@@ -361,8 +442,10 @@ public:
             CompareStringOrdinal(parent.c_str(), -1, targetParent.c_str(), -1, TRUE) != CSTR_EQUAL ||
             CompareStringOrdinal(temporary.c_str(), -1, target.c_str(), -1, TRUE) == CSTR_EQUAL)
             return Result<FileFingerprint>::failure({"transfer.commit_path", "Commit needs a distinct name in the same parent"});
-        const auto sourceCheck = ordinarySource(source.value, sourcePath);
-        const auto stagingCheck = ordinarySource(staging.value, stagingPath);
+        const auto zones = verifyZones(stagingPath);
+        if (!zones) return Result<FileFingerprint>::failure(zones.error());
+        const auto sourceCheck = ordinarySource(source.value, sourcePath, allowZone);
+        const auto stagingCheck = ordinarySource(staging.value, stagingPath, allowZone);
         if (!sourceCheck || !stagingCheck)
             return Result<FileFingerprint>::failure(!sourceCheck ? sourceCheck.error() : stagingCheck.error());
         const auto inputHash = digest(source.value, {});
@@ -423,7 +506,9 @@ public:
         // 이름 변경 뒤 오류는 확정 전 실패와 구별해 상위 계층에서 복구 필요로 남긴다.
         if (!FlushFileBuffers(staging.value))
             return Result<FileFingerprint>::failure(failure("transfer.commit_flush"));
-        const auto finalCheck = ordinarySource(staging.value, destination);
+        const auto finalZones = verifyZones(destination);
+        if (!finalZones) return Result<FileFingerprint>::failure(finalZones.error());
+        const auto finalCheck = ordinarySource(staging.value, destination, allowZone);
         if (!finalCheck) return Result<FileFingerprint>::failure(finalCheck.error());
         const auto finalHash = digest(staging.value, {});
         auto final = fingerprint(staging.value);
@@ -446,15 +531,27 @@ class RemovalSession final : public ITransferRemovalSession {
     Handle source_, destination_;
     TransferAttempt attempt_;
     bool attempted_{false};
+    bool allowZone_{false}, zoneChecked_{false};
+    std::optional<std::vector<unsigned char>> expectedZone_;
+    std::vector<Handle> sourceZoneLocks_, destinationZoneLocks_;
 public:
     // 보호 핸들과 확정된 전송 증거를 소유하는 함수.
-    RemovalSession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt)
-        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)) {}
+    RemovalSession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt, bool allowZone = false)
+        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)), allowZone_(allowZone) {}
     // 두 파일의 지원 범위·객체 ID·내용·수정 시각을 보유 핸들로 재검증하는 함수.
     Result<void> verify() override {
         if (source_.value == INVALID_HANDLE_VALUE) return Result<void>::failure({"transfer.removal_state", "Source handle closed"});
+        if (allowZone_) {
+            auto input = captureZone(attempt_.source), output = captureZone(attempt_.destination);
+            if (!input || !output) return Result<void>::failure(!input ? input.error() : output.error());
+            if (input.value().bytes != output.value().bytes || (zoneChecked_ && expectedZone_ != input.value().bytes))
+                return Result<void>::failure({"transfer.zone_changed", "Download markers differ or changed; source retained."});
+            expectedZone_ = input.value().bytes; zoneChecked_ = true;
+            if (input.value().bytes) sourceZoneLocks_.push_back(std::move(input.value().handle));
+            if (output.value().bytes) destinationZoneLocks_.push_back(std::move(output.value().handle));
+        }
         for (const auto& pair : {std::pair{source_.value, attempt_.source}, std::pair{destination_.value, attempt_.destination}}) {
-            const auto supported = ordinarySource(pair.first, pair.second);
+            const auto supported = ordinarySource(pair.first, pair.second, allowZone_);
             if (!supported) return supported;
             const auto hash = digest(pair.first, {});
             const auto actual = fingerprint(pair.first);
@@ -490,8 +587,14 @@ public:
         FILE_DISPOSITION_INFO disposition{TRUE};
         if (!SetFileInformationByHandle(source_.value, FileDispositionInfo, &disposition, sizeof(disposition)))
             return Result<void>::failure(failure("transfer.removal_failed"));
+        sourceZoneLocks_.clear();
         if (!CloseHandle(source_.value)) return Result<void>::failure(failure("transfer.removal_close"));
         source_.value = INVALID_HANDLE_VALUE;
+        if (allowZone_) {
+            const auto finalZone = captureZone(attempt_.destination);
+            if (!finalZone || finalZone.value().bytes != expectedZone_)
+                return Result<void>::failure({"transfer.zone_changed", "Retained final marker could not be confirmed."});
+        }
         if (GetFileAttributesW(attempt_.source.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
             return Result<void>::failure({"transfer.removal_uncertain", "Source absence is not confirmed; final copy retained"});
         const auto finalHash = digest(destination_.value, {});
@@ -552,12 +655,13 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
         if (!location || !location.value().localNtfs)
             return Return::failure({"transfer.removal_volume", "Accessible local fixed NTFS required"});
         if (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
-            movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+            (movement->preservation != PreservationPolicy::LocalNtfsBasic && movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone) ||
             !approvedVolume(location.value(), volumeIndex == 0 ? movement->sourceVolume : movement->destinationVolume)))
             return Return::failure({"transfer.volume_changed", "Protected removal volume differs from approval."});
         ++volumeIndex;
     }
-    return Return::success(std::make_unique<RemovalSession>(std::move(parents), std::move(source), std::move(destination), attempt));
+    return Return::success(std::make_unique<RemovalSession>(std::move(parents), std::move(source), std::move(destination), attempt,
+        movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone));
 }
 
 namespace {
@@ -584,6 +688,23 @@ Result<TransferVolume> inspectVolumePath(const std::filesystem::path& path) {
     return volume(handle.value);
 }
 } // namespace
+
+// 기본 파일·스트림 지원 여부를 전체 내용 읽기와 파일 생성 없이 확인하는 함수.
+Result<bool> WindowsStagedCopy::preflightSource(const std::filesystem::path& source) {
+    if (!validPath(source)) return Result<bool>::failure({"transfer.path", "Unsupported source path."});
+    std::vector<Handle> parents;
+    const auto locked = lockParents(source, parents);
+    if (!locked) return Result<bool>::failure(locked.error());
+    Handle input(CreateFileW(source.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE) return Result<bool>::failure(failure("transfer.source_unavailable"));
+    const auto supported = ordinarySource(input.value, source, true);
+    if (!supported) return Result<bool>::failure(supported.error());
+    const auto location = volume(input.value);
+    if (!location || !location.value().localNtfs) return Result<bool>::failure({"transfer.volume_unsupported", "Only fixed local NTFS files are supported."});
+    const auto zone = captureZone(source);
+    if (!zone) return Result<bool>::failure(zone.error());
+    return Result<bool>::success(zone.value().bytes.has_value());
+}
 
 // 공유된 읽기 전용 볼륨 검사를 호출하는 함수.
 Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::path& path) {
@@ -887,6 +1008,14 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsPreservedStagingCleanup::
 
 // 파일을 생성하지 않고 보호된 핸들에서 객체·내용·실제 볼륨을 읽는 함수.
 TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path& path) {
+    return inspectImpl(path, false);
+}
+// 승인된 다운로드 표식 보존 계약의 결과를 읽기 전용 검사하는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspectWithZone(const std::filesystem::path& path) {
+    return inspectImpl(path, true);
+}
+// 계약별 스트림 지원 범위로 메인 파일의 볼륨·객체·내용을 검사하는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::filesystem::path& path, bool allowZone) {
     TransferFileObservation result;
     // 관찰 실패를 파일 없음으로 바꾸지 않고 이유를 보존하는 함수.
     const auto unavailable = [&](Error error) {
@@ -922,7 +1051,7 @@ TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesys
         }
         return unavailable(failure("transfer.inspect_open"));
     }
-    const auto supported = ordinarySource(input.value, path);
+    const auto supported = ordinarySource(input.value, path, allowZone);
     if (!supported) return unavailable(supported.error());
     const auto before = fingerprint(input.value);
     const auto hash = digest(input.value, {});
@@ -931,7 +1060,7 @@ TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesys
         return unavailable(!before ? before.error() : (!hash ? hash.error() : after.error()));
     if (!sameFingerprint(before.value(), after.value()))
         return unavailable({"transfer.inspect_changed", "File changed while being inspected"});
-    const auto checked = ordinarySource(input.value, path);
+    const auto checked = ordinarySource(input.value, path, allowZone);
     if (!checked) return unavailable(checked.error());
     result.volumeId = after.value().volumeId;
     result.fingerprint = after.value();
@@ -957,14 +1086,21 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     if (input.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(input.value, &info) ||
         !GetFileInformationByHandleEx(input.value, FileBasicInfo, &basic, sizeof(basic)))
         return Return::failure(failure("transfer.source_unavailable"));
-    const auto supported = ordinarySource(input.value, source);
+    const bool allowZone = movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    const auto supported = ordinarySource(input.value, source, allowZone);
     if (!supported) return Return::failure(supported.error());
+    ZoneSnapshot marker;
+    if (allowZone) {
+        auto captured = captureZone(source);
+        if (!captured) return Return::failure(captured.error());
+        marker = std::move(captured.value());
+    }
     const auto sourceVolume = volume(input.value);
     if (!sourceVolume) return Return::failure(sourceVolume.error());
     if (!sourceVolume.value().localNtfs)
         return Return::failure({"transfer.volume_unsupported", "Only local fixed NTFS supported"});
     if (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
-        movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+        (movement->preservation != PreservationPolicy::LocalNtfsBasic && movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone) ||
         !approvedVolume(sourceVolume.value(), movement->sourceVolume)))
         return Return::failure({"transfer.volume_changed", "Protected copy volume differs from approval."});
     auto fp = fingerprint(input.value);
@@ -989,8 +1125,9 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     if (output.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.staging_create"));
     const auto initial = fingerprint(output.value);
     if (!initial) return Return::failure(initial.error());
-    return Return::success(std::make_unique<Session>(std::move(locks), std::move(input), std::move(output),
-        expected, initial.value(), basic, source, staging));
+    auto session = std::make_unique<Session>(std::move(locks), std::move(input), std::move(output), expected, initial.value(), basic, source, staging);
+    session->allowZone = allowZone; session->sourceZone = std::move(marker);
+    return Return::success(std::move(session));
 }
 // 원본과 최종 객체를 변경 없이 열고 승인된 부모·볼륨을 보호하는 함수.
 Result<std::unique_ptr<ITransferCommitRecoverySession>> WindowsTransferCommitRecoveryGuard::open(
@@ -1110,6 +1247,14 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외 플랫폼에서는 빠른 지원 검사도 변경 없이 거부하는 함수.
+Result<bool> WindowsStagedCopy::preflightSource(const std::filesystem::path&) {
+    return Result<bool>::failure({"transfer.unsupported", "Windows only"});
+}
+// Windows 외 플랫폼에서는 표식 허용 검사도 지원하지 않는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspectWithZone(const std::filesystem::path& path) { return inspect(path); }
+// Windows 외 플랫폼에서는 모든 실제 검사를 변경 없이 거부하는 함수.
+TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::filesystem::path& path, bool) { return inspect(path); }
 // Windows 외에서는 누락 확정 결과의 보호 검사를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferCommitRecoverySession>> WindowsTransferCommitRecoveryGuard::open(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<ITransferCommitRecoverySession>>::failure({"transfer.unsupported", "Windows only"});

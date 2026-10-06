@@ -92,6 +92,9 @@ if(NOOKBIT_BUILD_QT_APP)
     )
     target_include_directories(nookbit_history PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(nookbit_history PUBLIC nookbit_core Qt6::Core Qt6::Sql)
+    if(WIN32)
+      target_link_libraries(nookbit_history PRIVATE bcrypt)
+    endif()
 
     qt_add_executable(nookbit
       presentation/main.cpp

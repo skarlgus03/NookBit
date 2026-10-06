@@ -7,5 +7,10 @@ class WindowsTransferFileInspector final : public ITransferFileInspector {
 public:
     /// 볼륨과 파일 ID·내용을 안전하게 읽고 확인 불가 이유도 반환하는 함수.
     [[nodiscard]] TransferFileObservation inspect(const std::filesystem::path& path) override;
+    /// Zone.Identifier를 읽기 전용으로 허용하는 완료 작업 검사 함수.
+    [[nodiscard]] TransferFileObservation inspectWithZone(const std::filesystem::path& path) override;
+private:
+    /// 계약별 지원 범위를 적용하는 읽기 전용 검사 함수.
+    [[nodiscard]] TransferFileObservation inspectImpl(const std::filesystem::path& path, bool allowZone);
 };
 } // namespace nookbit

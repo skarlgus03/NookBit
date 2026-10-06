@@ -17,6 +17,7 @@
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/approve_plan_use_case.hpp"
+#include "application/use_cases/plan_signature.hpp"
 #include <nookbit/application/sort_workflow.hpp>
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
@@ -70,14 +71,34 @@ public:
         if (!acquired) return Result<OperationPlan>::failure(acquired.error());
         Session session(*this);
         auto saved = Result<OperationPlan>::success(plan);
+        if (frozen) for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+            const auto supported = session.copy.preflightSource(step.source);
+            if (!supported) return Result<OperationPlan>::failure(supported.error());
+            if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
+                return Result<OperationPlan>::failure({"transfer.zone_contract_required", "Download marker appeared after preparation. Create a new preview."});
+        }
         if (!frozen) {
             auto draft = plan;
+            for (auto& step : draft.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+                const auto supported = session.copy.preflightSource(step.source);
+                if (!supported) return Result<OperationPlan>::failure(supported.error());
+                if (supported.value()) step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
+            }
             const bool sameVolumeOnly = std::all_of(draft.steps.begin(), draft.steps.end(), [](const MoveStep& step) {
                 return step.movement && step.movement->strategy == MoveStrategy::Rename;
             });
             if (sameVolumeOnly) for (auto& step : draft.steps) step.movement->strategy = MoveStrategy::MetadataRename;
             FreezePreviewUseCase freeze(session.rules, session.scanner, session.planner, session.hasher, session.history, &session.copy);
             saved = freeze.execute(draft, selected, settings);
+            if (!saved) return saved;
+            // 갓 고정한 계획은 DB 서명/내용만 읽어 확인하고 같은 파일을 곧바로 다시 해싱하지 않는다.
+            const auto readback = session.history.loadPlan(saved.value().id);
+            if (!readback || readback.value().planHash != saved.value().planHash ||
+                readback.value().status != PlanStatus::Planned ||
+                readback.value().planHash != session.hasher.sha256(PlanSignature::approvalPayload(readback.value())) ||
+                PlanSignature::planContents(readback.value()) != PlanSignature::planContents(saved.value()))
+                return Result<OperationPlan>::failure({"sort.saved_plan_changed", "Saved confirmation plan differs from the frozen snapshot."});
+            return readback;
         }
         if (!saved) return saved;
         return session.verify.execute(saved.value().id, selected, settings);
@@ -89,6 +110,12 @@ public:
         const auto acquired = lock.acquire();
         if (!acquired) return acquired;
         Session session(*this);
+        for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+            const auto supported = session.copy.preflightSource(step.source);
+            if (!supported) return Result<void>::failure(supported.error());
+            if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
+                return Result<void>::failure({"transfer.zone_contract_required", "Download marker appeared after confirmation. Create a new preview."});
+        }
         ApprovePlanUseCase approve(session.verify, session.history);
         const auto displayed = session.history.loadPlan(plan.id);
         if (!displayed || displayed.value().planHash != plan.planHash)

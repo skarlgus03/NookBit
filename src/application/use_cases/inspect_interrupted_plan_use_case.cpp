@@ -147,10 +147,14 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing :
         plan.status == PlanStatus::RolledBack ? PlanStatus::RollingBack : plan.status;
     std::vector<Error> globalReasons;
+    const bool withZone = std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
+        return step.movement && step.movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    });
+    if (withZone) globalReasons.push_back({"recovery.zone_unsupported", "Interrupted download-marker transfers require manual review; automatic resume/rollback is not yet supported."});
     if (PlanSignature::isMetadataRenamePlan(plan)) globalReasons.push_back({"recovery.metadata_unsupported", "Interrupted metadata-only renames require manual review; automatic resume/rollback is not yet supported."});
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});
-    if (report.planIntact && plan.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(plan)) {
+    if (report.planIntact && plan.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(plan) && !withZone) {
         if (!volumes_) globalReasons.push_back({"recovery.volume_verifier_required", "V2 inspection requires current volume identities."});
         else {
             PrepareTransferPlanUseCase prepare(*volumes_);

@@ -218,6 +218,10 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
         QFile file(source); expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(QByteArray(2 * 1024 * 1024 + 37, 'b')) > 0, "owned background source");
         file.close(); pending.addUrl(QUrl::fromLocalFile(source));
     }
+    const bool taggedCrossVolume = sourceRoot != targetRoot;
+    const QByteArray ownedMarker("[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/owned-background\r\n");
+    const auto ownedZone = sources[0] + ":Zone.Identifier";
+    if (taggedCrossVolume) { QFile marker(ownedZone); expect(marker.open(QIODevice::WriteOnly | QIODevice::NewOnly) && marker.write(ownedMarker) == ownedMarker.size(), "owned cross-volume marker"); }
     preview.createPreview(home);
     expect(!preview.prepareSort() && runner.busy() && !preview.awaitingConfirmation(), "preparation must return immediately without opening premature confirmation");
     preview.confirmSort();
@@ -231,6 +235,7 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     for (const auto& source : sources) expect(!QFile::exists(source), "background source moved");
     preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
     expect(waitForBackground(runner) && !preview.canUndo(), "background last undo completes");
+    if (taggedCrossVolume) { QFile marker(ownedZone); expect(marker.open(QIODevice::ReadOnly) && marker.readAll() == ownedMarker, "cross-volume move and undo preserve exact download marker"); }
     for (const auto& source : sources) { expect(QFile::exists(source), "background original restored"); pending.addUrl(QUrl::fromLocalFile(source)); }
     preview.createPreview(home); preview.prepareSort();
     expect(waitForBackground(runner) && preview.awaitingConfirmation(), "second background confirmation"); preview.confirmSort();
@@ -240,6 +245,10 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     history.selectHistoryPlan(history.historyEntries().front().toMap().value("planId").toString());
     history.undoSelectedHistory(); expect(runner.busy(), "history undo must dispatch to background");
     expect(waitForBackground(runner) && !preview.canUndo(), "history completion refreshes last undo");
+    if (taggedCrossVolume) {
+        QFile marker(ownedZone); expect(marker.open(QIODevice::ReadOnly) && marker.readAll() == ownedMarker, "history undo preserves download marker"); marker.close();
+        expect(QFile::remove(ownedZone), "remove only owned fixture marker before legacy recovery regression");
+    }
     for (const auto& source : sources) pending.addUrl(QUrl::fromLocalFile(source));
     preview.createPreview(home); preview.freezePreview(); preview.approvePlan();
     const auto plans = workflow.history.incompletePlans();

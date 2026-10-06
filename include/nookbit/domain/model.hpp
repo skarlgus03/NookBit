@@ -174,7 +174,7 @@ struct RuleSet {
 enum class MoveStrategy { Rename, VerifiedCopy, MetadataRename };
 
 /// 다른 볼륨 복사에서 현재 지원하는 메타데이터 보존 범위.
-enum class PreservationPolicy { LocalNtfsBasic };
+enum class PreservationPolicy { LocalNtfsBasic, LocalNtfsBasicWithZone };
 
 /// 드라이브 문자와 별개로 승인 시 확인한 실제 볼륨을 표현한다.
 struct PlanVolume {

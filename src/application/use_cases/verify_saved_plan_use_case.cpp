@@ -89,6 +89,7 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
         current = prepare.execute(current.value());
         if (!current) return Result<OperationPlan>::failure(current.error());
     }
+    inheritMetadataRenamePolicy(current.value(), saved);
     const auto currentFormat = PlanSignature::validateFormat(current.value());
     if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
     auto hashed = attachContentHashes(current.value(), scanner_, hasher_);

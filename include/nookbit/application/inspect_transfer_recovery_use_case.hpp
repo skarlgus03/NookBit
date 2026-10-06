@@ -21,6 +21,8 @@ public:
     virtual ~ITransferFileInspector() = default;
     /// 볼륨·객체·내용을 읽되 파일 생성·이동·삭제는 하지 않는 함수.
     [[nodiscard]] virtual TransferFileObservation inspect(const std::filesystem::path& path) = 0;
+    /// 다운로드 표식 보존 계약의 완료 작업을 읽기 전용으로 검사하는 함수.
+    [[nodiscard]] virtual TransferFileObservation inspectWithZone(const std::filesystem::path& path) { return inspect(path); }
 };
 
 enum class TransferRecoveryFileState {

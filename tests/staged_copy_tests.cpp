@@ -1,4 +1,5 @@
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
@@ -18,6 +19,8 @@
 
 namespace {
 int failures{};
+// 다운로드 표식 원문을 보존하고 비지원 스트림/기존 계약을 계속 거부하는 함수.
+void testZonePreservation(const std::filesystem::path& root);
 // 조건이 거짓이면 실패를 기록하는 함수.
 void expect(bool condition, const char* message) {
     if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
@@ -42,6 +45,61 @@ void unchanged(const std::filesystem::path& source, const nookbit::FileFingerpri
 }
 
 #ifdef _WIN32
+// 새로 만든 시험 파일의 Zone.Identifier만 복사·확정·보호하는 함수.
+void testZonePreservation(const std::filesystem::path& root) {
+    using namespace nookbit;
+    const auto source = root / "zone-source", staging = root / "zone-stage", final = root / "zone-final";
+    const auto zonePath = std::filesystem::path(source.wstring() + L":Zone.Identifier");
+    const std::string marker = "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/owned-test\r\n";
+    write(source, "owned zone payload"); write(zonePath, marker);
+    WindowsStagedCopy copy;
+    const auto supported = copy.preflightSource(source);
+    expect(supported && supported.value(), "zone preflight detects bounded marker without full contents");
+    const auto expected = fingerprint(source);
+    expect(!copy.open(source, expected, root / "zone-legacy-stage"), "legacy contract still rejects named streams");
+    const auto volume = copy.inspectVolume(source);
+    if (!volume) { expect(false, "zone fixture volume"); return; }
+    auto guid = volume.value().name;
+    for (auto& ch : guid) if (ch >= L'A' && ch <= L'F') ch = ch + (L'a' - L'A');
+    PlanVolume approved{volume.value().id, std::string(guid.begin(), guid.end()), "NTFS"};
+    MoveContract movement{MoveStrategy::VerifiedCopy, approved, approved, PreservationPolicy::LocalNtfsBasicWithZone};
+    auto session = copy.openApproved(source, expected, staging, movement);
+    if (!session) { std::cerr << session.error().code << ": " << session.error().message << '\n'; expect(false, "zone protected session"); return; }
+    expect(session.value()->copyAndVerify().hasValue(), "zone copy verifies data and marker");
+    HANDLE writer = CreateFileW(zonePath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    expect(writer == INVALID_HANDLE_VALUE, "source marker write is blocked during copy session"); if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+    const auto committed = session.value()->commitNoReplace(final);
+    if (!committed) std::cerr << committed.error().code << ": " << committed.error().message << '\n';
+    expect(committed.hasValue(), "zone commit preserves marker"); session.value().reset();
+    if (!committed) return;
+    std::ifstream copied(std::filesystem::path(final.wstring() + L":Zone.Identifier"), std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(copied)), std::istreambuf_iterator<char>());
+    expect(bytes == marker, "final marker bytes exactly preserved");
+    copied.close();
+    TransferAttempt attempt;
+    attempt.id = "owned-zone-attempt"; attempt.planId = "owned-zone-plan"; attempt.stepId = "owned-zone-step";
+    attempt.source = source; attempt.staging = staging; attempt.destination = final;
+    attempt.sourceFingerprint = expected; attempt.stagingFingerprint = committed.value(); attempt.destinationFingerprint = committed.value();
+    attempt.phase = TransferPhase::DestinationCommitted;
+    write(zonePath, "owned changed marker");
+    WindowsTransferSourceRemoval removal;
+    auto guard = removal.openApproved(attempt, movement);
+    expect(bool(guard), "zone removal guard opens without deleting");
+    if (guard) {
+        const auto refused = guard.value()->removeVerifiedSource();
+        expect(!refused && refused.error().code == "transfer.zone_changed", "marker mismatch refuses source deletion");
+        guard.value().reset();
+    }
+    expect(std::filesystem::exists(source) && std::filesystem::exists(final), "marker mismatch retains both copies");
+    write(std::filesystem::path(source.wstring() + L":extra"), "owned unsupported stream");
+    expect(!copy.preflightSource(source), "unknown named stream is rejected at preflight");
+    expect(!std::filesystem::exists(root / "zone-legacy-stage"), "early rejected legacy stream creates no staging");
+    const auto oversized = root / "oversized-zone";
+    write(oversized, "owned oversized marker fixture");
+    write(std::filesystem::path(oversized.wstring() + L":Zone.Identifier"), std::string(65537, 'z'));
+    expect(!copy.preflightSource(oversized), "oversized download marker is rejected before full content hashing");
+}
+
 // 기록된 임시 객체의 앞부분을 검증하고 나머지만 이어 쓰는 경계를 검사하는 함수.
 void testPartialCopyResume(const std::filesystem::path& root) {
     using namespace nookbit;
@@ -330,6 +388,7 @@ int main(int argc, char** argv) {
     expect(!worker.open(source, now, root / "ads-stage"), "named streams rejected");
     expect(DeleteFileW((source.wstring() + L":extra").c_str()), "remove fixture stream");
     expect(nookbit::TransferValidation::sameContent(now, fingerprint(source)), "main stream retained after ADS fixture");
+    testZonePreservation(root);
 
     const auto parent = root / "locked-parent";
     std::filesystem::create_directory(parent);

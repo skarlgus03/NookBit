@@ -175,9 +175,9 @@ std::optional<MoveContract> parseMovement(const QString& text) {
     const auto destination = parseVolume(object.value("destinationVolume"));
     if (object.size() != 4 || !strategy.isDouble() ||
         (strategy.toDouble() != 0 && strategy.toDouble() != 1 && strategy.toDouble() != 2) ||
-        !preservation.isDouble() || preservation.toDouble() != 0 || !source || !destination) return {};
+        !preservation.isDouble() || (preservation.toDouble() != 0 && preservation.toDouble() != 1) || !source || !destination) return {};
     return MoveContract{static_cast<MoveStrategy>(strategy.toInt()), *source, *destination,
-                        PreservationPolicy::LocalNtfsBasic};
+                        static_cast<PreservationPolicy>(preservation.toInt())};
 }
 
 // 경고 목록을 DB의 JSON 문자열로 만드는 함수.

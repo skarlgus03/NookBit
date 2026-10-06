@@ -29,12 +29,17 @@ Result<FileFingerprint> selectedFingerprint(IScanner& scanner,
 
 // 같은 볼륨 빠른 계획을 재생성할 때 검사 정책만 유지하는 함수.
 void inheritMetadataRenamePolicy(OperationPlan& current, const OperationPlan& reference) {
-    if (!PlanSignature::isMetadataRenamePlan(reference) || current.steps.size() != reference.steps.size()) return;
+    if (current.steps.size() != reference.steps.size()) return;
+    const bool metadataOnly = PlanSignature::isMetadataRenamePlan(reference);
     for (size_t i = 0; i < current.steps.size(); ++i) {
         auto& step = current.steps[i];
-        if (step.source == reference.steps[i].source && step.destination == reference.steps[i].destination &&
+        if (metadataOnly && step.source == reference.steps[i].source && step.destination == reference.steps[i].destination &&
             step.movement && step.movement->strategy == MoveStrategy::Rename)
             step.movement->strategy = MoveStrategy::MetadataRename;
+        if (step.source == reference.steps[i].source && step.destination == reference.steps[i].destination &&
+            step.movement && reference.steps[i].movement && step.movement->strategy == MoveStrategy::VerifiedCopy &&
+            reference.steps[i].movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone)
+            step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
     }
 }
 

@@ -133,7 +133,8 @@ Result<void> PlanSignature::validateFormat(const OperationPlan& plan) {
         const auto& movement = *step.movement;
         if (!validVolume(movement.sourceVolume) || !validVolume(movement.destinationVolume) ||
             !step.fingerprint.volumeId || *step.fingerprint.volumeId != movement.sourceVolume.serial ||
-            movement.preservation != PreservationPolicy::LocalNtfsBasic)
+            (movement.preservation != PreservationPolicy::LocalNtfsBasic &&
+             !(movement.preservation == PreservationPolicy::LocalNtfsBasicWithZone && movement.strategy == MoveStrategy::VerifiedCopy)))
             return Result<void>::failure({"plan.volume_invalid", "Volume identity or preservation policy is invalid."});
         const bool same = movement.sourceVolume.guidPath == movement.destinationVolume.guidPath;
         if ((same && movement.sourceVolume.serial != movement.destinationVolume.serial) ||
