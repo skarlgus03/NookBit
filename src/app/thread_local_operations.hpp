@@ -15,11 +15,15 @@
 #include "modules/rules/rule_engine.hpp"
 #include "modules/planner/planner.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "application/use_cases/freeze_preview_use_case.hpp"
+#include "application/use_cases/approve_plan_use_case.hpp"
+#include <nookbit/application/sort_workflow.hpp>
+#include "infrastructure/filesystem/operation_mutex.hpp"
 #include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 
 namespace nookbit {
 /// 요청을 실행하는 스레드 안에서 모든 파일/DB 포트를 생성·해제하는 조립부.
-class ThreadLocalOperations final : public IFileOperations, public IInterruptedOperations {
+class ThreadLocalOperations final : public IFileOperations, public IInterruptedOperations, public ISortWorkflow {
     QString database_, migration_, rules_, schema_, legacy_;
     std::filesystem::path appData_;
     ISettingsRepository& settings_;
@@ -58,6 +62,40 @@ class ThreadLocalOperations final : public IFileOperations, public IInterruptedO
               recover(inspector, history, owner.settings_, rules, hasher, runner, &resolver), interrupted(inspector, history, recover) {}
     };
 public:
+    /// 작업 스레드 전용 연결로 고정·검사를 끝내고 확인할 계획을 반환하는 함수.
+    Result<OperationPlan> prepare(const OperationPlan& plan, bool frozen,
+        const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
+        OperationMutex lock;
+        const auto acquired = lock.acquire();
+        if (!acquired) return Result<OperationPlan>::failure(acquired.error());
+        Session session(*this);
+        auto saved = Result<OperationPlan>::success(plan);
+        if (!frozen) {
+            FreezePreviewUseCase freeze(session.rules, session.scanner, session.planner, session.hasher, session.history, &session.copy);
+            saved = freeze.execute(plan, selected, settings);
+        }
+        if (!saved) return saved;
+        return session.verify.execute(saved.value().id, selected, settings);
+    }
+    /// 사용자 확인 후 승인 검사와 파일 실행 모두 현재 작업 스레드에서 수행하는 함수.
+    Result<void> approveAndExecute(const OperationPlan& plan,
+        const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
+        OperationMutex lock;
+        const auto acquired = lock.acquire();
+        if (!acquired) return acquired;
+        Session session(*this);
+        ApprovePlanUseCase approve(session.verify, session.history);
+        const auto displayed = session.history.loadPlan(plan.id);
+        if (!displayed || displayed.value().planHash != plan.planHash)
+            return Result<void>::failure({"sort.confirmation_stale", "The displayed plan changed before approval."});
+        const auto approval = approve.execute(plan.id, selected, settings);
+        if (!approval) return Result<void>::failure(approval.error());
+        const auto approved = session.history.loadPlan(plan.id);
+        if (!approved) return Result<void>::failure(approved.error());
+        if (approval.value().planHash != plan.planHash)
+            return Result<void>::failure({"sort.confirmation_stale", "The approval differs from the displayed plan."});
+        return session.operations.executeApproved(approved.value(), approval.value(), selected, settings);
+    }
     /// 불변 경로와 스레드 안전한 현재 설정 포트만 보관하는 함수.
     ThreadLocalOperations(QString database, QString migration, QString rules, QString schema, QString legacy,
         std::filesystem::path appData, ISettingsRepository& settings)

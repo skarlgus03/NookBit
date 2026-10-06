@@ -210,6 +210,7 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     nookbit::HistoryController history(workflow.history, operations);
     nookbit::RecoveryController recovery(workflow.history, nullptr, &workflow.journal, &operations);
     preview.setTaskRunner(&runner); history.setTaskRunner(&runner); recovery.setTaskRunner(&runner);
+    preview.setSortWorkflow(&operations);
     QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
         &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     const QStringList sources{QDir(sourceRoot).filePath("background.jpg"), QDir(targetRoot).filePath("local.png")};
@@ -217,7 +218,13 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
         QFile file(source); expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(QByteArray(2 * 1024 * 1024 + 37, 'b')) > 0, "owned background source");
         file.close(); pending.addUrl(QUrl::fromLocalFile(source));
     }
-    preview.createPreview(home); expect(preview.prepareSort(), "background frozen confirmation");
+    preview.createPreview(home);
+    expect(!preview.prepareSort() && runner.busy() && !preview.awaitingConfirmation(), "preparation must return immediately without opening premature confirmation");
+    preview.confirmSort();
+    expect(waitForBackground(runner) && preview.awaitingConfirmation() && !preview.hasApprovedPlan(), "background preparation opens confirmation without approval");
+    for (const auto& source : sources) expect(QFile::exists(source), "preparation must not move files");
+    preview.cancelSort(); expect(!preview.awaitingConfirmation() && !runner.busy(), "cancel preparation confirmation without movement");
+    preview.prepareSort(); expect(waitForBackground(runner) && preview.awaitingConfirmation(), "frozen plan recheck in background");
     preview.confirmSort(); expect(runner.busy(), "sort must return before background completion");
     preview.confirmSort(); preview.undoLastMove();
     expect(waitForBackground(runner) && pending.count() == 0 && preview.canUndo(), "background movement updates queue and undo on UI thread");
@@ -225,7 +232,8 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
     expect(waitForBackground(runner) && !preview.canUndo(), "background last undo completes");
     for (const auto& source : sources) { expect(QFile::exists(source), "background original restored"); pending.addUrl(QUrl::fromLocalFile(source)); }
-    preview.createPreview(home); expect(preview.prepareSort(), "second background confirmation"); preview.confirmSort();
+    preview.createPreview(home); preview.prepareSort();
+    expect(waitForBackground(runner) && preview.awaitingConfirmation(), "second background confirmation"); preview.confirmSort();
     expect(waitForBackground(runner) && preview.canUndo(), "second background move");
     history.refreshHistory();
     if (history.historyEntries().isEmpty()) { expect(false, "background recent history"); return; }
@@ -249,6 +257,36 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     expect(operations.rollback(plan.id).hasValue(), "owned background fixture final restoration");
 #else
     (void)sourceRoot; (void)targetRoot;
+#endif
+}
+
+// 확인창 이후 파일 변경이 비동기 승인에서 거부되는지 검사하는 함수.
+void testBackgroundApprovalSafety() {
+#ifdef _WIN32
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "background approval safety directory"); return; }
+    const auto rules = projectPath("resources/rules/default.v3.json"), schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto home = directory.filePath("organized");
+    const auto appData = std::filesystem::path(directory.filePath("app-data").toStdWString());
+    PreviewWorkflow workflow(rules, schema, appData, true);
+    nookbit::UserSettings settings; settings.homeRoot = std::filesystem::path(home.toStdWString());
+    nookbit::RuntimeSettingsRepository current(settings);
+    nookbit::ThreadLocalOperations operations(directory.filePath("history.sqlite"),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"), rules, schema, {}, appData, current);
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, operations, rules, schema, home);
+    preview.setTaskRunner(&runner); preview.setSortWorkflow(&operations);
+    const auto source = directory.filePath("changed.jpg");
+    QFile file(source); expect(file.open(QIODevice::WriteOnly) && file.write("owned source") > 0, "background changed source"); file.close();
+    pending.addUrl(QUrl::fromLocalFile(source)); preview.createPreview(home); preview.prepareSort();
+    expect(waitForBackground(runner) && preview.awaitingConfirmation(), "background approval safety confirmation");
+    expect(file.open(QIODevice::Append) && file.write(" changed") > 0, "change after background confirmation"); file.close();
+    preview.confirmSort(); expect(runner.busy(), "approval revalidation must not block screen");
+    expect(waitForBackground(runner) && QFile::exists(source) && pending.count() == 1 && !preview.canUndo(), "changed source must not be moved by background approval");
+    const auto plans = workflow.history.incompletePlans();
+    expect(plans && plans.value().size() == 1 && plans.value()[0].status == nookbit::PlanStatus::Planned, "failed approval must leave unapproved plan");
 #endif
 }
 
@@ -1647,6 +1685,7 @@ int main(int argc, char* argv[]) {
     if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
     if (application.arguments().size() > 1) return 2;
     testBackgroundRunner();
+    testBackgroundApprovalSafety();
     QTemporaryDir backgroundSameVolume;
     if (backgroundSameVolume.isValid()) testBackgroundWorkflow(backgroundSameVolume.path(), backgroundSameVolume.path());
     QTemporaryDir nativeSameVolume;

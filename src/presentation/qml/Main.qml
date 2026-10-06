@@ -466,7 +466,7 @@ ApplicationWindow {
                     enabled: previewController.hasPreview && previewController.hasMovableSteps
                              && !previewController.awaitingConfirmation
                     onClicked: {
-                        if (previewController.prepareSort()) sortConfirmation.open()
+                        previewController.prepareSort()
                     }
                 }
             }
@@ -631,7 +631,9 @@ ApplicationWindow {
         target: previewController
         // 목록·규칙·설정 변경으로 확인이 무효화되면 창도 닫는 함수.
         function onPreviewChanged() {
-            if (!previewController.awaitingConfirmation && sortConfirmation.visible)
+            if (previewController.awaitingConfirmation && !sortConfirmation.visible)
+                sortConfirmation.open()
+            else if (!previewController.awaitingConfirmation && sortConfirmation.visible)
                 sortConfirmation.close()
         }
     }

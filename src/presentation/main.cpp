@@ -185,6 +185,7 @@ int main(int argc, char* argv[]) {
     nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &fileOperations);
     nookbit::HistoryController historyController(history, fileOperations);
     previewController.setTaskRunner(&backgroundTasks);
+    previewController.setSortWorkflow(&fileOperations);
     historyController.setTaskRunner(&backgroundTasks);
     recoveryController.setTaskRunner(&backgroundTasks);
     QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,

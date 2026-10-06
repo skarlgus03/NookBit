@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <memory>
 
 namespace nookbit {
 namespace {
@@ -251,6 +252,7 @@ bool PreviewController::prepareSort() {
         emit previewChanged();
         return false;
     }
+    if (runner_ && sortWorkflow_) { prepareSortInBackground(); return false; }
     if (!hasFrozenPlan_) freezePreview();
     if (!hasFrozenPlan_) return false;
     if (!verifySavedPlan()) {
@@ -277,6 +279,7 @@ void PreviewController::confirmSort() {
     if (runner_ && runner_->busy()) return;
     if (!awaitingConfirmation_) return;
     awaitingConfirmation_ = false;
+    if (runner_ && sortWorkflow_) { confirmSortInBackground(); return; }
     approvePlan();
     if (!approval_) {
         showError(message_);
@@ -284,6 +287,45 @@ void PreviewController::confirmSort() {
     }
     moveApprovedFile();
     if (!runner_ && hasPreview_) showError(message_);
+}
+
+// 파일 검사·해시 계산·저장을 작업 스레드로 보내 확인 결과만 화면에 반영하는 함수.
+void PreviewController::prepareSortInBackground() {
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
+    std::vector<std::filesystem::path> selected;
+    const auto paths = pendingFiles_.filePaths();
+    for (const auto& path : paths) selected.emplace_back(path.toStdWString());
+    auto prepared = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure({"sort.not_prepared", "Preparation did not complete."}));
+    message_ = QStringLiteral("정리할 파일을 검사하고 있어요. 아직 이동하지 않았어요.");
+    emit previewChanged();
+    dispatchOperation(runner_, this,
+        [workflow = sortWorkflow_, plan = *draft_, frozen = hasFrozenPlan_, selected, settings, prepared] {
+            *prepared = workflow->prepare(plan, frozen, selected, settings);
+            return *prepared ? Result<void>::success() : Result<void>::failure(prepared->error());
+        }, [this, paths, prepared](const Result<void>& result) {
+            if (!result) { showError(QStringLiteral("정리 준비 검사에 실패했어요: %1").arg(QString::fromStdString(result.error().message))); return; }
+            if (pendingFiles_.filePaths() != paths) { showError(QStringLiteral("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
+            draft_ = prepared->value(); hasFrozenPlan_ = true; awaitingConfirmation_ = true;
+            message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
+            emit previewChanged();
+        });
+}
+
+// 명시적 확인 뒤 승인 재검사와 실제 이동을 한 작업 스레드에서 이어 실행하는 함수.
+void PreviewController::confirmSortInBackground() {
+    if (!draft_ || !hasFrozenPlan_) return;
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
+    std::vector<std::filesystem::path> selected;
+    for (const auto& path : pendingFiles_.filePaths()) selected.emplace_back(path.toStdWString());
+    const auto plan = *draft_;
+    message_ = QStringLiteral("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
+    dispatchOperation(runner_, this,
+        [workflow = sortWorkflow_, plan, selected, settings] { return workflow->approveAndExecute(plan, selected, settings); },
+        [this, plan](const Result<void>& result) { finishMovement(plan.id, plan.steps, result); });
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
@@ -399,30 +441,35 @@ void PreviewController::moveApprovedFile() {
         [operations = &operations_, plan = loaded.value(), approval = *approval_, selectedFiles, settings] {
             return operations->executeApproved(plan, approval, selectedFiles, settings);
         }, [this, movedPlanId, movedSteps](const Result<void>& result) {
-        if (!result) {
-            const auto current = history_.loadPlan(movedPlanId);
-            if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
-            emit recoveryReconcileRequested();
-            message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
-                           .arg(QString::fromStdString(result.error().message));
-            emit previewChanged();
-            return;
-        }
-        for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
-            const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
-            if (std::any_of(movedSteps.begin(), movedSteps.end(), [&path](const MoveStep& step) {
-                    return step.status == StepStatus::Planned && step.source == path;
-                })) {
-                pendingFiles_.removeAt(index);
-            }
-        }
-        undoPlanId_ = movedPlanId;
-        message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
-                       .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
-                           return step.status == StepStatus::Planned;
-                       }));
-        emit previewChanged();
+        finishMovement(movedPlanId, movedSteps, result);
     });
+}
+
+// 이동 완료/실패를 화면 스레드에서 동일한 규칙으로 처리하는 함수.
+void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps, const Result<void>& result) {
+    if (!result) {
+        const auto current = history_.loadPlan(movedPlanId);
+        if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
+        emit recoveryReconcileRequested();
+        message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
+                       .arg(QString::fromStdString(result.error().message));
+        emit previewChanged();
+        return;
+    }
+    for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
+        const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
+        if (std::any_of(movedSteps.begin(), movedSteps.end(), [&path](const MoveStep& step) {
+                return step.status == StepStatus::Planned && step.source == path;
+            })) {
+            pendingFiles_.removeAt(index);
+        }
+    }
+    undoPlanId_ = movedPlanId;
+    message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
+                   .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
+                       return step.status == StepStatus::Planned;
+                   }));
+    emit previewChanged();
 }
 
 // 마지막으로 이동한 계획의 파일들을 안전하게 되돌리는 함수.

@@ -10,6 +10,7 @@
 
 #include <QObject>
 #include "presentation/background_task_runner.hpp"
+#include <nookbit/application/sort_workflow.hpp>
 #include <QString>
 #include <QVariantList>
 
@@ -39,6 +40,8 @@ class PreviewController final : public QObject {
 public:
     /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
     void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
+    /// 확인 전후의 무거운 검사를 화면 밖으로 전달하는 계약을 받는 함수.
+    void setSortWorkflow(ISortWorkflow* workflow) { sortWorkflow_ = workflow; }
     /// 화면 모델·계획 작업·파일 실행 계약과 기본 목적지를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
                       ICreatePreviewUseCase& createPreview,
@@ -140,6 +143,13 @@ signals:
     void recoveryReconcileRequested();
 
 private:
+    ISortWorkflow* sortWorkflow_{nullptr};
+    /// 선택 경로와 현재 설정을 값으로 고정해 비동기 확인 준비를 요청하는 함수.
+    void prepareSortInBackground();
+    /// 고정 계획의 사용자 확인 이후 승인·이동을 비동기로 요청하는 함수.
+    void confirmSortInBackground();
+    /// 이동 결과를 화면 스레드에서만 대기 목록·기록 안내에 반영하는 함수.
+    void finishMovement(const PlanId& id, const std::vector<MoveStep>& steps, const Result<void>& result);
     BackgroundTaskRunner* runner_{nullptr};
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
     void showError(const QString& message);
