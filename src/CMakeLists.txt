@@ -51,6 +51,7 @@ add_library(nookbit_filesystem STATIC
   infrastructure/filesystem/windows_staged_copy.cpp
   infrastructure/filesystem/transfer_recovery_service.cpp
   infrastructure/filesystem/safe_executor.cpp
+  infrastructure/filesystem/file_operation_service.cpp
 )
 target_include_directories(nookbit_filesystem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nookbit_filesystem PUBLIC nookbit_core)

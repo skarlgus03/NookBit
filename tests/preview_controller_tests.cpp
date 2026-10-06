@@ -15,6 +15,12 @@
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
+#include "infrastructure/filesystem/file_operation_service.hpp"
+#include "infrastructure/filesystem/operation_mutex.hpp"
+#include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
@@ -33,6 +39,8 @@
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QVariantMap>
+#include <QSaveFile>
+#include <QDateTime>
 
 #include <filesystem>
 #include <iostream>
@@ -90,22 +98,34 @@ struct PreviewWorkflow {
     nookbit::RuleEngine ruleEngine;
     nookbit::Planner planner;
     nookbit::QtPlanHasher hasher;
+    nookbit::WindowsStagedCopy copy;
+    nookbit::WindowsTransferSourceRemoval removal;
+    nookbit::WindowsTransferFileInspector files;
     nookbit::CreatePreviewUseCase useCase;
     nookbit::SqliteHistoryRepository history;
     nookbit::FreezePreviewUseCase freezeUseCase;
     nookbit::VerifySavedPlanUseCase verifyUseCase;
     nookbit::ApprovePlanUseCase approveUseCase;
+    nookbit::SqliteTransferJournal journal;
+    nookbit::ExecuteTransferStepUseCase forward;
+    nookbit::RollbackTransferUseCase reverse;
+    nookbit::FileOperationService operations;
 
     /// 테스트 규칙과 보호 경로로 미리보기 작업을 조립하는 생성자.
-    PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData)
+    PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData, bool native = false)
         : rules(std::move(rulesPath), std::move(schemaPath)),
-          planner(ruleEngine, appData),
-          useCase(rules, scanner, planner, &hasher),
+          planner(ruleEngine, appData, native ? nookbit::CrossVolumeDrafts::Allow : nookbit::CrossVolumeDrafts::Reject),
+          useCase(rules, scanner, planner, &hasher, native ? &copy : nullptr),
           history(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
                   projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")),
-          freezeUseCase(rules, scanner, planner, hasher, history),
-          verifyUseCase(rules, scanner, planner, hasher, history),
-          approveUseCase(verifyUseCase, history) {}
+          freezeUseCase(rules, scanner, planner, hasher, history, native ? &copy : nullptr),
+          verifyUseCase(rules, scanner, planner, hasher, history, native ? &copy : nullptr),
+          approveUseCase(verifyUseCase, history),
+          journal(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
+              projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")),
+          forward(copy, removal, journal, history, hasher),
+          reverse(journal, history, copy, removal, files, hasher),
+          operations(verifyUseCase, scanner, hasher, history, std::move(appData), &copy, &forward, &reverse) {}
 
     /// 기본 예제 규칙으로 미리보기 작업을 조립하는 생성자.
     explicit PreviewWorkflow(std::filesystem::path appData)
@@ -134,9 +154,9 @@ void testWatchedFilesUseNormalSortWorkflow() {
     nookbit::PendingFilesModel pending;
     nookbit::PreviewController preview(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history,
+        workflow.approveUseCase, workflow.history, workflow.operations,
         projectPath("resources/rules/default.example.json"),
-        projectPath("schemas/rules.schema.json"), appData, home);
+        projectPath("schemas/rules.schema.json"), home);
     nookbit::JsonPendingFilesRepository queue(directory.filePath(QStringLiteral("pending-files.json")));
     // 실제 앱처럼 목록 변경 때 전체 경로만 저장하는 함수.
     QObject::connect(&pending, &nookbit::PendingFilesModel::countChanged, &pending, [&] {
@@ -218,7 +238,7 @@ void testSavedEditorRulesReachMainPreview() {
     nookbit::PendingFilesModel pending;
     nookbit::PreviewController preview(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history, activePath, schema, appData, home);
+        workflow.approveUseCase, workflow.history, workflow.operations, activePath, schema, home);
     QObject::connect(&editor, &nookbit::RuleEditorController::rulesSaved,
                      &preview, &nookbit::PreviewController::refreshActiveRules);
     pending.addUrl(QUrl::fromLocalFile(source));
@@ -300,7 +320,7 @@ void testEveryPreviewOutcomeIsVisible() {
     }
     nookbit::PreviewController controller(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history, rulesPath, schema, appData, home);
+        workflow.approveUseCase, workflow.history, workflow.operations, rulesPath, schema, home);
     controller.createPreview(home);
     expect(controller.steps().size() == 2 && controller.outcomes().size() == 4,
            "all four decisions should appear without adding non-moves to executable steps");
@@ -363,7 +383,7 @@ void testCommonCollisionPolicyWorkflow() {
     pending.addUrl(QUrl::fromLocalFile(source));
     nookbit::PreviewController controller(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history, rulesPath, schema, appData, home);
+        workflow.approveUseCase, workflow.history, workflow.operations, rulesPath, schema, home);
 
     controller.createPreview(home);
     const auto renamedPath = home + QStringLiteral("/Pictures/photo (1).jpg");
@@ -432,9 +452,9 @@ void testSortConfirmationSafety() {
     pending.addUrl(QUrl::fromLocalFile(source));
     nookbit::PreviewController controller(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history,
+        workflow.approveUseCase, workflow.history, workflow.operations,
         projectPath("resources/rules/default.example.json"),
-        projectPath("schemas/rules.schema.json"), appData, home);
+        projectPath("schemas/rules.schema.json"), home);
     controller.confirmSort();
     expect(QFile::exists(source) && !controller.hasApprovedPlan(),
            "confirmation without preparation must do nothing");
@@ -501,10 +521,10 @@ void testPreviewFromPendingFiles() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(appData.toStdWString()), home);
+        home);
     QString acceptedDestination;
     QObject::connect(&controller, &nookbit::PreviewController::destinationRootAccepted,
                      &controller, [&acceptedDestination](const QString& root) {
@@ -590,7 +610,7 @@ void testTreeRulesReachPreview() {
     PreviewWorkflow workflow(rulesPath, schemaPath, appData);
     nookbit::PreviewController controller(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history, rulesPath, schemaPath, appData, home);
+        workflow.approveUseCase, workflow.history, workflow.operations, rulesPath, schemaPath, home);
     controller.createPreview(home);
     expect(controller.hasPreview() && controller.steps().size() == 1,
            "tree rules should produce one preview step");
@@ -627,10 +647,9 @@ void testChangedFileAfterSaveFailsVerification() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     controller.freezePreview();
@@ -663,10 +682,9 @@ void testTamperedSavedPlanFailsVerification() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     controller.freezePreview();
@@ -723,9 +741,8 @@ void testChangedRulesCannotBeFrozen() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         rulesPath, projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     expect(controller.hasPreview(), "rule-change preview should be available");
@@ -842,10 +859,9 @@ void testChangedFileCannotBeFrozen() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     expect(controller.hasPreview(), "stale-test preview should be available");
@@ -882,10 +898,9 @@ void testSingleFileApproveMoveUndo() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     expect(controller.hasPreview() && controller.steps().size() == 1,
@@ -942,10 +957,9 @@ void testMultipleFilesCanBeMoved() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     controller.createPreview(home);
     const auto previewRows = controller.steps();
@@ -989,10 +1003,10 @@ void testHistoryUndoUpdatesLastMove() {
     PreviewWorkflow workflow(appData);
     nookbit::PreviewController preview(
         pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
-        workflow.approveUseCase, workflow.history,
+        workflow.approveUseCase, workflow.history, workflow.operations,
         projectPath("resources/rules/default.example.json"),
-        projectPath("schemas/rules.schema.json"), appData, home);
-    nookbit::HistoryController history(workflow.history, appData, home);
+        projectPath("schemas/rules.schema.json"), home);
+    nookbit::HistoryController history(workflow.history, workflow.operations);
     QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
                      &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     preview.createPreview(home);
@@ -1038,9 +1052,9 @@ void testHistoryUndoAfterRestart() {
         nookbit::PreviewController controller(
             pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
             previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-            previewWorkflow.history,
-            rulesPath, schemaPath, appData, home);
-        nookbit::HistoryController historyController(previewWorkflow.history, appData, home);
+            previewWorkflow.history, previewWorkflow.operations,
+            rulesPath, schemaPath, home);
+        nookbit::HistoryController historyController(previewWorkflow.history, previewWorkflow.operations);
         QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                          &controller, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
         pending.addUrl(QUrl::fromLocalFile(first));
@@ -1068,9 +1082,9 @@ void testHistoryUndoAfterRestart() {
     nookbit::PreviewController restarted(
         pendingAfterRestart, restartedWorkflow.useCase, restartedWorkflow.freezeUseCase,
         restartedWorkflow.verifyUseCase, restartedWorkflow.approveUseCase,
-        restartedWorkflow.history,
-        rulesPath, schemaPath, appData, home);
-    nookbit::HistoryController restartedHistory(restartedWorkflow.history, appData, home);
+        restartedWorkflow.history, restartedWorkflow.operations,
+        rulesPath, schemaPath, home);
+    nookbit::HistoryController restartedHistory(restartedWorkflow.history, restartedWorkflow.operations);
     QObject::connect(&restartedHistory, &nookbit::HistoryController::rollbackAttempted,
                      &restarted, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     restartedHistory.refreshHistory();
@@ -1126,10 +1140,9 @@ void testRecoveryCasesInController() {
     nookbit::PreviewController controller(
         pending, previewWorkflow.useCase, previewWorkflow.freezeUseCase,
         previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
-        previewWorkflow.history,
+        previewWorkflow.history, previewWorkflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"),
-        std::filesystem::path(directory.filePath(QStringLiteral("app-data")).toStdWString()),
         home);
     nookbit::RecoveryController recoveryController(previewWorkflow.history);
     QObject::connect(&controller, &nookbit::PreviewController::recoveryReconcileRequested,
@@ -1176,11 +1189,131 @@ void testRecoveryCasesInController() {
            "screen confirmation should clear the record without moving the source");
 }
 
+// 화면의 실제 미리보기·승인·이동·마지막/기록 되돌리기를 같은 서비스로 검사하는 함수.
+void testNativeControllerCase(const QString& sourceRun, const QString& targetRun, int index) {
+#ifdef _WIN32
+    const auto sourceDir = QDir(sourceRun).filePath(QString("case-%1/incoming").arg(index));
+    const auto targetDir = QDir(targetRun).filePath(QString("case-%1").arg(index));
+    expect(QDir().mkpath(sourceDir) && QDir().mkpath(QDir(targetDir).filePath("incoming")), "owned native controller directories");
+    const QStringList sources{QDir(sourceDir).filePath("first.jpg"), QDir(targetDir).filePath("incoming/second.jpg"), QDir(sourceDir).filePath("third.jpg")};
+    for (int i = 0; i < sources.size(); ++i) {
+        expect(!QFile::exists(sources[i]), "native controller test never overwrites existing sources");
+        QFile file(sources[i]);
+        expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(QByteArray("owned native UI bytes ") + QByteArray::number(i)) > 0, "native controller source creation");
+    }
+    const auto home = QDir(targetDir).filePath("organized");
+    const auto appData = std::filesystem::path(QDir(targetDir).filePath("app-data").toStdWString());
+    PreviewWorkflow workflow(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), appData, true);
+    nookbit::PendingFilesModel pending;
+    for (const auto& source : sources) pending.addUrl(QUrl::fromLocalFile(source));
+    nookbit::PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase, workflow.approveUseCase,
+        workflow.history, workflow.operations, projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), home);
+    controller.createPreview(home);
+    expect(controller.hasPreview() && controller.steps().size() == 3, "native UI should preview every selected file");
+    if (controller.steps().size() != 3) { std::cerr << controller.message().toStdString() << '\n'; return; }
+    controller.moveApprovedFile();
+    for (const auto& source : sources) expect(QFile::exists(source), "native UI cannot move before approval");
+    controller.freezePreview(); controller.approvePlan();
+    expect(controller.hasApprovedPlan(), "native UI should approve the stored v2 contracts");
+    const auto entries = workflow.history.incompletePlans();
+    if (!entries || entries.value().empty()) { expect(false, "native UI frozen history missing"); return; }
+    const auto loaded = workflow.history.loadPlan(entries.value()[0].id);
+    if (!loaded) { expect(false, "native UI signed plan missing"); return; }
+    const auto plan = loaded.value();
+    expect(plan.formatVersion == 2 && plan.status == nookbit::PlanStatus::Approved, "native UI must store approved v2, never downgrade to v1");
+    for (const auto& step : plan.steps) {
+        const auto a = workflow.copy.inspectVolume(step.source), b = workflow.copy.inspectVolume(step.destination);
+        expect(a && b && step.movement && step.movement->strategy ==
+            (a.value().name == b.value().name ? nookbit::MoveStrategy::Rename : nookbit::MoveStrategy::VerifiedCopy), "UI contracts must reflect real volume identities");
+    }
+    const auto destination = QString::fromStdWString(plan.steps[0].destination.wstring());
+    if (index == 2) {
+        expect(QDir().mkpath(QFileInfo(destination).absolutePath()), "late UI collision parent");
+        QFile occupant(destination); expect(occupant.open(QIODevice::WriteOnly | QIODevice::NewOnly) && occupant.write("owned late occupant") > 0, "late UI collision fixture");
+    }
+    if (index == 3) { QFile source(sources[0]); expect(source.open(QIODevice::Append) && source.write(" changed") > 0, "changed approved UI source"); }
+    controller.moveApprovedFile();
+    const auto moved = workflow.history.loadPlan(plan.id);
+    if (index == 2 || index == 3) {
+        expect(moved && moved.value().status == nookbit::PlanStatus::Approved && pending.count() == 3 && !controller.canUndo(), "UI rejection must not start movement or remove pending files");
+        for (const auto& source : sources) expect(QFile::exists(source), "rejected UI move preserves every source");
+        for (size_t i = 0; i < plan.steps.size(); ++i) if (index != 2 || i != 0) expect(!std::filesystem::exists(plan.steps[i].destination), "rejected UI move must not create another final file");
+        if (index == 2) { QFile occupant(destination); expect(occupant.open(QIODevice::ReadOnly) && occupant.readAll() == "owned late occupant", "UI collision occupant unchanged"); }
+        return;
+    }
+    expect(moved && moved.value().status == nookbit::PlanStatus::Completed && pending.count() == 0 && controller.canUndo(), "native UI move must complete and update pending/undo state");
+    if (!moved || moved.value().status != nookbit::PlanStatus::Completed) { std::cerr << controller.message().toStdString() << '\n'; return; }
+    for (const auto& step : plan.steps) {
+        const auto attempts = workflow.journal.forStep(step.id);
+        expect(attempts && attempts.value().size() == (step.movement->strategy == nookbit::MoveStrategy::VerifiedCopy ? 1 : 0), "UI movement must use exactly the expected transfer records");
+        const auto hash = workflow.hasher.sha256File(step.destination);
+        expect(!std::filesystem::exists(step.source) && hash && hash.value() == *step.fingerprint.sha256, "UI moved contents must match approved SHA-256");
+    }
+    if (index == 4) {
+        QFile occupant(sources[0]); expect(occupant.open(QIODevice::WriteOnly | QIODevice::NewOnly) && occupant.write("owned undo occupant") > 0, "UI undo collision fixture"); occupant.close();
+        controller.undoLastMove();
+        expect(workflow.history.loadPlan(plan.id).value().status == nookbit::PlanStatus::Completed && controller.canUndo(), "rejected UI undo must retain completed history and retry availability");
+        for (const auto& step : plan.steps) expect(std::filesystem::exists(step.destination), "undo preflight collision must leave all moved files in place");
+        QFile preserved(sources[0]); expect(preserved.open(QIODevice::ReadOnly) && preserved.readAll() == "owned undo occupant", "UI undo must not overwrite occupant");
+        return;
+    }
+    if (index == 1) {
+        PreviewWorkflow restarted(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), appData, true);
+        nookbit::HistoryController history(restarted.history, restarted.operations);
+        QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted, &controller, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
+        history.refreshHistory(); history.selectHistoryPlan(QString::fromStdString(plan.id));
+        expect(history.canUndoSelectedHistory(), "reopened history must offer native v2 undo"); history.undoSelectedHistory();
+    } else controller.undoLastMove();
+    const auto restored = workflow.history.loadPlan(plan.id);
+    expect(restored && restored.value().status == nookbit::PlanStatus::RolledBack && !controller.canUndo(), "native UI undo must finish and clear the last action");
+    for (const auto& step : plan.steps) {
+        const auto hash = workflow.hasher.sha256File(step.source);
+        expect(hash && hash.value() == *step.fingerprint.sha256 && !std::filesystem::exists(step.destination), "native UI undo restores each approved original");
+        const auto attempts = workflow.journal.forStep(step.id);
+        expect(attempts && attempts.value().size() == (step.movement->strategy == nookbit::MoveStrategy::VerifiedCopy ? 2 : 0), "native UI undo must use reverse copy only for cross-volume movement");
+    }
+#else
+    (void)sourceRun; (void)targetRun; (void)index;
+#endif
+}
+
+// 명시한 두 부모 안에 새 고유 자료만 만들어 실제 화면 연결을 시험하는 함수.
+int runNativeControllerTests(const QStringList& args) {
+    if (args.size() != 6 || args[2] != "--source-parent" || args[4] != "--destination-parent") return 2;
+    for (const auto& parent : {args[3], args[5]}) if (!QFileInfo(parent).isAbsolute() || !QFileInfo(parent).isDir()) return 2;
+    nookbit::WindowsStagedCopy volumes;
+    const auto a = volumes.inspectVolume(std::filesystem::path(args[3].toStdWString())), b = volumes.inspectVolume(std::filesystem::path(args[5].toStdWString()));
+    if (!a || !b || !a.value().localNtfs || !b.value().localNtfs || a.value().name == b.value().name) return 2;
+    nookbit::OperationMutex lock;
+    if (!lock.acquire()) return 2;
+    QTemporaryDir source(QDir(args[3]).filePath("NookBit-ui-source-XXXXXX")), target(QDir(args[5]).filePath("NookBit-ui-target-XXXXXX"));
+    source.setAutoRemove(false); target.setAutoRemove(false);
+    if (!source.isValid() || !target.isValid()) return 2;
+    std::cout << "Source fixtures: " << source.path().toStdString() << "\nTarget fixtures/report: " << target.path().toStdString() << '\n';
+    const QStringList names{"preview-mixed-move-last-undo", "reopened-history-mixed-undo", "late-destination-collision", "changed-approved-source", "undo-preflight-collision"};
+    QJsonArray cases;
+    for (int i = 0; i < names.size(); ++i) {
+        const auto before = failures; testNativeControllerCase(source.path(), target.path(), i);
+        cases.append(QJsonObject{{"case", names[i]}, {"passed", failures == before}});
+        std::cout << (failures == before ? "PASS " : "FAIL ") << names[i].toStdString() << '\n';
+    }
+    QSaveFile report(QDir(target.path()).filePath("ui-backend-report.json"));
+    const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"passed", failures == 0}, {"cases", cases}}).toJson();
+    if (!report.open(QIODevice::WriteOnly) || report.write(bytes) != bytes.size() || !report.commit()) return 2;
+    std::cout << "Owned fixtures retained; no recursive cleanup.\n";
+    return failures ? 1 : 0;
+}
 } // namespace
 
 // 미리보기 화면 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
+    if (application.arguments().size() > 1) return 2;
+    QTemporaryDir nativeSameVolume;
+    if (nativeSameVolume.isValid()) testNativeControllerCase(nativeSameVolume.path(), nativeSameVolume.path(), 0);
+    else expect(false, "native v2 same-volume UI fixture");
     testCommonCollisionPolicyWorkflow();
     testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();

@@ -1,8 +1,6 @@
 #pragma once
 
-#include "infrastructure/cryptography/qt_plan_hasher.hpp"
-#include "infrastructure/filesystem/filesystem_scanner.hpp"
-#include <nookbit/application/ports.hpp>
+#include <nookbit/application/file_operations.hpp>
 
 #include <QObject>
 #include <QString>
@@ -24,9 +22,8 @@ class HistoryController final : public QObject {
     Q_PROPERTY(int selectedHistoryFileCount READ selectedHistoryFileCount NOTIFY historyChanged)
 
 public:
-    /// 기록 저장소와 보호 경로 및 기본 목적지를 받아 기록 화면을 준비하는 생성자.
-    HistoryController(IHistoryRepository& history, std::filesystem::path appDataRoot,
-                      QString defaultDestinationRoot, QObject* parent = nullptr);
+    /// 기록 조회와 외부 소유 파일 실행 계약으로 기록 화면을 준비하는 생성자.
+    HistoryController(IHistoryRepository& history, IFileOperations& operations, QObject* parent = nullptr);
 
     /// 최근 실행 작업 목록을 화면에 반환하는 함수.
     [[nodiscard]] QVariantList historyEntries() const;
@@ -62,10 +59,7 @@ signals:
 
 private:
     IHistoryRepository& history_;
-    FilesystemScanner scanner_;
-    QtPlanHasher hasher_;
-    std::filesystem::path appDataRoot_;
-    QString defaultDestinationRoot_;
+    IFileOperations& operations_;
     std::optional<OperationPlan> selectedHistoryPlan_;
     QVariantList historyEntries_;
     QVariantList historySteps_;

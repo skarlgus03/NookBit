@@ -1,7 +1,5 @@
 #include "presentation/history_controller.hpp"
 
-#include "infrastructure/configuration/session_settings_repository.hpp"
-#include "infrastructure/filesystem/safe_executor.hpp"
 
 #include <QDateTime>
 #include <QVariantMap>
@@ -44,11 +42,9 @@ QString historyStepStatusText(StepStatus status) {
 
 } // namespace
 
-// 기록 저장소와 보호 경로 및 기본 목적지를 받아 기록 화면을 준비하는 생성자.
-HistoryController::HistoryController(IHistoryRepository& history, std::filesystem::path appDataRoot,
-                                     QString defaultDestinationRoot, QObject* parent)
-    : QObject(parent), history_(history), appDataRoot_(std::move(appDataRoot)),
-      defaultDestinationRoot_(std::move(defaultDestinationRoot)) {}
+// 기록 조회와 외부 소유 파일 실행 계약으로 기록 화면을 준비하는 생성자.
+HistoryController::HistoryController(IHistoryRepository& history, IFileOperations& operations, QObject* parent)
+    : QObject(parent), history_(history), operations_(operations) {}
 
 // 최근 실행 작업 목록을 화면에 반환하는 함수.
 QVariantList HistoryController::historyEntries() const { return historyEntries_; }
@@ -156,9 +152,7 @@ void HistoryController::undoSelectedHistory() {
         return;
     }
     const auto planId = selectedHistoryPlan_->id;
-    SessionSettingsRepository settings(std::filesystem::path(defaultDestinationRoot_.toStdWString()));
-    SafeExecutor executor(settings, scanner_, hasher_, history_, appDataRoot_);
-    const auto result = executor.rollback(planId);
+    const auto result = operations_.rollback(planId);
     emit rollbackAttempted(QString::fromStdString(planId));
     refreshHistory();
     if (!result) {

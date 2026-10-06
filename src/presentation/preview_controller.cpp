@@ -1,7 +1,5 @@
 #include "presentation/preview_controller.hpp"
 
-#include "infrastructure/configuration/session_settings_repository.hpp"
-#include "infrastructure/filesystem/safe_executor.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -20,16 +18,16 @@ QString displayPath(const std::filesystem::path& path) {
 
 } // namespace
 
-// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
+// 화면 모델·계획 작업·파일 실행 계약과 기본 목적지를 받는 생성자.
 PreviewController::PreviewController(PendingFilesModel& pendingFiles,
                                      ICreatePreviewUseCase& createPreview,
                                      IFreezePreviewUseCase& freezePreview,
                                      IVerifySavedPlanUseCase& verifySavedPlan,
                                      IApprovePlanUseCase& approvePlan,
                                      IHistoryRepository& history,
+                                     IFileOperations& operations,
                                      QString rulesPath,
                                      QString schemaPath,
-                                     std::filesystem::path appDataRoot,
                                      QString defaultDestinationRoot,
                                      QObject* parent,
                                      QString legacySchemaPath)
@@ -40,9 +38,8 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
       verifySavedPlan_(verifySavedPlan),
       approvePlan_(approvePlan),
       rules_(std::move(rulesPath), std::move(schemaPath), std::move(legacySchemaPath)),
-      planner_(ruleEngine_, appDataRoot),
       history_(history),
-      appDataRoot_(std::move(appDataRoot)),
+      operations_(operations),
       defaultDestinationRoot_(std::move(defaultDestinationRoot)) {
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::rowsRemoved, this, [this] { clear(); });
@@ -381,9 +378,10 @@ void PreviewController::moveApprovedFile() {
         emit previewChanged();
         return;
     }
-    SessionSettingsRepository settings(std::filesystem::path(previewHomeRoot_.toStdWString()), collisionPolicy_);
-    SafeExecutor executor(settings, verifySavedPlan_, scanner_, hasher_, history_, appDataRoot_);
-    const auto result = executor.execute(loaded.value(), *approval_, selectedFiles);
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
+    settings.defaultCollisionPolicy = collisionPolicy_;
+    const auto result = operations_.executeApproved(loaded.value(), *approval_, selectedFiles, settings);
     if (!result) {
         const auto current = history_.loadPlan(draft_->id);
         if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
@@ -418,9 +416,7 @@ void PreviewController::undoLastMove() {
         emit previewChanged();
         return;
     }
-    SessionSettingsRepository settings(std::filesystem::path(defaultDestinationRoot_.toStdWString()));
-    SafeExecutor executor(settings, scanner_, hasher_, history_, appDataRoot_);
-    const auto result = executor.rollback(*undoPlanId_);
+    const auto result = operations_.rollback(*undoPlanId_);
     if (!result) {
         const auto current = history_.loadPlan(*undoPlanId_);
         if (current && current.value().status != PlanStatus::Completed &&

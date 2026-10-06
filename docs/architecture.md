@@ -31,7 +31,7 @@ NookBit의 기본 입력은 사용자가 끌어온 파일의 **대기 목록**�
 
 Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접 구현하지 않도록 한다. 컨트롤러는 화면 입력을 변환하고 유스케이스를 호출하며 결과를 화면에 돌려준다. 앱 시작 시 실제 객체 연결은 주로 [`main.cpp`](../src/presentation/main.cpp)에 있다. [`CompositionRoot`](../src/app/composition_root.cpp)는 서비스 묶음 검증에 쓰이지만, 현재 데스크톱 연결의 전부를 대신하지는 않는다.
 
-현재는 [`PreviewController`](../src/presentation/preview_controller.hpp) 등이 일부 구체 Scanner/RuleEngine/Planner/저장소를 직접 생성·보유한다. 이는 우리가 지향하는 “화면은 포트와 유스케이스에 의존” 방향에 남아 있는 결합이다. 새 기능에서 이 패턴을 무작정 복제하지 말고, 기능 경계가 분명할 때 유스케이스/포트로 옮기자. 다만 작은 수정을 위해 대규모 구조 개편을 끼워 넣지는 않는다.
+2026-10-06 [`PreviewController`](../src/presentation/preview_controller.hpp)와 HistoryController의 Scanner/RuleEngine/Planner/Hasher 보유 및 SafeExecutor 직접 생성을 제거했다. main에서 조립한 IFileOperations 계약을 공유하고 FileOperationService가 요청별 SafeExecutor를 조립한다. 보호 경로와 전송 포트도 화면 밖에서 소유한다. PreviewController의 규칙 저장소 등 일부 구체 저장소 의존은 남아 있다. 이는 우리가 지향하는 “화면은 포트와 유스케이스에 의존” 방향에 남아 있는 결합이다. 새 기능에서 이 패턴을 무작정 복제하지 말고, 기능 경계가 분명할 때 유스케이스/포트로 옮기자. 다만 작은 수정을 위해 대규모 구조 개편을 끼워 넣지는 않는다.
 
 ## 규칙 모델
 

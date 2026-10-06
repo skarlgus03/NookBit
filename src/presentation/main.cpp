@@ -5,6 +5,10 @@
 #include "presentation/watch_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "infrastructure/filesystem/recovery_service.hpp"
+#include "infrastructure/filesystem/file_operation_service.hpp"
+#include "infrastructure/filesystem/windows_staged_copy.hpp"
+#include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
+#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
@@ -131,16 +135,23 @@ int main(int argc, char* argv[]) {
         previewRules, previewRules, nullptr, &previewRules,
         verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
         &previewRules, &testRule, &previewRules);
-    nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()));
+    nookbit::WindowsStagedCopy transferCopy;
+    nookbit::WindowsTransferSourceRemoval transferRemoval;
+    nookbit::WindowsTransferFileInspector transferFiles;
+    nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()), nookbit::CrossVolumeDrafts::Allow);
     nookbit::QtPlanHasher previewHasher;
     nookbit::CreatePreviewUseCase createPreview(
-        previewRules, previewScanner, previewPlanner, &previewHasher);
+        previewRules, previewScanner, previewPlanner, &previewHasher, &transferCopy);
     nookbit::SqliteHistoryRepository history(databasePath, migrationPath);
     nookbit::FreezePreviewUseCase freezePreview(
-        previewRules, previewScanner, previewPlanner, previewHasher, history);
+        previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy);
     nookbit::VerifySavedPlanUseCase verifySavedPlan(
-        previewRules, previewScanner, previewPlanner, previewHasher, history);
+        previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy);
     nookbit::ApprovePlanUseCase approvePlan(verifySavedPlan, history);
+    nookbit::ExecuteTransferStepUseCase forwardTransfer(transferCopy, transferRemoval, transferJournal, history, previewHasher);
+    nookbit::RollbackTransferUseCase reverseTransfer(transferJournal, history, transferCopy, transferRemoval, transferFiles, previewHasher);
+    nookbit::FileOperationService fileOperations(verifySavedPlan, previewScanner, previewHasher, history,
+        std::filesystem::path(appData.toStdWString()), &transferCopy, &forwardTransfer, &reverseTransfer);
     nookbit::PreviewController previewController(
         pendingFiles,
         createPreview,
@@ -148,9 +159,9 @@ int main(int argc, char* argv[]) {
         verifySavedPlan,
         approvePlan,
         history,
+        fileOperations,
         rulesPath,
         treeSchema,
-        std::filesystem::path(appData.toStdWString()),
         defaultDestination,
         nullptr, legacyTreeSchema);
     if (!verifyUi) {
@@ -172,9 +183,7 @@ int main(int argc, char* argv[]) {
         uiPreferences.sync();
     });
     nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal);
-    nookbit::HistoryController historyController(
-        history, std::filesystem::path(appData.toStdWString()),
-        defaultDestination);
+    nookbit::HistoryController historyController(history, fileOperations);
     QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                      &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     QObject::connect(&historyController, &nookbit::HistoryController::recoveryRefreshRequested,

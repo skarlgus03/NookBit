@@ -1,10 +1,7 @@
 #pragma once
 
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
-#include "infrastructure/cryptography/qt_plan_hasher.hpp"
-#include "infrastructure/filesystem/filesystem_scanner.hpp"
-#include "modules/planner/planner.hpp"
-#include "modules/rules/rule_engine.hpp"
+#include <nookbit/application/file_operations.hpp>
 #include "presentation/pending_files_model.hpp"
 #include <nookbit/application/use_cases/create_preview.hpp>
 #include <nookbit/application/use_cases/freeze_preview.hpp>
@@ -39,16 +36,16 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
 
 public:
-    /// 화면 모델과 계획 작업 계약 및 보호할 앱 데이터 경로를 받는 생성자.
+    /// 화면 모델·계획 작업·파일 실행 계약과 기본 목적지를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
                       ICreatePreviewUseCase& createPreview,
                       IFreezePreviewUseCase& freezePreview,
                       IVerifySavedPlanUseCase& verifySavedPlan,
                       IApprovePlanUseCase& approvePlan,
                       IHistoryRepository& history,
+                      IFileOperations& operations,
                       QString rulesPath,
                       QString schemaPath,
-                      std::filesystem::path appDataRoot,
                       QString defaultDestinationRoot,
                       QObject* parent = nullptr,
                       QString legacySchemaPath = {});
@@ -149,12 +146,8 @@ private:
     IVerifySavedPlanUseCase& verifySavedPlan_;
     IApprovePlanUseCase& approvePlan_;
     JsonRuleSetRepository rules_;
-    FilesystemScanner scanner_;
-    RuleEngine ruleEngine_;
-    Planner planner_;
-    QtPlanHasher hasher_;
     IHistoryRepository& history_;
-    std::filesystem::path appDataRoot_;
+    IFileOperations& operations_;
     QString defaultDestinationRoot_;
     QString activeRuleLabel_;
     CollisionPolicy collisionPolicy_{CollisionPolicy::Rename};
