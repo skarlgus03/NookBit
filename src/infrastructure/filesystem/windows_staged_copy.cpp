@@ -821,6 +821,70 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(cons
     return Return::success(std::make_unique<CleanupSession>(std::move(parents), std::move(source), std::move(staging), attempt));
 }
 
+// 보존한 부분 객체와 온전한 원본을 보호하고 승인 지문·내용 접두부를 재검사하는 함수.
+Result<std::unique_ptr<IStagingCleanupSession>> WindowsPreservedStagingCleanup::openPreserved(
+    const TransferAttempt& attempt, const MoveContract& movement, const FileFingerprint& expected, bool priorIntent) {
+    using Return = Result<std::unique_ptr<IStagingCleanupSession>>;
+    auto initial = attempt;
+    initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.error.reset(); initial.recoveryCompleted = false; initial.recoveryRemovalIntent = false;
+    initial.stagingCleanup = StagingCleanup::None; initial.copyResume = CopyResume::None; initial.stagingCommit = StagingCommit::None;
+    if (!TransferValidation::validateNew(initial) || attempt.direction != TransferDirection::Forward || !attempt.stagingFingerprint ||
+        !TransferValidation::sameObject(*attempt.stagingFingerprint, expected) || !expected.sha256 || expected.size >= attempt.sourceFingerprint.size ||
+        !validPath(attempt.source) || !validPath(attempt.staging) || !validPath(attempt.destination) ||
+        movement.strategy != MoveStrategy::VerifiedCopy || movement.preservation != PreservationPolicy::LocalNtfsBasic)
+        return Return::failure({"cleanup.partial_contract", "Ordinary recorded partial staging and approved copy contract required."});
+    std::vector<Handle> parents;
+    for (const auto& path : {attempt.source, attempt.staging}) {
+        const auto locked = lockParents(path, parents);
+        if (!locked) return Return::failure(locked.error());
+    }
+    Handle source(CreateFileW(attempt.source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (source.value == INVALID_HANDLE_VALUE) return Return::failure(failure("cleanup.source_lock"));
+    const auto sourceVolume = volume(source.value);
+    const auto stageVolume = volume(parents.back().value);
+    if (!sourceVolume || !stageVolume || !sourceVolume.value().localNtfs || !stageVolume.value().localNtfs ||
+        !approvedVolume(sourceVolume.value(), movement.sourceVolume) || !approvedVolume(stageVolume.value(), movement.destinationVolume) ||
+        sourceVolume.value().id != attempt.sourceFingerprint.volumeId || stageVolume.value().id != expected.volumeId)
+        return Return::failure({"cleanup.volume_changed", "Protected partial cleanup volumes changed."});
+    Handle staging(CreateFileW(attempt.staging.c_str(), GENERIC_READ | DELETE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+    if (staging.value == INVALID_HANDLE_VALUE && (GetLastError() != ERROR_FILE_NOT_FOUND || !priorIntent))
+        return Return::failure(failure("cleanup.stage_lock"));
+    const auto sourceChecked = verifyCleanupFile(source.value, attempt.source, attempt.sourceFingerprint);
+    if (!sourceChecked) return Return::failure(sourceChecked.error());
+    if (staging.value != INVALID_HANDLE_VALUE) {
+        const auto checked = verifyCleanupFile(staging.value, attempt.staging, expected);
+        const auto actualVolume = volume(staging.value);
+        if (!checked || !actualVolume || !approvedVolume(actualVolume.value(), movement.destinationVolume))
+            return Return::failure(!checked ? checked.error() : Error{"cleanup.volume_changed", "Partial object volume changed."});
+        LARGE_INTEGER zero{};
+        if (!SetFilePointerEx(source.value, zero, nullptr, FILE_BEGIN) || !SetFilePointerEx(staging.value, zero, nullptr, FILE_BEGIN))
+            return Return::failure(failure("cleanup.seek"));
+        std::vector<unsigned char> original(1024 * 1024), partial(original.size());
+        uintmax_t remaining = expected.size;
+        while (remaining) {
+            const DWORD wanted = static_cast<DWORD>(std::min<uintmax_t>(remaining, original.size()));
+            DWORD originalRead{}, partialRead{};
+            if (!ReadFile(source.value, original.data(), wanted, &originalRead, nullptr) ||
+                !ReadFile(staging.value, partial.data(), wanted, &partialRead, nullptr))
+                return Return::failure(failure("cleanup.prefix_read"));
+            if (originalRead != wanted || partialRead != wanted || !std::equal(original.begin(), original.begin() + wanted, partial.begin()))
+                return Return::failure({"cleanup.prefix_changed", "Partial bytes differ from the original; preserve staging."});
+            remaining -= wanted;
+        }
+    }
+    // 세션의 승인 지문은 별도 감사의 지문이며 전송 저널의 증거를 변경하지 않는다.
+    auto protectedAttempt = attempt;
+    protectedAttempt.stagingFingerprint = expected;
+    protectedAttempt.stagingCleanup = priorIntent ? StagingCleanup::IntentRecorded : StagingCleanup::None;
+    auto session = std::make_unique<CleanupSession>(std::move(parents), std::move(source), std::move(staging), protectedAttempt);
+    const auto checked = session->verify();
+    if (!checked) return Return::failure(checked.error());
+    return Return::success(std::move(session));
+}
+
 // 파일을 생성하지 않고 보호된 핸들에서 객체·내용·실제 볼륨을 읽는 함수.
 TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesystem::path& path) {
     TransferFileObservation result;
@@ -1061,6 +1125,11 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
 // Windows 외에서는 검증된 임시 복사본 정리를 지원하지 않는 함수.
 Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(const TransferAttempt&, const MoveContract*) {
     return Result<std::unique_ptr<IStagingCleanupSession>>::failure({"transfer.unsupported", "Windows only"});
+}
+// 지원되지 않는 플랫폼에서는 보존 부분 파일 정리도 변경 없이 거부하는 함수.
+Result<std::unique_ptr<IStagingCleanupSession>> WindowsPreservedStagingCleanup::openPreserved(
+    const TransferAttempt&, const MoveContract&, const FileFingerprint&, bool) {
+    return Result<std::unique_ptr<IStagingCleanupSession>>::failure({"cleanup.unsupported", "Windows only"});
 }
 // Windows 외에서는 원본 제거를 지원하지 않는 함수.
 Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::openImpl(const TransferAttempt&, const MoveContract*) {

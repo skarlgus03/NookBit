@@ -21,6 +21,14 @@ struct PreservedTransfer {
     StepId stepId;
     std::filesystem::path staging;
 };
+/// 부분 임시 파일의 명시적 정리 승인 지문과 결과를 이동 기록과 분리한다.
+struct PreservedCleanupRecord {
+    PlanId planId;
+    std::string planHash;
+    std::string attemptId;
+    FileFingerprint stagingFingerprint;
+    bool removed{false};
+};
 /// 현재 상태 비교와 선택 감사·재시작 상태 복원을 한 트랜잭션에 요청한다.
 struct RecoveryRestart {
     RecoveryRequest request;

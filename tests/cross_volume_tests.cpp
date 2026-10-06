@@ -45,6 +45,10 @@
 #include <stdexcept>
 #include <memory>
 #include <algorithm>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#endif
 
 namespace {
 using namespace nookbit;
@@ -365,6 +369,108 @@ qlonglong testSql(const QString& database, const QString& sql) {
     return result;
 }
 
+// 보존한 부분 파일의 승인·정리·감사 실패와 기록만 복구하는 경계를 시험하는 함수.
+void preservedCleanupScenario(SqliteHistoryRepository& history, SqliteTransferJournal& journal,
+    WindowsTransferFileInspector& files, WindowsStagedCopy& volumes, QtPlanHasher& hasher,
+    const QString& database, const TransferAttempt& attempt, int scenario) {
+    WindowsPreservedStagingCleanup worker;
+    CleanupPreservedStagingUseCase useCase(history, journal, files, worker, hasher);
+    PreservedStagingCleanupService service(useCase);
+    const auto plan = take(history.loadPlan(attempt.planId));
+    const auto stage = fingerprint(attempt.staging);
+    const auto events = testSql(database, "SELECT COUNT(*) FROM events");
+    auto approval = take(service.inspect(plan.id, attempt.id));
+    require(testSql(database, "SELECT COUNT(*) FROM events") == events && sameFingerprint(stage, fingerprint(attempt.staging)),
+        "Cleanup preview changed files or DB");
+    require(!service.execute({approval, false}) && !take(history.preservedCleanup(plan.id, attempt.id)), "Missing explicit approval must not record intent");
+    if (scenario == 0) {
+        const auto& movement = *plan.steps.back().movement;
+        {
+            auto guarded = take(worker.openPreserved(attempt, movement, approval.stagingFingerprint, false));
+            saved(guarded->verify());
+            for (const auto& protectedPath : {attempt.source, attempt.staging}) {
+                const auto writer = CreateFileW(protectedPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                require(writer == INVALID_HANDLE_VALUE, "Partial cleanup session must block source/staging writes");
+            }
+        }
+        require(sameFingerprint(stage, fingerprint(attempt.staging)), "Opening and releasing cleanup session must not delete staging");
+        auto wrongVolume = movement; wrongVolume.destinationVolume.guidPath = "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\";
+        require(!worker.openPreserved(attempt, wrongVolume, approval.stagingFingerprint, false), "Changed approved volume must block cleanup");
+    }
+    if (scenario == 1) approval.planHash = std::string(64, 'e');
+    if (scenario == 2) {
+        QFile source(QString::fromStdWString(attempt.source.wstring()));
+        require(source.open(QIODevice::Append) && source.write("changed") == 7, "Cannot change owned cleanup source");
+        source.close();
+    }
+    const auto backup = attempt.staging.parent_path() / "owned-partial-backup.tmp";
+    if (scenario == 3) {
+        std::filesystem::rename(attempt.staging, backup);
+        createFile(attempt.staging, "owned replacement stage");
+    }
+    if (scenario == 4 || scenario == 8) {
+        std::fstream partial(attempt.staging, std::ios::in | std::ios::out | std::ios::binary);
+        partial.put('X'); partial.close(); require(!partial.fail(), "Cannot change owned partial prefix");
+        if (scenario == 4) approval = take(service.inspect(plan.id, attempt.id)); // 새 승인이어도 원본 접두부가 아니면 거부한다.
+    }
+    if (scenario == 9) require(SetFileAttributesW(attempt.staging.c_str(), FILE_ATTRIBUTE_READONLY), "Cannot set owned staging readonly");
+    std::optional<FileFingerprint> finalOccupant;
+    if (scenario == 10) {
+        createFile(attempt.destination, "owned late final occupant"); finalOccupant = fingerprint(attempt.destination);
+    }
+    if (scenario == 11) std::filesystem::rename(attempt.staging, backup);
+    if (scenario == 5 || scenario == 6 || scenario == 7) {
+        const auto type = scenario == 5 ? "preserved_cleanup_intent" : "preserved_cleanup_removed";
+        testSql(database, QString("CREATE TRIGGER stop_partial_cleanup BEFORE INSERT ON events WHEN NEW.event_type='%1' BEGIN SELECT RAISE(FAIL,'owned cleanup audit failure'); END").arg(type));
+    }
+    const auto stageBefore = std::filesystem::exists(attempt.staging) ? std::optional<FileFingerprint>{fingerprint(attempt.staging)} : std::nullopt;
+    const auto result = service.execute({approval, true});
+    if (scenario == 0 || scenario == 12) {
+        saved(result);
+        require(!std::filesystem::exists(attempt.staging) && take(history.preservedCleanup(plan.id, attempt.id))->removed &&
+            !service.execute({approval, true}), "Explicit partial cleanup must finish once");
+        if (scenario == 12) {
+            testSql(database, "UPDATE events SET payload_json='{}' WHERE event_type='preserved_cleanup_removed'");
+            require(!history.preservedCleanup(plan.id, attempt.id) && !service.execute({approval, true}), "Corrupt completion audit must not silently succeed");
+        }
+    } else if (scenario == 6 || scenario == 7) {
+        require(!result && !std::filesystem::exists(attempt.staging) && take(history.preservedCleanup(plan.id, attempt.id)) &&
+            !take(history.preservedCleanup(plan.id, attempt.id))->removed, "Post-delete audit failure must preserve the original intent");
+        testSql(database, "DROP TRIGGER stop_partial_cleanup");
+        SqliteHistoryRepository reopened(database, QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
+        CleanupPreservedStagingUseCase restarted(reopened, journal, files, worker, hasher);
+        PreservedStagingCleanupService retry(restarted);
+        if (scenario == 7) {
+            createFile(attempt.staging, "owned later staging occupant");
+            const auto replacement = fingerprint(attempt.staging);
+            require(!retry.execute({approval, true}) && sameFingerprint(replacement, fingerprint(attempt.staging)) &&
+                !take(reopened.preservedCleanup(plan.id, attempt.id))->removed, "Cleanup retry must not delete a later occupant");
+        } else {
+            saved(retry.execute({approval, true}));
+            require(take(reopened.preservedCleanup(plan.id, attempt.id))->removed && !retry.execute({approval, true}), "Missing-stage retry must complete only the audit");
+        }
+    } else {
+        require(!result && (stageBefore ? sameFingerprint(*stageBefore, fingerprint(attempt.staging)) : !std::filesystem::exists(attempt.staging)) && !take(history.preservedCleanup(plan.id, attempt.id)) &&
+            testSql(database, "SELECT COUNT(*) FROM events") == events, "Rejected cleanup must preserve staging and all records");
+        if (scenario == 3 || scenario == 11) require(sameFingerprint(stage, fingerprint(backup)), "Rejected cleanup lost the owned stage backup");
+    }
+    require(take(history.loadPlan(plan.id)).status == PlanStatus::RolledBack &&
+        PlanSignature::planContents(take(history.loadPlan(plan.id))) == PlanSignature::planContents(plan) &&
+        take(journal.load(attempt.id)).phase == attempt.phase && take(journal.load(attempt.id)).copyResume == attempt.copyResume,
+        "Partial cleanup must not rewrite movement or transfer history");
+    if (scenario != 2) require(sameFingerprint(attempt.sourceFingerprint, fingerprint(attempt.source)), "Cleanup changed the original");
+    for (const auto& step : plan.steps) {
+        if (finalOccupant && step.id == attempt.stepId) require(sameFingerprint(*finalOccupant, fingerprint(step.destination)), "Cleanup changed a final occupant");
+        else require(!std::filesystem::exists(step.destination), "Cleanup created a final destination");
+    }
+    InspectInterruptedPlanUseCase reminders(history, journal, files, hasher, &volumes);
+    const auto remaining = reminders.inspectAll();
+    if (scenario == 12) require(!remaining, "Corrupt cleanup audit must remain an explicit inspection error, not disappear");
+    else require(remaining && remaining.value().empty() == (scenario == 0 || scenario == 6), "Completed cleanup must resolve only its staging reminder");
+    if (scenario == 9) require(SetFileAttributesW(attempt.staging.c_str(), FILE_ATTRIBUTE_NORMAL), "Cannot restore owned test-only readonly attribute");
+}
+
 // 실제 SQLite 기록 경계에 시험 전용 충돌만 삽입하는 저장소 대리자.
 class BatchHistory final : public IHistoryRepository {
     IHistoryRepository& inner_;
@@ -601,6 +707,7 @@ void batchScenario(const QString& sourceRun, const QString& targetRun, int index
                 const auto reminders = take(refreshed.inspectAll());
                 require(reminders.size() == 1 && reminders[0].preserved == 1 && reminders[0].resume.readiness == RecoveryReadiness::Blocked,
                     "Preserved stage reminder must remain visible even after movement undo finishes");
+                if (index >= 39) preservedCleanupScenario(history, journal, files, copy, hasher, database, attempt, index - 39);
             }
             return;
         }
@@ -1068,8 +1175,8 @@ int main(int argc, char** argv) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--mixed-crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run, --crash-run, --mixed-crash-run, --batch-run, --recovery-run, --transfer-recovery-run or --preserved-undo-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--mixed-crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-cleanup-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --crash-run, --mixed-crash-run, --batch-run, --recovery-run, --transfer-recovery-run, --preserved-undo-run or --preserved-cleanup-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -1086,6 +1193,7 @@ int main(int argc, char** argv) {
         const bool recovering = args[1] == "--recovery-run";
         const bool resolving = args[1] == "--transfer-recovery-run";
         const bool preserving = args[1] == "--preserved-undo-run";
+        const bool cleaning = args[1] == "--preserved-cleanup-run";
         // 일반 시험은 전체 잠금, 강제 종료 시험은 각 자식이 독립적으로 잠금을 갖는다.
         std::unique_ptr<OperationMutex> lock;
         if (!crashing) { lock = std::make_unique<OperationMutex>(); saved(lock->acquire()); }
@@ -1096,7 +1204,8 @@ int main(int argc, char** argv) {
         std::cout << "Source fixtures: " << source.path().toStdString() << "\nTarget fixtures/report: " << target.path().toStdString() << '\n';
         QJsonArray results;
         int failures = 0;
-        const QStringList names = mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :
+        const QStringList names = cleaning ? QStringList{"explicit-partial-cleanup", "stale-plan-approval", "changed-original-blocked", "replaced-stage-blocked", "changed-prefix-blocked", "intent-audit-failure", "removed-audit-only-retry", "later-occupant-blocked", "stale-stage-approval", "readonly-stage-blocked", "final-occupant-blocked", "unrecorded-absence-blocked", "corrupt-cleanup-audit-visible"} :
+            mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :
             crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
             preserving ? QStringList{"undo-prefix-preserve-partial", "preserved-undo-audit-failure", "changed-partial-source-blocked", "replaced-staging-blocked", "no-moves-partial-preserved", "late-undo-collision-retains-registration"} :
             resolving ? QStringList{"partial-then-whole-resume", "verified-stage-then-whole-resume", "commit-record-then-whole-resume", "committed-source-retained-resume", "removed-source-record-resume", "completion-record-resume", "last-partial-completes-whole", "partial-collision-preserved", "partial-audit-failure-preserved", "partial-undo-preserves-staging", "corrupt-prefix-stops-whole"} :
@@ -1107,7 +1216,7 @@ int main(int argc, char** argv) {
             try {
                 if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index], mixedCrash));
                 else {
-                    if (batching || recovering || resolving || preserving) batchScenario(source.path(), target.path(), preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
+                    if (batching || recovering || resolving || preserving || cleaning) batchScenario(source.path(), target.path(), cleaning ? index + 39 : preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
                     else scenario(source.path(), target.path(), index);
                     results.append(QJsonObject{{"case", names[index]}, {"passed", true}});
                 }
@@ -1118,11 +1227,11 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(mixedCrash ? "mixed-crash-report.json" : crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(cleaning ? "preserved-cleanup-report.json" : mixedCrash ? "mixed-crash-report.json" : crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
-            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", mixedCrash ? "mixed-forced-process-termination" : crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
+            {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", cleaning ? "preserved-partial-cleanup" : mixedCrash ? "mixed-forced-process-termination" : crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
             {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";

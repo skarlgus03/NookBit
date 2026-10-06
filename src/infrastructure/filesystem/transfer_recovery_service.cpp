@@ -2,6 +2,20 @@
 #include "operation_mutex.hpp"
 
 namespace nookbit {
+// 보호된 조회 동안 다른 실행·복구가 파일을 이동하지 않도록 직렬화하는 함수.
+Result<PreservedCleanupRecord> PreservedStagingCleanupService::inspect(const PlanId& planId, const std::string& attemptId) {
+    OperationMutex lock;
+    const auto acquired = lock.acquire();
+    if (!acquired) return Result<PreservedCleanupRecord>::failure(acquired.error());
+    return useCase_.inspect(planId, attemptId);
+}
+// 작업 잠금을 획득하고 명시적 부분 임시 파일 정리만 요청하는 함수.
+Result<void> PreservedStagingCleanupService::execute(const PreservedCleanupRequest& request) {
+    OperationMutex lock;
+    const auto acquired = lock.acquire();
+    if (!acquired) return acquired;
+    return useCase_.execute(request);
+}
 // 다른 파일 실행·복구와 직렬화한 뒤 누락 확정 기록만 복구하는 함수.
 Result<TransferAttempt> TransferCommitRecoveryService::execute(const std::string& attemptId, const std::function<bool()>& cancelled) {
     OperationMutex lock;

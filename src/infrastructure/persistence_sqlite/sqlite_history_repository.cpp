@@ -645,6 +645,106 @@ Result<std::vector<PreservedTransfer>> SqliteHistoryRepository::preservedTransfe
     return Return::success(std::move(result));
 }
 
+// 별도 정리 감사의 순서·승인 해시·원래 지문을 검증해서 읽는 함수.
+Result<std::optional<PreservedCleanupRecord>> SqliteHistoryRepository::preservedCleanup(const PlanId& planId, const std::string& attemptId) const {
+    using Return = Result<std::optional<PreservedCleanupRecord>>;
+    const auto opened = ensureOpen();
+    if (!opened) return Return::failure(opened.error());
+    const auto plan = loadPlan(planId);
+    if (!plan) return Return::failure(plan.error());
+    QSqlQuery query(database_);
+    query.prepare("SELECT event_type,payload_json FROM events WHERE plan_id=? AND event_type IN ('preserved_cleanup_intent','preserved_cleanup_removed') ORDER BY id");
+    query.addBindValue(QString::fromStdString(planId));
+    if (!query.exec()) return Return::failure({"history.cleanup_read_failed", query.lastError().text().toStdString()});
+    std::optional<PreservedCleanupRecord> result;
+    while (query.next()) {
+        const auto doc = QJsonDocument::fromJson(query.value(1).toString().toUtf8());
+        if (!doc.isObject()) return Return::failure({"history.cleanup_corrupt", "Cleanup audit is not an object."});
+        const auto object = doc.object();
+        if (!object.value("attemptId").isString()) return Return::failure({"history.cleanup_corrupt", "Cleanup audit lacks attempt identity."});
+        if (object.value("attemptId").toString().toStdString() != attemptId) continue;
+        const auto fp = parseFingerprint(object.value("stagingFingerprint").toString());
+        if (!fp || !fp->fileId || fp->fileId->empty() || !fp->volumeId || fp->volumeId->empty() ||
+            !fp->sha256 || !PlanSignature::isSha256Hex(*fp->sha256) ||
+            object.value("planHash").toString().toStdString() != plan.value().planHash)
+            return Return::failure({"history.cleanup_corrupt", "Cleanup audit fingerprint or approval is invalid."});
+        const bool removed = query.value(0).toString() == "preserved_cleanup_removed";
+        if ((!result && removed) || (result && (!removed || result->removed || fingerprintJson(result->stagingFingerprint) != fingerprintJson(*fp))))
+            return Return::failure({"history.cleanup_corrupt", "Cleanup audit order or approved fingerprint changed."});
+        result = PreservedCleanupRecord{planId, plan.value().planHash, attemptId, *fp, removed};
+    }
+    if (result) {
+        const auto entries = preservedTransfers(planId);
+        if (!entries) return Return::failure(entries.error());
+        const auto marker = std::find_if(entries.value().begin(), entries.value().end(), [&](const PreservedTransfer& item) { return item.attemptId == attemptId; });
+        const auto hash = QCryptographicHash::hash(QByteArray::fromStdString(PlanSignature::approvalPayload(plan.value())), QCryptographicHash::Sha256).toHex().toStdString();
+        if (marker == entries.value().end() || !PlanSignature::validateFormat(plan.value()) || !PlanSignature::validateMovementScope(plan.value()) || hash != result->planHash)
+            return Return::failure({"history.cleanup_corrupt", "Cleanup audit no longer belongs to its signed preservation record."});
+        QSqlQuery owner(database_);
+        owner.prepare("SELECT staging_fingerprint_json FROM transfer_attempts WHERE id=? AND plan_id=? AND step_id=? AND staging_path=? AND direction='forward'");
+        owner.addBindValue(QString::fromStdString(attemptId)); owner.addBindValue(QString::fromStdString(planId));
+        owner.addBindValue(QString::fromStdString(marker->stepId)); owner.addBindValue(QDir::cleanPath(pathString(marker->staging)));
+        if (!owner.exec()) return Return::failure({"history.cleanup_read_failed", owner.lastError().text().toStdString()});
+        if (!owner.next()) return Return::failure({"history.cleanup_corrupt", "Cleanup audit lost its owned transfer record."});
+        const auto owned = parseFingerprint(owner.value(0).toString());
+        if (!owned || owned->fileId != result->stagingFingerprint.fileId || owned->volumeId != result->stagingFingerprint.volumeId)
+            return Return::failure({"history.cleanup_corrupt", "Cleanup approval does not identify the recorded staging object."});
+    }
+    return Return::success(std::move(result));
+}
+
+// 완료된 되돌리기의 보존 객체에만 의도와 완료를 별도 감사로 저장하는 함수.
+Result<void> SqliteHistoryRepository::recordPreservedCleanup(const PreservedCleanupRecord& record) {
+    const auto opened = ensureOpen();
+    if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"history.transaction_failed", database_.lastError().text().toStdString()});
+    // 중간 오류에는 정리 승인이나 완료 감사를 남기지 않는 함수.
+    const auto fail = [&](Error error) { database_.rollback(); return Result<void>::failure(std::move(error)); };
+    const auto plan = loadPlan(record.planId);
+    const auto entries = preservedTransfers(record.planId);
+    const auto prior = preservedCleanup(record.planId, record.attemptId);
+    if (!plan || !entries || !prior) return fail(!plan ? plan.error() : !entries ? entries.error() : prior.error());
+    const auto marker = std::find_if(entries.value().begin(), entries.value().end(), [&](const PreservedTransfer& item) { return item.attemptId == record.attemptId; });
+    const auto hash = QCryptographicHash::hash(QByteArray::fromStdString(PlanSignature::approvalPayload(plan.value())), QCryptographicHash::Sha256).toHex().toStdString();
+    if (marker == entries.value().end() || plan.value().status != PlanStatus::RolledBack || plan.value().planHash != record.planHash || hash != record.planHash ||
+        !record.stagingFingerprint.sha256 || !PlanSignature::isSha256Hex(*record.stagingFingerprint.sha256) ||
+        (record.removed ? !prior.value() || prior.value()->removed || fingerprintJson(prior.value()->stagingFingerprint) != fingerprintJson(record.stagingFingerprint) : prior.value().has_value()))
+        return fail({"history.cleanup_conflict", "Cleanup requires the preserved undo and an unchanged explicit intent."});
+    const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) { return item.id == marker->stepId; });
+    if (step == plan.value().steps.end() || step->status != StepStatus::Planned || record.stagingFingerprint.size >= step->fingerprint.size)
+        return fail({"history.cleanup_conflict", "Only never-completed partial steps can be cleaned."});
+    QSqlQuery attempt(database_);
+    attempt.prepare("SELECT t.source_path,t.destination_path,t.staging_path,e.staging_fingerprint_json,e.destination_fingerprint_json,e.phase,"
+        "e.staging_cleanup,e.copy_resume,e.staging_commit,e.recovery_completed,e.recovery_removal_intent FROM transfer_attempts t "
+        "JOIN transfer_events e ON e.id=(SELECT max(last.id) FROM transfer_events last WHERE last.attempt_id=t.id) "
+        "WHERE t.id=? AND t.plan_id=? AND t.step_id=? AND t.direction='forward'");
+    attempt.addBindValue(QString::fromStdString(record.attemptId)); attempt.addBindValue(QString::fromStdString(record.planId));
+    attempt.addBindValue(QString::fromStdString(marker->stepId));
+    if (!attempt.exec()) return fail({"history.cleanup_read_failed", attempt.lastError().text().toStdString()});
+    if (!attempt.next()) return fail({"history.cleanup_conflict", "Preserved attempt no longer exists."});
+    const auto stage = parseFingerprint(attempt.value(3).toString());
+    if (!stage || stage->fileId != record.stagingFingerprint.fileId || stage->volumeId != record.stagingFingerprint.volumeId ||
+        !stage->fileId || !stage->volumeId || !attempt.value(4).isNull() ||
+        !QStringList{"staging_created", "cancelled", "failed", "needs_recovery"}.contains(attempt.value(5).toString()) ||
+        attempt.value(0).toString() != QDir::cleanPath(pathString(step->source)) ||
+        attempt.value(1).toString() != QDir::cleanPath(pathString(step->destination)) ||
+        attempt.value(2).toString() != QDir::cleanPath(pathString(marker->staging)))
+        return fail({"history.cleanup_conflict", "Recorded partial ownership or paths changed."});
+    for (int column = 6; column <= 10; ++column) if (attempt.value(column).toInt() != 0)
+        return fail({"history.cleanup_conflict", "Partial attempt acquired conflicting recovery evidence."});
+    const QJsonObject payload{{"attemptId", QString::fromStdString(record.attemptId)}, {"planHash", QString::fromStdString(record.planHash)},
+        {"stagingFingerprint", fingerprintJson(record.stagingFingerprint)}};
+    QSqlQuery insert(database_);
+    insert.prepare("INSERT INTO events(plan_id,step_id,occurred_at,event_type,payload_json) VALUES(?,?,?,?,?)");
+    insert.addBindValue(QString::fromStdString(record.planId)); insert.addBindValue(QString::fromStdString(marker->stepId));
+    insert.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    insert.addBindValue(record.removed ? "preserved_cleanup_removed" : "preserved_cleanup_intent");
+    insert.addBindValue(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
+    if (!insert.exec()) return fail({"history.cleanup_write_failed", insert.lastError().text().toStdString()});
+    if (!database_.commit()) return fail({"history.commit_failed", database_.lastError().text().toStdString()});
+    return Result<void>::success();
+}
+
 // 이동 복원이 끝나도 임시 파일 확인이 남은 작업 ID를 읽는 함수.
 Result<std::vector<PlanId>> SqliteHistoryRepository::preservedTransferPlans() const {
     using Return = Result<std::vector<PlanId>>;
@@ -659,7 +759,13 @@ Result<std::vector<PlanId>> SqliteHistoryRepository::preservedTransferPlans() co
     for (const auto& id : candidates) {
         const auto entries = preservedTransfers(id);
         if (!entries) return Return::failure(entries.error());
-        if (!entries.value().empty()) result.push_back(id);
+        bool pending = false;
+        for (const auto& entry : entries.value()) {
+            const auto cleanup = preservedCleanup(id, entry.attemptId);
+            if (!cleanup) return Return::failure(cleanup.error());
+            if (!cleanup.value() || !cleanup.value()->removed) pending = true;
+        }
+        if (pending) result.push_back(id);
     }
     return Return::success(std::move(result));
 }

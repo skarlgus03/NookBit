@@ -101,6 +101,14 @@ class IHistoryRepository {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
     virtual ~IHistoryRepository() = default;
+    /// 보존 임시 파일의 별도 정리 의도와 결과를 읽는 함수.
+    [[nodiscard]] virtual Result<std::optional<PreservedCleanupRecord>> preservedCleanup(const PlanId&, const std::string&) const {
+        return Result<std::optional<PreservedCleanupRecord>>::success({});
+    }
+    /// 최초 승인 지문과 정리 완료 감사를 원자적으로 기록하는 함수.
+    [[nodiscard]] virtual Result<void> recordPreservedCleanup(const PreservedCleanupRecord&) {
+        return Result<void>::failure({"history.cleanup_unsupported", "Preserved staging cleanup audit is unsupported."});
+    }
 
     /// 명시적 복구 선택과 검사한 단계 상태를 원자적으로 기록하는 함수.
     [[nodiscard]] virtual Result<void> beginRecovery(const RecoveryRestart&) {

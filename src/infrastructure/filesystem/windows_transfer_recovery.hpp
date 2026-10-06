@@ -1,6 +1,7 @@
 #pragma once
 #include <nookbit/application/reconcile_transfer_recovery_use_case.hpp>
 #include <nookbit/application/cleanup_transfer_staging_use_case.hpp>
+#include <nookbit/application/cleanup_preserved_staging_use_case.hpp>
 #include <nookbit/application/resume_committed_transfer_use_case.hpp>
 #include <nookbit/application/resume_partial_copy_use_case.hpp>
 #include <nookbit/application/commit_resumed_staging_use_case.hpp>
@@ -78,6 +79,24 @@ public:
     [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId);
 private:
     CleanupTransferStagingUseCase& useCase_;
+};
+/// 전체 검증 복사본 정리와 별도로 보존된 부분 파일만 보호하는 어댑터.
+class WindowsPreservedStagingCleanup final : public IPreservedStagingCleanup {
+public:
+    /// 기록된 객체와 승인 지문을 보호하고 같은 임시 객체의 삭제만 제공하는 함수.
+    [[nodiscard]] Result<std::unique_ptr<IStagingCleanupSession>> openPreserved(const TransferAttempt& attempt,
+        const MoveContract& movement, const FileFingerprint& expected, bool priorIntent) override;
+};
+class PreservedStagingCleanupService final {
+public:
+    /// 외부에서 조립한 부분 파일 정리 유스케이스를 받는 함수.
+    explicit PreservedStagingCleanupService(CleanupPreservedStagingUseCase& useCase) : useCase_(useCase) {}
+    /// 공유 작업 잠금 아래 승인에 사용할 읽기 전용 검사를 수행하는 함수.
+    [[nodiscard]] Result<PreservedCleanupRecord> inspect(const PlanId& planId, const std::string& attemptId);
+    /// 다른 실행·복구와 직렬화한 뒤 명시적 정리 승인을 전달하는 함수.
+    [[nodiscard]] Result<void> execute(const PreservedCleanupRequest& request);
+private:
+    CleanupPreservedStagingUseCase& useCase_;
 };
 
 /// 실행·되돌리기와 같은 시스템 잠금 안에서 명시적 완료 복구를 수행하는 진입점.

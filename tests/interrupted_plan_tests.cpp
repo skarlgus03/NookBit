@@ -1,5 +1,6 @@
 #include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
 #include <nookbit/application/recover_interrupted_plan_use_case.hpp>
+#include <nookbit/application/cleanup_preserved_staging_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include <iostream>
 #include <map>
@@ -28,11 +29,23 @@ struct History final : IHistoryRepository {
     bool failRecovery{false};
     std::function<void()> onRecovery;
     std::vector<PreservedTransfer> preserved;
+    std::optional<PreservedCleanupRecord> cleanup;
+    bool failCleanupIntent{false}, failCleanupRemoved{false};
+    // 승인된 정리 지문과 별도 완료 여부를 반환하는 함수.
+    Result<std::optional<PreservedCleanupRecord>> preservedCleanup(const PlanId&, const std::string&) const override {
+        return Result<std::optional<PreservedCleanupRecord>>::success(cleanup);
+    }
+    // 정리 감사 실패에는 원래 의도를 유지하고 성공만 기록하는 함수.
+    Result<void> recordPreservedCleanup(const PreservedCleanupRecord& record) override {
+        if (record.removed ? failCleanupRemoved : failCleanupIntent)
+            return Result<void>::failure({"test.cleanup_audit", "Injected cleanup audit failure"});
+        cleanup = record; ++writes; return Result<void>::success();
+    }
     // 보존한 임시 파일의 추적 정보를 반환하는 함수.
     Result<std::vector<PreservedTransfer>> preservedTransfers(const PlanId&) const override { return Result<std::vector<PreservedTransfer>>::success(preserved); }
     // 보존 추적이 남은 작업만 시작 조회에 포함하는 함수.
     Result<std::vector<PlanId>> preservedTransferPlans() const override {
-        return Result<std::vector<PlanId>>::success(preserved.empty() ? std::vector<PlanId>{} : std::vector<PlanId>{plan.id});
+        return Result<std::vector<PlanId>>::success(preserved.empty() || (cleanup && cleanup->removed) ? std::vector<PlanId>{} : std::vector<PlanId>{plan.id});
     }
     // 시험용 원자적 재시작을 반영하고 요청 실패에는 원래 상태를 보존하는 함수.
     Result<void> beginRecovery(const RecoveryRestart& restart) override {
@@ -440,6 +453,89 @@ void testTransferBoundaries() {
         "all moved files still require explicit completion-record confirmation, not silent completion");
 }
 
+// 메모리 관찰값만 제거하며 감사 의도가 먼저 기록되었는지 확인하는 정리 대역.
+class PartialCleanup final : public IPreservedStagingCleanup {
+    History& history_;
+    Files& files_;
+    class Session final : public IStagingCleanupSession {
+        History& history_;
+        Files& files_;
+        std::filesystem::path path_;
+        FileFingerprint expected_;
+        bool prior_;
+    public:
+        // 가상 파일 관찰과 승인 당시 지문을 빌려 받는 함수.
+        Session(History& history, Files& files, std::filesystem::path path, FileFingerprint expected, bool prior)
+            : history_(history), files_(files), path_(std::move(path)), expected_(std::move(expected)), prior_(prior) {}
+        // 같은 가상 객체 또는 이전 의도 뒤의 부재만 허용하는 함수.
+        Result<void> verify() override {
+            const auto observed = files_.inspect(path_);
+            if (observed.presence == TransferPathPresence::Missing && prior_) return Result<void>::success();
+            if (!observed.fingerprint || !TransferValidation::sameObject(expected_, *observed.fingerprint) ||
+                !TransferValidation::sameContent(expected_, *observed.fingerprint)) return Result<void>::failure({"test.changed", "Changed staging"});
+            return Result<void>::success();
+        }
+        // 의도 감사가 선행했을 때만 가상 임시 객체의 부재를 반영하는 함수.
+        Result<void> removeVerifiedStaging() override {
+            expect(history_.cleanup && !history_.cleanup->removed, "cleanup intent must precede removal");
+            const auto checked = verify(); if (!checked) return checked;
+            files_.values[path_] = {TransferPathPresence::Missing, expected_.volumeId, {}, {}};
+            return Result<void>::success();
+        }
+    };
+public:
+    int opens{0};
+    // 파일 작업 없이 정리 대상 관찰과 감사 저장소를 받는 함수.
+    PartialCleanup(History& history, Files& files) : history_(history), files_(files) {}
+    // 삭제 시뮬레이션용 세션만 반환하는 함수.
+    Result<std::unique_ptr<IStagingCleanupSession>> openPreserved(const TransferAttempt& attempt, const MoveContract&,
+        const FileFingerprint& expected, bool prior) override {
+        ++opens;
+        return Result<std::unique_ptr<IStagingCleanupSession>>::success(std::make_unique<Session>(history_, files_, attempt.staging, expected, prior));
+    }
+};
+
+// 승인 누락·오래된 지문·감사 실패와 삭제 뒤 기록 재시도를 자동 검사하는 함수.
+void testPartialCleanupApproval() {
+    for (int scenario = 0; scenario < 8; ++scenario) {
+        Fixture f;
+        f.history.plan.status = PlanStatus::RolledBack; f.history.origin = PlanStatus::RollingBack;
+        auto attempt = f.forward(0, TransferPhase::Cancelled);
+        attempt.stagingFingerprint = FileFingerprint{0, 21, "2", "stage", {}};
+        f.journal.attempts.push_back(attempt);
+        f.history.preserved.push_back({attempt.id, attempt.stepId, attempt.staging});
+        const FileFingerprint partial{4, 22, "2", "stage", std::string(64, 'e')};
+        f.present(attempt.staging, partial);
+        PartialCleanup worker(f.history, f.files);
+        CleanupPreservedStagingUseCase cleanup(f.history, f.journal, f.files, worker, f.hasher);
+        const auto preview = cleanup.inspect(f.history.plan.id, attempt.id);
+        expect(preview && f.history.writes == 0 && worker.opens == 0, "cleanup inspection is read-only");
+        if (!preview) continue;
+        PreservedCleanupRequest request{preview.value(), scenario != 1};
+        if (scenario == 2) request.expected.planHash = std::string(64, 'b');
+        if (scenario == 3) f.files.values[attempt.staging].fingerprint->sha256 = std::string(64, 'f');
+        if (scenario == 4) f.history.failCleanupIntent = true;
+        if (scenario == 5 || scenario == 6) f.history.failCleanupRemoved = true;
+        if (scenario == 7) f.history.preserved.clear();
+        const auto result = cleanup.execute(request);
+        if (scenario == 0) {
+            expect(result && f.history.cleanup && f.history.cleanup->removed && f.history.writes == 2 &&
+                !cleanup.execute(request), "cleanup completes once with separate intent/result audits");
+        } else if (scenario == 5 || scenario == 6) {
+            expect(!result && f.history.cleanup && !f.history.cleanup->removed &&
+                f.files.values[attempt.staging].presence == TransferPathPresence::Missing, "delete result failure retains durable intent");
+            f.history.failCleanupRemoved = false;
+            if (scenario == 6) {
+                auto replacement = partial; replacement.fileId = "replacement"; f.present(attempt.staging, replacement);
+                expect(!cleanup.execute(request) && !f.history.cleanup->removed, "cleanup retry preserves a same-name replacement");
+            } else expect(cleanup.execute(request).hasValue() && f.history.cleanup->removed, "record-only cleanup retry needs no second deletion");
+        } else expect(!result && f.history.writes == 0 && f.files.values[attempt.staging].presence == TransferPathPresence::Present,
+            "unapproved, stale, unaudited or unregistered cleanup cannot delete");
+        expect(f.history.plan.status == PlanStatus::RolledBack && f.journal.writes == 0 &&
+            f.files.values[attempt.source].fingerprint->fileId == attempt.sourceFingerprint.fileId, "cleanup does not change movement or original");
+    }
+}
+
 // 시작 조회가 승인 대기·초안·완료 작업을 제외하고 미해결 상태를 보존하는지 검사하는 함수.
 void testStartupFilter() {
     Fixture f;
@@ -464,5 +560,6 @@ int main() {
     testExplicitChoices();
     testTransferToWholeResume();
     testPreservedStartup();
+    testPartialCleanupApproval();
     return failures ? 1 : 0;
 }

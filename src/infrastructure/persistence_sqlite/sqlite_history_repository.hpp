@@ -29,6 +29,10 @@ public:
     [[nodiscard]] Result<void> beginRecovery(const RecoveryRestart& restart) override;
     /// 선택 감사에 남긴 보존 임시 파일의 추적 정보를 읽는 함수.
     [[nodiscard]] Result<std::vector<PreservedTransfer>> preservedTransfers(const PlanId& planId) const override;
+    /// 별도 부분 정리의 승인 지문과 완료 감사를 검증해 읽는 함수.
+    [[nodiscard]] Result<std::optional<PreservedCleanupRecord>> preservedCleanup(const PlanId& planId, const std::string& attemptId) const override;
+    /// 부분 정리의 최초 의도 또는 동일 승인 지문의 완료만 원자적으로 기록하는 함수.
+    [[nodiscard]] Result<void> recordPreservedCleanup(const PreservedCleanupRecord& record) override;
     /// 완료된 되돌리기에서도 보존 임시 파일을 확인할 작업을 읽는 함수.
     [[nodiscard]] Result<std::vector<PlanId>> preservedTransferPlans() const override;
 

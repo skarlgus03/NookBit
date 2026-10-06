@@ -190,7 +190,14 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
                 const bool retained = std::any_of(report.preservedTransfers.begin(), report.preservedTransfers.end(), [&](const PreservedTransfer& entry) {
                     return entry.stepId == step.id && entry.attemptId == forward[0].id && entry.staging == forward[0].staging;
                 });
-                if (retained && reverse.empty() && report.interruptedStatus == PlanStatus::RollingBack && canPreservePartialTransfer(*item.transfer)) {
+                const auto cleanup = history_.preservedCleanup(plan.id, forward[0].id);
+                if (!cleanup) return Return::failure(cleanup.error());
+                if (retained && cleanup.value() && cleanup.value()->removed && reverse.empty() && report.interruptedStatus == PlanStatus::RollingBack &&
+                    item.transfer->source == TransferRecoveryFileState::Matches && item.transfer->staging == TransferRecoveryFileState::Missing &&
+                    item.transfer->destination == TransferRecoveryFileState::Missing && item.transfer->observationErrors.empty()) {
+                    item.state = InterruptedStepState::Pending;
+                    item.reasons.push_back({"recovery.staging_cleaned", "Preserved partial staging was explicitly cleaned; original was not moved."});
+                } else if (retained && reverse.empty() && report.interruptedStatus == PlanStatus::RollingBack && canPreservePartialTransfer(*item.transfer)) {
                     item.state = InterruptedStepState::Preserved;
                     item.reasons.push_back({"recovery.staging_preserved", "Original and partial staging were left untouched; staging still needs separate review."});
                 } else if (preservationRecorded) {
