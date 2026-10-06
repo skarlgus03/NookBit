@@ -70,6 +70,7 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
         refreshed = prepare.execute(refreshed.value());
         if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
     }
+    inheritMetadataRenamePolicy(refreshed.value(), draft);
     const auto currentFormat = PlanSignature::validateFormat(refreshed.value());
     if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
     if (PlanSignature::planContents(draft) != PlanSignature::planContents(refreshed.value())) {

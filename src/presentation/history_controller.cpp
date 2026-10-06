@@ -138,6 +138,8 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         row.insert(QStringLiteral("source"), displayPath(step.source));
         row.insert(QStringLiteral("destination"), displayPath(step.destination));
         row.insert(QStringLiteral("status"), historyStepStatusText(step.status));
+        if (step.failure) row["status"] = historyStepStatusText(step.status) + QStringLiteral(": %1 (%2)")
+            .arg(QString::fromStdString(step.failure->message), QString::fromStdString(step.failure->code));
         historySteps_.append(row);
     }
     historyMessage_ = canUndoSelectedHistory()

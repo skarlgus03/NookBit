@@ -52,7 +52,7 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
         });
     }
 
-    if (saved.formatVersion == 2) {
+    if (saved.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(saved)) {
         if (!volumes_) return Result<OperationPlan>::failure({"verify.volume_verifier_required", "V2 approval requires current volume verification."});
         PrepareTransferPlanUseCase prepare(*volumes_);
         const auto checked = prepare.verify(saved);
@@ -73,6 +73,13 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
         });
     }
 
+    if (PlanSignature::isMetadataRenamePlan(saved)) {
+        // 경로만 고정하고 개별 파일의 접근/객체/이동 실패는 실제 시도에서 처리한다.
+        if (selectedFiles.size() != saved.steps.size() || std::any_of(saved.steps.begin(), saved.steps.end(), [&](const MoveStep& step) {
+            return std::find(selectedFiles.begin(), selectedFiles.end(), step.source) == selectedFiles.end();
+        })) return Result<OperationPlan>::failure({"verify.selection_changed", "Selected paths differ from the frozen metadata plan."});
+        return Result<OperationPlan>::success(saved);
+    }
     auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
     auto current = planner_.buildPlan(snapshot.value(), settings, rules.value());

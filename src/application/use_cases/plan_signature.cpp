@@ -137,10 +137,29 @@ Result<void> PlanSignature::validateFormat(const OperationPlan& plan) {
             return Result<void>::failure({"plan.volume_invalid", "Volume identity or preservation policy is invalid."});
         const bool same = movement.sourceVolume.guidPath == movement.destinationVolume.guidPath;
         if ((same && movement.sourceVolume.serial != movement.destinationVolume.serial) ||
-            movement.strategy != (same ? MoveStrategy::Rename : MoveStrategy::VerifiedCopy))
+            (same ? (movement.strategy != MoveStrategy::Rename && movement.strategy != MoveStrategy::MetadataRename)
+                  : movement.strategy != MoveStrategy::VerifiedCopy))
             return Result<void>::failure({"plan.strategy_invalid", "Movement strategy does not match the approved volumes."});
+        if (movement.strategy == MoveStrategy::MetadataRename && (step.fingerprint.sha256 || !step.fingerprint.fileId))
+            return Result<void>::failure({"plan.metadata_contract_invalid", "Metadata rename requires an object ID and no content digest."});
     }
+    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
+        return step.movement && step.movement->strategy == MoveStrategy::MetadataRename;
+    }) && !isMetadataRenamePlan(plan))
+        return Result<void>::failure({"plan.metadata_mix_unsupported", "Metadata rename is currently restricted to same-volume-only batches."});
     return Result<void>::success();
+}
+
+// 내용 승인과 섞이지 않은 같은 볼륨 전용 빠른 계획을 구분하는 함수.
+bool PlanSignature::isMetadataRenamePlan(const OperationPlan& plan) {
+    bool found = false;
+    if (plan.formatVersion != 2) return false;
+    for (const auto& step : plan.steps) {
+        if (step.status == StepStatus::Skipped) continue;
+        if (!step.movement || step.movement->strategy != MoveStrategy::MetadataRename) return false;
+        found = true;
+    }
+    return found;
 }
 
 // 구형 계획을 복사 전략으로 암묵적으로 확장하지 않는 함수.

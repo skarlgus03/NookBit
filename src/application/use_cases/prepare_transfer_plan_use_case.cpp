@@ -67,7 +67,7 @@ Result<void> PrepareTransferPlanUseCase::verify(const OperationPlan& plan) {
         const auto current = inspect(step);
         if (!current) return Result<void>::failure(current.error());
         const auto& saved = *step.movement;
-        if (saved.strategy != current.value().strategy || saved.preservation != current.value().preservation ||
+        if ((saved.strategy == MoveStrategy::MetadataRename ? current.value().strategy != MoveStrategy::Rename : saved.strategy != current.value().strategy) || saved.preservation != current.value().preservation ||
             !sameVolume(saved.sourceVolume, current.value().sourceVolume) ||
             !sameVolume(saved.destinationVolume, current.value().destinationVolume))
             return Result<void>::failure({"plan.volume_changed", "Approved volume identity or movement strategy changed."});

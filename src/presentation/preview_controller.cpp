@@ -449,6 +449,16 @@ void PreviewController::moveApprovedFile() {
 void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps, const Result<void>& result) {
     if (!result) {
         const auto current = history_.loadPlan(movedPlanId);
+        if (current && current.value().status == PlanStatus::Failed) {
+            const auto& completed = current.value().steps;
+            for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
+                const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
+                if (std::any_of(completed.begin(), completed.end(), [&](const MoveStep& step) {
+                    return step.status == StepStatus::Applied && step.source == path;
+                })) pendingFiles_.removeAt(index);
+            }
+            if (std::any_of(completed.begin(), completed.end(), [](const MoveStep& step) { return step.status == StepStatus::Applied; })) undoPlanId_ = movedPlanId;
+        }
         if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
         emit recoveryReconcileRequested();
         message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")

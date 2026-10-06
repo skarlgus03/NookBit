@@ -1,5 +1,11 @@
 # Real two-volume backend test
 
+## 2026-10-06 같은 볼륨 빠른 이동의 분리 검증
+
+[새 MetadataRename](same-volume-fast-move.md)은 같은 볼륨 전용 신규 작업에만 적용하며 다른 볼륨/혼합 작업은 기존 내용 승인 정책이다. 최종 자동 19/19, 새 실패 경계 8개 및 기존 두 볼륨 비동기 이동/되돌리기/중단 재개가 통과했다. 파일 내용 읽기를 금지한 대역으로 새 경로의 해시 호출 0회를 확인했다. 컨트롤러의 부분 실패 대기 목록/부분 되돌리기 회귀도 포함된다. 새 정책의 중단 복구는 명시적 보존·차단 상태다.
+
+실제 두 볼륨 재실행 자료는 `C:/Users/begon/AppData/Local/Temp/NookBit-bg-source-pRMAqq`와 `D:/NookBit/out/build/dev/tests/NookBit-bg-target-bPlUiU`에 보존했다. 이 시험은 기존 복사 정책의 유지 검사이며 C:→D: 속도 개선을 검증한 것이 아니다.
+
 ## 2026-10-06 정리 준비·승인 검사 응답 없음 수정
 
 이동만 비동기였던 경로에서 prepareSort의 고정·전체 파일 해시·저장 계획 검사와 confirmSort의 승인 재검사가 화면 스레드를 막던 문제를 수정했다. 앱은 ISortWorkflow로 이 단계들도 작업 스레드 전용 DB 연결에서 수행한다. 정리 버튼의 즉시 반환은 확인 완료가 아니며, 성공 결과의 awaitingConfirmation 상태를 QML이 받아 확인창을 연다. 승인·이동은 사용자 확인 후에만 실행한다.

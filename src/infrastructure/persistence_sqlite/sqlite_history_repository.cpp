@@ -174,7 +174,7 @@ std::optional<MoveContract> parseMovement(const QString& text) {
     const auto source = parseVolume(object.value("sourceVolume"));
     const auto destination = parseVolume(object.value("destinationVolume"));
     if (object.size() != 4 || !strategy.isDouble() ||
-        (strategy.toDouble() != 0 && strategy.toDouble() != 1) ||
+        (strategy.toDouble() != 0 && strategy.toDouble() != 1 && strategy.toDouble() != 2) ||
         !preservation.isDouble() || preservation.toDouble() != 0 || !source || !destination) return {};
     return MoveContract{static_cast<MoveStrategy>(strategy.toInt()), *source, *destination,
                         PreservationPolicy::LocalNtfsBasic};
@@ -365,6 +365,7 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
 
     QString planId;
     QString stepId;
+    std::optional<Error> stepFailure;
     QString eventType;
     QJsonObject payload;
     QString updateSql;
@@ -415,6 +416,11 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
             default: break;
             }
         } else if constexpr (std::is_same_v<T, StepStatusChanged>) {
+            if (value.failure && value.status == StepStatus::Failed) {
+                stepFailure = value.failure;
+                payload.insert("errorCode", QString::fromStdString(value.failure->code));
+                payload.insert("errorDetail", QString::fromStdString(value.failure->message));
+            }
             planId = QString::fromStdString(value.planId);
             stepId = QString::fromStdString(value.stepId);
             eventType = QStringLiteral("step_status_changed");
@@ -481,6 +487,16 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
         }
     }
 
+    if (stepFailure) {
+        QSqlQuery failure(database_);
+        failure.prepare("UPDATE steps SET error_code = ?, error_detail = ? WHERE id = ? AND plan_id = ?");
+        failure.addBindValue(QString::fromStdString(stepFailure->code));
+        failure.addBindValue(QString::fromStdString(stepFailure->message));
+        failure.addBindValue(stepId); failure.addBindValue(planId);
+        if (!failure.exec() || failure.numRowsAffected() != 1) {
+            database_.rollback(); return sqlFailure("history.failure_record_failed", failure);
+        }
+    }
     QSqlQuery insert(database_);
     insert.prepare(QStringLiteral(
         "INSERT INTO events(plan_id, step_id, occurred_at, event_type, payload_json) "
@@ -900,7 +916,7 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
         QSqlQuery steps(database_);
         steps.prepare(QStringLiteral(
             "SELECT id, source_path, destination_path, fingerprint_json, matched_rule_id, "
-            "reason, collision_policy, status, movement_json FROM steps WHERE plan_id = ? ORDER BY sequence_no"));
+            "reason, collision_policy, status, movement_json, error_code, error_detail FROM steps WHERE plan_id = ? ORDER BY sequence_no"));
         steps.addBindValue(QString::fromStdString(plan.id));
         if (!steps.exec()) {
             return Result<std::vector<OperationPlan>>::failure({
@@ -925,6 +941,7 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
             step.reason = steps.value(5).toString().toStdString();
             step.collisionPolicy = *collision;
             step.status = *stepState;
+            if (!steps.value(9).isNull()) step.failure = Error{steps.value(9).toString().toStdString(), steps.value(10).toString().toStdString()};
             if (!steps.value(8).isNull()) {
                 step.movement = parseMovement(steps.value(8).toString());
                 if (!step.movement) return Result<std::vector<OperationPlan>>::failure({"history.corrupt_contract", "Invalid stored movement contract."});

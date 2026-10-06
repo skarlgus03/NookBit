@@ -49,6 +49,9 @@ public:
     [[nodiscard]] Result<void> runRecoveredPlan(const OperationPlan& plan, RecoveryAction action) override;
 
 private:
+    /// 빠른 같은 볼륨 이동을 개별 시도하고 확실한 실패만 기록하며 다음 파일을 처리하는 함수.
+    [[nodiscard]] Result<void> executeMetadataSteps(const OperationPlan& plan,
+        const std::vector<std::filesystem::path>& selected, const UserSettings& settings);
     /// 최초 실행과 복구 실행이 같은 단계 이동·보상·완료 기록을 공유하는 함수.
     [[nodiscard]] Result<void> executePreparedSteps(const OperationPlan& plan,
         const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps);

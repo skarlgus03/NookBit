@@ -14,12 +14,20 @@
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
+#include "application/use_cases/plan_signature.hpp"
+#include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#include <winioctl.h>
+#endif
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QElapsedTimer>
 #include <QSqlQuery>
 #include <QUuid>
 
@@ -796,8 +804,127 @@ void testStreamingContentHash() {
 } // namespace
 
 // 안전한 단일 파일 이동·되돌리기 테스트를 실행하는 함수.
+// 빠른 승인 경로에서 파일 내용 읽기를 시도하면 실패시키는 검사 대역.
+class NoContentHasher final : public nookbit::IPlanHasher {
+public:
+    mutable int reads{0};
+    nookbit::QtPlanHasher documentHasher;
+    /// 승인 문서의 작은 바이트 해시는 정상 계산하는 함수.
+    std::string sha256(std::string_view bytes) const override { return documentHasher.sha256(bytes); }
+    /// 파일 전체 읽기 호출을 세고 금지하는 함수.
+    nookbit::Result<std::string> sha256File(const std::filesystem::path&) const override {
+        ++reads; return nookbit::Result<std::string>::failure({"test.content_read_forbidden", "Metadata rename must not read contents."});
+    }
+};
+
+// 내용 읽기 없이 성공·잠금·충돌·변경·누락을 기록하고 성공 파일만 되돌리는 함수.
+void testMetadataRename(int scenario) {
+#ifdef _WIN32
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "metadata directory"); return; }
+    const auto appData = std::filesystem::path(directory.filePath("app-data").toStdWString());
+    TestSettingsRepository settings; settings.settings.homeRoot = std::filesystem::path(directory.filePath("organized").toStdWString());
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, appData, nookbit::CrossVolumeDrafts::Allow);
+    NoContentHasher hasher;
+    nookbit::WindowsStagedCopy volumes;
+    nookbit::SqliteHistoryRepository history(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    std::vector<std::filesystem::path> selected;
+    for (int i = 0; i < 3; ++i) {
+        const auto path = directory.filePath(QString("owned-%1.jpg").arg(i));
+        expect(writeFile(path, "owned metadata bytes"), "metadata owned file"); selected.emplace_back(path.toStdWString());
+    }
+    if (scenario == 0) {
+        const auto handle = CreateFileW(selected[0].c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        expect(handle != INVALID_HANDLE_VALUE, "owned sparse size fixture");
+        if (handle != INVALID_HANDLE_VALUE) {
+            DWORD returned = 0; LARGE_INTEGER length{}; length.QuadPart = 4LL * 1024 * 1024 * 1024;
+            expect(DeviceIoControl(handle, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr) &&
+                SetFilePointerEx(handle, length, nullptr, FILE_BEGIN) && SetEndOfFile(handle), "owned 4 GiB sparse fixture without large physical allocation");
+            CloseHandle(handle);
+        }
+    }
+    nookbit::CreatePreviewUseCase preview(rules, scanner, planner, &hasher, &volumes);
+    auto draft = preview.execute({{}, selected, settings.settings.homeRoot});
+    if (!draft) { expect(false, "metadata draft"); return; }
+    for (auto& step : draft.value().steps) step.movement->strategy = nookbit::MoveStrategy::MetadataRename;
+    nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history, &volumes);
+    QElapsedTimer elapsed; elapsed.start();
+    const auto frozen = freeze.execute(draft.value(), selected, settings.settings);
+    if (!frozen) { expect(false, "metadata freeze: " + frozen.error().message); return; }
+    nookbit::VerifySavedPlanUseCase verify(rules, scanner, planner, hasher, history, &volumes);
+    nookbit::ApprovePlanUseCase approve(verify, history);
+    const auto approved = approve.execute(frozen.value().id, selected, settings.settings);
+    if (!approved) { expect(false, "metadata approval"); return; }
+    auto loaded = history.loadPlan(frozen.value().id);
+    expect(loaded && !loaded.value().steps[0].fingerprint.sha256, "metadata signature round-trip without content hash");
+    if (!loaded) return;
+    const auto middle = loaded.value().steps[1];
+    HANDLE lock = INVALID_HANDLE_VALUE;
+    if (scenario == 1) {
+        lock = CreateFileW(middle.source.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        expect(lock != INVALID_HANDLE_VALUE, "metadata lock fixture");
+    }
+    if (scenario == 2) {
+        expect(QDir().mkpath(QString::fromStdWString(middle.destination.parent_path().wstring())), "metadata occupant parent");
+        expect(writeFile(QString::fromStdWString(middle.destination.wstring()), "owned occupant"), "metadata destination collision");
+    }
+    if (scenario == 3 || scenario == 6) { QFile file(QString::fromStdWString(middle.source.wstring())); expect(file.open(QIODevice::Append) && file.write(" changed") > 0, "metadata changed source"); }
+    if (scenario == 4) expect(QFile::remove(QString::fromStdWString(middle.source.wstring())), "owned missing source fixture");
+    if (scenario == 6 || scenario == 7) {
+        const auto connection = QUuid::createUuid().toString();
+        {
+            auto faultDb = QSqlDatabase::addDatabase("QSQLITE", connection); faultDb.setDatabaseName(directory.filePath("history.sqlite"));
+            expect(faultDb.open(), "metadata SQL audit fault connection");
+            QSqlQuery fault(faultDb);
+            const auto status = scenario == 6 ? "failed" : "applied";
+            expect(fault.exec(QString("CREATE TRIGGER owned_metadata_audit_fault BEFORE INSERT ON events WHEN NEW.event_type = 'step_status_changed' AND NEW.payload_json LIKE '%%\"status\":\"%1\"%%' BEGIN SELECT RAISE(ABORT, 'owned metadata audit failure'); END").arg(status)), "metadata SQL audit fault trigger");
+        }
+        QSqlDatabase::removeDatabase(connection);
+    }
+    FailingIntentHistory failingHistory(history);
+    nookbit::IHistoryRepository& executionHistory = scenario == 5 ? static_cast<nookbit::IHistoryRepository&>(failingHistory) : history;
+    nookbit::SafeExecutor executor(settings, verify, scanner, hasher, executionHistory, appData, &volumes);
+    const auto result = executor.execute(loaded.value(), approved.value(), selected);
+    if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
+    expect(result.hasValue() == (scenario == 0), "metadata batch success/failure");
+    const auto after = history.loadPlan(frozen.value().id);
+    if (!after) { expect(false, "metadata persisted result"); return; }
+    if (scenario >= 5) {
+        expect(after.value().status == nookbit::PlanStatus::NeedsRecovery && !std::filesystem::exists(selected[0]) &&
+            std::filesystem::exists(selected[1]) && std::filesystem::exists(selected[2]), "metadata DB uncertainty must stop without compensating or starting suffix");
+        nookbit::SqliteTransferJournal journal(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+        nookbit::WindowsTransferFileInspector files;
+        nookbit::InspectInterruptedPlanUseCase inspector(history, journal, files, hasher, &volumes);
+        const auto report = inspector.execute(after.value().id);
+        expect(report && report.value().planIntact && report.value().resume.readiness == nookbit::RecoveryReadiness::Blocked &&
+            report.value().rollback.readiness == nookbit::RecoveryReadiness::Blocked, "metadata interrupted recovery must fail closed until explicitly implemented");
+        expect(hasher.reads == 0, "metadata uncertainty inspection must not invoke content hashing");
+        if (scenario == 6) expect(!after.value().steps[1].failure, "failed audit transaction must roll back failure detail with step state");
+        return;
+    }
+    expect(after.value().steps[0].status == nookbit::StepStatus::Applied && after.value().steps[2].status == nookbit::StepStatus::Applied,
+        "metadata failure must retain prefix and continue suffix");
+    if (scenario) expect(after.value().status == nookbit::PlanStatus::Failed && after.value().steps[1].status == nookbit::StepStatus::Failed && after.value().steps[1].failure,
+        "metadata failure reason must survive DB reopen/read");
+    expect(executor.rollback(after.value().id).hasValue(), "metadata successful subset must be undoable");
+    expect(std::filesystem::exists(selected[0]) && std::filesystem::exists(selected[2]), "metadata undo restores successful subset");
+    if (scenario == 2) { QFile occupant(QString::fromStdWString(middle.destination.wstring())); expect(occupant.open(QIODevice::ReadOnly) && occupant.readAll() == "owned occupant", "metadata collision occupant preserved"); }
+    expect(hasher.reads == 0, "metadata freeze/approve/execute/undo must never hash file contents");
+    if (scenario == 0) std::cout << "metadata_4GiB_sparse_prepare_move_undo_ms=" << elapsed.elapsed() << " content_reads=" << hasher.reads << '\n';
+    auto altered = frozen.value(); altered.steps[0].movement->strategy = nookbit::MoveStrategy::Rename;
+    expect(nookbit::PlanSignature::approvalPayload(altered) != nookbit::PlanSignature::approvalPayload(frozen.value()), "metadata policy must be signed");
+#else
+    (void)scenario;
+#endif
+}
+
+// 안전한 단일 파일 이동·되돌리기 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    for (int scenario = 0; scenario < 8; ++scenario) testMetadataRename(scenario);
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
     for (int scenario = 0; scenario < 16; ++scenario) testV2Execution(scenario);

@@ -171,7 +171,7 @@ struct RuleSet {
 };
 
 /// 승인에 고정할 이동 방식이며 실행 실패 시 다른 방식으로 바꾸지 않는다.
-enum class MoveStrategy { Rename, VerifiedCopy };
+enum class MoveStrategy { Rename, VerifiedCopy, MetadataRename };
 
 /// 다른 볼륨 복사에서 현재 지원하는 메타데이터 보존 범위.
 enum class PreservationPolicy { LocalNtfsBasic };
@@ -201,6 +201,7 @@ struct MoveStep {
     CollisionPolicy collisionPolicy{CollisionPolicy::Rename};
     StepStatus status{StepStatus::Planned};
     std::optional<MoveContract> movement;
+    std::optional<Error> failure;
 };
 
 /// 화면에서 파일별 분류 결과를 구분하는 미리보기 전용 상태.

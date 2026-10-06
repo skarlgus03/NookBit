@@ -137,8 +137,8 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     for (const auto& step : plan.steps) {
         if (step.id.empty() || !ids.insert(step.id).second || !step.source.is_absolute() || !step.destination.is_absolute() ||
             step.source.lexically_normal() == step.destination.lexically_normal() ||
-            (step.status != StepStatus::Skipped && (!step.fingerprint.sha256 ||
-             !PlanSignature::isSha256Hex(*step.fingerprint.sha256) || !step.fingerprint.volumeId || !step.fingerprint.fileId)))
+            (step.status != StepStatus::Skipped && ((!PlanSignature::isMetadataRenamePlan(plan) && (!step.fingerprint.sha256 ||
+             !PlanSignature::isSha256Hex(*step.fingerprint.sha256))) || !step.fingerprint.volumeId || !step.fingerprint.fileId)))
             report.planIntact = false;
     }
     if (plan.status == PlanStatus::NeedsRecovery) {
@@ -147,9 +147,10 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing :
         plan.status == PlanStatus::RolledBack ? PlanStatus::RollingBack : plan.status;
     std::vector<Error> globalReasons;
+    if (PlanSignature::isMetadataRenamePlan(plan)) globalReasons.push_back({"recovery.metadata_unsupported", "Interrupted metadata-only renames require manual review; automatic resume/rollback is not yet supported."});
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});
-    if (report.planIntact && plan.formatVersion == 2) {
+    if (report.planIntact && plan.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(plan)) {
         if (!volumes_) globalReasons.push_back({"recovery.volume_verifier_required", "V2 inspection requires current volume identities."});
         else {
             PrepareTransferPlanUseCase prepare(*volumes_);

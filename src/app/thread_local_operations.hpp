@@ -71,8 +71,13 @@ public:
         Session session(*this);
         auto saved = Result<OperationPlan>::success(plan);
         if (!frozen) {
+            auto draft = plan;
+            const bool sameVolumeOnly = std::all_of(draft.steps.begin(), draft.steps.end(), [](const MoveStep& step) {
+                return step.movement && step.movement->strategy == MoveStrategy::Rename;
+            });
+            if (sameVolumeOnly) for (auto& step : draft.steps) step.movement->strategy = MoveStrategy::MetadataRename;
             FreezePreviewUseCase freeze(session.rules, session.scanner, session.planner, session.hasher, session.history, &session.copy);
-            saved = freeze.execute(plan, selected, settings);
+            saved = freeze.execute(draft, selected, settings);
         }
         if (!saved) return saved;
         return session.verify.execute(saved.value().id, selected, settings);

@@ -85,6 +85,11 @@ Result<void> SafeExecutor::execute(
         plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
+    if (PlanSignature::isMetadataRenamePlan(saved)) {
+        if (saved.planHash != plan.planHash || PlanSignature::planContents(saved) != PlanSignature::planContents(plan))
+            return Result<void>::failure({"execute.plan_mismatch", "Requested metadata plan differs from saved approval."});
+        return executeMetadataSteps(saved, selectedFiles, settings.value());
+    }
     const bool hasCopy = saved.formatVersion == 2 && std::any_of(saved.steps.begin(), saved.steps.end(), [](const MoveStep& item) {
         return item.status != StepStatus::Skipped && item.movement && item.movement->strategy == MoveStrategy::VerifiedCopy;
     });
@@ -120,6 +125,45 @@ Result<void> SafeExecutor::execute(
     auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
     return executePreparedSteps(saved, steps, {});
+}
+
+// 보호된 객체의 이동을 시도하며 확실한 실패는 남기고 불확실한 결과는 중단하는 함수.
+Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
+    const std::vector<std::filesystem::path>& selected, const UserSettings& settings) {
+    const auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
+    if (!started) return started;
+    int failures = 0;
+    for (const auto& step : plan.steps) {
+        if (step.status != StepStatus::Planned) continue;
+        const auto intent = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::IntentRecorded});
+        if (!intent) { const auto marked = markNeedsRecovery(plan.id); return marked ? intent : marked; }
+        auto result = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.homeRoot, appDataRoot_);
+        if (result) result = verifyMovement(plan, &step);
+        if (result) result = WindowsFileMover::moveMatchingNoReplace(step.source, step.destination, step.fingerprint);
+        if (!result) {
+            // 이름 변경 API 실패가 실제 이동 결과를 증명하지 못하면 다음 파일로 진행하지 않는다.
+            if (result.error().code == "move.rename_failed" &&
+                (probeFile(scanner_, step.source, step.fingerprint) != FileProbe::Matches ||
+                 probeFile(scanner_, step.destination, step.fingerprint) == FileProbe::Matches ||
+                 probeFile(scanner_, step.destination, step.fingerprint) == FileProbe::Unavailable)) {
+                const auto marked = markNeedsRecovery(plan.id);
+                return marked ? Result<void>::failure({"execute.needs_recovery", "Rename outcome is uncertain; preserve files and review."}) : marked;
+            }
+            const auto failed = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::Failed, result.error()});
+            if (!failed) { const auto marked = markNeedsRecovery(plan.id); return marked ? failed : marked; }
+            ++failures; continue;
+        }
+        if (probeFile(scanner_, step.source, step.fingerprint) != FileProbe::Missing ||
+            probeFile(scanner_, step.destination, step.fingerprint) != FileProbe::Matches) {
+            const auto marked = markNeedsRecovery(plan.id);
+            return marked ? Result<void>::failure({"execute.needs_recovery", "Moved object could not be confirmed; review required."}) : marked;
+        }
+        const auto applied = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::Applied});
+        if (!applied) { const auto marked = markNeedsRecovery(plan.id); return marked ? applied : marked; }
+    }
+    const auto finished = history_.appendEvent(PlanStatusChanged{plan.id, failures ? PlanStatus::Failed : PlanStatus::Completed});
+    if (!finished) { const auto marked = markNeedsRecovery(plan.id); return marked ? finished : marked; }
+    return failures ? Result<void>::failure({"execute.partial_failure", std::to_string(failures) + " file(s) could not move; successful files remain moved. See per-file history."}) : Result<void>::success();
 }
 
 // 정방향 최초 실행과 복구가 동일한 이동 및 보상 경계를 사용하는 함수.
@@ -350,8 +394,8 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
         const bool copyStep = plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy;
         Result<void> reverseReady = Result<void>::success();
         if (copyStep) reverseReady = reversals_->verifyRollback(plan.id, step->id);
-        if (!step->fingerprint.sha256 ||
-            !PlanSignature::isSha256Hex(*step->fingerprint.sha256) ||
+        if ((!PlanSignature::isMetadataRenamePlan(plan) && (!step->fingerprint.sha256 ||
+            !PlanSignature::isSha256Hex(*step->fingerprint.sha256))) ||
             !step->source.is_absolute() || !step->destination.is_absolute() ||
             !appDataRoot_.is_absolute() ||
             PathSafetyValidator::isWithin(step->source, appDataRoot_) ||
@@ -409,7 +453,9 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
                 "rollback.needs_recovery", "A file changed during undo; review is required.",
             });
         }
-        auto moved = WindowsFileMover::moveNoReplace(step->destination, step->source);
+        auto moved = PlanSignature::isMetadataRenamePlan(plan)
+            ? WindowsFileMover::moveMatchingNoReplace(step->destination, step->source, step->fingerprint)
+            : WindowsFileMover::moveNoReplace(step->destination, step->source);
         if (!moved ||
             probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches ||
             probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Missing) {

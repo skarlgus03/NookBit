@@ -280,13 +280,20 @@ void testBackgroundApprovalSafety() {
     preview.setTaskRunner(&runner); preview.setSortWorkflow(&operations);
     const auto source = directory.filePath("changed.jpg");
     QFile file(source); expect(file.open(QIODevice::WriteOnly) && file.write("owned source") > 0, "background changed source"); file.close();
+    const auto successfulSource = directory.filePath("successful.jpg");
+    QFile successful(successfulSource); expect(successful.open(QIODevice::WriteOnly) && successful.write("owned successful source") > 0, "background successful subset source"); successful.close();
+    pending.addUrl(QUrl::fromLocalFile(successfulSource));
     pending.addUrl(QUrl::fromLocalFile(source)); preview.createPreview(home); preview.prepareSort();
     expect(waitForBackground(runner) && preview.awaitingConfirmation(), "background approval safety confirmation");
     expect(file.open(QIODevice::Append) && file.write(" changed") > 0, "change after background confirmation"); file.close();
     preview.confirmSort(); expect(runner.busy(), "approval revalidation must not block screen");
-    expect(waitForBackground(runner) && QFile::exists(source) && pending.count() == 1 && !preview.canUndo(), "changed source must not be moved by background approval");
+    expect(waitForBackground(runner) && QFile::exists(source) && !QFile::exists(successfulSource) && pending.count() == 1 && preview.canUndo(),
+        "partial metadata failure must retain failed pending file and remove only successful file");
     const auto plans = workflow.history.incompletePlans();
-    expect(plans && plans.value().size() == 1 && plans.value()[0].status == nookbit::PlanStatus::Planned, "failed approval must leave unapproved plan");
+    expect(plans && plans.value().size() == 1 && plans.value()[0].status == nookbit::PlanStatus::Failed &&
+        std::any_of(plans.value()[0].steps.begin(), plans.value()[0].steps.end(), [](const auto& step) { return step.failure && step.failure->code == "move.source_changed"; }),
+        "metadata execution must record changed source as per-file failure");
+    preview.undoLastMove(); expect(waitForBackground(runner) && QFile::exists(successfulSource) && QFile::exists(source), "partial metadata UI undo must restore only successful subset");
 #endif
 }
 

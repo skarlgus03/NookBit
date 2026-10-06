@@ -27,10 +27,22 @@ Result<FileFingerprint> selectedFingerprint(IScanner& scanner,
 
 } // namespace
 
+// 같은 볼륨 빠른 계획을 재생성할 때 검사 정책만 유지하는 함수.
+void inheritMetadataRenamePolicy(OperationPlan& current, const OperationPlan& reference) {
+    if (!PlanSignature::isMetadataRenamePlan(reference) || current.steps.size() != reference.steps.size()) return;
+    for (size_t i = 0; i < current.steps.size(); ++i) {
+        auto& step = current.steps[i];
+        if (step.source == reference.steps[i].source && step.destination == reference.steps[i].destination &&
+            step.movement && step.movement->strategy == MoveStrategy::Rename)
+            step.movement->strategy = MoveStrategy::MetadataRename;
+    }
+}
+
 // 이동 예정 파일의 내용 해시를 재검사해 계획에 붙이는 함수.
 Result<void> attachContentHashes(OperationPlan& plan, IScanner& scanner, IPlanHasher& hasher) {
     for (auto& step : plan.steps) {
         if (step.status != StepStatus::Planned) continue;
+        if (step.movement && step.movement->strategy == MoveStrategy::MetadataRename) continue;
         const auto before = selectedFingerprint(scanner, step.source);
         if (!before || !sameMetadata(step.fingerprint, before.value())) {
             return Result<void>::failure({

@@ -21,6 +21,7 @@ struct StepStatusChanged {
     PlanId planId;
     StepId stepId;
     StepStatus status;
+    std::optional<Error> failure;
 };
 
 struct HomeStateChanged {

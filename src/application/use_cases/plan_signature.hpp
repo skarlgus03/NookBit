@@ -9,6 +9,8 @@ namespace nookbit {
 /// 계획의 모든 승인 관련 입력을 순서가 고정된 바이트 문자열로 만드는 도우미.
 class PlanSignature final {
 public:
+    /// 같은 볼륨 메타데이터 승인만 포함한 빠른 이동 계획인지 반환하는 함수.
+    static bool isMetadataRenamePlan(const OperationPlan& plan);
     /// 지원하는 계획 버전과 이동 계약의 일관성을 검사하는 함수.
     [[nodiscard]] static Result<void> validateFormat(const OperationPlan& plan);
 
