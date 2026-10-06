@@ -266,6 +266,38 @@ void testTransferToWholeResume() {
     }
 }
 
+// 복사 시작 전·부분 역전송은 새 실행이나 감사 없이 명시적 선택을 차단하는 함수.
+void testUnsupportedRecoveryEdges() {
+    for (bool reverse : {false, true}) {
+        Fixture f;
+        if (reverse) {
+            f.movedCopy(0);
+            const auto forward = f.journal.attempts[0];
+            TransferAttempt undo;
+            undo.id = "partial-undo"; undo.planId = forward.planId; undo.stepId = forward.stepId; undo.direction = TransferDirection::Rollback;
+            undo.source = forward.destination; undo.destination = forward.source; undo.staging = forward.source.parent_path() / "reverse.tmp";
+            undo.sourceFingerprint = *forward.destinationFingerprint; undo.phase = TransferPhase::StagingCreated;
+            undo.stagingFingerprint = FileFingerprint{0, 20, "1", "partial-reverse", {}};
+            auto actual = *undo.stagingFingerprint; actual.size = 3; actual.sha256 = std::string(64, 'd');
+            f.present(undo.staging, actual); f.journal.attempts.push_back(undo);
+            f.history.plan.status = PlanStatus::RollingBack; f.history.origin = PlanStatus::RollingBack;
+            f.history.plan.steps[0].status = StepStatus::RollbackIntentRecorded;
+        } else {
+            f.journal.attempts.push_back(f.forward(0, TransferPhase::Prepared));
+            f.history.plan.steps[0].status = StepStatus::IntentRecorded;
+        }
+        Settings settings; Rules rules; rules.value.version = "rules"; Runner runner; Resolver resolver(f);
+        f.history.plan.settingsRevision = f.history.plan.rulesRevision = std::string(64, 'b'); f.seal();
+        InspectInterruptedPlanUseCase inspector(f.history, f.journal, f.files, f.hasher, &f.volumes);
+        RecoverInterruptedPlanUseCase recovery(inspector, f.history, settings, rules, f.hasher, runner, &resolver);
+        expect(recovery.execute({f.history.plan.id, f.history.plan.planHash, RecoveryAction::Later}).hasValue(), "unsupported edge can be deferred");
+        for (const auto action : {RecoveryAction::Resume, RecoveryAction::Rollback})
+            expect(!recovery.execute({f.history.plan.id, f.history.plan.planHash, action}), "unsupported transfer boundary must block both guessed choices");
+        expect(f.history.writes == 0 && f.journal.writes == 0 && runner.executions == 0 && resolver.executions == 0,
+            "unsupported recovery edges never mutate audit or invoke file workers");
+    }
+}
+
 // 보존된 부분 파일이 되돌리기 완료 후에도 조회되고 변경되면 경고하는지 검사하는 함수.
 void testPreservedStartup() {
     Fixture f;
@@ -561,5 +593,6 @@ int main() {
     testTransferToWholeResume();
     testPreservedStartup();
     testPartialCleanupApproval();
+    testUnsupportedRecoveryEdges();
     return failures ? 1 : 0;
 }
