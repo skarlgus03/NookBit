@@ -20,6 +20,7 @@
 #include "application/use_cases/plan_signature.hpp"
 #include <nookbit/application/sort_workflow.hpp>
 #include "infrastructure/filesystem/operation_mutex.hpp"
+#include "infrastructure/diagnostics/operation_timing.hpp"
 #include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 
 namespace nookbit {
@@ -66,67 +67,85 @@ public:
     /// 작업 스레드 전용 연결로 고정·검사를 끝내고 확인할 계획을 반환하는 함수.
     Result<OperationPlan> prepare(const OperationPlan& plan, bool frozen,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
-        OperationMutex lock;
-        const auto acquired = lock.acquire();
-        if (!acquired) return Result<OperationPlan>::failure(acquired.error());
-        Session session(*this);
-        auto saved = Result<OperationPlan>::success(plan);
-        if (frozen) for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
-            const auto supported = session.copy.preflightSource(step.source);
-            if (!supported) return Result<OperationPlan>::failure(supported.error());
-            if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
-                return Result<OperationPlan>::failure({"transfer.zone_contract_required", "Download marker appeared after preparation. Create a new preview."});
-        }
-        if (!frozen) {
-            auto draft = plan;
-            for (auto& step : draft.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+        OperationTiming timing(appData_ / "diagnostics", "prepare", selected.size(), plannedBytes(plan));
+        const auto result = [&]() -> Result<OperationPlan> {
+            TimingStage preparation("prepare_total");
+            OperationMutex lock;
+            const auto acquired = lock.acquire();
+            if (!acquired) return Result<OperationPlan>::failure(acquired.error());
+            Session session(*this);
+            auto saved = Result<OperationPlan>::success(plan);
+            if (frozen) for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
                 const auto supported = session.copy.preflightSource(step.source);
                 if (!supported) return Result<OperationPlan>::failure(supported.error());
-                if (supported.value()) step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
+                if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
+                    return Result<OperationPlan>::failure({"transfer.zone_contract_required", "Download marker appeared after preparation. Create a new preview."});
             }
-            const bool sameVolumeOnly = std::all_of(draft.steps.begin(), draft.steps.end(), [](const MoveStep& step) {
-                return step.movement && step.movement->strategy == MoveStrategy::Rename;
-            });
-            if (sameVolumeOnly) for (auto& step : draft.steps) step.movement->strategy = MoveStrategy::MetadataRename;
-            FreezePreviewUseCase freeze(session.rules, session.scanner, session.planner, session.hasher, session.history, &session.copy);
-            saved = freeze.execute(draft, selected, settings);
+            if (!frozen) {
+                auto draft = plan;
+                for (auto& step : draft.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+                    const auto supported = session.copy.preflightSource(step.source);
+                    if (!supported) return Result<OperationPlan>::failure(supported.error());
+                    if (supported.value()) step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
+                }
+                const bool sameVolumeOnly = std::all_of(draft.steps.begin(), draft.steps.end(), [](const MoveStep& step) {
+                    return step.movement && step.movement->strategy == MoveStrategy::Rename;
+                });
+                if (sameVolumeOnly) for (auto& step : draft.steps) step.movement->strategy = MoveStrategy::MetadataRename;
+                FreezePreviewUseCase freeze(session.rules, session.scanner, session.planner, session.hasher, session.history, &session.copy);
+                saved = freeze.execute(draft, selected, settings);
+                if (!saved) return saved;
+                // 갓 고정한 계획은 DB 서명/내용만 읽어 확인하고 같은 파일을 곧바로 다시 해싱하지 않는다.
+                const auto readback = session.history.loadPlan(saved.value().id);
+                if (!readback || readback.value().planHash != saved.value().planHash ||
+                    readback.value().status != PlanStatus::Planned ||
+                    readback.value().planHash != session.hasher.sha256(PlanSignature::approvalPayload(readback.value())) ||
+                    PlanSignature::planContents(readback.value()) != PlanSignature::planContents(saved.value()))
+                    return Result<OperationPlan>::failure({"sort.saved_plan_changed", "Saved confirmation plan differs from the frozen snapshot."});
+                return readback;
+            }
             if (!saved) return saved;
-            // 갓 고정한 계획은 DB 서명/내용만 읽어 확인하고 같은 파일을 곧바로 다시 해싱하지 않는다.
-            const auto readback = session.history.loadPlan(saved.value().id);
-            if (!readback || readback.value().planHash != saved.value().planHash ||
-                readback.value().status != PlanStatus::Planned ||
-                readback.value().planHash != session.hasher.sha256(PlanSignature::approvalPayload(readback.value())) ||
-                PlanSignature::planContents(readback.value()) != PlanSignature::planContents(saved.value()))
-                return Result<OperationPlan>::failure({"sort.saved_plan_changed", "Saved confirmation plan differs from the frozen snapshot."});
-            return readback;
-        }
-        if (!saved) return saved;
-        return session.verify.execute(saved.value().id, selected, settings);
+            return session.verify.execute(saved.value().id, selected, settings);
+        }();
+        timing.completed(bool(result));
+        return result;
     }
     /// 사용자 확인 후 승인 검사와 파일 실행 모두 현재 작업 스레드에서 수행하는 함수.
     Result<void> approveAndExecute(const OperationPlan& plan,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
-        OperationMutex lock;
-        const auto acquired = lock.acquire();
-        if (!acquired) return acquired;
-        Session session(*this);
-        for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
-            const auto supported = session.copy.preflightSource(step.source);
-            if (!supported) return Result<void>::failure(supported.error());
-            if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
-                return Result<void>::failure({"transfer.zone_contract_required", "Download marker appeared after confirmation. Create a new preview."});
-        }
-        ApprovePlanUseCase approve(session.verify, session.history);
-        const auto displayed = session.history.loadPlan(plan.id);
-        if (!displayed || displayed.value().planHash != plan.planHash)
-            return Result<void>::failure({"sort.confirmation_stale", "The displayed plan changed before approval."});
-        const auto approval = approve.execute(plan.id, selected, settings);
-        if (!approval) return Result<void>::failure(approval.error());
-        const auto approved = session.history.loadPlan(plan.id);
-        if (!approved) return Result<void>::failure(approved.error());
-        if (approval.value().planHash != plan.planHash)
-            return Result<void>::failure({"sort.confirmation_stale", "The approval differs from the displayed plan."});
-        return session.operations.executeApproved(approved.value(), approval.value(), selected, settings);
+        OperationTiming timing(appData_ / "diagnostics", "move", selected.size(), plannedBytes(plan));
+        const auto result = [&]() -> Result<void> {
+            TimingStage setup("request_setup");
+            OperationMutex lock;
+            const auto acquired = lock.acquire();
+            if (!acquired) return acquired;
+            Session session(*this);
+            setup.stop();
+            TimingStage preflight("source_support_check");
+            for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+                const auto supported = session.copy.preflightSource(step.source);
+                if (!supported) return Result<void>::failure(supported.error());
+                if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
+                    return Result<void>::failure({"transfer.zone_contract_required", "Download marker appeared after confirmation. Create a new preview."});
+            }
+            preflight.stop();
+            TimingStage approvalCheck("approval_check");
+            ApprovePlanUseCase approve(session.verify, session.history);
+            const auto displayed = session.history.loadPlan(plan.id);
+            if (!displayed || displayed.value().planHash != plan.planHash)
+                return Result<void>::failure({"sort.confirmation_stale", "The displayed plan changed before approval."});
+            const auto approval = approve.execute(plan.id, selected, settings);
+            if (!approval) return Result<void>::failure(approval.error());
+            const auto approved = session.history.loadPlan(plan.id);
+            if (!approved) return Result<void>::failure(approved.error());
+            if (approval.value().planHash != plan.planHash)
+                return Result<void>::failure({"sort.confirmation_stale", "The approval differs from the displayed plan."});
+            approvalCheck.stop();
+            TimingStage execution("execution_total");
+            return session.operations.executeApproved(approved.value(), approval.value(), selected, settings);
+        }();
+        timing.completed(bool(result));
+        return result;
     }
     /// 불변 경로와 스레드 안전한 현재 설정 포트만 보관하는 함수.
     ThreadLocalOperations(QString database, QString migration, QString rules, QString schema, QString legacy,
@@ -136,7 +155,14 @@ public:
     /// 승인된 값 스냅샷을 현재 스레드 전용 실행기로 전달하는 함수.
     Result<void> executeApproved(const OperationPlan& plan, const ApprovalRecord& approval,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
-        Session session(*this); return session.operations.executeApproved(plan, approval, selected, settings);
+        OperationTiming timing(appData_ / "diagnostics", "move", selected.size(), plannedBytes(plan));
+        const auto result = [&] {
+            TimingStage execution("execution_total");
+            Session session(*this);
+            return session.operations.executeApproved(plan, approval, selected, settings);
+        }();
+        timing.completed(bool(result));
+        return result;
     }
     /// 저장된 계약으로 현재 스레드에서 안전하게 복원하는 함수.
     Result<void> rollback(const PlanId& id) override { Session session(*this); return session.operations.rollback(id); }
@@ -146,6 +172,13 @@ public:
     Result<void> execute(const RecoveryRequest& request) override {
         if (request.action == RecoveryAction::Later) return Result<void>::success();
         Session session(*this); return session.interrupted.execute(request);
+    }
+private:
+    /// 경로를 읽지 않고 실행 대상의 승인 크기 합계만 진단용으로 구하는 함수.
+    static std::uintmax_t plannedBytes(const OperationPlan& plan) {
+        std::uintmax_t bytes = 0;
+        for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped) bytes += step.fingerprint.size;
+        return bytes;
     }
 };
 }

@@ -42,6 +42,7 @@ target_include_directories(nookbit_core
 target_compile_features(nookbit_core PUBLIC cxx_std_20)
 
 add_library(nookbit_filesystem STATIC
+  infrastructure/diagnostics/operation_timing.cpp
   infrastructure/filesystem/filesystem_scanner.cpp
   infrastructure/filesystem/file_identity.cpp
   infrastructure/filesystem/operation_mutex.cpp

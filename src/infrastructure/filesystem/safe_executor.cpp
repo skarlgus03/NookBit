@@ -4,6 +4,7 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
+#include "infrastructure/diagnostics/operation_timing.hpp"
 #include "infrastructure/filesystem/windows_file_mover.hpp"
 #include "modules/planner/path_safety_validator.hpp"
 
@@ -81,8 +82,10 @@ Result<void> SafeExecutor::execute(
     }
     auto settings = settings_.load();
     if (!settings) return Result<void>::failure(settings.error());
+    TimingStage savedPlanCheck("executor_plan_check");
     auto checked = verifier_->execute(
         plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
+    savedPlanCheck.stop();
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
     if (PlanSignature::isMetadataRenamePlan(saved)) {
@@ -106,6 +109,7 @@ Result<void> SafeExecutor::execute(
     if (steps.empty()) {
         return Result<void>::failure({"execute.no_steps", "There are no files to move."});
     }
+    TimingStage batchCheck("batch_source_check");
     for (const auto* step : steps) {
         if (!step->fingerprint.sha256 ||
             !PlanSignature::isSha256Hex(*step->fingerprint.sha256)) {
@@ -122,6 +126,7 @@ Result<void> SafeExecutor::execute(
         }
     }
 
+    batchCheck.stop();
     auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
     return executePreparedSteps(saved, steps, {});
@@ -192,7 +197,10 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             if (!marked) return marked;
             return currentMovement;
         }
-        if (probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Matches) {
+        TimingStage finalSourceCheck("file_source_check", step->fingerprint.size);
+        const auto sourceState = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
+        finalSourceCheck.stop();
+        if (sourceState != FileProbe::Matches) {
             auto failedStep = history_.appendEvent(
                 StepStatusChanged{plan.id, step->id, StepStatus::Failed});
             if (!failedStep) return failedStep;

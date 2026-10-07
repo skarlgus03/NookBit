@@ -22,6 +22,8 @@ target_link_libraries(nookbit_planner_tests PRIVATE nookbit_filesystem)
 
 add_executable(nookbit_watch_evaluator_tests watch_evaluator_tests.cpp)
 add_executable(nookbit_interrupted_plan_tests interrupted_plan_tests.cpp)
+add_executable(nookbit_operation_timing_tests operation_timing_tests.cpp)
+target_link_libraries(nookbit_operation_timing_tests PRIVATE nookbit_filesystem)
 
 set(NOOKBIT_TEST_TARGETS
   nookbit_core_tests
@@ -31,6 +33,7 @@ set(NOOKBIT_TEST_TARGETS
   nookbit_planner_tests
   nookbit_watch_evaluator_tests
   nookbit_interrupted_plan_tests
+  nookbit_operation_timing_tests
 )
 
 foreach(target IN LISTS NOOKBIT_TEST_TARGETS)
@@ -52,6 +55,7 @@ add_test(NAME nookbit_filesystem_scanner_tests COMMAND nookbit_filesystem_scanne
 add_test(NAME nookbit_planner_tests COMMAND nookbit_planner_tests)
 add_test(NAME nookbit_watch_evaluator_tests COMMAND nookbit_watch_evaluator_tests)
 add_test(NAME nookbit_interrupted_plan_tests COMMAND nookbit_interrupted_plan_tests)
+add_test(NAME nookbit_operation_timing_tests COMMAND nookbit_operation_timing_tests)
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql)

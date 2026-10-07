@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QVariantMap>
+#include <QElapsedTimer>
 
 #include <algorithm>
 #include <utility>
@@ -298,17 +299,25 @@ void PreviewController::prepareSortInBackground() {
     const auto paths = pendingFiles_.filePaths();
     for (const auto& path : paths) selected.emplace_back(path.toStdWString());
     auto prepared = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure({"sort.not_prepared", "Preparation did not complete."}));
+    auto elapsedMs = std::make_shared<qint64>(-1);
     message_ = QStringLiteral("정리할 파일을 검사하고 있어요. 아직 이동하지 않았어요.");
     emit previewChanged();
     dispatchOperation(runner_, this,
-        [workflow = sortWorkflow_, plan = *draft_, frozen = hasFrozenPlan_, selected, settings, prepared] {
+        [workflow = sortWorkflow_, plan = *draft_, frozen = hasFrozenPlan_, selected, settings, prepared, elapsedMs] {
+            QElapsedTimer timer; timer.start();
             *prepared = workflow->prepare(plan, frozen, selected, settings);
+            *elapsedMs = timer.elapsed();
             return *prepared ? Result<void>::success() : Result<void>::failure(prepared->error());
-        }, [this, paths, prepared](const Result<void>& result) {
-            if (!result) { showError(QStringLiteral("정리 준비 검사에 실패했어요: %1").arg(QString::fromStdString(result.error().message))); return; }
+        }, [this, paths, prepared, elapsedMs](const Result<void>& result) {
+            if (!result) {
+                auto error = QStringLiteral("정리 준비 검사에 실패했어요: %1").arg(QString::fromStdString(result.error().message));
+                if (*elapsedMs >= 0) error += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
+                showError(error); return;
+            }
             if (pendingFiles_.filePaths() != paths) { showError(QStringLiteral("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
             draft_ = prepared->value(); hasFrozenPlan_ = true; awaitingConfirmation_ = true;
             message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
+            message_ += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
             emit previewChanged();
         });
 }
@@ -322,10 +331,22 @@ void PreviewController::confirmSortInBackground() {
     std::vector<std::filesystem::path> selected;
     for (const auto& path : pendingFiles_.filePaths()) selected.emplace_back(path.toStdWString());
     const auto plan = *draft_;
+    auto elapsedMs = std::make_shared<qint64>(-1);
     message_ = QStringLiteral("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
     dispatchOperation(runner_, this,
-        [workflow = sortWorkflow_, plan, selected, settings] { return workflow->approveAndExecute(plan, selected, settings); },
-        [this, plan](const Result<void>& result) { finishMovement(plan.id, plan.steps, result); });
+        [workflow = sortWorkflow_, plan, selected, settings, elapsedMs] {
+            QElapsedTimer timer; timer.start();
+            const auto result = workflow->approveAndExecute(plan, selected, settings);
+            *elapsedMs = timer.elapsed();
+            return result;
+        },
+        [this, plan, elapsedMs](const Result<void>& result) {
+            finishMovement(plan.id, plan.steps, result);
+            if (*elapsedMs >= 0) {
+                message_ += QStringLiteral(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
+                emit previewChanged();
+            }
+        });
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.

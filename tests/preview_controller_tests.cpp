@@ -226,12 +226,28 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     expect(!preview.prepareSort() && runner.busy() && !preview.awaitingConfirmation(), "preparation must return immediately without opening premature confirmation");
     preview.confirmSort();
     expect(waitForBackground(runner) && preview.awaitingConfirmation() && !preview.hasApprovedPlan(), "background preparation opens confirmation without approval");
+    expect(preview.message().contains(QStringLiteral("검사 ")) && preview.message().contains(QStringLiteral("초")),
+        "background preparation displays automatic elapsed time");
+    QFile prepareTiming(QString::fromStdWString((appData / "diagnostics" / "last-prepare-timing.log").wstring()));
+    expect(prepareTiming.open(QIODevice::ReadOnly) && prepareTiming.readAll().contains("operation=prepare outcome=success"),
+        "background preparation writes a separate timing report");
+    prepareTiming.close();
     for (const auto& source : sources) expect(QFile::exists(source), "preparation must not move files");
     preview.cancelSort(); expect(!preview.awaitingConfirmation() && !runner.busy(), "cancel preparation confirmation without movement");
     preview.prepareSort(); expect(waitForBackground(runner) && preview.awaitingConfirmation(), "frozen plan recheck in background");
     preview.confirmSort(); expect(runner.busy(), "sort must return before background completion");
     preview.confirmSort(); preview.undoLastMove();
     expect(waitForBackground(runner) && pending.count() == 0 && preview.canUndo(), "background movement updates queue and undo on UI thread");
+    expect(preview.message().contains(QStringLiteral("검사·이동 총 ")), "background movement displays automatic total time");
+    QFile moveTiming(QString::fromStdWString((appData / "diagnostics" / "last-move-timing.log").wstring()));
+    expect(moveTiming.open(QIODevice::ReadOnly), "background movement timing report exists");
+    const auto timingReport = moveTiming.readAll(); moveTiming.close();
+    expect(timingReport.contains("operation=move outcome=success") && timingReport.contains("approval_check") &&
+        timingReport.contains("executor_plan_check"), "timing includes approval and executor checks");
+    if (taggedCrossVolume) for (const auto* stage : {"protected_copy_open", "copy_stream", "copy_flush", "copy_readback",
+        "destination_commit", "removal_full_check", "source_delete_and_confirm"})
+        expect(timingReport.contains(stage), "timing includes every actual cross-volume transfer phase");
+    for (const auto& source : sources) expect(!timingReport.contains(source.toUtf8()), "diagnostic report omits source paths");
     for (const auto& source : sources) expect(!QFile::exists(source), "background source moved");
     preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
     expect(waitForBackground(runner) && !preview.canUndo(), "background last undo completes");

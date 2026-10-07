@@ -3,6 +3,7 @@
 #include "windows_transfer_source_removal.hpp"
 #include "windows_transfer_recovery.hpp"
 #include "file_identity.hpp"
+#include "infrastructure/diagnostics/operation_timing.hpp"
 #include <nookbit/domain/transfer.hpp>
 
 namespace nookbit {
@@ -371,6 +372,7 @@ public:
 
     // 원본을 유지하며 복사·flush·재읽기·메타데이터 검증을 수행하는 함수.
     Result<FileFingerprint> copyAndVerify(const std::function<bool()>& cancelled) override {
+        TimingStage copyTotal("copy_total", expected.size);
         if (std::exchange(attempted, true))
             return Result<FileFingerprint>::failure({"transfer.reused", "Session already attempted"});
         LARGE_INTEGER start{};
@@ -386,6 +388,7 @@ public:
             const auto initialized = streamedHash.initialize();
             if (!initialized) return Result<FileFingerprint>::failure(initialized.error());
         }
+        TimingStage copyStream("copy_stream", expected.size - resumeOffset);
         for (;;) {
             if (cancelled && cancelled())
                 return Result<FileFingerprint>::failure({"transfer.cancelled", "Copy cancelled; source retained"});
@@ -408,12 +411,20 @@ public:
                 offset += written;
             }
         }
+        copyStream.stop();
+        TimingStage flush("copy_flush", expected.size);
         if (!FlushFileBuffers(staging.value))
             return Result<FileFingerprint>::failure(failure("transfer.flush"));
+        flush.stop();
+        TimingStage readback("copy_readback", expected.size);
         const auto copiedHash = digest(staging.value, cancelled);
+        readback.stop();
         if (!copiedHash) return Result<FileFingerprint>::failure(copiedHash.error());
+        TimingStage sourceHashCheck("copy_source_digest", resumeOffset == 0 ? 0 : expected.size);
         const auto sourceHash = resumeOffset == 0 ? streamedHash.finish() : digest(source.value, cancelled);
+        sourceHashCheck.stop();
         if (!sourceHash) return Result<FileFingerprint>::failure(sourceHash.error());
+        TimingStage metadataCheck("copy_metadata_and_markers");
         auto current = fingerprint(source.value);
         if (!current) return current;
         current.value().sha256 = sourceHash.value();
@@ -462,6 +473,7 @@ public:
 
     // 같은 보호 핸들의 검증 증거로 내용 재읽기 없이 이름·객체·메타데이터를 확정하는 함수.
     Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) override {
+        TimingStage commit("destination_commit");
         if (!verifiedCopy || std::exchange(commitAttempted, true))
             return Result<FileFingerprint>::failure({"transfer.commit_state", "A verified unused session is required"});
         const auto parent = stagingPath.parent_path().lexically_normal().wstring();
@@ -569,6 +581,8 @@ public:
         : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)), allowZone_(allowZone) {}
     // 두 파일의 지원 범위·객체 ID·내용·수정 시각을 보유 핸들로 재검증하는 함수.
     Result<void> verify() override {
+        TimingStage removalCheck(contentsVerified_ ? "removal_cached_check" : "removal_full_check",
+            contentsVerified_ ? 0 : attempt_.sourceFingerprint.size * 2);
         if (source_.value == INVALID_HANDLE_VALUE) return Result<void>::failure({"transfer.removal_state", "Source handle closed"});
         if (allowZone_) {
             auto input = captureZone(attempt_.source), output = captureZone(attempt_.destination);
@@ -612,9 +626,11 @@ public:
     }
     // 제거 직전 재검증하고 핸들 기반 제거·닫기·실제 부재를 한 번 확인하는 함수.
     Result<void> removeVerifiedSource() override {
+        TimingStage removal("source_remove_total");
         if (std::exchange(attempted_, true)) return Result<void>::failure({"transfer.removal_reused", "Removal already attempted"});
         const auto checked = verify();
         if (!checked) return checked;
+        TimingStage deletion("source_delete_and_confirm");
         FILE_DISPOSITION_INFO disposition{TRUE};
         if (!SetFileInformationByHandle(source_.value, FileDispositionInfo, &disposition, sizeof(disposition)))
             return Result<void>::failure(failure("transfer.removal_failed"));
@@ -1103,6 +1119,7 @@ TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::fil
 // 지원 범위와 원본을 검사한 뒤 독점적인 새 임시 파일 세션을 만드는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract* movement) {
+    TimingStage opening("protected_copy_open", expected.size);
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
     if (!validPath(source) || !validPath(staging) || staging.filename().empty() ||
         !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId)
