@@ -1,5 +1,17 @@
 # Real two-volume backend test
 
+## 2026-10-07 삭제 전 영구 증거와 원본 없는 복구
+
+Schema v9에 제거 전 영수증과 감사 연결을 추가했다. 새 정방향 표식 전송은 보호 세션의 최종 객체·내용 해시·정밀 속성·표식 해시를 삭제 전에 원자적으로 저장한다. 재시작한 DB 연결에서 실제 제거 의도와 영수증·파일을 다시 확인해 사용자 선택 후 완료 기록만 복구한다. 기존 계획 v2·규칙 JSON v3·승인 해시는 유지하고, 옛 기록에는 증거를 만들어 넣지 않는다.
+
+- 자동 회귀 22/22: v1~v8 이행 호환·Schema 9 DDL 실패 롤백/재시도·구형 기록에 증거/의도 미생성 포함.
+- `--zone-recovery-run` 17/17: 삭제 결과/완료 저장 실패 후 재시작 복구, 구형 무증거·표식 변경/삭제·감사 손상 차단, 감사 또는 영수증 저장 실패의 전체 롤백과 원본 보존, 같은 크기/수정 시각의 파일 내용 변경 차단, 영수증 불변성과 동일 증거 재시도.
+- 성공한 복구는 원자적 전송/단계/계획 완료와 표식 원문을 보존한 정상 되돌리기까지 확인한다.
+- 최종 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-cross-source-rcHrHn`, `D:/NookBit/out/build/dev/tests/NookBit-cross-target-KpeVEK/zone-recovery-report.json`.
+- 앱의 실제 백그라운드 정리·마지막/기록 되돌리기·명시적 복구도 통과했다. 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-bg-source-aLYwcu`, `D:/NookBit/out/build/dev/tests/NookBit-bg-target-atNrPQ`.
+
+전용 자료는 보존했고 사용자 파일·앱 DB는 사용하지 않았다. 중단 역전송·표식 임시 파일 정리는 후속이다. 구형 실행 파일은 Schema 9 DB를 거부하므로 이행 뒤 다운그레이드하지 않는다. 시각적 테스트는 사용자가 한다.
+
 ## 2026-10-07 원본이 남은 다운로드 표식 복구
 
 자동 회귀 22/22, 실제 서로 다른 고정 NTFS 볼륨의 `--zone-recovery-run` 9/9, 컨트롤러 `--background-cross-run`이 통과했다. 새 고유 시험 파일만 사용했고 사용자 파일·실행 앱·사용자 DB는 건드리지 않았다.

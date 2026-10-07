@@ -24,6 +24,8 @@ public:
     ~SqliteTransferJournal() override;
     /// 실행 중인 단계에 연결된 새 시도를 기록하는 함수.
     [[nodiscard]] Result<void> begin(const TransferAttempt& attempt) override;
+    /// 승인·예상 시도와 보호 증거를 대조해 제거 전 영수증과 감사를 저장하는 함수.
+    [[nodiscard]] Result<void> recordRemovalProof(const TransferAttempt& expected, const TransferRemovalProof& proof) override;
     /// 예상 상태·증거를 검사하고 스냅샷과 이벤트를 함께 기록하는 함수.
     [[nodiscard]] Result<void> advance(const std::string& attemptId, const TransferUpdate& update) override;
     /// 정방향 전송 완료와 상위 단계·계획 기록을 한 트랜잭션으로 저장하는 함수.

@@ -35,6 +35,7 @@ TransferRecoveryFileState classify(const TransferFileObservation& observed,
 bool trusted(const OperationPlan& plan, const TransferAttempt& attempt, const IPlanHasher& hasher) {
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.stagingFingerprint.reset();
     initial.destinationFingerprint.reset();
     initial.error.reset();
@@ -141,9 +142,20 @@ Result<TransferRecoveryInspection> InspectTransferRecoveryUseCase::execute(const
     }
     if (withZone) {
         if (report.source == State::Missing && phase != TransferPhase::Completed) {
-            report.finding = Finding::Unavailable;
-            report.reason = "No source or persisted marker proof remains; final file and records retained.";
-            report.observationErrors.push_back({"recovery.zone_evidence_required", report.reason});
+            const auto& proof = report.attempt.removalProof;
+            const bool eligible = proof && (report.attempt.sourceRemovalIntentRecorded || report.attempt.recoveryRemovalIntent) &&
+                TransferValidation::validateRemovalProof(report.attempt, *proof, plan.value().planHash) &&
+                TransferValidation::reconcileCompleted(report.attempt, true) && noStage && report.destination == State::Matches;
+            const auto checked = eligible ? files_.checkRemovalProof(report.attempt.destination, *proof) :
+                Result<void>::failure({"recovery.zone_evidence_required", "No trusted pre-removal marker proof or removal intent remains."});
+            if (!checked) {
+                report.finding = Finding::Unavailable;
+                report.reason = "Persisted removal proof cannot confirm the final file; file and records retained.";
+                report.observationErrors.push_back(checked.error());
+            } else {
+                report.finding = Finding::SourceAbsentAfterRemoveIntent;
+                report.reason = "Final object, marker and attributes match durable pre-removal evidence; explicit completion recovery is available.";
+            }
         } else if (sourceMatches && (!noStage || !noFinal)) {
             const auto markers = files_.checkDownloadMarkers(report.attempt.source,
                 noStage ? report.attempt.destination : report.attempt.staging, report.finding == Finding::PartialCopy);

@@ -530,6 +530,31 @@ void testCommitRecoveryJournal() {
 }
 
 // v7에서 확정 감사 컬럼 이행 실패·재시도·승인 보존을 검사하는 함수.
+void testRemovalProofMigration() {
+    QTemporaryDir directory;
+    Fixture fixture(directory.path()); if (!fixture.ready) return;
+    const auto dbPath = directory.filePath("history.sqlite");
+    { nookbit::SqliteTransferJournal journal(dbPath, migrationPath()); expect(journal.begin(fixture.attempt).hasValue(), "proof migration old attempt"); }
+    expect(sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
+        sql(dbPath, "DELETE FROM schema_migrations WHERE version=9").isValid(), "restore genuine v8 fixture");
+    const auto upgrade = directory.filePath("009_removal_proof.sql");
+    QFile broken(upgrade); expect(broken.open(QIODevice::WriteOnly), "proof migration fault fixture");
+    if (!broken.isOpen()) return;
+    broken.write("CREATE TABLE proof_migration_sentinel(value TEXT); INVALID SQL;"); broken.close();
+    nookbit::SqliteHistoryRepository history(dbPath, directory.filePath("001_initial.sql"));
+    expect(!history.loadPlan("plan") && sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 8 &&
+        sql(dbPath, "SELECT count(*) FROM sqlite_master WHERE name='proof_migration_sentinel'").toInt() == 0,
+        "failed v9 migration rolls back DDL and version");
+    expect(QFile::remove(upgrade) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), upgrade), "repair proof migration");
+    const auto plan = history.loadPlan("plan");
+    nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
+    const auto attempt = journal.load("attempt");
+    expect(plan && plan.value().planHash == fixture.plan.planHash && attempt && !attempt.value().removalProof &&
+        !attempt.value().sourceRemovalIntentRecorded && sql(dbPath, "SELECT count(*) FROM transfer_removal_proofs").toInt() == 0,
+        "v9 preserves approval and never invents old removal proof");
+}
+
+// v7에서 확정 감사 컬럼 이행 실패·재시도·승인 보존을 검사하는 함수.
 void testStagingCommitMigration() {
     QTemporaryDir directory;
     Fixture fixture(directory.path());
@@ -537,7 +562,8 @@ void testStagingCommitMigration() {
     const auto dbPath = directory.filePath("history.sqlite");
     { nookbit::SqliteTransferJournal journal(dbPath, migrationPath()); expect(journal.begin(fixture.attempt).hasValue(), "v8 migration attempt fixture"); }
     expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_commit").isValid() &&
-        sql(dbPath, "DELETE FROM schema_migrations WHERE version=8").isValid(), "restore v7 fixture");
+        sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
+        sql(dbPath, "DELETE FROM schema_migrations WHERE version>=8").isValid(), "restore v7 fixture");
     const auto upgrade = directory.filePath("008_staging_commit.sql");
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "v8 broken migration fixture");
@@ -548,6 +574,7 @@ void testStagingCommitMigration() {
         sql(dbPath, "SELECT count(*) FROM pragma_table_info('transfer_events') WHERE name='staging_commit'").toInt() == 0,
         "v8 failure rolls back column and version");
     expect(QFile::remove(upgrade) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), upgrade), "repair v8 migration");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), directory.filePath("009_removal_proof.sql")), "v9 follows repaired v8");
     const auto plan = history.loadPlan("plan");
     nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
     const auto attempt = journal.load("attempt");
@@ -564,6 +591,7 @@ void testCopyResumeMigration() {
     { nookbit::SqliteTransferJournal journal(dbPath, migrationPath()); expect(journal.begin(fixture.attempt).hasValue(), "copy resume migration fixture"); }
     expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_commit").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN copy_resume").isValid() &&
+        sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
         sql(dbPath, "DELETE FROM schema_migrations WHERE version>=7").isValid(), "restore v6 fixture");
     const auto upgrade = directory.filePath("007_copy_resume.sql");
     QFile broken(upgrade);
@@ -575,6 +603,7 @@ void testCopyResumeMigration() {
         sql(dbPath, "SELECT count(*) FROM pragma_table_info('transfer_events') WHERE name='copy_resume'").toInt() == 0, "v7 failure rolls back both column and version");
     expect(QFile::remove(upgrade) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("007_copy_resume.sql"), upgrade), "repair v7 migration");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), directory.filePath("008_staging_commit.sql")), "v8 follows repaired v7");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), directory.filePath("009_removal_proof.sql")), "v9 follows repaired v7");
     const auto plan = history.loadPlan("plan");
     nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
     const auto attempt = journal.load("attempt");
@@ -592,6 +621,7 @@ void testRecoveryRemovalMigration() {
     expect(sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN recovery_removal_intent").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_commit").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN copy_resume").isValid() &&
+        sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
         sql(dbPath, "DELETE FROM schema_migrations WHERE version>=6").isValid(), "restore v5 fixture");
     const auto upgrade = directory.filePath("006_recovery_removal.sql");
     QFile broken(upgrade);
@@ -605,6 +635,7 @@ void testRecoveryRemovalMigration() {
     expect(QFile::remove(upgrade) && QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("006_recovery_removal.sql"), upgrade), "repair v6 migration");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("007_copy_resume.sql"), directory.filePath("007_copy_resume.sql")), "copy resume migration fixture follows v6");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), directory.filePath("008_staging_commit.sql")), "v8 migration fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), directory.filePath("009_removal_proof.sql")), "v9 migration fixture");
     const auto plan = history.loadPlan("plan");
     nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
     const auto attempt = journal.load("attempt");
@@ -623,7 +654,7 @@ void testMigrationFailureIsAtomic() {
         expect(fixture.ready, "migration failure original plan should save");
         hash = fixture.plan.planHash;
     }
-    expect(sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
+    expect(sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() && sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
                sql(dbPath, "ALTER TABLE plans DROP COLUMN format_version").isValid() &&
                sql(dbPath, "ALTER TABLE steps DROP COLUMN movement_json").isValid() &&
                sql(dbPath, "DELETE FROM schema_migrations WHERE version>=2").isValid(), "failure fixture should use v1");
@@ -642,6 +673,7 @@ void testMigrationFailureIsAtomic() {
                       QDir(migrations).filePath("006_recovery_removal.sql")), "v6 migration should copy to the fixture");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("007_copy_resume.sql"), QDir(migrations).filePath("007_copy_resume.sql")), "v7 migration should copy to fixture");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), QDir(migrations).filePath("008_staging_commit.sql")), "v8 migration fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), QDir(migrations).filePath("009_removal_proof.sql")), "v9 migration fixture");
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "broken migration fixture should open");
     if (!broken.isOpen()) return;
@@ -658,7 +690,7 @@ void testMigrationFailureIsAtomic() {
            "temporary broken migration should be replaced with the valid fixture");
     const auto repaired = repository.loadPlan("plan");
     expect(repaired && repaired.value().planHash == hash &&
-               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 8,
+               sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 9,
            "repaired migration should succeed without losing the old plan");
 }
 
@@ -679,6 +711,7 @@ void testRecoveryMigrationCompatibility() {
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN recovery_removal_intent").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_commit").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN copy_resume").isValid() &&
+        sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
         sql(dbPath, "DELETE FROM schema_migrations WHERE version>=4").isValid(), "legacy v3 database should be reconstructed");
     const auto brokenPath = directory.filePath("004_transfer_recovery.sql");
     QFile broken(brokenPath);
@@ -699,6 +732,7 @@ void testRecoveryMigrationCompatibility() {
         directory.filePath("006_recovery_removal.sql")), "removal migration fixture should copy");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("007_copy_resume.sql"), directory.filePath("007_copy_resume.sql")), "v7 fixture follows removal migration");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), directory.filePath("008_staging_commit.sql")), "v8 migration fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), directory.filePath("009_removal_proof.sql")), "v9 migration fixture");
     const auto plan = upgraded.loadPlan("plan");
     expect(plan && plan.value().planHash == oldHash, "recovery schema upgrade preserves original signature");
     nookbit::SqliteTransferJournal reopened(dbPath, directory.filePath("001_initial.sql"));
@@ -723,6 +757,7 @@ void testCleanupMigrationAtomic() {
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN recovery_removal_intent").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN staging_commit").isValid() &&
         sql(dbPath, "ALTER TABLE transfer_events DROP COLUMN copy_resume").isValid() &&
+        sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() &&
         sql(dbPath, "DELETE FROM schema_migrations WHERE version>=5").isValid(), "restore v4 fixture");
     const auto upgrade = directory.filePath("005_staging_cleanup.sql");
     QFile broken(upgrade);
@@ -738,6 +773,7 @@ void testCleanupMigrationAtomic() {
         directory.filePath("006_recovery_removal.sql")), "v6 migration should follow cleanup fixture");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("007_copy_resume.sql"), directory.filePath("007_copy_resume.sql")), "v7 fixture follows cleanup migration");
     expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("008_staging_commit.sql"), directory.filePath("008_staging_commit.sql")), "v8 migration fixture");
+    expect(QFile::copy(QDir(QFileInfo(migrationPath()).path()).filePath("009_removal_proof.sql"), directory.filePath("009_removal_proof.sql")), "v9 migration fixture");
     const auto plan = history.loadPlan("plan");
     nookbit::SqliteTransferJournal journal(dbPath, directory.filePath("001_initial.sql"));
     const auto old = journal.load("attempt");
@@ -756,7 +792,7 @@ void testMigrationCompatibility() {
         expect(fixture.ready, "legacy plan fixture should save");
         oldHash = fixture.plan.planHash;
     }
-    expect(sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
+    expect(sql(dbPath, "DROP TABLE transfer_removal_proofs").isValid() && sql(dbPath, "DROP TABLE transfer_events").isValid() && sql(dbPath, "DROP TABLE transfer_attempts").isValid() &&
                sql(dbPath, "ALTER TABLE plans DROP COLUMN format_version").isValid() &&
                sql(dbPath, "ALTER TABLE steps DROP COLUMN movement_json").isValid() &&
                sql(dbPath, "DELETE FROM schema_migrations WHERE version>=2").isValid(), "legacy v1 schema should be reconstructed");
@@ -765,16 +801,16 @@ void testMigrationCompatibility() {
         const auto loaded = upgraded.loadPlan("plan");
         expect(loaded && loaded.value().planHash == oldHash && loaded.value().status == nookbit::PlanStatus::Executing,
                "v1 migration must preserve the plan hash and execution state");
-        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 8,
+        expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 9,
                "v2/v3/v4/v5/v6/v7/v8 schema should apply exactly once");
     }
-    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(9,'future')").isValid(), "future schema fixture should save");
+    expect(sql(dbPath, "INSERT INTO schema_migrations VALUES(10,'future')").isValid(), "future schema fixture should save");
     nookbit::SqliteHistoryRepository tooOld(dbPath, migrationPath());
     auto unsupported = tooOld.loadPlan("plan");
     expect(!unsupported && unsupported.error().code == "history.schema_too_new",
            "future schema must be rejected before writes");
     expect(!tooOld.loadPlan("plan"), "failed opening must not become usable on the next call");
-    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 9,
+    expect(sql(dbPath, "SELECT max(version) FROM schema_migrations").toInt() == 10,
            "future migration marker must remain intact");
 }
 } // namespace
@@ -791,6 +827,7 @@ int main(int argc, char* argv[]) {
     testStagingCommitJournal();
     testCommitRecoveryJournal();
     testStagingCommitMigration();
+    testRemovalProofMigration();
     testCopyResumeMigration();
     testRecoveryRemovalMigration();
     testMigrationCompatibility();

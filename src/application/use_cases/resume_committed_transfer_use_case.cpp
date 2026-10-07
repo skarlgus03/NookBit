@@ -36,10 +36,17 @@ Result<TransferAttempt> ResumeCommittedTransferUseCase::execute(const std::strin
     const auto verified = session.value()->verify();
     if (!verified) return Return::failure(verified.error());
     if (cancelled && cancelled()) return Return::failure({"transfer.cancelled", "Both copies retained before recovery intent"});
+    if (attempt.direction == TransferDirection::Forward && movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone) {
+        const auto proof = session.value()->removalProof(binding.value().planHash);
+        if (!proof) return Return::failure(proof.error());
+        const auto savedProof = journal_.recordRemovalProof(attempt, proof.value());
+        if (!savedProof) return Return::failure(savedProof.error());
+        attempt.removalProof = proof.value();
+    }
     // 이전 의도가 있어도 현재 승인·예상 상태를 보호 세션 안에서 다시 확인한다.
     const auto savedIntent = journal_.recordRecoveryRemovalIntent(attempt, binding.value().planHash);
     if (!savedIntent) return Return::failure(savedIntent.error());
-    if (!attempt.recoveryRemovalIntent) attempt = intent.value();
+    if (!attempt.recoveryRemovalIntent) attempt = TransferValidation::recordRecoveryRemovalIntent(attempt).value();
     // 의도 이후에는 취소로 결과 판정을 생략하지 않으며 같은 보호 원본만 제거한다.
     const auto removed = session.value()->removeVerifiedSource();
     if (!removed) return Return::failure(removed.error());

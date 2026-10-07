@@ -9,6 +9,10 @@ class ITransferJournal {
 public:
     /// 구현체를 안전하게 정리하는 소멸자.
     virtual ~ITransferJournal() = default;
+    /// 보호 세션의 제거 증거와 감사를 원자적으로 저장하며 다른 증거로 덮어쓰지 않는 함수.
+    [[nodiscard]] virtual Result<void> recordRemovalProof(const TransferAttempt&, const TransferRemovalProof&) {
+        return Result<void>::failure({"transfer.removal_proof_unsupported", "Durable removal proof is required."});
+    }
 
     /// 기존 실행 단계에 연결된 새 전송 시도를 기록하는 함수.
     [[nodiscard]] virtual Result<void> begin(const TransferAttempt& attempt) = 0;

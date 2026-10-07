@@ -36,6 +36,8 @@ QString recoveryError(const Error& error) {
     if (code == "recovery.zone_evidence_required")
         return QStringLiteral("원본이 없고 다운로드 표식의 이전 증거가 없어 자동 확정할 수 없어요. 최종 파일과 기록을 보존합니다.");
     if (code == "transfer.zone_changed") return QStringLiteral("원본과 복사본의 다운로드 표식이 달라요. 두 파일을 보존합니다.");
+    if (code == "transfer.removal_proof_changed") return QStringLiteral("최종 파일의 표식 또는 속성이 삭제 전 증거와 달라요. 파일과 기록을 보존합니다.");
+    if (code == "transfer.removal_proof_invalid") return QStringLiteral("삭제 전 증거 또는 감사 기록을 신뢰할 수 없어요. 파일은 변경하지 않습니다.");
     if (code == "recovery.zone_reverse_unsupported") return QStringLiteral("다운로드 표식이 있는 파일의 중단된 되돌리기는 아직 별도 확인이 필요해요.");
     if (code == "recovery.preserve_unsupported" || code == "recovery.step_resolution_required" || code == "recovery.transfer_resume_unsupported")
         return QStringLiteral("현재 중단 경계는 이 선택으로 처리할 수 없어요. 파일과 기록은 보존합니다.");
@@ -171,6 +173,7 @@ void RecoveryController::applyWholeInspection(const Result<std::vector<Interrupt
         QStringList details;
         for (const auto& step : report.steps) for (const auto& reason : step.reasons)
             if (reason.code == "recovery.zone_evidence_required" || reason.code == "transfer.zone_changed" ||
+                reason.code == "transfer.removal_proof_changed" || reason.code == "transfer.removal_proof_invalid" ||
                 reason.code == "recovery.zone_reverse_unsupported") {
                 const auto detail = recoveryError(reason);
                 if (!details.contains(detail)) details << detail;

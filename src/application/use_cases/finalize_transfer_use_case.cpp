@@ -91,6 +91,13 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
     const auto verified = session.value()->verify();
     if (!verified) return stop(verified.error());
     if (cancelled && cancelled()) return Result<TransferAttempt>::failure({"transfer.cancelled", "Cancelled before removal intent; both files retained"});
+    if (forward && movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone) {
+        const auto proof = session.value()->removalProof(plan.value().planHash);
+        if (!proof) return stop(proof.error());
+        const auto savedProof = journal_.recordRemovalProof(state, proof.value());
+        if (!savedProof) return stop(savedProof.error());
+        state.removalProof = proof.value();
+    }
     const auto intent = record(TransferPhase::SourceRemoveIntent);
     if (!intent) return stop(intent.error());
     // 제거 의도 이후 취소 요청은 결과 판정·기록을 중단시키지 않는다.

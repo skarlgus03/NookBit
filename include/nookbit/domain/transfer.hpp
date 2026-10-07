@@ -9,6 +9,17 @@ enum class StagingCleanup { None, IntentRecorded, Removed };
 enum class CopyResume { None, IntentRecorded, Verified };
 enum class StagingCommit { None, IntentRecorded, Committed };
 
+/// 보호된 제거 세션에서 얻은 최종 파일·표식 증거이며 원문 URL은 저장하지 않는다.
+struct TransferRemovalProof {
+    std::string planHash;
+    FileFingerprint destination;
+    bool markerPresent{false};
+    uint64_t markerSize{0};
+    std::optional<std::string> markerSha256;
+    int64_t creationTime{0}, writeTime{0};
+    uint32_t attributes{0};
+};
+
 /// 한 전송 시도의 기록 단계이며 파일 작업을 허가하는 권한은 아니다.
 enum class TransferPhase {
     Prepared, CopyIntent, StagingCreated, CopyVerified, CommitIntent,
@@ -40,6 +51,10 @@ struct TransferAttempt {
     CopyResume copyResume{CopyResume::None};
     /// 명시적 최종 이름 확정 또는 누락된 확정 기록의 복구 결과를 보존한다.
     StagingCommit stagingCommit{StagingCommit::None};
+    /// 제거 전에 별도 원자적 영수증으로 저장한 증거이며 구형 기록은 없다.
+    std::optional<TransferRemovalProof> removalProof;
+    /// 이벤트 재생으로 확인한 정상 제거 의도이며 영수증만으로 추정하지 않는다.
+    bool sourceRemovalIntentRecorded{false};
 };
 
 /// 예상한 이전 단계와 새 증거를 함께 전달하는 낙관적 동시성 갱신 요청.
@@ -53,6 +68,10 @@ struct TransferUpdate {
 
 /// 내용 해시 비교와 객체 ID 비교를 구분하는 전송 계약.
 namespace TransferValidation {
+
+/// 승인 해시·확정 객체·표식 형식이 저장된 제거 증거와 일치하는지 검사하는 함수.
+[[nodiscard]] Result<void> validateRemovalProof(const TransferAttempt& attempt, const TransferRemovalProof& proof,
+    const std::string& planHash);
 
 /// 복사본의 크기와 유효한 SHA-256 내용이 같은지 검사하는 함수.
 [[nodiscard]] bool sameContent(const FileFingerprint& left, const FileFingerprint& right);

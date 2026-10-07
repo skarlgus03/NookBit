@@ -72,6 +72,43 @@ std::optional<FileFingerprint> decodeFingerprint(const QString& json) {
     return result;
 }
 
+// 정밀한 파일 속성과 표식 해시를 제거 영수증 JSON으로 직렬화하는 함수.
+QString encodeRemovalProof(const TransferRemovalProof& proof) {
+    QJsonObject object{{"version", 1}, {"planHash", QString::fromStdString(proof.planHash)},
+        {"destination", encodeFingerprint(proof.destination)}, {"markerPresent", proof.markerPresent},
+        {"markerSize", QString::number(proof.markerSize)}, {"creationTime", QString::number(proof.creationTime)},
+        {"writeTime", QString::number(proof.writeTime)}, {"attributes", QString::number(proof.attributes)}};
+    if (proof.markerSha256) object.insert("markerSha256", QString::fromStdString(*proof.markerSha256));
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+// 영수증 숫자의 정밀도와 알려진 형식만 엄격하게 복원하는 함수.
+std::optional<TransferRemovalProof> decodeRemovalProof(const QString& json) {
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(json.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return {};
+    const auto object = document.object();
+    if (object.value("version").toInt() != 1 || !object.value("markerPresent").isBool()) return {};
+    const auto destination = decodeFingerprint(object.value("destination").toString());
+    if (!destination) return {};
+    TransferRemovalProof proof;
+    proof.destination = *destination; proof.planHash = object.value("planHash").toString().toStdString();
+    proof.markerPresent = object.value("markerPresent").toBool();
+    bool sizeOk{}, creationOk{}, writeOk{}, attributesOk{};
+    proof.markerSize = object.value("markerSize").toString().toULongLong(&sizeOk);
+    proof.creationTime = object.value("creationTime").toString().toLongLong(&creationOk);
+    proof.writeTime = object.value("writeTime").toString().toLongLong(&writeOk);
+    proof.attributes = object.value("attributes").toString().toUInt(&attributesOk);
+    if (object.contains("markerSha256")) proof.markerSha256 = object.value("markerSha256").toString().toStdString();
+    if (!sizeOk || !creationOk || !writeOk || !attributesOk || encodeRemovalProof(proof) != json) return {};
+    return proof;
+}
+
+// 선택적 제거 영수증을 낙관적 동시성 비교용 값으로 변환하는 함수.
+QVariant optionalRemovalProof(const std::optional<TransferRemovalProof>& proof) {
+    return proof ? QVariant(encodeRemovalProof(*proof)) : QVariant();
+}
+
 // 없는 지문은 SQL NULL, 있는 지문은 검증 가능한 JSON으로 바꾸는 함수.
 QVariant optionalFingerprint(const std::optional<FileFingerprint>& fingerprint) {
     return fingerprint ? QVariant(encodeFingerprint(*fingerprint)) : QVariant();
@@ -107,6 +144,8 @@ bool sameAttempt(const TransferAttempt& actual, const TransferAttempt& expected)
         actual.recoveryCompleted == expected.recoveryCompleted && actual.stagingCleanup == expected.stagingCleanup &&
         actual.recoveryRemovalIntent == expected.recoveryRemovalIntent &&
         actual.copyResume == expected.copyResume && actual.stagingCommit == expected.stagingCommit &&
+        actual.sourceRemovalIntentRecorded == expected.sourceRemovalIntentRecorded &&
+        sameNullable(optionalRemovalProof(actual.removalProof), optionalRemovalProof(expected.removalProof)) &&
         samePath(pathText(actual.source), expected.source) && samePath(pathText(actual.destination), expected.destination) &&
         samePath(pathText(actual.staging), expected.staging) &&
         encodeFingerprint(actual.sourceFingerprint) == encodeFingerprint(expected.sourceFingerprint) &&
@@ -163,6 +202,7 @@ Result<void> SqliteTransferJournal::appendSnapshot(const TransferAttempt& attemp
 
 // 실행 중인 단계에 연결된 새 시도를 기록하는 함수.
 Result<void> SqliteTransferJournal::begin(const TransferAttempt& attempt) {
+    if (attempt.removalProof || attempt.sourceRemovalIntentRecorded) return Result<void>::failure({"transfer.removal_proof_invalid", "New attempts cannot carry historical removal proof."});
     const auto valid = TransferValidation::validateNew(attempt);
     if (!valid) return valid;
     const auto opened = ensureOpen();
@@ -285,6 +325,7 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
         !events.value(1).isNull() || !events.value(2).isNull() || !events.value(3).isNull() || events.value(4).toInt() != 0 || events.value(5).toInt() != 0 || events.value(6).toInt() != 0 || events.value(7).toInt() != 0 || events.value(8).toInt() != 0)
         return Result<TransferAttempt>::failure({"transfer.record_invalid", "Missing or invalid initial transfer event."});
     bool removalIntentRecorded = false;
+    bool normalRemovalIntentRecorded = false;
     bool commitIntentRecorded = false;
     while (events.next()) {
         const auto phase = parsePhase(events.value(0).toString());
@@ -368,7 +409,7 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
         const auto next = recovery ? TransferValidation::reconcileCompleted(result, removalIntentRecorded) :
             TransferValidation::advance(result, update);
         if (!next) return Result<TransferAttempt>::failure(next.error());
-        if (*phase == TransferPhase::SourceRemoveIntent) removalIntentRecorded = true;
+        if (*phase == TransferPhase::SourceRemoveIntent) { removalIntentRecorded = true; normalRemovalIntentRecorded = true; }
         if (*phase == TransferPhase::CommitIntent) commitIntentRecorded = true;
         result = next.value();
     }
@@ -376,6 +417,24 @@ Result<TransferAttempt> SqliteTransferJournal::readAttempt(const std::string& at
         !sameNullable(row.value(8), optionalFingerprint(result.stagingFingerprint)) ||
         !sameNullable(row.value(9), optionalFingerprint(result.destinationFingerprint)) || !sameNullable(row.value(10), encodeError(result.error)))
         return Result<TransferAttempt>::failure({"transfer.record_invalid", "Transfer snapshot disagrees with its events."});
+    result.sourceRemovalIntentRecorded = normalRemovalIntentRecorded;
+    QSqlQuery receipt(database_);
+    receipt.prepare("SELECT r.proof_json,e.payload_json,e.plan_id,e.step_id,e.event_type,t.attempt_id,t.destination_fingerprint_json,t.phase "
+        "FROM transfer_removal_proofs r LEFT JOIN events e ON e.id=r.audit_event_id "
+        "LEFT JOIN transfer_events t ON t.id=r.verified_transfer_event_id WHERE r.attempt_id=?");
+    receipt.addBindValue(QString::fromStdString(attemptId));
+    if (!receipt.exec()) return Result<TransferAttempt>::failure({"transfer.removal_proof_invalid", "Cannot read removal receipt."});
+    if (receipt.next()) {
+        const auto proof = decodeRemovalProof(receipt.value(0).toString());
+        if (!proof || receipt.value(0).toString() != receipt.value(1).toString() ||
+            receipt.value(2).toString().toStdString() != result.planId || receipt.value(3).toString().toStdString() != result.stepId ||
+            receipt.value(4).toString() != "transfer_removal_proof" || receipt.value(5).toString().toStdString() != result.id ||
+            receipt.value(6).toString() != encodeFingerprint(proof->destination) ||
+            (receipt.value(7).toString() != "destination_committed" && receipt.value(7).toString() != "needs_recovery") ||
+            !TransferValidation::validateRemovalProof(result, *proof, proof->planHash))
+            return Result<TransferAttempt>::failure({"transfer.removal_proof_invalid", "Removal receipt, audit or committed object disagrees."});
+        result.removalProof = *proof;
+    }
     return Result<TransferAttempt>::success(std::move(result));
 }
 
@@ -743,6 +802,54 @@ Result<std::vector<TransferAttempt>> SqliteTransferJournal::forStep(const StepId
         result.push_back(attempt.value());
     }
     return Result<std::vector<TransferAttempt>>::success(std::move(result));
+}
+
+// 보호 세션의 증거를 승인·확정 이벤트와 묶고 영수증·감사를 한 트랜잭션에 저장하는 함수.
+Result<void> SqliteTransferJournal::recordRemovalProof(const TransferAttempt& expected, const TransferRemovalProof& proof) {
+    const auto valid = TransferValidation::validateRemovalProof(expected, proof, proof.planHash);
+    auto eligible = expected; eligible.recoveryRemovalIntent = false;
+    if (!valid || expected.direction != TransferDirection::Forward || !TransferValidation::recordRecoveryRemovalIntent(eligible))
+        return Result<void>::failure({"transfer.removal_proof_invalid", "Owned forward committed evidence is required before removal."});
+    const auto opened = ensureOpen(); if (!opened) return opened;
+    if (!database_.transaction()) return Result<void>::failure({"transfer.transaction_failed", "Cannot start removal proof transaction."});
+    // 실패한 영수증 저장은 감사까지 모두 취소하는 함수.
+    const auto fail = [&](const char* code) {
+        database_.rollback(); return Result<void>::failure({code, "Removal proof was not committed; source must be retained."});
+    };
+    const auto current = readAttempt(expected.id);
+    if (!current || !sameAttempt(current.value(), expected)) return fail("transfer.removal_proof_conflict");
+    QSqlQuery owner(database_);
+    owner.prepare("SELECT s.movement_json FROM plans p JOIN steps s ON s.plan_id=p.id WHERE p.id=? AND s.id=? AND p.plan_hash=? "
+        "AND p.approved_at IS NOT NULL AND p.status IN ('executing','needs_recovery') AND s.status IN ('intent_recorded','needs_recovery')");
+    owner.addBindValue(QString::fromStdString(expected.planId)); owner.addBindValue(QString::fromStdString(expected.stepId));
+    owner.addBindValue(QString::fromStdString(proof.planHash));
+    if (!owner.exec() || !owner.next()) return fail("transfer.removal_proof_owner");
+    const auto movement = QJsonDocument::fromJson(owner.value(0).toString().toUtf8()).object();
+    if (movement.value("preservation").toInt(-1) != 1 || movement.value("strategy").toInt(-1) != 1)
+        return fail("transfer.removal_proof_policy");
+    owner.finish();
+    if (current.value().removalProof) {
+        if (encodeRemovalProof(*current.value().removalProof) != encodeRemovalProof(proof)) return fail("transfer.removal_proof_changed");
+        if (!database_.commit()) return fail("transfer.removal_proof_commit");
+        return Result<void>::success();
+    }
+    QSqlQuery event(database_);
+    event.prepare("SELECT id FROM transfer_events WHERE attempt_id=? ORDER BY id DESC LIMIT 1");
+    event.addBindValue(QString::fromStdString(expected.id));
+    if (!event.exec() || !event.next()) return fail("transfer.removal_proof_event");
+    const auto verifiedEvent = event.value(0); event.finish();
+    QSqlQuery audit(database_);
+    audit.prepare("INSERT INTO events(plan_id,step_id,occurred_at,event_type,payload_json) VALUES(?,?,?,'transfer_removal_proof',?)");
+    audit.addBindValue(QString::fromStdString(expected.planId)); audit.addBindValue(QString::fromStdString(expected.stepId));
+    audit.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)); audit.addBindValue(encodeRemovalProof(proof));
+    if (!audit.exec()) return fail("transfer.removal_proof_audit");
+    QSqlQuery receipt(database_);
+    receipt.prepare("INSERT INTO transfer_removal_proofs(attempt_id,verified_transfer_event_id,audit_event_id,proof_json) VALUES(?,?,?,?)");
+    receipt.addBindValue(QString::fromStdString(expected.id)); receipt.addBindValue(verifiedEvent);
+    receipt.addBindValue(audit.lastInsertId()); receipt.addBindValue(encodeRemovalProof(proof));
+    if (!receipt.exec()) return fail("transfer.removal_proof_insert");
+    if (!database_.commit()) return fail("transfer.removal_proof_commit");
+    return Result<void>::success();
 }
 
 } // namespace nookbit

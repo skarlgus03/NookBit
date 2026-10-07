@@ -308,6 +308,34 @@ Result<ZoneSnapshot> captureZone(const std::filesystem::path& path) {
     }
     return Return::success(ZoneSnapshot{std::move(handle), std::move(bytes)});
 }
+// 표식 부재와 빈 표식을 구분하며 최대 64 KiB 원문의 SHA-256을 계산하는 함수.
+Result<std::optional<std::string>> markerDigest(const std::optional<std::vector<unsigned char>>& marker) {
+    using Return = Result<std::optional<std::string>>;
+    if (!marker) return Return::success({});
+    ContentHash hash;
+    const auto initialized = hash.initialize(); if (!initialized) return Return::failure(initialized.error());
+    auto bytes = *marker;
+    const auto added = hash.append(bytes.data(), static_cast<DWORD>(bytes.size()));
+    if (!added) return Return::failure(added.error());
+    const auto finished = hash.finish();
+    return finished ? Return::success(finished.value()) : Return::failure(finished.error());
+}
+
+// 최종 파일의 표식과 정밀한 기본 속성을 제거 전 영수증과 대조하는 함수.
+Result<void> verifyMarkerProof(HANDLE file, const std::filesystem::path& path, const TransferRemovalProof& proof) {
+    const auto supported = ordinarySource(file, path, true); if (!supported) return supported;
+    const auto marker = captureZone(path); if (!marker) return Result<void>::failure(marker.error());
+    const auto hash = markerDigest(marker.value().bytes); if (!hash) return Result<void>::failure(hash.error());
+    FILE_BASIC_INFO basic{};
+    if (!GetFileInformationByHandleEx(file, FileBasicInfo, &basic, sizeof(basic)))
+        return Result<void>::failure(failure("transfer.removal_proof_metadata"));
+    if (marker.value().bytes.has_value() != proof.markerPresent ||
+        (marker.value().bytes ? marker.value().bytes->size() : 0) != proof.markerSize || hash.value() != proof.markerSha256 ||
+        basic.CreationTime.QuadPart != proof.creationTime || basic.LastWriteTime.QuadPart != proof.writeTime || basic.FileAttributes != proof.attributes)
+        return Result<void>::failure({"transfer.removal_proof_changed", "Final marker or preserved attributes changed; file retained."});
+    return Result<void>::success();
+}
+
 // 앱 소유 임시 파일에만 표식을 새로 쓰고 flush·재읽기로 원문 보존을 검증하는 함수.
 Result<ZoneSnapshot> createZone(const std::filesystem::path& path, const std::vector<unsigned char>& bytes) {
     using Return = Result<ZoneSnapshot>;
@@ -647,6 +675,20 @@ public:
         contentsVerified_ = true;
         return Result<void>::success();
     }
+    // 독점 보호·검증 중인 최종 파일의 속성과 표식 해시를 영수증으로 만드는 함수.
+    Result<TransferRemovalProof> removalProof(const std::string& planHash) override {
+        using Return = Result<TransferRemovalProof>;
+        if (!allowZone_) return Return::failure({"transfer.removal_proof_policy", "Marker-aware protected session required."});
+        const auto checked = verify(); if (!checked) return Return::failure(checked.error());
+        const auto hash = markerDigest(expectedZone_); if (!hash) return Return::failure(hash.error());
+        FILE_BASIC_INFO basic{};
+        if (!GetFileInformationByHandleEx(destination_.value, FileBasicInfo, &basic, sizeof(basic)))
+            return Return::failure(failure("transfer.removal_proof_metadata"));
+        TransferRemovalProof proof{planHash, *attempt_.destinationFingerprint, expectedZone_.has_value(),
+            expectedZone_ ? expectedZone_->size() : 0, hash.value(), basic.CreationTime.QuadPart, basic.LastWriteTime.QuadPart, basic.FileAttributes};
+        const auto valid = TransferValidation::validateRemovalProof(attempt_, proof, planHash);
+        return valid ? Return::success(std::move(proof)) : Return::failure(valid.error());
+    }
     // 제거 직전 재검증하고 핸들 기반 제거·닫기·실제 부재를 한 번 확인하는 함수.
     Result<void> removeVerifiedSource() override {
         TimingStage removal("source_remove_total");
@@ -691,6 +733,7 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
     using Return = Result<std::unique_ptr<ITransferRemovalSession>>;
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
     initial.copyResume = CopyResume::None;
@@ -806,12 +849,14 @@ public:
     std::vector<Handle> parents;
     Handle destination;
     TransferAttempt attempt;
+    bool allowZone{false};
+    ZoneSnapshot retainedZone;
     // 최종 파일·부모 보호 핸들과 예상 전송 증거를 소유하는 함수.
-    RecoverySession(std::vector<Handle> locks, Handle file, TransferAttempt expected)
-        : parents(std::move(locks)), destination(std::move(file)), attempt(std::move(expected)) {}
+    RecoverySession(std::vector<Handle> locks, Handle file, TransferAttempt expected, bool withZone, ZoneSnapshot zone)
+        : parents(std::move(locks)), destination(std::move(file)), attempt(std::move(expected)), allowZone(withZone), retainedZone(std::move(zone)) {}
     // 잠긴 최종 파일을 재검증하고 두 부재 관찰값을 완료 저장 직전에 확인하는 함수.
     Result<void> verify() override {
-        const auto supported = ordinarySource(destination.value, attempt.destination);
+        const auto supported = ordinarySource(destination.value, attempt.destination, allowZone);
         if (!supported) return supported;
         const auto before = fingerprint(destination.value);
         const auto hash = digest(destination.value, {});
@@ -827,6 +872,10 @@ public:
             return Result<void>::failure({"transfer.recovery_changed", "Final object, contents or modification time changed"});
         const auto source = requireMissing(attempt.source);
         if (!source) return source;
+        if (allowZone) {
+            const auto proof = verifyMarkerProof(destination.value, attempt.destination, *attempt.removalProof);
+            if (!proof) return proof;
+        }
         return requireMissing(attempt.staging);
     }
 };
@@ -836,12 +885,16 @@ public:
 Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::open(
     const TransferAttempt& attempt, const MoveContract* movement) {
     using Return = Result<std::unique_ptr<ITransferRecoverySession>>;
-    if (movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone)
+    const bool allowZone = movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    if (allowZone && (!attempt.removalProof || attempt.direction != TransferDirection::Forward ||
+        (!attempt.sourceRemovalIntentRecorded && !attempt.recoveryRemovalIntent) ||
+        !TransferValidation::validateRemovalProof(attempt, *attempt.removalProof, attempt.removalProof->planHash)))
         return Return::failure({"recovery.zone_evidence_required", "Source is absent and no persisted download marker proof exists; retain final copy."});
     const auto evidence = TransferValidation::reconcileCompleted(attempt, true);
     if (!evidence) return Return::failure(evidence.error());
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false;
     initial.copyResume = CopyResume::None;
@@ -863,7 +916,7 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
         sourceVolume.value().id != attempt.sourceFingerprint.volumeId ||
         targetVolume.value().id != attempt.destinationFingerprint->volumeId ||
         (movement && (movement->strategy != MoveStrategy::VerifiedCopy ||
-        movement->preservation != PreservationPolicy::LocalNtfsBasic ||
+        (movement->preservation != PreservationPolicy::LocalNtfsBasic && !allowZone) ||
         !approvedVolume(sourceVolume.value(), movement->sourceVolume) ||
         !approvedVolume(targetVolume.value(), movement->destinationVolume))))
         return Return::failure({"transfer.volume_changed", "Recovery volumes do not match recorded evidence and approval"});
@@ -874,7 +927,14 @@ Result<std::unique_ptr<ITransferRecoverySession>> WindowsTransferRecoveryGuard::
     if (!finalVolume || finalVolume.value().id != targetVolume.value().id ||
         (movement && !approvedVolume(finalVolume.value(), movement->destinationVolume)))
         return Return::failure({"transfer.volume_changed", "Final file volume changed"});
-    return Return::success(std::make_unique<RecoverySession>(std::move(parents), std::move(finalFile), attempt));
+    ZoneSnapshot zone;
+    if (allowZone) {
+        auto captured = captureZone(attempt.destination); if (!captured) return Return::failure(captured.error());
+        zone = std::move(captured.value());
+        const auto proof = verifyMarkerProof(finalFile.value, attempt.destination, *attempt.removalProof);
+        if (!proof) return Return::failure(proof.error());
+    }
+    return Return::success(std::make_unique<RecoverySession>(std::move(parents), std::move(finalFile), attempt, allowZone, std::move(zone)));
 }
 
 namespace {
@@ -997,6 +1057,7 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsStagingCleanup::open(cons
     if (!allowed) return Return::failure(allowed.error());
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.error.reset(); initial.recoveryCompleted = false; initial.stagingCleanup = StagingCleanup::None;
     initial.copyResume = CopyResume::None;
     initial.stagingCommit = StagingCommit::None;
@@ -1037,6 +1098,7 @@ Result<std::unique_ptr<IStagingCleanupSession>> WindowsPreservedStagingCleanup::
     using Return = Result<std::unique_ptr<IStagingCleanupSession>>;
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.error.reset(); initial.recoveryCompleted = false; initial.recoveryRemovalIntent = false;
     initial.stagingCleanup = StagingCleanup::None; initial.copyResume = CopyResume::None; initial.stagingCommit = StagingCommit::None;
     if (!TransferValidation::validateNew(initial) || attempt.direction != TransferDirection::Forward || !attempt.stagingFingerprint ||
@@ -1103,6 +1165,16 @@ TransferFileObservation WindowsTransferFileInspector::inspect(const std::filesys
 TransferFileObservation WindowsTransferFileInspector::inspectWithZone(const std::filesystem::path& path) {
     return inspectImpl(path, true);
 }
+// 부모·메인 파일을 보호한 상태에서 다운로드 표식만 비교하는 함수.
+Result<void> WindowsTransferFileInspector::checkRemovalProof(const std::filesystem::path& path, const TransferRemovalProof& proof) {
+    if (!validPath(path)) return Result<void>::failure({"transfer.path", "Ordinary proof inspection path required."});
+    std::vector<Handle> parents;
+    const auto locked = lockParents(path, parents); if (!locked) return locked;
+    Handle input(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (input.value == INVALID_HANDLE_VALUE) return Result<void>::failure(failure("transfer.removal_proof_open"));
+    return verifyMarkerProof(input.value, path, proof);
+}
+
 // 부모·메인 파일을 보호한 상태에서 다운로드 표식만 비교하는 함수.
 Result<void> WindowsTransferFileInspector::checkDownloadMarkers(const std::filesystem::path& source,
     const std::filesystem::path& copy, bool allowMissingCopy) {
@@ -1264,6 +1336,7 @@ Result<std::unique_ptr<ITransferCommitRecoverySession>> WindowsTransferCommitRec
         return Return::failure({"transfer.commit_recovery_state", "Unrecorded final commit evidence required"});
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared; initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset();
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.error.reset(); initial.copyResume = CopyResume::None; initial.stagingCommit = StagingCommit::None;
     if (!TransferValidation::validateNew(initial) || !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging))
         return Return::failure({"transfer.path", "Unsupported commit recovery paths"});
@@ -1308,6 +1381,7 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(
     auto eligible = attempt;
     auto initial = attempt;
     initial.phase = TransferPhase::Prepared;
+    initial.removalProof.reset(); initial.sourceRemovalIntentRecorded = false;
     initial.stagingFingerprint.reset(); initial.destinationFingerprint.reset(); initial.error.reset();
     initial.recoveryCompleted = false; initial.recoveryRemovalIntent = false;
     initial.copyResume = CopyResume::None; initial.stagingCleanup = StagingCleanup::None;
@@ -1396,6 +1470,10 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openExistingImpl(
 } // namespace nookbit
 #else
 namespace nookbit {
+// Windows 외 플랫폼에서는 다운로드 표식 비교를 변경 없이 거부하는 함수.
+Result<void> WindowsTransferFileInspector::checkRemovalProof(const std::filesystem::path&, const TransferRemovalProof&) {
+    return Result<void>::failure({"transfer.unsupported", "Windows only"});
+}
 // Windows 외 플랫폼에서는 다운로드 표식 비교를 변경 없이 거부하는 함수.
 Result<void> WindowsTransferFileInspector::checkDownloadMarkers(const std::filesystem::path&,
     const std::filesystem::path&, bool) {

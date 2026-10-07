@@ -11,6 +11,10 @@ public:
     virtual ~ITransferRemovalSession() = default;
     /// 보호된 원본과 최종 복사본을 다시 검증하는 함수.
     [[nodiscard]] virtual Result<void> verify() = 0;
+    /// 현재 보호·검증 중인 최종 파일과 표식의 영구 저장용 증거를 반환하는 함수.
+    [[nodiscard]] virtual Result<TransferRemovalProof> removalProof(const std::string&) {
+        return Result<TransferRemovalProof>::failure({"transfer.removal_proof_unsupported", "Protected removal proof is required."});
+    }
     /// 같은 보호 세션의 검증된 원본만 한 번 제거하고 실제 부재를 확인하는 함수.
     [[nodiscard]] virtual Result<void> removeVerifiedSource() = 0;
     /// 제거 전부터 유지한 보호 증거로 원본 부재와 최종 복사본을 확인하는 함수.

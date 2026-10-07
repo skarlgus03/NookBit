@@ -51,6 +51,8 @@ Result<TransferRecoveryBinding> verifyTransferRecoveryBinding(const IHistoryRepo
         if (count != 1) return Return::failure({"transfer.rollback_origin", "One completed forward result is required"});
     }
     TransferRecoveryBinding binding{plan.planHash, {}};
+    if (attempt.removalProof && !TransferValidation::validateRemovalProof(attempt, *attempt.removalProof, plan.planHash))
+        return Return::failure({"transfer.removal_proof_invalid", "Removal proof no longer matches the selected approval."});
     if (plan.formatVersion == 2) {
         binding.movement = *step->movement;
         if (binding.movement->strategy != MoveStrategy::VerifiedCopy)

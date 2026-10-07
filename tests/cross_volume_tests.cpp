@@ -98,6 +98,10 @@ public:
     bool throwBeforeCompletion{false};
     // 실제 SQLite 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& inner) : inner_(inner) {}
+    // 실제 제거 전 영수증 저장을 전달하는 함수.
+    Result<void> recordRemovalProof(const TransferAttempt& expected, const TransferRemovalProof& proof) override {
+        return inner_.recordRemovalProof(expected, proof);
+    }
     // 새 시도 기록을 전달하는 함수.
     Result<void> begin(const TransferAttempt& attempt) override { return inner_.begin(attempt); }
     // 실제 파일 작업 뒤 지정한 기록 경계에서 한 번만 실패하는 함수.
@@ -265,6 +269,9 @@ struct Fixture {
 };
 
 // 실제 두 볼륨의 다운로드 표식 복구와 증거 부족·표식 불일치 보존을 검사하는 함수.
+qlonglong testSql(const QString& database, const QString& sql);
+
+// 실제 두 볼륨의 다운로드 표식 복구와 증거 부족·표식 불일치 보존을 검사하는 함수.
 void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, int index) {
     Fixture f(sourceRun, targetRun, QString("zone-%1").arg(index), true);
     const std::string marker = "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/owned-recovery\r\n";
@@ -280,9 +287,47 @@ void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, in
         if (index == 4) f.faults.failAt = TransferPhase::DestinationCommitted;
         const auto copied = f.commit();
         require(bool(copied) == (index != 3 && index != 4), "Requested commit boundary missing");
-        if (index == 6 || index == 7) {
+        if (index == 16) {
+            f.faults.failAt = TransferPhase::SourceRemoveIntent;
+            require(!f.finish() && std::filesystem::exists(f.attempt.source), "Proof saved but removal intent failed; source retained");
+            const auto stopped = take(f.journal.load(f.attempt.id));
+            require(stopped.removalProof.has_value(), "Durable proof must survive pre-removal intent failure");
+            auto changed = *stopped.removalProof; changed.markerSha256 = std::string(64, 'b');
+            const auto refused = f.journal.recordRemovalProof(stopped, changed);
+            require(!refused && refused.error().code == "transfer.removal_proof_changed" && std::filesystem::exists(f.attempt.source),
+                "Existing receipt cannot be overwritten by different marker proof");
+        }
+        if (index == 6 || index == 7 || (index >= 9 && index <= 15)) {
             f.faults.failAt = index == 6 ? TransferPhase::SourceRemoved : TransferPhase::Completed;
+            if (index == 12) testSql(f.database, "CREATE TRIGGER reject_proof BEFORE INSERT ON events WHEN NEW.event_type='transfer_removal_proof' BEGIN SELECT RAISE(FAIL,'owned proof audit failure'); END");
+            if (index == 13) testSql(f.database, "CREATE TRIGGER reject_receipt BEFORE INSERT ON transfer_removal_proofs BEGIN SELECT RAISE(FAIL,'owned receipt failure'); END");
+            if (index == 12 || index == 13) {
+                require(!f.finish() && std::filesystem::exists(f.attempt.source) &&
+                    testSql(f.database, "SELECT count(*) FROM transfer_removal_proofs") == 0 &&
+                    testSql(f.database, "SELECT count(*) FROM events WHERE event_type='transfer_removal_proof'") == 0,
+                    "Failed proof audit or receipt must preserve source and rollback both records");
+                return;
+            }
             require(!f.finish() && !std::filesystem::exists(f.attempt.source), "Source-absent interrupted boundary required");
+            if (index == 9) testSql(f.database, "DELETE FROM transfer_removal_proofs");
+            if (index == 10) {
+                QFile tag(QString::fromStdWString(zone(f.attempt.destination).wstring()));
+                require(tag.open(QIODevice::WriteOnly | QIODevice::Truncate) && tag.write("owned modified final marker") > 0, "Owned final marker mutation");
+            }
+            if (index == 11) testSql(f.database, "UPDATE events SET payload_json='{}' WHERE event_type='transfer_removal_proof'");
+            if (index == 14) {
+                QFile data(QString::fromStdWString(f.attempt.destination.wstring()));
+                require(data.open(QIODevice::ReadWrite) && data.write("x", 1) == 1, "Owned equal-size final body mutation"); data.close();
+                const auto proof = *take(f.journal.load(f.attempt.id)).removalProof;
+                HANDLE handle = CreateFileW(f.attempt.destination.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+                FILE_BASIC_INFO info{};
+                require(handle != INVALID_HANDLE_VALUE && GetFileInformationByHandleEx(handle, FileBasicInfo, &info, sizeof(info)), "Owned final timestamp handle");
+                info.LastWriteTime.QuadPart = proof.writeTime;
+                const bool restored = SetFileInformationByHandle(handle, FileBasicInfo, &info, sizeof(info)); CloseHandle(handle);
+                require(restored, "Owned timestamp restoration for independent full-content verification");
+            }
+            if (index == 15) require(QFile::remove(QString::fromStdWString(zone(f.attempt.destination).wstring())), "Remove only owned final marker");
         }
         if (index == 8) {
             QFile tag(QString::fromStdWString(zone(f.attempt.destination).wstring()));
@@ -290,15 +335,24 @@ void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, in
                 "Only owned final marker may change");
         }
     }
-    InspectTransferRecoveryUseCase inspect(f.history, f.journal, f.files, f.hasher);
+    // 이전 연결·파일 세션의 캐시 없이 재시작한 저장소로 증거를 다시 읽는다.
+    SqliteHistoryRepository restartedHistory(f.database, f.migration);
+    SqliteTransferJournal restartedJournal(f.database, f.migration);
+    InspectTransferRecoveryUseCase inspect(restartedHistory, restartedJournal, f.files, f.hasher);
     WindowsTransferRecoveryGuard removalGuard;
     WindowsTransferCommitRecoveryGuard commitGuard;
-    ResumeInterruptedTransferUseCase resume(f.history, f.journal, f.copy, f.removal, f.files, removalGuard, commitGuard, f.hasher);
+    ResumeInterruptedTransferUseCase resume(restartedHistory, restartedJournal, f.copy, f.removal, f.files, removalGuard, commitGuard, f.hasher);
+    if (index == 11) {
+        require(!f.journal.load(f.attempt.id) && !resume.resume(f.attempt.id) && std::filesystem::exists(f.attempt.destination),
+            "Corrupt proof audit must block loading and preserve final file");
+        return;
+    }
     const auto before = take(f.journal.load(f.attempt.id));
     const auto observed = take(inspect.execute(f.attempt.id));
-    if (index == 2 || index == 6 || index == 7 || index == 8) {
+    if (index == 2 || index == 8 || index == 9 || index == 10 || index == 14 || index == 15) {
         const bool mismatch = index == 2 || index == 8;
-        require(observed.finding == (mismatch ? TransferRecoveryFinding::ChangedFile : TransferRecoveryFinding::Unavailable) &&
+        require((observed.finding == (mismatch ? TransferRecoveryFinding::ChangedFile : TransferRecoveryFinding::Unavailable) ||
+            ((index == 10 || index == 14 || index == 15) && observed.finding == TransferRecoveryFinding::ChangedFile)) &&
             !resume.verifyResume(observed) && !resume.resume(f.attempt.id), "Unsafe marker recovery must stay blocked");
         require(take(f.journal.load(f.attempt.id)).phase == before.phase, "Blocked recovery changed records");
         require(std::filesystem::exists(f.attempt.source) == mismatch, "Blocked recovery changed source presence");
@@ -313,8 +367,8 @@ void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, in
             require(!checked && checked.error().code == "transfer.zone_changed", "Native removal must independently reject mismatched marker");
         }
         if (!mismatch) {
-            const auto guard = removalGuard.open(before, &*f.plan.steps[0].movement);
-            require(!guard && guard.error().code == "recovery.zone_evidence_required", "Fresh source-absent guard must refuse missing marker proof");
+            auto guard = removalGuard.open(before, &*f.plan.steps[0].movement);
+            require(!guard || !guard.value()->verify(), "Fresh source-absent guard must refuse missing proof or changed final content/marker");
         }
         return;
     }
@@ -1465,7 +1519,7 @@ int main(int argc, char** argv) {
         std::cout << "Source fixtures: " << source.path().toStdString() << "\nTarget fixtures/report: " << target.path().toStdString() << '\n';
         QJsonArray results;
         int failures = 0;
-        const QStringList names = zoneRecovery ? QStringList{"zone-partial-missing-marker", "zone-partial-matching-marker", "zone-partial-mismatch-blocked", "zone-verified-staging", "zone-unrecorded-commit", "zone-committed-source-retained", "zone-source-removed-blocked", "zone-completion-record-failed-blocked", "zone-final-mismatch-blocked"} :
+        const QStringList names = zoneRecovery ? QStringList{"zone-partial-missing-marker", "zone-partial-matching-marker", "zone-partial-mismatch-blocked", "zone-verified-staging", "zone-unrecorded-commit", "zone-committed-source-retained", "zone-source-removed-recovery", "zone-completion-record-recovery", "zone-final-mismatch-blocked", "zone-old-missing-proof-blocked", "zone-stored-marker-changed-blocked", "zone-proof-audit-corrupt-blocked", "zone-proof-save-failure-preserves-source", "zone-receipt-failure-rolls-back-audit", "zone-same-size-time-body-change-blocked", "zone-missing-final-marker-blocked", "zone-immutable-proof-idempotent-retry"} :
             edgeCrash ? QStringList{"cleanup-intent", "cleanup-removed", "cleanup-removed-occupant", "before-copy", "reverse-mid-copy"} :
             cleaning ? QStringList{"explicit-partial-cleanup", "stale-plan-approval", "changed-original-blocked", "replaced-stage-blocked", "changed-prefix-blocked", "intent-audit-failure", "removed-audit-only-retry", "later-occupant-blocked", "stale-stage-approval", "readonly-stage-blocked", "final-occupant-blocked", "unrecorded-absence-blocked", "corrupt-cleanup-audit-visible"} :
             mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :

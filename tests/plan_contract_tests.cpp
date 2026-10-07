@@ -207,6 +207,7 @@ void testContractMigrationFailure() {
         expect(original.savePlan(plan).hasValue(), "legacy plan should save");
     }
     expect(mutate(path, "ALTER TABLE plans DROP COLUMN format_version") &&
+        mutate(path, "DROP TABLE transfer_removal_proofs") &&
         mutate(path, "ALTER TABLE steps DROP COLUMN movement_json") &&
         mutate(path, "ALTER TABLE transfer_events DROP COLUMN recovery_completed") &&
         mutate(path, "ALTER TABLE transfer_events DROP COLUMN staging_cleanup") &&
@@ -233,6 +234,7 @@ void testContractMigrationFailure() {
     expect(QFile::copy(sourceDir + "006_recovery_removal.sql", directory.filePath("006_recovery_removal.sql")), "removal recovery migration fixture should copy");
     expect(QFile::copy(sourceDir + "007_copy_resume.sql", directory.filePath("007_copy_resume.sql")), "copy resume migration fixture should copy");
     expect(QFile::copy(sourceDir + "008_staging_commit.sql", directory.filePath("008_staging_commit.sql")), "staging commit migration fixture should copy");
+    expect(QFile::copy(sourceDir + "009_removal_proof.sql", directory.filePath("009_removal_proof.sql")), "removal proof migration fixture should copy");
     loaded = repository.loadPlan(plan.id);
     expect(loaded && loaded.value().formatVersion == 1 && loaded.value().planHash == plan.planHash &&
         nookbit::PlanSignature::approvalPayload(loaded.value()) == nookbit::PlanSignature::approvalPayload(plan),

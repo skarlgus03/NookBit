@@ -43,6 +43,20 @@ bool samePath(const std::filesystem::path& left, const std::filesystem::path& ri
 
 } // namespace
 
+// 제거 영수증의 승인·확정 객체·표식 형식이 서로 연결되는지 검사하는 함수.
+Result<void> validateRemovalProof(const TransferAttempt& attempt, const TransferRemovalProof& proof, const std::string& planHash) {
+    if (!PlanSignature::isSha256Hex(planHash) || proof.planHash != planHash || !attempt.destinationFingerprint ||
+        !attempt.stagingFingerprint || !sameObject(proof.destination, *attempt.destinationFingerprint) ||
+        !sameContent(proof.destination, *attempt.destinationFingerprint) ||
+        proof.destination.modifiedUtcMs != attempt.destinationFingerprint->modifiedUtcMs ||
+        !sameObject(proof.destination, *attempt.stagingFingerprint) || !sameContent(attempt.sourceFingerprint, proof.destination) ||
+        proof.markerSize > 65536 || (proof.markerPresent ? !proof.markerSha256 ||
+        !PlanSignature::isSha256Hex(*proof.markerSha256) : proof.markerSha256.has_value() || proof.markerSize != 0) ||
+        proof.creationTime < 0 || proof.writeTime < 0 || proof.attributes == 0)
+        return Result<void>::failure({"transfer.removal_proof_invalid", "Removal proof does not match the approved committed object."});
+    return Result<void>::success();
+}
+
 // 복사본의 크기와 유효한 SHA-256 내용이 같은지 검사하는 함수.
 bool sameContent(const FileFingerprint& left, const FileFingerprint& right) {
     return left.size == right.size && left.sha256 && right.sha256 &&
@@ -89,7 +103,7 @@ Result<void> validateNew(const TransferAttempt& attempt) {
     if (attempt.id.empty() || attempt.planId.empty() || attempt.stepId.empty() ||
         (attempt.direction != TransferDirection::Forward && attempt.direction != TransferDirection::Rollback) ||
         attempt.phase != TransferPhase::Prepared || attempt.stagingFingerprint ||
-        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.recoveryRemovalIntent || attempt.copyResume != CopyResume::None || attempt.stagingCommit != StagingCommit::None || attempt.stagingCleanup != StagingCleanup::None ||
+        attempt.destinationFingerprint || attempt.error || attempt.recoveryCompleted || attempt.removalProof || attempt.sourceRemovalIntentRecorded || attempt.recoveryRemovalIntent || attempt.copyResume != CopyResume::None || attempt.stagingCommit != StagingCommit::None || attempt.stagingCleanup != StagingCleanup::None ||
         !validPath(attempt.source) || !validPath(attempt.destination) || !validPath(attempt.staging) ||
         samePath(attempt.source, attempt.destination) ||
         samePath(attempt.staging, attempt.destination) ||
@@ -142,6 +156,7 @@ Result<TransferAttempt> advance(const TransferAttempt& attempt, const TransferUp
     }
     auto next = attempt;
     next.phase = update.nextPhase;
+    if (update.nextPhase == TransferPhase::SourceRemoveIntent) next.sourceRemovalIntentRecorded = true;
     if (update.stagingFingerprint) next.stagingFingerprint = update.stagingFingerprint;
     if (update.destinationFingerprint) next.destinationFingerprint = update.destinationFingerprint;
     next.error = update.error;
