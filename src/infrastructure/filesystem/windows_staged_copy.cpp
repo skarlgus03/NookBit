@@ -196,22 +196,48 @@ Result<void> prepareApprovedParents(const std::filesystem::path& path, const Pla
     return Result<void>::success();
 }
 
+// 복사 중 읽은 바이트와 재읽기 검증이 같은 SHA-256 구현을 사용하는 일꾼.
+struct ContentHash {
+    BCRYPT_ALG_HANDLE algorithm{};
+    BCRYPT_HASH_HANDLE hash{};
+    // 해시 핸들을 역순으로 해제하는 함수.
+    ~ContentHash() {
+        if (hash) BCryptDestroyHash(hash);
+        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    }
+    // 현재 스트림의 SHA-256 상태를 초기화하는 함수.
+    Result<void> initialize() {
+        if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
+            BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) < 0)
+            return Result<void>::failure({"transfer.hash", "Cannot initialize SHA-256"});
+        return Result<void>::success();
+    }
+    // 방금 읽은 바이트를 추가하며 파일을 별도로 재읽지 않는 함수.
+    Result<void> append(unsigned char* bytes, DWORD size) {
+        if (BCryptHashData(hash, bytes, size, 0) < 0)
+            return Result<void>::failure({"transfer.hash", "Cannot hash file contents"});
+        return Result<void>::success();
+    }
+    // 누적한 전체 바이트의 SHA-256을 기존 승인 형식으로 반환하는 함수.
+    Result<std::string> finish() {
+        std::array<unsigned char, 32> bytes{};
+        if (BCryptFinishHash(hash, bytes.data(), static_cast<ULONG>(bytes.size()), 0) < 0)
+            return Result<std::string>::failure({"transfer.hash", "Cannot finish SHA-256"});
+        constexpr char hex[] = "0123456789abcdef";
+        std::string text;
+        for (const auto byte : bytes) { text += hex[byte >> 4]; text += hex[byte & 15]; }
+        return Result<std::string>::success(std::move(text));
+    }
+};
+
 // 경로를 다시 열지 않고 보유한 핸들의 전체 SHA-256을 계산하는 함수.
 Result<std::string> digest(HANDLE file, const std::function<bool()>& cancelled) {
     LARGE_INTEGER zero{};
     if (!SetFilePointerEx(file, zero, nullptr, FILE_BEGIN))
         return Result<std::string>::failure(failure("transfer.seek"));
-    struct Hash {
-        BCRYPT_ALG_HANDLE algorithm{};
-        BCRYPT_HASH_HANDLE hash{};
-        // 해시 핸들을 역순으로 해제하는 함수.
-        ~Hash() {
-            if (hash) BCryptDestroyHash(hash);
-            if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-        }
-    } state;
-    if (BCryptOpenAlgorithmProvider(&state.algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
-        BCryptCreateHash(state.algorithm, &state.hash, nullptr, 0, nullptr, 0, 0) < 0)
+    ContentHash state;
+    const auto initialized = state.initialize();
+    if (!initialized)
         return Result<std::string>::failure({"transfer.hash", "Cannot initialize SHA-256"});
     std::vector<unsigned char> buffer(1024 * 1024);
     DWORD read{};
@@ -221,16 +247,10 @@ Result<std::string> digest(HANDLE file, const std::function<bool()>& cancelled) 
         if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr))
             return Result<std::string>::failure(failure("transfer.read"));
         if (!read) break;
-        if (BCryptHashData(state.hash, buffer.data(), read, 0) < 0)
-            return Result<std::string>::failure({"transfer.hash", "Cannot hash file contents"});
+        const auto appended = state.append(buffer.data(), read);
+        if (!appended) return Result<std::string>::failure(appended.error());
     }
-    std::array<unsigned char, 32> hash{};
-    if (BCryptFinishHash(state.hash, hash.data(), static_cast<ULONG>(hash.size()), 0) < 0)
-        return Result<std::string>::failure({"transfer.hash", "Cannot finish SHA-256"});
-    constexpr char hex[] = "0123456789abcdef";
-    std::string text;
-    for (const auto byte : hash) { text += hex[byte >> 4]; text += hex[byte & 15]; }
-    return Result<std::string>::success(std::move(text));
+    return state.finish();
 }
 
 // 이름 있는 스트림이나 지원하지 않는 파일 형태가 생기지 않았는지 확인하는 함수.
@@ -360,6 +380,12 @@ public:
             return Result<FileFingerprint>::failure(failure("transfer.seek"));
         std::vector<unsigned char> buffer(1024 * 1024);
         uintmax_t total{resumeOffset};
+        ContentHash streamedHash;
+        // 이어쓰기는 기존 앞부분을 포함한 별도 전체 검증을 유지한다.
+        if (resumeOffset == 0) {
+            const auto initialized = streamedHash.initialize();
+            if (!initialized) return Result<FileFingerprint>::failure(initialized.error());
+        }
         for (;;) {
             if (cancelled && cancelled())
                 return Result<FileFingerprint>::failure({"transfer.cancelled", "Copy cancelled; source retained"});
@@ -370,6 +396,10 @@ public:
             total += read;
             if (total > expected.size)
                 return Result<FileFingerprint>::failure({"transfer.source_changed", "Source size changed"});
+            if (resumeOffset == 0) {
+                const auto appended = streamedHash.append(buffer.data(), read);
+                if (!appended) return Result<FileFingerprint>::failure(appended.error());
+            }
             DWORD offset{};
             while (offset < read) {
                 DWORD written{};
@@ -382,7 +412,7 @@ public:
             return Result<FileFingerprint>::failure(failure("transfer.flush"));
         const auto copiedHash = digest(staging.value, cancelled);
         if (!copiedHash) return Result<FileFingerprint>::failure(copiedHash.error());
-        const auto sourceHash = digest(source.value, cancelled);
+        const auto sourceHash = resumeOffset == 0 ? streamedHash.finish() : digest(source.value, cancelled);
         if (!sourceHash) return Result<FileFingerprint>::failure(sourceHash.error());
         auto current = fingerprint(source.value);
         if (!current) return current;
@@ -430,7 +460,7 @@ public:
         return verified;
     }
 
-    // 보유한 임시 파일 핸들로 이름을 바꾸고 최종 파일의 내용·객체를 재검증하는 함수.
+    // 같은 보호 핸들의 검증 증거로 내용 재읽기 없이 이름·객체·메타데이터를 확정하는 함수.
     Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) override {
         if (!verifiedCopy || std::exchange(commitAttempted, true))
             return Result<FileFingerprint>::failure({"transfer.commit_state", "A verified unused session is required"});
@@ -448,14 +478,13 @@ public:
         const auto stagingCheck = ordinarySource(staging.value, stagingPath, allowZone);
         if (!sourceCheck || !stagingCheck)
             return Result<FileFingerprint>::failure(!sourceCheck ? sourceCheck.error() : stagingCheck.error());
-        const auto inputHash = digest(source.value, {});
-        const auto copyHash = digest(staging.value, {});
         auto input = fingerprint(source.value);
         auto output = fingerprint(staging.value);
-        if (!inputHash || !copyHash || !input || !output)
+        if (!input || !output)
             return Result<FileFingerprint>::failure({"transfer.commit_check", "Cannot revalidate before commit"});
-        input.value().sha256 = inputHash.value();
-        output.value().sha256 = copyHash.value();
+        // copyAndVerify/openVerified 이후 쓰기·교체를 막은 동일 핸들에서만 증거를 재사용한다.
+        input.value().sha256 = expected.sha256;
+        output.value().sha256 = verifiedCopy->sha256;
         if (!sameFingerprint(expected, input.value()) || !sameFingerprint(*verifiedCopy, output.value()))
             return Result<FileFingerprint>::failure({"transfer.commit_changed", "Source or staging changed before commit"});
         FILE_BASIC_INFO inputBasic{}, outputBasic{};
@@ -510,13 +539,12 @@ public:
         if (!finalZones) return Result<FileFingerprint>::failure(finalZones.error());
         const auto finalCheck = ordinarySource(staging.value, destination, allowZone);
         if (!finalCheck) return Result<FileFingerprint>::failure(finalCheck.error());
-        const auto finalHash = digest(staging.value, {});
         auto final = fingerprint(staging.value);
         FILE_BASIC_INFO finalBasic{};
-        if (!finalHash || !final ||
+        if (!final ||
             !GetFileInformationByHandleEx(staging.value, FileBasicInfo, &finalBasic, sizeof(finalBasic)))
             return Result<FileFingerprint>::failure({"transfer.commit_verify", "Cannot verify renamed file"});
-        final.value().sha256 = finalHash.value();
+        final.value().sha256 = verifiedCopy->sha256;
         if (!sameFingerprint(*verifiedCopy, final.value()) ||
             finalBasic.CreationTime.QuadPart != metadata.CreationTime.QuadPart ||
             finalBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
@@ -531,6 +559,7 @@ class RemovalSession final : public ITransferRemovalSession {
     Handle source_, destination_;
     TransferAttempt attempt_;
     bool attempted_{false};
+    bool contentsVerified_{false};
     bool allowZone_{false}, zoneChecked_{false};
     std::optional<std::vector<unsigned char>> expectedZone_;
     std::vector<Handle> sourceZoneLocks_, destinationZoneLocks_;
@@ -553,12 +582,13 @@ public:
         for (const auto& pair : {std::pair{source_.value, attempt_.source}, std::pair{destination_.value, attempt_.destination}}) {
             const auto supported = ordinarySource(pair.first, pair.second, allowZone_);
             if (!supported) return supported;
-            const auto hash = digest(pair.first, {});
+            const auto& expected = pair.first == source_.value ? attempt_.sourceFingerprint : *attempt_.destinationFingerprint;
+            // 재개·재열기에서는 반드시 전체 검증하며, 같은 독점 세션에서만 재사용한다.
+            const auto hash = contentsVerified_ ? Result<std::string>::success(*expected.sha256) : digest(pair.first, {});
             const auto actual = fingerprint(pair.first);
             if (!hash || !actual) return Result<void>::failure(!hash ? hash.error() : actual.error());
             auto hashed = actual.value();
             hashed.sha256 = hash.value();
-            const auto& expected = pair.first == source_.value ? attempt_.sourceFingerprint : *attempt_.destinationFingerprint;
             if (!sameFingerprint(expected, hashed))
                 return Result<void>::failure({"transfer.removal_changed", "Source or final copy changed; neither file removed"});
         }
@@ -577,6 +607,7 @@ public:
             return Result<void>::failure({"transfer.removal_metadata", "Source and final metadata differ; source retained"});
         if (GetFileAttributesW(attempt_.staging.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
             return Result<void>::failure({"transfer.removal_staging", "Staging path is not provably absent"});
+        contentsVerified_ = true;
         return Result<void>::success();
     }
     // 제거 직전 재검증하고 핸들 기반 제거·닫기·실제 부재를 한 번 확인하는 함수.
@@ -597,11 +628,11 @@ public:
         }
         if (GetFileAttributesW(attempt_.source.c_str()) != INVALID_FILE_ATTRIBUTES || GetLastError() != ERROR_FILE_NOT_FOUND)
             return Result<void>::failure({"transfer.removal_uncertain", "Source absence is not confirmed; final copy retained"});
-        const auto finalHash = digest(destination_.value, {});
         const auto final = fingerprint(destination_.value);
-        if (!finalHash || !final) return Result<void>::failure({"transfer.removal_final_unavailable", "Cannot confirm retained final copy"});
+        if (!final) return Result<void>::failure({"transfer.removal_final_unavailable", "Cannot confirm retained final copy"});
         auto actual = final.value();
-        actual.sha256 = finalHash.value();
+        // 최종 핸들은 첫 전체 검증부터 이 확인까지 독점 보호를 유지한다.
+        actual.sha256 = attempt_.destinationFingerprint->sha256;
         if (!sameFingerprint(*attempt_.destinationFingerprint, actual))
             return Result<void>::failure({"transfer.removal_final_changed", "Final copy verification failed after source removal"});
         return Result<void>::success();

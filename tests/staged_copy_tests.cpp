@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QProcess>
 #include <QDir>
+#include <QElapsedTimer>
 #include <fstream>
 #include <iostream>
 #ifdef _WIN32
@@ -45,6 +46,116 @@ void unchanged(const std::filesystem::path& source, const nookbit::FileFingerpri
 }
 
 #ifdef _WIN32
+// 보호가 끊기면 내용 검증을 다시 수행하고 같은 보호 세션에서만 증거를 재사용하는 함수.
+void testProtectedEvidenceReuse(const std::filesystem::path& root) {
+    using namespace nookbit;
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        const auto folder = root / ("protected-evidence-" + std::to_string(scenario));
+        std::filesystem::create_directory(folder);
+        const auto source = folder / "source", staging = folder / "stage", final = folder / "final";
+        const std::string bytes("owned binary\0payload", 20);
+        write(source, bytes);
+        const auto expected = fingerprint(source);
+        QtPlanHasher hasher;
+        expect(expected.sha256 == hasher.sha256(bytes), "file evidence matches independent in-memory hash");
+        WindowsStagedCopy copy;
+        auto session = copy.open(source, expected, staging);
+        expect(bool(session), "protected evidence session opens");
+        if (!session) continue;
+        const auto verified = session.value()->copyAndVerify();
+        expect(verified && verified.value().sha256 == hasher.sha256(bytes), "streaming digest includes binary bytes");
+        if (!verified) continue;
+        const auto committed = session.value()->commitNoReplace(final);
+        expect(bool(committed), "protected evidence commits");
+        if (!committed) continue;
+        session.value().reset();
+        TransferAttempt attempt;
+        attempt.id = "protected"; attempt.planId = "plan"; attempt.stepId = "step";
+        attempt.source = source; attempt.staging = staging; attempt.destination = final;
+        attempt.sourceFingerprint = expected; attempt.stagingFingerprint = verified.value();
+        attempt.destinationFingerprint = committed.value(); attempt.phase = TransferPhase::DestinationCommitted;
+        if (scenario != 0) {
+            const auto changed = scenario == 1 ? source : final;
+            const auto time = std::filesystem::last_write_time(changed);
+            write(changed, std::string(bytes.size(), 'x'));
+            std::filesystem::last_write_time(changed, time);
+        }
+        WindowsTransferSourceRemoval removal;
+        auto guard = removal.open(attempt);
+        expect(bool(guard), "removal evidence opens new protection");
+        if (!guard) continue;
+        if (scenario != 0) {
+            const auto refused = guard.value()->removeVerifiedSource();
+            expect(!refused && refused.error().code == "transfer.removal_changed",
+                "same-size same-time mutation between sessions requires a fresh full hash");
+            expect(std::filesystem::exists(source) && std::filesystem::exists(final), "mismatch preserves both files");
+            continue;
+        }
+        expect(guard.value()->verify().hasValue(), "first removal verification hashes reopened evidence");
+        for (const auto& path : {source, final}) {
+            HANDLE writer = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, 0, nullptr);
+            expect(writer == INVALID_HANDLE_VALUE, "cached removal evidence denies writers");
+            if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+            expect(!DeleteFileW(path.c_str()), "cached removal evidence denies external deletion");
+        }
+        expect(guard.value()->verify().hasValue(), "same protected removal session reuses evidence");
+        expect(guard.value()->removeVerifiedSource().hasValue(), "protected removal succeeds after repeated verification");
+        expect(!guard.value()->removeVerifiedSource(), "protected removal cannot run twice");
+        guard.value().reset();
+        expect(!std::filesystem::exists(source) && sameFingerprint(committed.value(), fingerprint(final)),
+            "retained final independently verifies after removal");
+    }
+}
+
+// 소유한 256 MiB 자료로 복사·확정·삭제 단계 시간을 별도로 측정하는 함수.
+void benchmarkProtectedTransfer(const std::filesystem::path& root) {
+    using namespace nookbit;
+    const auto source = root / "benchmark-source", staging = root / "benchmark-stage", final = root / "benchmark-final";
+    write(source, std::string(256 * 1024 * 1024, 'b'));
+    const auto expected = fingerprint(source);
+    WindowsStagedCopy copy;
+    QElapsedTimer timer; timer.start();
+    auto session = copy.open(source, expected, staging);
+    const auto openedMs = timer.restart();
+    expect(bool(session), "benchmark protected copy opens");
+    if (!session) return;
+    const auto verified = session.value()->copyAndVerify();
+    const auto copiedMs = timer.restart();
+    expect(bool(verified), "benchmark copy verifies");
+    if (!verified) return;
+    for (const auto& path : {source, staging}) {
+        HANDLE writer = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, 0, nullptr);
+        expect(writer == INVALID_HANDLE_VALUE, "verified evidence remains protected from writers");
+        if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+    }
+    const auto committed = session.value()->commitNoReplace(final);
+    const auto committedMs = timer.restart();
+    expect(bool(committed), "benchmark copy commits");
+    if (!committed) return;
+    session.value().reset();
+    TransferAttempt attempt;
+    attempt.id = "benchmark"; attempt.planId = "plan"; attempt.stepId = "step";
+    attempt.source = source; attempt.staging = staging; attempt.destination = final;
+    attempt.sourceFingerprint = expected; attempt.stagingFingerprint = verified.value();
+    attempt.destinationFingerprint = committed.value(); attempt.phase = TransferPhase::DestinationCommitted;
+    WindowsTransferSourceRemoval removal;
+    auto guard = removal.open(attempt);
+    expect(bool(guard), "benchmark removal opens with fresh protection");
+    if (!guard) return;
+    expect(guard.value()->verify().hasValue(), "benchmark removal validates reopened files");
+    const auto removalCheckMs = timer.restart();
+    expect(guard.value()->verify().hasValue(), "repeated protected removal verification succeeds");
+    expect(guard.value()->removeVerifiedSource().hasValue(), "benchmark removes verified source");
+    const auto removedMs = timer.elapsed();
+    guard.value().reset();
+    expect(!std::filesystem::exists(source) && sameFingerprint(committed.value(), fingerprint(final)),
+        "benchmark retained final independently matches contents and identity");
+    std::cout << "BENCHMARK 256MiB open=" << openedMs << "ms copy=" << copiedMs << "ms commit=" << committedMs
+        << "ms removal-check=" << removalCheckMs << "ms removal=" << removedMs << "ms\n";
+}
+
 // 새로 만든 시험 파일의 Zone.Identifier만 복사·확정·보호하는 함수.
 void testZonePreservation(const std::filesystem::path& root) {
     using namespace nookbit;
@@ -271,6 +382,8 @@ int main(int argc, char** argv) {
     QTemporaryDir fixture(QCoreApplication::applicationDirPath() + "/staged-copy-XXXXXX");
     expect(fixture.isValid(), "temporary directory");
     const std::filesystem::path root(fixture.path().toStdWString());
+    testProtectedEvidenceReuse(root);
+    if (qEnvironmentVariableIsSet("NOOKBIT_BENCHMARK_COPY")) benchmarkProtectedTransfer(root);
     testApprovedParentCreation(root);
     testPartialCopyResume(root);
     nookbit::WindowsStagedCopy worker;
