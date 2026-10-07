@@ -13,6 +13,10 @@ public:
     [[nodiscard]] virtual Result<void> verify() = 0;
     /// 같은 보호 세션의 검증된 원본만 한 번 제거하고 실제 부재를 확인하는 함수.
     [[nodiscard]] virtual Result<void> removeVerifiedSource() = 0;
+    /// 제거 전부터 유지한 보호 증거로 원본 부재와 최종 복사본을 확인하는 함수.
+    [[nodiscard]] virtual Result<void> verifyRemovedSource() {
+        return Result<void>::failure({"transfer.removal_verification_unsupported", "Live removal evidence is required."});
+    }
 };
 class ITransferSourceRemoval {
 public:

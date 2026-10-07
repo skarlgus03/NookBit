@@ -333,9 +333,6 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
 
 // 복구 선택을 기록하기 전에 서비스 구성과 보호 범위를 읽기 전용으로 검사하는 함수.
 Result<void> SafeExecutor::verifyRecoverySupport(const OperationPlan& plan, RecoveryAction action) {
-    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
-        return step.movement && step.movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
-    })) return Result<void>::failure({"recovery.zone_unsupported", "Interrupted download-marker transfer recovery is not yet supported."});
     if ((action != RecoveryAction::Resume && action != RecoveryAction::Rollback) ||
         !PlanSignature::validateFormat(plan) || !PlanSignature::validateMovementScope(plan) ||
         !PlanSignature::isSha256Hex(plan.planHash) || plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan)))

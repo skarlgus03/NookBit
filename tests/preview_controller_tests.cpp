@@ -70,7 +70,10 @@ bool waitForBackground(nookbit::BackgroundTaskRunner& runner) {
     QTimer deadline;
     deadline.setSingleShot(true);
     QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(&runner, &nookbit::BackgroundTaskRunner::busyChanged, &loop, [&] { if (!runner.busy()) loop.quit(); });
+    QObject::connect(&runner, &nookbit::BackgroundTaskRunner::busyChanged, &loop, [&] {
+        // 완료 콜백이 후속 읽기 전용 검사를 예약한 뒤 최종 유휴 상태를 확인한다.
+        if (!runner.busy()) QTimer::singleShot(0, &loop, [&] { if (!runner.busy()) loop.quit(); });
+    });
     deadline.start(30000); loop.exec();
     return !runner.busy();
 }
@@ -331,12 +334,14 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     // 새 고유 시험 계획만 미시작 중단 상태로 만들어 명시적 재개를 검사한다.
     expect(workflow.history.appendEvent(nookbit::PlanStatusChanged{plan.id, nookbit::PlanStatus::Executing}).hasValue(), "owned background interruption");
     recovery.refreshRecoveryCases();
+    expect(waitForBackground(runner), "recovery inspection runs on its own background connection");
     recovery.requestRecoveryChoice(QString::fromStdString(plan.id), "resume");
     expect(recovery.awaitingRecoveryConfirmation(), "background recovery explicit confirmation");
     recovery.confirmRecoveryChoice(); expect(runner.busy(), "recovery must dispatch to background");
     recovery.confirmRecoveryChoice();
     expect(waitForBackground(runner) && workflow.history.loadPlan(plan.id).value().status == nookbit::PlanStatus::Completed,
         "background recovery finishes without sharing GUI SQLite connection");
+    expect(waitForBackground(runner), "post-recovery inspection completes before another operation");
     expect(operations.rollback(plan.id).hasValue(), "owned background fixture final restoration");
 #else
     (void)sourceRoot; (void)targetRoot;
@@ -1495,8 +1500,10 @@ public:
     std::string hash = std::string(64, 'a');
     int executions{0}, mutations{0};
     bool remaining{true}, unavailable{false};
+    std::function<void()> onInspect;
     // 파일·DB 접근 없이 표시 후보만 반환하는 함수.
     nookbit::Result<std::vector<nookbit::InterruptedOperationView>> inspectAll() override {
+        if (onInspect) onInspect();
         if (unavailable) return nookbit::Result<std::vector<nookbit::InterruptedOperationView>>::failure({"test.unavailable", "Owned inspection failed"});
         nookbit::InterruptedOperationView view;
         view.inspection.planId = "owned-plan"; view.inspection.pending = 1; view.inspection.moved = 1;
@@ -1512,6 +1519,33 @@ public:
         ++mutations; remaining = false; return nookbit::Result<void>::success();
     }
 };
+
+// 느린 복구 조회 중 화면 이벤트·중복 차단·조회 실패 안내를 확인하는 함수.
+void testBackgroundRecoveryInspection() {
+    QTemporaryDir directory;
+    PreviewWorkflow workflow(std::filesystem::path(directory.filePath("app-data").toStdWString()));
+    RecoveryChoices operations;
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::RecoveryController controller(workflow.history, nullptr, &workflow.journal, &operations);
+    controller.setTaskRunner(&runner);
+    QSemaphore gate;
+    std::atomic<bool> offUi{false};
+    std::atomic<int> inspections{0};
+    bool heartbeat = false;
+    const auto uiThread = QThread::currentThread();
+    operations.onInspect = [&] { ++inspections; offUi = QThread::currentThread() != uiThread; gate.acquire(); };
+    controller.refreshRecoveryCases();
+    expect(runner.busy() && controller.recoveryBusy(), "slow recovery inspection must dispatch immediately");
+    controller.refreshRecoveryCases(); controller.requestRecoveryChoice("owned-plan", "resume");
+    expect(!controller.awaitingRecoveryConfirmation() && operations.executions == 0, "busy inspection cannot execute stale actions");
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; gate.release(); });
+    expect(waitForBackground(runner) && heartbeat && offUi && inspections == 1 && !controller.recoveryBusy() &&
+        controller.recoveryCases().size() == 1 && operations.executions == 0, "inspection keeps UI responsive without mutating files");
+    operations.onInspect = {}; operations.unavailable = true;
+    controller.refreshRecoveryCases();
+    expect(waitForBackground(runner) && controller.recoveryCases().isEmpty() && !controller.recoveryNotice().isEmpty(),
+        "background inspection failure clears stale actions and retains warning");
+}
 
 // 화면 선택만으로 실행되지 않고 확인·취소·재검사가 안전한지 검사하는 함수.
 void testRecoveryConfirmationFlow() {
@@ -1804,6 +1838,7 @@ int main(int argc, char* argv[]) {
     testRecoveryCasesInController();
     testV2StartupRecoveryNotice();
     testRecoveryConfirmationFlow();
+    testBackgroundRecoveryInspection();
     if (failures == 0) {
         std::cout << "All preview-controller tests passed.\n";
         return 0;

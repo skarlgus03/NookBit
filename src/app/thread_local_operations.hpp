@@ -174,7 +174,10 @@ public:
         Session session(*this); return session.operations.rollback(id);
     }
     /// 현재 스레드 전용 연결로 중단 작업을 읽기 전용 조회하는 함수.
-    Result<std::vector<InterruptedOperationView>> inspectAll() override { Session session(*this); return session.interrupted.inspectAll(); }
+    Result<std::vector<InterruptedOperationView>> inspectAll() override {
+        OperationProgressScope::begin(OperationPhase::Recovering);
+        Session session(*this); return session.interrupted.inspectAll();
+    }
     /// 명시적 복구 선택을 현재 스레드의 복구 서비스로 전달하는 함수.
     Result<void> execute(const RecoveryRequest& request) override {
         if (request.action == RecoveryAction::Later) return Result<void>::success();

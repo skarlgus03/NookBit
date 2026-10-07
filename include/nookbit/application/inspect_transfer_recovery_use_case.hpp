@@ -23,6 +23,11 @@ public:
     [[nodiscard]] virtual TransferFileObservation inspect(const std::filesystem::path& path) = 0;
     /// 다운로드 표식 보존 계약의 완료 작업을 읽기 전용으로 검사하는 함수.
     [[nodiscard]] virtual TransferFileObservation inspectWithZone(const std::filesystem::path& path) { return inspect(path); }
+    /// 두 파일의 다운로드 표식을 비교하며 부분 복사에서만 복사본 표식 부재를 허용하는 함수.
+    [[nodiscard]] virtual Result<void> checkDownloadMarkers(const std::filesystem::path&,
+        const std::filesystem::path&, bool = false) {
+        return Result<void>::failure({"recovery.zone_inspector_required", "Download marker comparison is required."});
+    }
 };
 
 enum class TransferRecoveryFileState {

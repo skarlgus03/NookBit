@@ -62,7 +62,9 @@ void block(InterruptedStepInspection& item, const char* code, const char* messag
 // 기록이 없는 단계의 두 위치를 검사하고 실제 객체 증거로 상태를 구분하는 함수.
 void inspectUntracked(const MoveStep& step, bool copy, PlanStatus origin,
     ITransferFileInspector& files, InterruptedStepInspection& item) {
-    const auto source = files.inspect(step.source), destination = files.inspect(step.destination);
+    const bool withZone = step.movement && step.movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    const auto source = withZone ? files.inspectWithZone(step.source) : files.inspect(step.source);
+    const auto destination = withZone ? files.inspectWithZone(step.destination) : files.inspect(step.destination);
     const auto targetVolume = step.movement ? std::optional<std::string>{step.movement->destinationVolume.serial} : step.fingerprint.volumeId;
     if (source.error) item.reasons.push_back(*source.error);
     if (destination.error) item.reasons.push_back(*destination.error);
@@ -147,14 +149,10 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing :
         plan.status == PlanStatus::RolledBack ? PlanStatus::RollingBack : plan.status;
     std::vector<Error> globalReasons;
-    const bool withZone = std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
-        return step.movement && step.movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
-    });
-    if (withZone) globalReasons.push_back({"recovery.zone_unsupported", "Interrupted download-marker transfers require manual review; automatic resume/rollback is not yet supported."});
     if (PlanSignature::isMetadataRenamePlan(plan)) globalReasons.push_back({"recovery.metadata_unsupported", "Interrupted metadata-only renames require manual review; automatic resume/rollback is not yet supported."});
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});
-    if (report.planIntact && plan.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(plan) && !withZone) {
+    if (report.planIntact && plan.formatVersion == 2 && !PlanSignature::isMetadataRenamePlan(plan)) {
         if (!volumes_) globalReasons.push_back({"recovery.volume_verifier_required", "V2 inspection requires current volume identities."});
         else {
             PrepareTransferPlanUseCase prepare(*volumes_);

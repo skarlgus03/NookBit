@@ -33,6 +33,10 @@ QString recoveryError(const Error& error) {
         return QStringLiteral("현재 정리 위치·충돌 정책·규칙이 원래 승인과 달라요. 이전 설정과 규칙을 복원한 뒤 다시 검사해 주세요.");
     if (code == "recovery.choice_stale") return QStringLiteral("표시 당시의 승인 기록이 바뀌었어요. 다시 검사하고 선택해 주세요.");
     if (code == "recovery.not_interrupted") return QStringLiteral("이동 처리는 이미 끝났어요. 보존된 임시 파일은 별도 정리가 필요해요.");
+    if (code == "recovery.zone_evidence_required")
+        return QStringLiteral("원본이 없고 다운로드 표식의 이전 증거가 없어 자동 확정할 수 없어요. 최종 파일과 기록을 보존합니다.");
+    if (code == "transfer.zone_changed") return QStringLiteral("원본과 복사본의 다운로드 표식이 달라요. 두 파일을 보존합니다.");
+    if (code == "recovery.zone_reverse_unsupported") return QStringLiteral("다운로드 표식이 있는 파일의 중단된 되돌리기는 아직 별도 확인이 필요해요.");
     if (code == "recovery.preserve_unsupported" || code == "recovery.step_resolution_required" || code == "recovery.transfer_resume_unsupported")
         return QStringLiteral("현재 중단 경계는 이 선택으로 처리할 수 없어요. 파일과 기록은 보존합니다.");
     return QStringLiteral("%1 (%2)").arg(QString::fromStdString(error.message), code);
@@ -124,7 +128,24 @@ void RecoveryController::applyChoice(const RecoveryRequest& request) {
 
 // 진단·선택 후보·차단 이유를 작업당 한 항목으로 표시하는 함수.
 void RecoveryController::refreshWholeCases() {
-    const auto inspected = operations_->inspectAll();
+    busy_ = true; emit recoveryBusyChanged();
+    cancelRecoveryChoice();
+    recoveryMessage_ = QStringLiteral("중단 작업을 검사하고 있어요. 파일은 변경하지 않습니다.");
+    emit recoveryCasesChanged();
+    auto inspected = std::make_shared<Result<std::vector<InterruptedOperationView>>>(
+        Result<std::vector<InterruptedOperationView>>::failure({"background.exception", "Inspection did not complete."}));
+    dispatchOperation(runner_, this, [operations = operations_, inspected] {
+        *inspected = operations->inspectAll();
+        return *inspected ? Result<void>::success() : Result<void>::failure(inspected->error());
+    }, [this, inspected](const Result<void>& result) {
+        busy_ = false; emit recoveryBusyChanged();
+        if (!result) applyWholeInspection(Result<std::vector<InterruptedOperationView>>::failure(result.error()));
+        else applyWholeInspection(*inspected);
+    });
+}
+
+// 완료된 읽기 전용 진단을 화면 목록과 한국어 차단 안내로 변환하는 함수.
+void RecoveryController::applyWholeInspection(const Result<std::vector<InterruptedOperationView>>& inspected) {
     recoveryCases_.clear();
     if (!inspected) {
         cancelRecoveryChoice();
@@ -133,7 +154,9 @@ void RecoveryController::refreshWholeCases() {
     }
     // 구형 v1의 파일 변경 없는 기록 확정은 호환 경로로만 유지한다.
     RecoveryService legacy(history_, scanner_, hasher_, transfers_);
-    const auto oldCases = legacy.inspectCases();
+    const bool needsLegacy = std::any_of(inspected.value().begin(), inspected.value().end(),
+        [](const InterruptedOperationView& item) { return item.formatVersion == 1; });
+    const auto oldCases = needsLegacy ? legacy.inspectCases() : Result<std::vector<RecoveryCase>>::success({});
     for (const auto& item : inspected.value()) {
         const auto& report = item.inspection;
         QVariantMap row;
@@ -147,8 +170,11 @@ void RecoveryController::refreshWholeCases() {
             if (old.planId == report.planId && old.canResolve) row["canResolve"] = true;
         QStringList details;
         for (const auto& step : report.steps) for (const auto& reason : step.reasons)
-            if (reason.code == "recovery.zone_unsupported" && !details.contains(QStringLiteral("다운로드 표식 보존 전송의 중단 복구는 아직 지원하지 않아요. 원본·복사본·기록을 보존하며 별도 확인이 필요해요.")))
-                details << QStringLiteral("다운로드 표식 보존 전송의 중단 복구는 아직 지원하지 않아요. 원본·복사본·기록을 보존하며 별도 확인이 필요해요.");
+            if (reason.code == "recovery.zone_evidence_required" || reason.code == "transfer.zone_changed" ||
+                reason.code == "recovery.zone_reverse_unsupported") {
+                const auto detail = recoveryError(reason);
+                if (!details.contains(detail)) details << detail;
+            }
         for (const auto& step : report.steps) for (const auto& reason : step.reasons)
             if (reason.code == "recovery.metadata_unsupported" && !details.contains(QStringLiteral("빠른 같은 볼륨 이동의 중단 복구는 아직 지원하지 않아요. 파일과 기록을 보존하며 별도 확인이 필요해요.")))
                 details << QStringLiteral("빠른 같은 볼륨 이동의 중단 복구는 아직 지원하지 않아요. 파일과 기록을 보존하며 별도 확인이 필요해요.");
@@ -172,7 +198,8 @@ void RecoveryController::refreshWholeCases() {
         row["files"] = files;
         recoveryCases_.append(row);
     }
-    recoveryMessage_ = QStringLiteral("파일과 작업 기록을 변경하지 않고 중단 작업을 검사했어요.");
+    if (recoveryMessage_ == QStringLiteral("중단 작업을 검사하고 있어요. 파일은 변경하지 않습니다."))
+        recoveryMessage_ = QStringLiteral("파일과 작업 기록을 변경하지 않고 중단 작업을 검사했어요.");
     setRecoveryNotice(recoveryCases_.isEmpty() ? QString{} : QStringLiteral("확인이 필요한 작업 %1건이 있어요. 재개·되돌리기는 직접 선택해야 합니다.").arg(recoveryCases_.size()));
     emit recoveryCasesChanged();
 }

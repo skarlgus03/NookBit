@@ -1,5 +1,19 @@
 # Real two-volume backend test
 
+## 2026-10-07 원본이 남은 다운로드 표식 복구
+
+자동 회귀 22/22, 실제 서로 다른 고정 NTFS 볼륨의 `--zone-recovery-run` 9/9, 컨트롤러 `--background-cross-run`이 통과했다. 새 고유 시험 파일만 사용했고 사용자 파일·실행 앱·사용자 DB는 건드리지 않았다.
+
+- 부분 복사: 표식 없음/일치 시 재개, 다른 기존 표식은 검사와 네이티브 이어쓰기 포트 양쪽에서 차단.
+- 확정: 검증된 임시 파일 확정, 누락된 최종 이름 확정 기록 복구, 원본이 남은 제거 재개 후 원자적 완료와 정확한 표식 정상 되돌리기.
+- 보존: 원본 제거 후 기록 실패·완료 기록 실패는 영구 표식 증거 부재로 차단. 최종 표식 불일치도 검사와 네이티브 제거 포트 양쪽에서 차단.
+- 조회: 앱의 전체 복구 조회를 작업 스레드 전용 DB 연결로 실행. 기본 테스트는 느린 조회 중 화면 이벤트 처리·중복 차단·실패 시 이전 실행 카드 폐기를 검사한다.
+- 재실행: `nookbit_cross_volume_tests.exe --zone-recovery-run --source-parent <기존 C: 부모> --destination-parent <기존 D: 부모>`. 일반 CTest와 동시에 실행하지 않는다.
+- 복구 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-cross-source-cFljCT`, `D:/NookBit/out/build/dev/tests/NookBit-cross-target-nrXVqt/zone-recovery-report.json`.
+- 앱 연결 자료: `C:/Users/begon/AppData/Local/Temp/NookBit-bg-source-mmeOTY`, `D:/NookBit/out/build/dev/tests/NookBit-bg-target-DogXpn`.
+
+자료는 보존했다. 원본 없는 미완료 표식 전송·중단 역전송·표식 임시 파일 정리는 미지원이며 자세한 증거 범위는 [다운로드 표식 계약](download-marker-copy.md)을 따른다. Schema v8·승인 계획 v2·규칙 JSON v3는 바꾸지 않았다. 화면의 시각적 시험은 사용자가 한다.
+
 ## 2026-10-06 같은 볼륨 빠른 이동의 분리 검증
 
 [새 MetadataRename](same-volume-fast-move.md)은 같은 볼륨 전용 신규 작업에만 적용하며 다른 볼륨/혼합 작업은 기존 내용 승인 정책이다. 최종 자동 19/19, 새 실패 경계 8개 및 기존 두 볼륨 비동기 이동/되돌리기/중단 재개가 통과했다. 파일 내용 읽기를 금지한 대역으로 새 경로의 해시 호출 0회를 확인했다. 컨트롤러의 부분 실패 대기 목록/부분 되돌리기 회귀도 포함된다. 새 정책의 중단 복구는 명시적 보존·차단 상태다.

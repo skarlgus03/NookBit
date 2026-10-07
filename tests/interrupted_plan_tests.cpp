@@ -95,6 +95,13 @@ struct Journal final : ITransferJournal {
 struct Files final : ITransferFileInspector {
     std::map<std::filesystem::path, TransferFileObservation> values;
     int reads{0};
+    int markerChecks{0};
+    bool markerMismatch{false}, allowMissingMarkerObserved{false};
+    // 가상 표식의 일치 여부만 반환하며 파일이나 기록은 바꾸지 않는 함수.
+    Result<void> checkDownloadMarkers(const std::filesystem::path&, const std::filesystem::path&, bool allowMissing) override {
+        ++markerChecks; allowMissingMarkerObserved = allowMissing;
+        return markerMismatch ? Result<void>::failure({"transfer.zone_changed", "Fixture markers differ"}) : Result<void>::success();
+    }
     // 등록한 관찰값만 반환하고 파일 시스템에는 접근하지 않는 함수.
     TransferFileObservation inspect(const std::filesystem::path& file) override { ++reads; return values.at(file); }
 };
@@ -568,6 +575,46 @@ void testPartialCleanupApproval() {
     }
 }
 
+// 다운로드 표식 복구를 원본 존재·표식 일치·완료 기록에 따라 구분하는 함수.
+void testZoneRecoveryInspection() {
+    for (int scenario = 0; scenario < 7; ++scenario) {
+        Fixture f;
+        f.history.plan.steps[0].movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone; f.seal();
+        if (scenario == 0) {
+            expect(f.inspect().pending == 3, "tagged never-started files remain pending rather than globally blocked");
+            continue;
+        }
+        auto attempt = f.forward(0, scenario <= 2 ? TransferPhase::Cancelled :
+            scenario == 6 ? TransferPhase::Completed : TransferPhase::SourceRemoveIntent);
+        auto copied = attempt.sourceFingerprint; copied.volumeId = "2"; copied.fileId = "owned-zone-copy";
+        if (scenario <= 2) {
+            copied.sha256.reset(); attempt.stagingFingerprint = copied; f.present(attempt.staging, copied);
+        } else {
+            attempt.stagingFingerprint = copied; attempt.destinationFingerprint = copied;
+            f.present(attempt.destination, copied);
+            if (scenario >= 5) f.missing(attempt.source, "1");
+        }
+        f.files.markerMismatch = scenario == 2 || scenario == 4;
+        if (scenario == 6) f.history.plan.steps[0].status = StepStatus::Applied;
+        f.journal.attempts.push_back(attempt);
+        const auto report = f.inspect();
+        const auto& transfer = *report.steps[0].transfer;
+        if (scenario <= 2) {
+            expect(transfer.finding == (scenario == 2 ? TransferRecoveryFinding::ChangedFile : TransferRecoveryFinding::PartialCopy),
+                "partial tagged staging compares existing markers and allows missing marker");
+            expect(f.files.markerChecks == 1 && f.files.allowMissingMarkerObserved, "only partial staging may omit its marker");
+        } else if (scenario <= 4) {
+            expect(transfer.finding == (scenario == 4 ? TransferRecoveryFinding::ChangedFile : TransferRecoveryFinding::CommittedSourceRetained),
+                "tagged committed source requires marker equality");
+            expect(!f.files.allowMissingMarkerObserved, "committed final marker cannot be omitted");
+        } else if (scenario == 5) {
+            expect(transfer.finding == TransferRecoveryFinding::Unavailable && !transfer.observationErrors.empty() &&
+                transfer.observationErrors[0].code == "recovery.zone_evidence_required" && report.resume.readiness == RecoveryReadiness::Blocked,
+                "source absent without completed marker history must remain blocked");
+        } else expect(report.moved == 1, "known completed tagged file is not globally blocked");
+    }
+}
+
 // 시작 조회가 승인 대기·초안·완료 작업을 제외하고 미해결 상태를 보존하는지 검사하는 함수.
 void testStartupFilter() {
     Fixture f;
@@ -594,5 +641,6 @@ int main() {
     testPreservedStartup();
     testPartialCleanupApproval();
     testUnsupportedRecoveryEdges();
+    testZoneRecoveryInspection();
     return failures ? 1 : 0;
 }

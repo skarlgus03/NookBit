@@ -17,6 +17,9 @@ Result<void> ResumeInterruptedTransferUseCase::verifyResume(const TransferRecove
         return Result<void>::failure({"recovery.transfer_resume_unsupported", "Only owned unresolved forward transfers without cleanup or observation errors may resume."});
     const auto binding = verifyTransferRecoveryBinding(history_, journal_, hasher_, attempt);
     if (!binding) return Result<void>::failure(binding.error());
+    if (binding.value().movement && binding.value().movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone &&
+        inspection.finding == TransferRecoveryFinding::SourceAbsentAfterRemoveIntent)
+        return Result<void>::failure({"recovery.zone_evidence_required", "Source-absent marker recovery requires persisted proof."});
     auto eligible = attempt;
     Result<TransferAttempt> permitted = Result<TransferAttempt>::failure({"recovery.transfer_resume_unsupported", "This finding has no supported forward recovery route."});
     switch (inspection.finding) {

@@ -80,6 +80,8 @@ private:
     bool busy_{false};
     /// 전체 작업 진단을 화면 값으로 변환하고 차단 이유를 표시하는 함수.
     void refreshWholeCases();
+    /// 백그라운드 검사 결과만 화면 스레드에서 목록으로 변환하는 함수.
+    void applyWholeInspection(const Result<std::vector<InterruptedOperationView>>& inspected);
     /// 외부 복구 계약으로 명시적 선택만 실행하고 결과·목록을 갱신하는 함수.
     void applyChoice(const RecoveryRequest& request);
     FilesystemScanner scanner_;

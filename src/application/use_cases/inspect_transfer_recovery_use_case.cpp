@@ -75,9 +75,13 @@ Result<TransferRecoveryInspection> InspectTransferRecoveryUseCase::execute(const
         report.reason = "Plan signature or transfer paths/evidence are untrusted; no files inspected.";
         return Result<TransferRecoveryInspection>::success(std::move(report));
     }
-    const auto source = files_.inspect(report.attempt.source);
-    const auto staging = files_.inspect(report.attempt.staging);
-    const auto destination = files_.inspect(report.attempt.destination);
+    const auto step = std::find_if(plan.value().steps.begin(), plan.value().steps.end(), [&](const MoveStep& item) {
+        return item.id == report.attempt.stepId;
+    });
+    const bool withZone = step->movement && step->movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone;
+    const auto source = withZone ? files_.inspectWithZone(report.attempt.source) : files_.inspect(report.attempt.source);
+    const auto staging = withZone ? files_.inspectWithZone(report.attempt.staging) : files_.inspect(report.attempt.staging);
+    const auto destination = withZone ? files_.inspectWithZone(report.attempt.destination) : files_.inspect(report.attempt.destination);
     for (const auto* observed : {&source, &staging, &destination})
         if (observed->error) report.observationErrors.push_back(*observed->error);
     report.source = classify(source, report.attempt.sourceFingerprint);
@@ -134,6 +138,26 @@ Result<TransferRecoveryInspection> InspectTransferRecoveryUseCase::execute(const
             report.attempt.recoveryRemovalIntent)) {
         report.finding = Finding::SourceAbsentAfterRemoveIntent;
         report.reason = "Source is absent after a recorded removal intent and final copy matches; inspection does not finalize the record.";
+    }
+    if (withZone) {
+        if (report.source == State::Missing && phase != TransferPhase::Completed) {
+            report.finding = Finding::Unavailable;
+            report.reason = "No source or persisted marker proof remains; final file and records retained.";
+            report.observationErrors.push_back({"recovery.zone_evidence_required", report.reason});
+        } else if (sourceMatches && (!noStage || !noFinal)) {
+            const auto markers = files_.checkDownloadMarkers(report.attempt.source,
+                noStage ? report.attempt.destination : report.attempt.staging, report.finding == Finding::PartialCopy);
+            if (!markers) {
+                report.finding = markers.error().code == "transfer.zone_changed" ? Finding::ChangedFile : Finding::Unavailable;
+                report.reason = "Download markers do not prove safe recovery; files retained.";
+                report.observationErrors.push_back(markers.error());
+            }
+        }
+        if (report.attempt.direction == TransferDirection::Rollback && phase != TransferPhase::Completed) {
+            report.finding = Finding::Unavailable;
+            report.reason = "Interrupted reverse marker transfers still require manual review.";
+            report.observationErrors.push_back({"recovery.zone_reverse_unsupported", report.reason});
+        }
     }
     return Result<TransferRecoveryInspection>::success(std::move(report));
 }

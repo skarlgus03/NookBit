@@ -14,7 +14,21 @@ The separate removal session compares and protects source/final markers, and ret
 
 This policy preserves the marker observed at copy-session opening, not a marker byte digest frozen during preparation. An external marker change before opening is outside the original content-digest snapshot; a change during copying or mismatch before removal is rejected. This does not provide transactional filesystem/DB or power-loss guarantees.
 
-Completed normal moves and explicit normal/history undo support the marker policy in both directions. Interrupted policy-1 transfers are currently explicitly blocked and preserved by startup inspection and the recovered-runner boundary; partial-copy resume/cleanup and interrupted commit/removal recovery have not been extended to this policy. Old Basic-policy recovery continues unchanged. Do not reinterpret an old failed Basic transfer as a policy-1 transfer.
+Completed normal moves and explicit normal/history undo support the marker policy in both directions. Policy-1 forward recovery now supports source-retained boundaries described below. Old Basic-policy recovery continues unchanged. Do not reinterpret an old failed Basic transfer as a policy-1 transfer.
+
+## Source-retained marker recovery
+
+Read-only recovery inspection uses the signed preservation policy, reads supported markers, and compares source/copy raw bytes. A partial owned staging file may lack its marker because normal copying writes it after data verification. An existing marker must match; it is never overwritten to repair a mismatch. Verified staging and committed final copies require exact marker equality, including presence/absence.
+
+Protected native sessions independently repeat these checks before any recovery write. Forward recovery supports partial-prefix continuation, verified staging commit, reconciliation of an unrecorded final rename, and source removal from a recorded committed copy. Marker handles and source/copy parent/base-file handles remain held during the relevant operations. Recovered source removal records completion while the same removal session still holds its independently verified final-content and marker evidence; it does not reopen a source-absent session and infer a historical marker.
+
+The journal still stores no historical marker bytes/digest. If the source is already absent and the attempt was not durably Completed, inspection and the fresh completion guard return `recovery.zone_evidence_required`, retaining final copy and records. A database failure after successful removal can therefore require manual review after restart. Persisted marker proof and a migration are future work. Already Completed attempts can be recognized when inspecting a larger interrupted batch, and their normal explicit undo remains supported.
+
+Interrupted reverse policy-1 attempts and policy-1 staging cleanup remain unsupported. Metadata-only rename recovery is unchanged. The current source marker is authoritative when both files remain: identical external changes to both markers before opening cannot be detected against a historical marker, because none was saved. Full-content/object/volume/metadata checks remain independently required.
+
+Application whole-operation inspection now runs on the shared background runner using thread-local database connections. It is read-only and never automatically resumes. Busy inspection rejects duplicate requests and stale execution choices; exceptions and failed inspections clear actionable cards and retain warnings. Only v1 compatibility records use the old synchronous legacy record-resolution inspection.
+
+Verification uses `nookbit_cross_volume_tests.exe --zone-recovery-run --source-parent <existing C: directory> --destination-parent <existing D: directory>`. Nine owned scenarios cover partial marker absence/equality/mismatch, verified staging, unrecorded commit, retained-source finalization, source-removed/completion-record-failure blocking, and final marker mismatch. Successful recovery is checked through durable completion and exact-marker normal undo. Schema v8, plan v2 and rule JSON v3 remain unchanged.
 
 ## Performance changes and remaining work
 

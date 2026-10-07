@@ -120,6 +120,10 @@ public:
     Result<void> completeForward(const std::string& id) override {
         if (throwBeforeCompletion) throw std::runtime_error("owned-transfer-stop");
         if (stopAt == "before-complete") checkpoint(stopAt);
+        if (failAt == TransferPhase::Completed) {
+            failAt.reset();
+            return Result<void>::failure({"test.completion_interrupted", "Injected atomic completion failure"});
+        }
         return inner_.completeForward(id);
     }
     // 원자적 역방향 완료를 전달하는 함수.
@@ -188,7 +192,7 @@ struct Fixture {
     OperationPlan plan;
     TransferAttempt attempt;
     // 전용 폴더 안의 이진 파일과 실제 서로 다른 볼륨의 v2 승인 계약을 만드는 함수.
-    Fixture(const QString& sourceRun, const QString& targetRun, const QString& name)
+    Fixture(const QString& sourceRun, const QString& targetRun, const QString& name, bool withZone = false)
         : sourceRoot((QDir(sourceRun).filePath(name)).toStdWString()),
           targetRoot((QDir(targetRun).filePath(name)).toStdWString()),
           database(QDir(targetRun).filePath(name + "/history.sqlite")),
@@ -202,6 +206,8 @@ struct Fixture {
         attempt.destination = targetRoot / "new-parent" / "nested" / L"정리 파일.bin";
         attempt.staging = attempt.destination.parent_path() / "stage.tmp";
         createFile(attempt.source, contents);
+        if (withZone) createFile(std::filesystem::path(attempt.source.wstring() + L":Zone.Identifier"),
+            "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/owned-recovery\r\n");
         attempt.sourceFingerprint = fingerprint(attempt.source);
         OperationPlan draft;
         draft.id = attempt.planId; draft.ruleSetVersion = "cross-volume-test";
@@ -216,6 +222,7 @@ struct Fixture {
             plan.steps[0].movement->sourceVolume.guidPath != plan.steps[0].movement->destinationVolume.guidPath,
             "Real distinct-volume VerifiedCopy contract required; no forced strategy is allowed");
         plan.status = PlanStatus::Planned;
+        if (withZone) plan.steps[0].movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
         plan.planHash = hasher.sha256(PlanSignature::approvalPayload(plan));
         saved(history.savePlan(plan));
         saved(history.saveApproval({plan.id, plan.planHash, std::chrono::system_clock::now()}));
@@ -256,6 +263,70 @@ struct Fixture {
             "Rollback location or full contents differ");
     }
 };
+
+// 실제 두 볼륨의 다운로드 표식 복구와 증거 부족·표식 불일치 보존을 검사하는 함수.
+void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, int index) {
+    Fixture f(sourceRun, targetRun, QString("zone-%1").arg(index), true);
+    const std::string marker = "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/owned-recovery\r\n";
+    // 시험 파일의 다운로드 표식 경로만 만드는 함수.
+    const auto zone = [](const std::filesystem::path& path) { return std::filesystem::path(path.wstring() + L":Zone.Identifier"); };
+    if (index <= 2) {
+        int checks = 0;
+        require(!f.commit([&] { return ++checks >= 3; }), "Owned copy must stop after one block");
+        require(std::filesystem::file_size(f.attempt.staging) == 1024 * 1024, "Genuine partial staging required");
+        if (index) createFile(zone(f.attempt.staging), index == 1 ? marker : "owned different marker");
+    } else {
+        if (index == 3) f.faults.failAt = TransferPhase::CommitIntent;
+        if (index == 4) f.faults.failAt = TransferPhase::DestinationCommitted;
+        const auto copied = f.commit();
+        require(bool(copied) == (index != 3 && index != 4), "Requested commit boundary missing");
+        if (index == 6 || index == 7) {
+            f.faults.failAt = index == 6 ? TransferPhase::SourceRemoved : TransferPhase::Completed;
+            require(!f.finish() && !std::filesystem::exists(f.attempt.source), "Source-absent interrupted boundary required");
+        }
+        if (index == 8) {
+            QFile tag(QString::fromStdWString(zone(f.attempt.destination).wstring()));
+            require(tag.open(QIODevice::WriteOnly | QIODevice::Truncate) && tag.write("owned changed marker") > 0,
+                "Only owned final marker may change");
+        }
+    }
+    InspectTransferRecoveryUseCase inspect(f.history, f.journal, f.files, f.hasher);
+    WindowsTransferRecoveryGuard removalGuard;
+    WindowsTransferCommitRecoveryGuard commitGuard;
+    ResumeInterruptedTransferUseCase resume(f.history, f.journal, f.copy, f.removal, f.files, removalGuard, commitGuard, f.hasher);
+    const auto before = take(f.journal.load(f.attempt.id));
+    const auto observed = take(inspect.execute(f.attempt.id));
+    if (index == 2 || index == 6 || index == 7 || index == 8) {
+        const bool mismatch = index == 2 || index == 8;
+        require(observed.finding == (mismatch ? TransferRecoveryFinding::ChangedFile : TransferRecoveryFinding::Unavailable) &&
+            !resume.verifyResume(observed) && !resume.resume(f.attempt.id), "Unsafe marker recovery must stay blocked");
+        require(take(f.journal.load(f.attempt.id)).phase == before.phase, "Blocked recovery changed records");
+        require(std::filesystem::exists(f.attempt.source) == mismatch, "Blocked recovery changed source presence");
+        require(std::filesystem::exists(index == 2 ? f.attempt.staging : f.attempt.destination), "Blocked recovery removed owned copy");
+        if (index == 2) {
+            const auto opened = f.copy.openResume(before, &*f.plan.steps[0].movement);
+            require(!opened && opened.error().code == "transfer.zone_changed", "Native resume must independently reject mismatched marker");
+        }
+        if (index == 8) {
+            auto opened = take(f.removal.openApproved(before, *f.plan.steps[0].movement));
+            const auto checked = opened->verify();
+            require(!checked && checked.error().code == "transfer.zone_changed", "Native removal must independently reject mismatched marker");
+        }
+        if (!mismatch) {
+            const auto guard = removalGuard.open(before, &*f.plan.steps[0].movement);
+            require(!guard && guard.error().code == "recovery.zone_evidence_required", "Fresh source-absent guard must refuse missing marker proof");
+        }
+        return;
+    }
+    saved(resume.verifyResume(observed)); saved(resume.resume(f.attempt.id)); f.completed();
+    QFile tag(QString::fromStdWString(zone(f.attempt.destination).wstring()));
+    require(tag.open(QIODevice::ReadOnly) && tag.readAll().toStdString() == marker, "Recovered final marker bytes differ"); tag.close();
+    InspectInterruptedPlanUseCase whole(f.history, f.journal, f.files, f.hasher, &f.copy);
+    require(take(whole.inspectAfterResume(f.plan.id)).moved == 1, "Completed tagged result must be recognized");
+    f.rollback();
+    QFile restored(QString::fromStdWString(zone(f.attempt.source).wstring()));
+    require(restored.open(QIODevice::ReadOnly) && restored.readAll().toStdString() == marker, "Recovered move undo lost marker");
+}
 
 // 실제 두 볼륨에서 성공·충돌·중단 재개·기록 복구의 한 시나리오를 검사하는 함수.
 void scenario(const QString& sourceRun, const QString& targetRun, int index) {
@@ -1363,8 +1434,8 @@ int main(int argc, char** argv) {
         try { return child(args[2], args[3], args[1] == "--crash-recover"); }
         catch (const std::exception& error) { std::cerr << "Child failed: " << error.what() << '\n'; return 2; }
     }
-    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--crash-run" && args[1] != "--mixed-crash-run" && args[1] != "--edge-crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-cleanup-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
-        std::cout << "Opt-in only: --run, --crash-run, --mixed-crash-run, --edge-crash-run, --batch-run, --recovery-run, --transfer-recovery-run, --preserved-undo-run or --preserved-cleanup-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
+    if (args.size() != 6 || (args[1] != "--run" && args[1] != "--zone-recovery-run" && args[1] != "--crash-run" && args[1] != "--mixed-crash-run" && args[1] != "--edge-crash-run" && args[1] != "--batch-run" && args[1] != "--recovery-run" && args[1] != "--transfer-recovery-run" && args[1] != "--preserved-cleanup-run" && args[1] != "--preserved-undo-run") || args[2] != "--source-parent" || args[4] != "--destination-parent") {
+        std::cout << "Opt-in only: --run, --zone-recovery-run, --crash-run, --mixed-crash-run, --edge-crash-run, --batch-run, --recovery-run, --transfer-recovery-run, --preserved-undo-run or --preserved-cleanup-run --source-parent <existing-directory> --destination-parent <existing-directory>\n";
         return args.size() == 1 ? 0 : 2;
     }
     try {
@@ -1383,6 +1454,7 @@ int main(int argc, char** argv) {
         const bool resolving = args[1] == "--transfer-recovery-run";
         const bool preserving = args[1] == "--preserved-undo-run";
         const bool cleaning = args[1] == "--preserved-cleanup-run";
+        const bool zoneRecovery = args[1] == "--zone-recovery-run";
         // 일반 시험은 전체 잠금, 강제 종료 시험은 각 자식이 독립적으로 잠금을 갖는다.
         std::unique_ptr<OperationMutex> lock;
         if (!crashing) { lock = std::make_unique<OperationMutex>(); saved(lock->acquire()); }
@@ -1393,7 +1465,8 @@ int main(int argc, char** argv) {
         std::cout << "Source fixtures: " << source.path().toStdString() << "\nTarget fixtures/report: " << target.path().toStdString() << '\n';
         QJsonArray results;
         int failures = 0;
-        const QStringList names = edgeCrash ? QStringList{"cleanup-intent", "cleanup-removed", "cleanup-removed-occupant", "before-copy", "reverse-mid-copy"} :
+        const QStringList names = zoneRecovery ? QStringList{"zone-partial-missing-marker", "zone-partial-matching-marker", "zone-partial-mismatch-blocked", "zone-verified-staging", "zone-unrecorded-commit", "zone-committed-source-retained", "zone-source-removed-blocked", "zone-completion-record-failed-blocked", "zone-final-mismatch-blocked"} :
+            edgeCrash ? QStringList{"cleanup-intent", "cleanup-removed", "cleanup-removed-occupant", "before-copy", "reverse-mid-copy"} :
             cleaning ? QStringList{"explicit-partial-cleanup", "stale-plan-approval", "changed-original-blocked", "replaced-stage-blocked", "changed-prefix-blocked", "intent-audit-failure", "removed-audit-only-retry", "later-occupant-blocked", "stale-stage-approval", "readonly-stage-blocked", "final-occupant-blocked", "unrecorded-absence-blocked", "corrupt-cleanup-audit-visible"} :
             mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :
             crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
@@ -1406,7 +1479,8 @@ int main(int argc, char** argv) {
             try {
                 if (crashing) results.append(crashScenario(source.path(), target.path(), index, names[index], mixedCrash, edgeCrash));
                 else {
-                    if (batching || recovering || resolving || preserving || cleaning) batchScenario(source.path(), target.path(), cleaning ? index + 39 : preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
+                    if (zoneRecovery) zoneRecoveryScenario(source.path(), target.path(), index);
+                    else if (batching || recovering || resolving || preserving || cleaning) batchScenario(source.path(), target.path(), cleaning ? index + 39 : preserving ? index + 26 : resolving ? index + 15 : recovering ? index + 5 : index);
                     else scenario(source.path(), target.path(), index);
                     results.append(QJsonObject{{"case", names[index]}, {"passed", true}});
                 }
@@ -1417,12 +1491,12 @@ int main(int argc, char** argv) {
                 std::cerr << "FAIL " << names[index].toStdString() << ": " << error.what() << '\n';
             }
         }
-        QSaveFile report(QDir(target.path()).filePath(edgeCrash ? "edge-crash-report.json" : cleaning ? "preserved-cleanup-report.json" : mixedCrash ? "mixed-crash-report.json" : crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
+        QSaveFile report(QDir(target.path()).filePath(zoneRecovery ? "zone-recovery-report.json" : edgeCrash ? "edge-crash-report.json" : cleaning ? "preserved-cleanup-report.json" : mixedCrash ? "mixed-crash-report.json" : crashing ? "crash-report.json" : preserving ? "preserved-undo-report.json" : resolving ? "transfer-recovery-report.json" : recovering ? "recovery-report.json" : batching ? "batch-report.json" : "report.json"));
         require(report.open(QIODevice::WriteOnly), "Cannot save test report");
         const auto bytes = QJsonDocument(QJsonObject{{"utc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"sourceRoot", source.path()}, {"targetRoot", target.path()}, {"sourceVolume", QString::fromStdWString(sourceVolume.name)},
             {"destinationVolume", QString::fromStdWString(targetVolume.name)}, {"mode", edgeCrash ? "cleanup-and-unsupported-edge-termination" : cleaning ? "preserved-partial-cleanup" : mixedCrash ? "mixed-forced-process-termination" : crashing ? "forced-process-termination" : preserving ? "partial-preserving-undo" : resolving ? "transfer-to-batch-recovery" : recovering ? "explicit-batch-recovery" : batching ? "native-mixed-batch" : "record-fault-injection"},
-            {"passed", failures == 0}, {"cases", results}}).toJson();
+            {"downloadMarkerRecovery", zoneRecovery}, {"passed", failures == 0}, {"cases", results}}).toJson();
         require(report.write(bytes) == bytes.size() && report.commit(), "Test report commit failed");
         std::cout << "Fixtures retained; no recursive cleanup performed.\n";
         return failures ? 1 : 0;

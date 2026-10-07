@@ -43,11 +43,19 @@ Result<TransferAttempt> ResumeCommittedTransferUseCase::execute(const std::strin
     // 의도 이후에는 취소로 결과 판정을 생략하지 않으며 같은 보호 원본만 제거한다.
     const auto removed = session.value()->removeVerifiedSource();
     if (!removed) return Return::failure(removed.error());
-    session.value().reset();
-    auto final = guard_.open(attempt, movement ? &*movement : nullptr);
-    if (!final) return Return::failure(final.error());
-    const auto checked = final.value()->verify();
-    if (!checked) return Return::failure(checked.error());
+    std::unique_ptr<ITransferRecoverySession> final;
+    if (movement && movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone) {
+        // 원본 없는 새 세션은 표식의 과거 증거가 없으므로 같은 제거 세션을 유지한다.
+        const auto checked = session.value()->verifyRemovedSource();
+        if (!checked) return Return::failure(checked.error());
+    } else {
+        session.value().reset();
+        auto opened = guard_.open(attempt, movement ? &*movement : nullptr);
+        if (!opened) return Return::failure(opened.error());
+        final = std::move(opened.value());
+        const auto checked = final->verify();
+        if (!checked) return Return::failure(checked.error());
+    }
     const auto saved = journal_.reconcileCompleted(attempt, binding.value().planHash);
     if (!saved) return Return::failure(saved.error());
     return TransferValidation::reconcileCompleted(attempt, true);
