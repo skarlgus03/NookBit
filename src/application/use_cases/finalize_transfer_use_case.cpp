@@ -1,4 +1,5 @@
 #include <nookbit/application/finalize_transfer_use_case.hpp>
+#include <nookbit/application/operation_progress.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include <algorithm>
 #include <cwctype>
@@ -61,6 +62,7 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
         TransferUpdate update{state.phase, next, {}, {}, error};
         const auto advanced = TransferValidation::advance(state, update);
         if (!advanced) return Result<void>::failure(advanced.error());
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         const auto saved = journal_.advance(state.id, update);
         if (!saved) return saved;
         state = advanced.value();
@@ -83,6 +85,7 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
             return stop({"transfer.strategy_invalid", "Removal requires an approved verified-copy strategy."});
         if (!forward) std::swap(movement->sourceVolume, movement->destinationVolume);
     }
+    OperationProgressScope::phase(OperationPhase::VerifyingBeforeRemoval);
     auto session = movement ? removal_.openApproved(state, *movement) : removal_.open(state);
     if (!session) return stop(session.error());
     const auto verified = session.value()->verify();

@@ -19,21 +19,54 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         x: (parent.width - width) / 2
         y: parent.height - height - 24
-        width: 360
-        height: 64
+        width: Math.min(440, root.width - 32)
+        height: 174
         padding: 10
         background: Rectangle {
             radius: 12
             color: root.editorDark ? "#243044" : "#edf4ef"
             border.color: root.editorDark ? "#617a9c" : "#739b83"
         }
-        contentItem: RowLayout {
-            BusyIndicator { running: backgroundTasks.busy; implicitWidth: 36; implicitHeight: 36 }
+        contentItem: ColumnLayout {
+            spacing: 6
             Label {
-                text: "파일 작업 중이에요. 완료 후 닫아 주세요."
+                text: backgroundTasks.stageLabel
+                color: root.editorDark ? "#edf2f8" : "#253428"
+                font.bold: true
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Label {
+                text: backgroundTasks.currentFileName
+                visible: text.length > 0
                 color: root.editorDark ? "#edf2f8" : "#253428"
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
+                elide: Text.ElideMiddle
+            }
+            Label {
+                text: backgroundTasks.filePosition
+                visible: text.length > 0
+                color: root.editorDark ? "#b7c6dc" : "#4b6153"
+                Layout.fillWidth: true
+            }
+            ProgressBar {
+                Layout.fillWidth: true
+                from: 0; to: 1
+                value: backgroundTasks.byteFraction
+                indeterminate: !backgroundTasks.byteProgressKnown
+                Accessible.name: backgroundTasks.stageLabel
+            }
+            Label {
+                text: backgroundTasks.byteProgressText
+                visible: backgroundTasks.byteProgressKnown
+                color: root.editorDark ? "#edf2f8" : "#253428"
+                Layout.fillWidth: true
+            }
+            Label {
+                text: "복사 후 검증·확정까지 마쳐야 완료돼요."
+                color: root.editorDark ? "#b7c6dc" : "#4b6153"
+                font.pixelSize: 11
+                Layout.fillWidth: true
             }
         }
     }

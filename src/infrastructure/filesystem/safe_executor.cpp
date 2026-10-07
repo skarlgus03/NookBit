@@ -5,6 +5,7 @@
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include "infrastructure/diagnostics/operation_timing.hpp"
+#include <nookbit/application/operation_progress.hpp>
 #include "infrastructure/filesystem/windows_file_mover.hpp"
 #include "modules/planner/path_safety_validator.hpp"
 
@@ -66,6 +67,7 @@ Result<void> SafeExecutor::execute(
     const OperationPlan& plan,
     const ApprovalRecord& approval,
     const std::vector<std::filesystem::path>& selectedFiles) {
+    OperationProgressScope::begin(OperationPhase::CheckingPlan);
     const auto format = PlanSignature::validateFormat(plan);
     if (!format) return format;
     if (!verifier_) {
@@ -112,6 +114,7 @@ Result<void> SafeExecutor::execute(
         return Result<void>::failure({"execute.no_steps", "There are no files to move."});
     }
     TimingStage batchCheck("batch_source_check");
+    OperationProgressScope::phase(OperationPhase::CheckingSource);
     for (const auto* step : steps) {
         if (!step->fingerprint.sha256 ||
             !PlanSignature::isSha256Hex(*step->fingerprint.sha256)) {
@@ -139,16 +142,25 @@ Result<void> SafeExecutor::execute(
 // 보호된 객체의 이동을 시도하며 확실한 실패는 남기고 불확실한 결과는 중단하는 함수.
 Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
     const std::vector<std::filesystem::path>& selected, const UserSettings& settings) {
+    const auto fileCount = stepsWithStatus(plan, StepStatus::Planned).size();
+    OperationProgressScope::begin(OperationPhase::CheckingSource, fileCount);
     const auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
     int failures = 0;
+    std::size_t fileIndex = 0;
     for (const auto& step : plan.steps) {
         if (step.status != StepStatus::Planned) continue;
+        OperationProgressScope::file(++fileIndex, fileCount, step.source);
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         const auto intent = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::IntentRecorded});
         if (!intent) { const auto marked = markNeedsRecovery(plan.id); return marked ? intent : marked; }
+        OperationProgressScope::phase(OperationPhase::CheckingSource);
         auto result = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.homeRoot, appDataRoot_);
         if (result) result = verifyMovement(plan, &step);
-        if (result) result = WindowsFileMover::moveMatchingNoReplace(step.source, step.destination, step.fingerprint);
+        if (result) {
+            OperationProgressScope::phase(OperationPhase::Moving);
+            result = WindowsFileMover::moveMatchingNoReplace(step.source, step.destination, step.fingerprint);
+        }
         if (!result) {
             // 이름 변경 API 실패가 실제 이동 결과를 증명하지 못하면 다음 파일로 진행하지 않는다.
             if (result.error().code == "move.rename_failed" &&
@@ -162,13 +174,16 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
             if (!failed) { const auto marked = markNeedsRecovery(plan.id); return marked ? failed : marked; }
             ++failures; continue;
         }
+        OperationProgressScope::phase(OperationPhase::CheckingResult);
         if (probeFile(scanner_, step.source, step.fingerprint) != FileProbe::Missing ||
             probeFile(scanner_, step.destination, step.fingerprint) != FileProbe::Matches) {
             const auto marked = markNeedsRecovery(plan.id);
             return marked ? Result<void>::failure({"execute.needs_recovery", "Moved object could not be confirmed; review required."}) : marked;
         }
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         const auto applied = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::Applied});
         if (!applied) { const auto marked = markNeedsRecovery(plan.id); return marked ? applied : marked; }
+        OperationProgressScope::fileCompleted();
     }
     const auto finished = history_.appendEvent(PlanStatusChanged{plan.id, failures ? PlanStatus::Failed : PlanStatus::Completed});
     if (!finished) { const auto marked = markNeedsRecovery(plan.id); return marked ? finished : marked; }
@@ -179,7 +194,11 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
 Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
     const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps, bool sourceContentAtCopyOpen) {
     const auto& plan = saved;
+    OperationProgressScope::begin(OperationPhase::CheckingSource, steps.size());
+    std::size_t fileIndex = 0;
     for (const auto* step : steps) {
+        OperationProgressScope::file(++fileIndex, steps.size(), step->source);
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         auto intent = history_.appendEvent(
             StepStatusChanged{plan.id, step->id, StepStatus::IntentRecorded});
         if (!intent) {
@@ -195,6 +214,7 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             });
         }
         // 앞선 이동이나 의도 기록 중 바뀐 파일은 옮기지 않는 최종 검사.
+        OperationProgressScope::phase(OperationPhase::CheckingSource);
         const auto currentMovement = verifyMovement(saved, step);
         if (!currentMovement) {
             const auto marked = markNeedsRecovery(plan.id);
@@ -245,8 +265,10 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
                 return Result<void>::failure({"execute.transfer_record_invalid", "Transfer result is not backed by an intact applied-step record."});
             }
             appliedSteps.push_back(step);
+            OperationProgressScope::fileCompleted();
             continue;
         }
+        OperationProgressScope::phase(OperationPhase::Moving);
         auto moved = WindowsFileMover::moveNoReplace(step->source, step->destination);
         if (!moved) {
             const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
@@ -273,6 +295,7 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
                 "execute.batch_rolled_back", "A file could not move; earlier moves were undone.",
             });
         }
+        OperationProgressScope::phase(OperationPhase::CheckingResult);
         auto movedFingerprint = scanFingerprint(scanner_, step->destination, &hasher_);
         if (!movedFingerprint ||
             !sameFingerprint(step->fingerprint, movedFingerprint.value())) {
@@ -282,6 +305,7 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
                 "execute.needs_recovery", "Moved file could not be verified; review is required.",
             });
         }
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         auto applied = history_.appendEvent(
             StepStatusChanged{plan.id, step->id, StepStatus::Applied});
         if (!applied) {
@@ -292,6 +316,7 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             });
         }
         appliedSteps.push_back(step);
+        OperationProgressScope::fileCompleted();
     }
     const auto currentPlan = history_.loadPlan(plan.id);
     if (!currentPlan) return Result<void>::failure(currentPlan.error());
@@ -392,6 +417,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     const std::vector<const MoveStep*>& applied,
     PlanStatus finalStatus,
     bool duringExecution) {
+    OperationProgressScope::begin(OperationPhase::Restoring, applied.size());
     const bool hasCopy = plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
         return step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
     });
@@ -433,8 +459,11 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
         auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::RollingBack});
         if (!started) return started;
     }
+    std::size_t fileIndex = 0;
     for (auto iterator = applied.rbegin(); iterator != applied.rend(); ++iterator) {
         const auto* step = *iterator;
+        OperationProgressScope::file(++fileIndex, applied.size(), step->destination);
+        OperationProgressScope::phase(OperationPhase::Restoring);
         if (plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
             static std::atomic<std::uint64_t> reverseCounter{0};
             const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
@@ -446,6 +475,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
                 if (!marked) return marked;
                 return reversed;
             }
+            OperationProgressScope::fileCompleted();
             continue;
         }
         auto intent = history_.appendEvent(
@@ -489,6 +519,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             if (!marked) return marked;
             return reverted;
         }
+        OperationProgressScope::fileCompleted();
     }
     const auto currentPlan = history_.loadPlan(plan.id);
     if (!currentPlan) return Result<void>::failure(currentPlan.error());
@@ -498,6 +529,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
 
 // 완료된 계획의 이동 파일들을 역순으로 안전하게 되돌리는 함수.
 Result<void> SafeExecutor::rollback(const PlanId& planId) {
+    OperationProgressScope::begin(OperationPhase::Restoring);
     OperationMutex operationLock;
     auto locked = operationLock.acquire();
     if (!locked) return locked;
@@ -522,6 +554,7 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
         if (!reversals_ || !volumes_ || plan.status != PlanStatus::Completed)
             return Result<void>::failure({"rollback.transfer_executor_required", "Approved reverse transfer requires its dedicated executor."});
         const auto* step = applied[0];
+        OperationProgressScope::file(1, 1, step->destination);
         if (!step->source.is_absolute() || !step->destination.is_absolute() || !appDataRoot_.is_absolute() ||
             PathSafetyValidator::isWithin(step->source, appDataRoot_) || PathSafetyValidator::isWithin(step->destination, appDataRoot_))
             return Result<void>::failure({"rollback.path_invalid", "Reverse transfer paths must stay outside application data."});
@@ -542,6 +575,7 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
             }
         }
         // 완료 트랜잭션에서 이미 RolledBack을 기록하므로 중복 기록하지 않는다.
+        if (reversed) OperationProgressScope::fileCompleted();
         return reversed;
     }
     return rollbackAppliedSteps(plan, applied, PlanStatus::RolledBack, false);

@@ -109,6 +109,52 @@ void testBackgroundRunner() {
     expect(drained, "runner destruction must wait for worker instead of terminating it");
 }
 
+// 작업 스레드의 진행 값이 화면 스레드에서만 반영되고 실패 시 완료를 꾸미지 않는 함수.
+void testBackgroundProgress() {
+    using namespace nookbit;
+    BackgroundTaskRunner runner;
+    QObject receiver;
+    QSemaphore gate;
+    auto* screenThread = QThread::currentThread();
+    bool intermediate = false, copyFinished = false, verification = false;
+    QObject::connect(&runner, &BackgroundTaskRunner::progressChanged, &receiver, [&] {
+        expect(QThread::currentThread() == screenThread, "progress properties update only on screen thread");
+        const auto& value = runner.progress();
+        if (value.phase == OperationPhase::Copying && value.copiedBytes == 45) {
+            intermediate = runner.byteProgressKnown() && runner.byteFraction() == 0.45 &&
+                runner.byteProgressText().contains("45.0%") && runner.currentFileName() == "owned.bin";
+            gate.release();
+        }
+        if (value.phase == OperationPhase::Copying && value.copiedBytes == 100)
+            copyFinished = value.completedFiles == 0;
+        if (value.phase == OperationPhase::VerifyingCopy)
+            verification = !runner.byteProgressKnown() && value.completedFiles == 0;
+    });
+    expect(runner.submit(&receiver, [&] {
+        OperationProgressScope::begin(OperationPhase::CheckingSource, 1);
+        OperationProgressScope::file(1, 1, std::filesystem::path("private") / "owned.bin");
+        OperationProgressScope::copied(45, 100);
+        gate.acquire();
+        OperationProgressScope::copied(100, 100);
+        OperationProgressScope::phase(OperationPhase::VerifyingCopy);
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
+        OperationProgressScope::fileCompleted();
+        return Result<void>::success();
+    }, [](const auto&) {}), "progress job accepted");
+    expect(waitForBackground(runner) && intermediate && copyFinished && verification,
+        "live copy percentage and verification delivered before completion");
+    expect(runner.progress().phase == OperationPhase::Completed && runner.progress().completedFiles == 1 &&
+        !runner.byteProgressKnown(), "success retains recorded file count without stale byte bar");
+    expect(runner.submit(&receiver, [] {
+        OperationProgressScope::begin(OperationPhase::Copying, 1);
+        OperationProgressScope::file(1, 1, "failed.bin");
+        OperationProgressScope::copied(100, 100);
+        return Result<void>::failure({"test.failure", "Owned failure after copying"});
+    }, [](const auto&) {}), "second progress job accepted");
+    expect(waitForBackground(runner) && runner.progress().phase == OperationPhase::Failed &&
+        runner.progress().completedFiles == 0 && !runner.byteProgressKnown(), "failure resets previous success and clears copy percentage");
+}
+
 // 테스트가 미리보기 중간에 설정을 바꿀 수 있게 하는 저장소.
 class MutableSettingsRepository final : public nookbit::ISettingsRepository {
 public:
@@ -205,6 +251,9 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
         projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"), rules, schema, {}, appData, current);
     nookbit::BackgroundTaskRunner runner;
     nookbit::PendingFilesModel pending;
+    std::vector<nookbit::OperationProgress> progressEvents;
+    QObject::connect(&runner, &nookbit::BackgroundTaskRunner::progressChanged, &runner,
+        [&] { progressEvents.push_back(runner.progress()); });
     nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
         workflow.approveUseCase, workflow.history, operations, rules, schema, home);
     nookbit::HistoryController history(workflow.history, operations);
@@ -238,6 +287,14 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     preview.confirmSort(); expect(runner.busy(), "sort must return before background completion");
     preview.confirmSort(); preview.undoLastMove();
     expect(waitForBackground(runner) && pending.count() == 0 && preview.canUndo(), "background movement updates queue and undo on UI thread");
+    expect(runner.progress().completedFiles == 2 && runner.progress().fileCount == 2 &&
+        runner.progress().phase == nookbit::OperationPhase::Completed, "actual file completion counted only after recorded movement");
+    const bool copied = std::any_of(progressEvents.begin(), progressEvents.end(), [](const auto& value) { return value.byteProgressKnown; });
+    expect(copied == taggedCrossVolume, "copy byte percentages appear only for actual cross-volume copying");
+    if (taggedCrossVolume) for (const auto stage : {nookbit::OperationPhase::Copying, nookbit::OperationPhase::VerifyingCopy,
+        nookbit::OperationPhase::CommittingDestination, nookbit::OperationPhase::RemovingSource})
+        expect(std::any_of(progressEvents.begin(), progressEvents.end(), [stage](const auto& value) { return value.phase == stage; }),
+            "actual transfer publishes each important phase");
     expect(preview.message().contains(QStringLiteral("검사·이동 총 ")), "background movement displays automatic total time");
     QFile moveTiming(QString::fromStdWString((appData / "diagnostics" / "last-move-timing.log").wstring()));
     expect(moveTiming.open(QIODevice::ReadOnly), "background movement timing report exists");
@@ -251,6 +308,7 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     for (const auto& source : sources) expect(!QFile::exists(source), "background source moved");
     preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
     expect(waitForBackground(runner) && !preview.canUndo(), "background last undo completes");
+    expect(runner.progress().completedFiles == 2, "actual last undo publishes restored file count");
     if (taggedCrossVolume) { QFile marker(ownedZone); expect(marker.open(QIODevice::ReadOnly) && marker.readAll() == ownedMarker, "cross-volume move and undo preserve exact download marker"); }
     for (const auto& source : sources) { expect(QFile::exists(source), "background original restored"); pending.addUrl(QUrl::fromLocalFile(source)); }
     preview.createPreview(home); preview.prepareSort();
@@ -1720,6 +1778,7 @@ int main(int argc, char* argv[]) {
     if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
     if (application.arguments().size() > 1) return 2;
     testBackgroundRunner();
+    testBackgroundProgress();
     testBackgroundApprovalSafety();
     QTemporaryDir backgroundSameVolume;
     if (backgroundSameVolume.isValid()) testBackgroundWorkflow(backgroundSameVolume.path(), backgroundSameVolume.path());

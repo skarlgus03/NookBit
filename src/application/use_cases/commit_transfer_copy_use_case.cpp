@@ -1,4 +1,5 @@
 #include <nookbit/application/commit_transfer_copy_use_case.hpp>
+#include <nookbit/application/operation_progress.hpp>
 
 namespace nookbit {
 
@@ -19,6 +20,7 @@ Result<TransferAttempt> CommitTransferCopyUseCase::execute(
     const auto record = [&](TransferUpdate update) -> Result<void> {
         const auto next = TransferValidation::advance(state, update);
         if (!next) return Result<void>::failure(next.error());
+        OperationProgressScope::phase(OperationPhase::SavingHistory);
         const auto saved = journal_.advance(state.id, update);
         if (!saved) return saved;
         state = next.value();

@@ -21,6 +21,7 @@
 #include <nookbit/application/sort_workflow.hpp>
 #include "infrastructure/filesystem/operation_mutex.hpp"
 #include "infrastructure/diagnostics/operation_timing.hpp"
+#include <nookbit/application/operation_progress.hpp>
 #include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 
 namespace nookbit {
@@ -67,6 +68,7 @@ public:
     /// 작업 스레드 전용 연결로 고정·검사를 끝내고 확인할 계획을 반환하는 함수.
     Result<OperationPlan> prepare(const OperationPlan& plan, bool frozen,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
+        OperationProgressScope::begin(OperationPhase::Preparing);
         OperationTiming timing(appData_ / "diagnostics", "prepare", selected.size(), plannedBytes(plan));
         const auto result = [&]() -> Result<OperationPlan> {
             TimingStage preparation("prepare_total");
@@ -113,6 +115,7 @@ public:
     /// 사용자 확인 후 승인 검사와 파일 실행 모두 현재 작업 스레드에서 수행하는 함수.
     Result<void> approveAndExecute(const OperationPlan& plan,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {
+        OperationProgressScope::begin(OperationPhase::Approving);
         OperationTiming timing(appData_ / "diagnostics", "move", selected.size(), plannedBytes(plan));
         const auto result = [&]() -> Result<void> {
             TimingStage setup("request_setup");
@@ -129,6 +132,7 @@ public:
                     return Result<void>::failure({"transfer.zone_contract_required", "Download marker appeared after confirmation. Create a new preview."});
             }
             preflight.stop();
+            OperationProgressScope::phase(OperationPhase::Approving);
             TimingStage approvalCheck("approval_check");
             ApprovePlanUseCase approve(session.verify, session.history);
             const auto displayed = session.history.loadPlan(plan.id);
@@ -165,12 +169,16 @@ public:
         return result;
     }
     /// 저장된 계약으로 현재 스레드에서 안전하게 복원하는 함수.
-    Result<void> rollback(const PlanId& id) override { Session session(*this); return session.operations.rollback(id); }
+    Result<void> rollback(const PlanId& id) override {
+        OperationProgressScope::begin(OperationPhase::Restoring);
+        Session session(*this); return session.operations.rollback(id);
+    }
     /// 현재 스레드 전용 연결로 중단 작업을 읽기 전용 조회하는 함수.
     Result<std::vector<InterruptedOperationView>> inspectAll() override { Session session(*this); return session.interrupted.inspectAll(); }
     /// 명시적 복구 선택을 현재 스레드의 복구 서비스로 전달하는 함수.
     Result<void> execute(const RecoveryRequest& request) override {
         if (request.action == RecoveryAction::Later) return Result<void>::success();
+        OperationProgressScope::begin(OperationPhase::Recovering);
         Session session(*this); return session.interrupted.execute(request);
     }
 private:

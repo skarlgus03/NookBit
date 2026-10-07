@@ -4,6 +4,7 @@
 #include "windows_transfer_recovery.hpp"
 #include "file_identity.hpp"
 #include "infrastructure/diagnostics/operation_timing.hpp"
+#include <nookbit/application/operation_progress.hpp>
 #include <nookbit/domain/transfer.hpp>
 
 namespace nookbit {
@@ -373,6 +374,7 @@ public:
     // 원본을 유지하며 복사·flush·재읽기·메타데이터 검증을 수행하는 함수.
     Result<FileFingerprint> copyAndVerify(const std::function<bool()>& cancelled) override {
         TimingStage copyTotal("copy_total", expected.size);
+        OperationProgressScope::phase(OperationPhase::Copying);
         if (std::exchange(attempted, true))
             return Result<FileFingerprint>::failure({"transfer.reused", "Session already attempted"});
         LARGE_INTEGER start{};
@@ -382,6 +384,7 @@ public:
             return Result<FileFingerprint>::failure(failure("transfer.seek"));
         std::vector<unsigned char> buffer(1024 * 1024);
         uintmax_t total{resumeOffset};
+        OperationProgressScope::copied(resumeOffset, expected.size);
         ContentHash streamedHash;
         // 이어쓰기는 기존 앞부분을 포함한 별도 전체 검증을 유지한다.
         if (resumeOffset == 0) {
@@ -410,12 +413,15 @@ public:
                     return Result<FileFingerprint>::failure(failure("transfer.write"));
                 offset += written;
             }
+            OperationProgressScope::copied(total, expected.size);
         }
         copyStream.stop();
+        OperationProgressScope::phase(OperationPhase::FlushingCopy);
         TimingStage flush("copy_flush", expected.size);
         if (!FlushFileBuffers(staging.value))
             return Result<FileFingerprint>::failure(failure("transfer.flush"));
         flush.stop();
+        OperationProgressScope::phase(OperationPhase::VerifyingCopy);
         TimingStage readback("copy_readback", expected.size);
         const auto copiedHash = digest(staging.value, cancelled);
         readback.stop();
@@ -424,6 +430,7 @@ public:
         const auto sourceHash = resumeOffset == 0 ? streamedHash.finish() : digest(source.value, cancelled);
         sourceHashCheck.stop();
         if (!sourceHash) return Result<FileFingerprint>::failure(sourceHash.error());
+        OperationProgressScope::phase(OperationPhase::PreservingMetadata);
         TimingStage metadataCheck("copy_metadata_and_markers");
         auto current = fingerprint(source.value);
         if (!current) return current;
@@ -473,6 +480,7 @@ public:
 
     // 같은 보호 핸들의 검증 증거로 내용 재읽기 없이 이름·객체·메타데이터를 확정하는 함수.
     Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) override {
+        OperationProgressScope::phase(OperationPhase::CommittingDestination);
         TimingStage commit("destination_commit");
         if (!verifiedCopy || std::exchange(commitAttempted, true))
             return Result<FileFingerprint>::failure({"transfer.commit_state", "A verified unused session is required"});
@@ -581,6 +589,7 @@ public:
         : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)), allowZone_(allowZone) {}
     // 두 파일의 지원 범위·객체 ID·내용·수정 시각을 보유 핸들로 재검증하는 함수.
     Result<void> verify() override {
+        OperationProgressScope::phase(OperationPhase::VerifyingBeforeRemoval);
         TimingStage removalCheck(contentsVerified_ ? "removal_cached_check" : "removal_full_check",
             contentsVerified_ ? 0 : attempt_.sourceFingerprint.size * 2);
         if (source_.value == INVALID_HANDLE_VALUE) return Result<void>::failure({"transfer.removal_state", "Source handle closed"});
@@ -630,6 +639,7 @@ public:
         if (std::exchange(attempted_, true)) return Result<void>::failure({"transfer.removal_reused", "Removal already attempted"});
         const auto checked = verify();
         if (!checked) return checked;
+        OperationProgressScope::phase(OperationPhase::RemovingSource);
         TimingStage deletion("source_delete_and_confirm");
         FILE_DISPOSITION_INFO disposition{TRUE};
         if (!SetFileInformationByHandle(source_.value, FileDispositionInfo, &disposition, sizeof(disposition)))
@@ -1120,6 +1130,7 @@ TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::fil
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract* movement) {
     TimingStage opening("protected_copy_open", expected.size);
+    OperationProgressScope::phase(OperationPhase::ProtectingSource);
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
     if (!validPath(source) || !validPath(staging) || staging.filename().empty() ||
         !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId)
