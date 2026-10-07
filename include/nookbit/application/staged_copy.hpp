@@ -41,6 +41,8 @@ public:
 
 class IStagedCopy : public ITransferVolumeInspector {
 public:
+    /// 새 임시 파일 생성 전 승인 원본의 전체 내용 검증·보호를 보장하는지 반환하는 함수.
+    [[nodiscard]] virtual bool verifiesSourceBeforeStaging() const { return false; }
     /// 복사 일꾼을 해제하는 함수.
     ~IStagedCopy() override = default;
     /// 기록된 임시 객체·원본·앞부분을 보호 검증해 이어쓰기 세션만 여는 함수.

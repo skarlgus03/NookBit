@@ -43,6 +43,24 @@ void inheritMetadataRenamePolicy(OperationPlan& current, const OperationPlan& re
     }
 }
 
+// 재생성한 메타데이터가 같은 복사 단계에만 승인 기대값을 이어 붙이는 함수.
+Result<void> inheritExpectedCopyHashes(OperationPlan& current, const OperationPlan& reference) {
+    if (!PlanSignature::isFreshVerifiedCopyPlan(current) || !PlanSignature::isFreshVerifiedCopyPlan(reference) ||
+        current.steps.size() != reference.steps.size())
+        return Result<void>::failure({"verify.copy_scope", "Deferred content checks require a fresh copy-only plan."});
+    for (size_t i = 0; i < current.steps.size(); ++i) {
+        auto& step = current.steps[i];
+        const auto& expected = reference.steps[i];
+        if (step.source != expected.source || step.destination != expected.destination ||
+            !sameMetadata(step.fingerprint, expected.fingerprint) || !expected.fingerprint.sha256 ||
+            !PlanSignature::isSha256Hex(*expected.fingerprint.sha256))
+            return Result<void>::failure({"verify.plan_stale", "Copy metadata or expected content digest changed."});
+        // 현재 내용의 증거가 아니다. 보호 복사 openApproved에서 반드시 실제 내용과 비교한다.
+        step.fingerprint.sha256 = expected.fingerprint.sha256;
+    }
+    return Result<void>::success();
+}
+
 // 이동 예정 파일의 내용 해시를 재검사해 계획에 붙이는 함수.
 Result<void> attachContentHashes(OperationPlan& plan, IScanner& scanner, IPlanHasher& hasher) {
     for (auto& step : plan.steps) {

@@ -11,6 +11,8 @@ class PlanSignature final {
 public:
     /// 같은 볼륨 메타데이터 승인만 포함한 빠른 이동 계획인지 반환하는 함수.
     static bool isMetadataRenamePlan(const OperationPlan& plan);
+    /// 미시작 VerifiedCopy 단계로만 구성된 v2 계획인지 구분하는 함수.
+    static bool isFreshVerifiedCopyPlan(const OperationPlan& plan);
     /// 지원하는 계획 버전과 이동 계약의 일관성을 검사하는 함수.
     [[nodiscard]] static Result<void> validateFormat(const OperationPlan& plan);
 

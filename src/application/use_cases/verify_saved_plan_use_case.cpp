@@ -23,6 +23,19 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     const std::vector<std::filesystem::path>& selectedFiles,
     const UserSettings& settings,
     PlanStatus expectedStatus) {
+    return executeImpl(planId, selectedFiles, settings, expectedStatus, false);
+}
+
+// 보호된 새 복사를 시작할 실행기만 사용하는 계약·메타데이터 재검사 함수.
+Result<OperationPlan> VerifySavedPlanUseCase::executeForProtectedCopy(const PlanId& planId,
+    const std::vector<std::filesystem::path>& selectedFiles, const UserSettings& settings) {
+    return executeImpl(planId, selectedFiles, settings, PlanStatus::Approved, true);
+}
+
+// 현재 규칙·설정·목적지를 재생성하며 보호 복사에 한해서만 내용 비교를 지연하는 함수.
+Result<OperationPlan> VerifySavedPlanUseCase::executeImpl(const PlanId& planId,
+    const std::vector<std::filesystem::path>& selectedFiles, const UserSettings& settings,
+    PlanStatus expectedStatus, bool protectedCopy) {
     if (planId.empty() || selectedFiles.empty()) {
         return Result<OperationPlan>::failure({
             "verify.input_invalid", "A saved plan and its selected files are required.",
@@ -92,7 +105,10 @@ Result<OperationPlan> VerifySavedPlanUseCase::execute(
     inheritMetadataRenamePolicy(current.value(), saved);
     const auto currentFormat = PlanSignature::validateFormat(current.value());
     if (!currentFormat) return Result<OperationPlan>::failure(currentFormat.error());
-    auto hashed = attachContentHashes(current.value(), scanner_, hasher_);
+    const bool deferContents = protectedCopy && expectedStatus == PlanStatus::Approved &&
+        PlanSignature::isFreshVerifiedCopyPlan(saved);
+    auto hashed = deferContents ? inheritExpectedCopyHashes(current.value(), saved) :
+        attachContentHashes(current.value(), scanner_, hasher_);
     if (!hashed) return Result<OperationPlan>::failure(hashed.error());
     if (PlanSignature::planContents(saved) != PlanSignature::planContents(current.value())) {
         return Result<OperationPlan>::failure({

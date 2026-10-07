@@ -193,7 +193,7 @@ struct PreviewWorkflow {
 };
 
 // 독립 DB 연결로 이동·두 종류 되돌리기·중단 재개를 비동기 검사하는 함수.
-void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot) {
+void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot, bool copyOnly = false) {
 #ifdef _WIN32
     const auto home = QDir(targetRoot).filePath("organized");
     const auto appData = std::filesystem::path(QDir(targetRoot).filePath("app-data").toStdWString());
@@ -213,7 +213,7 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     preview.setSortWorkflow(&operations);
     QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
         &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
-    const QStringList sources{QDir(sourceRoot).filePath("background.jpg"), QDir(targetRoot).filePath("local.png")};
+    const QStringList sources{QDir(sourceRoot).filePath("background.jpg"), QDir(copyOnly ? sourceRoot : targetRoot).filePath("local.png")};
     for (const auto& source : sources) {
         QFile file(source); expect(file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && file.write(QByteArray(2 * 1024 * 1024 + 37, 'b')) > 0, "owned background source");
         file.close(); pending.addUrl(QUrl::fromLocalFile(source));
@@ -334,6 +334,9 @@ int runBackgroundCrossTests(const QStringList& args) {
     if (!source.isValid() || !target.isValid()) return 2;
     std::cout << "Background fixtures: " << source.path().toStdString() << " -> " << target.path().toStdString() << '\n';
     testBackgroundWorkflow(source.path(), target.path());
+    const auto copySource = QDir(source.path()).filePath("copy-only"), copyTarget = QDir(target.path()).filePath("copy-only");
+    expect(QDir().mkpath(copySource) && QDir().mkpath(copyTarget), "owned copy-only native fixture directories");
+    testBackgroundWorkflow(copySource, copyTarget, true);
     std::cout << (failures ? "FAIL" : "PASS") << " background move/last undo/history undo/recovery\nOwned fixtures retained.\n";
     return failures ? 1 : 0;
 }

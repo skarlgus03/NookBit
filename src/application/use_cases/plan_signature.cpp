@@ -163,6 +163,15 @@ bool PlanSignature::isMetadataRenamePlan(const OperationPlan& plan) {
     return found;
 }
 
+// 혼합·미시작이 아닌·제외 단계가 포함된 계획에는 검사 지연을 적용하지 않는 함수.
+bool PlanSignature::isFreshVerifiedCopyPlan(const OperationPlan& plan) {
+    return plan.formatVersion == 2 && !plan.steps.empty() &&
+        std::all_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
+            return step.status == StepStatus::Planned && step.movement &&
+                step.movement->strategy == MoveStrategy::VerifiedCopy;
+        });
+}
+
 // 구형 계획을 복사 전략으로 암묵적으로 확장하지 않는 함수.
 Result<void> PlanSignature::validateMovementScope(const OperationPlan& plan) {
     if (plan.formatVersion != 1) return Result<void>::success();

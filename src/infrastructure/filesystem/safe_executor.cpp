@@ -83,8 +83,10 @@ Result<void> SafeExecutor::execute(
     auto settings = settings_.load();
     if (!settings) return Result<void>::failure(settings.error());
     TimingStage savedPlanCheck("executor_plan_check");
-    auto checked = verifier_->execute(
-        plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
+    const bool sourceContentAtCopyOpen = PlanSignature::isFreshVerifiedCopyPlan(plan) &&
+        transfers_ && transfers_->verifiesSourceBeforeStaging();
+    auto checked = sourceContentAtCopyOpen ? verifier_->executeForProtectedCopy(plan.id, selectedFiles, settings.value()) :
+        verifier_->execute(plan.id, selectedFiles, settings.value(), PlanStatus::Approved);
     savedPlanCheck.stop();
     if (!checked) return Result<void>::failure(checked.error());
     const auto& saved = checked.value();
@@ -119,9 +121,11 @@ Result<void> SafeExecutor::execute(
             step->source, step->destination, selectedFiles,
             settings.value().homeRoot, appDataRoot_);
         if (!safety) return safety;
-        auto fingerprint = scanFingerprint(scanner_, step->source, &hasher_);
+        auto fingerprint = scanFingerprint(scanner_, step->source, sourceContentAtCopyOpen ? nullptr : &hasher_);
         if (!fingerprint) return Result<void>::failure(fingerprint.error());
-        if (!sameFingerprint(step->fingerprint, fingerprint.value())) {
+        auto expected = step->fingerprint;
+        if (sourceContentAtCopyOpen) expected.sha256.reset();
+        if (!sameFingerprint(expected, fingerprint.value())) {
             return Result<void>::failure({"execute.source_changed", "A selected file changed before execution."});
         }
     }
@@ -129,7 +133,7 @@ Result<void> SafeExecutor::execute(
     batchCheck.stop();
     auto started = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Executing});
     if (!started) return started;
-    return executePreparedSteps(saved, steps, {});
+    return executePreparedSteps(saved, steps, {}, sourceContentAtCopyOpen);
 }
 
 // 보호된 객체의 이동을 시도하며 확실한 실패는 남기고 불확실한 결과는 중단하는 함수.
@@ -173,7 +177,7 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
 
 // 정방향 최초 실행과 복구가 동일한 이동 및 보상 경계를 사용하는 함수.
 Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
-    const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps) {
+    const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps, bool sourceContentAtCopyOpen) {
     const auto& plan = saved;
     for (const auto* step : steps) {
         auto intent = history_.appendEvent(
@@ -198,7 +202,9 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             return currentMovement;
         }
         TimingStage finalSourceCheck("file_source_check", step->fingerprint.size);
-        const auto sourceState = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
+        auto expected = step->fingerprint;
+        if (sourceContentAtCopyOpen) expected.sha256.reset();
+        const auto sourceState = probeFile(scanner_, step->source, expected, sourceContentAtCopyOpen ? nullptr : &hasher_);
         finalSourceCheck.stop();
         if (sourceState != FileProbe::Matches) {
             auto failedStep = history_.appendEvent(

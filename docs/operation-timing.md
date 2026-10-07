@@ -26,9 +26,9 @@ The first two lines identify the format and overall request. Stage rows are tab 
 | `source_support_check` | Read-only file type/stream preflight |
 | `approval_check` | Displayed-plan checks, source revalidation and approval persistence |
 | `execution_total` | Entire executor request; contains the following child stages |
-| `executor_plan_check` | Saved approved plan and file revalidation |
-| `batch_source_check` | Path safety and full source checks before any step executes |
-| `file_source_check` | Final source check immediately before that file step |
+| `executor_plan_check` | Saved approved plan and file revalidation; guaranteed copy-only execution defers content comparison to protected opening |
+| `batch_source_check` | Path safety and source checks before execution; metadata-only for guaranteed copy-only execution |
+| `file_source_check` | Final source check immediately before that file step; metadata-only for guaranteed copy-only execution |
 | `protected_copy_open` | Protected source hash, volume checks, parents and staging creation |
 | `copy_total` | Whole copy session; contains stream, flush, readback and metadata children |
 | `copy_stream` | Source reading + streaming SHA-256 + staging writes; not pure disk copy throughput |

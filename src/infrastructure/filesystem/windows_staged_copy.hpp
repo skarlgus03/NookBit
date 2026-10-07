@@ -7,6 +7,14 @@ namespace nookbit {
 /// 원본 제거 API 없이 로컬 NTFS의 임시 복사·검증·최종 이름 확정을 수행하는 어댑터.
 class WindowsStagedCopy final : public IStagedCopy {
 public:
+    /// 원본 해시가 승인과 일치해야 임시 파일을 만들고 보호 핸들을 유지하는지 반환하는 함수.
+    [[nodiscard]] bool verifiesSourceBeforeStaging() const override {
+#ifdef _WIN32
+        return true;
+#else
+        return false;
+#endif
+    }
     /// 원본을 수정하거나 전체 내용을 읽지 않고 지원 여부와 다운로드 표식 유무를 검사하는 함수.
     [[nodiscard]] Result<bool> preflightSource(const std::filesystem::path& source);
     /// 전체 검증된 재개 복사본을 보호 재검사해 확정 세션만 여는 함수.

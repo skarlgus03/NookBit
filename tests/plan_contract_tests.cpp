@@ -71,6 +71,15 @@ void testSignatures() {
     expect(prepared.hasValue(), "volume plan should prepare");
     if (!prepared) return;
     plan = prepared.value();
+    expect(nookbit::PlanSignature::isFreshVerifiedCopyPlan(plan), "fresh copy-only plan can defer execution content checks");
+    auto nonFresh = plan;
+    nonFresh.steps[0].status = nookbit::StepStatus::Applied;
+    expect(!nookbit::PlanSignature::isFreshVerifiedCopyPlan(nonFresh), "applied steps cannot use fresh-copy scope");
+    nonFresh = plan; nonFresh.steps[0].status = nookbit::StepStatus::Skipped;
+    expect(!nookbit::PlanSignature::isFreshVerifiedCopyPlan(nonFresh), "skipped plans conservatively retain full checks");
+    nonFresh = plan; nonFresh.steps.push_back(nonFresh.steps[0]);
+    nonFresh.steps.back().movement->strategy = nookbit::MoveStrategy::Rename;
+    expect(!nookbit::PlanSignature::isFreshVerifiedCopyPlan(nonFresh), "mixed plans retain full checks");
     expect(nookbit::PlanSignature::validateMovementScope(plan).hasValue(), "explicit v2 contract permits cross-drive planning");
     nookbit::QtPlanHasher hasher;
     const auto hash = hasher.sha256(nookbit::PlanSignature::approvalPayload(plan));

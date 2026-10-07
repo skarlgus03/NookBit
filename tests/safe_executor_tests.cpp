@@ -367,6 +367,9 @@ public:
     std::optional<nookbit::MoveContract> forwardContract;
     int approvedCalls{0};
     bool fail{false};
+    bool protectedChecks{false};
+    // 원본을 실제 native 보호 세션으로 검사하는 테스트에서만 보장을 선언하는 함수.
+    bool verifiesSourceBeforeStaging() const override { return protectedChecks; }
     // 실제 볼륨 조회를 전달하는 함수.
     nookbit::Result<nookbit::TransferVolume> inspectVolume(const std::filesystem::path& path) override { return volumes ? volumes->inspectVolume(path) : native.inspectVolume(path); }
     // 승인 없는 API가 호출되면 테스트를 실패시키는 함수.
@@ -640,6 +643,7 @@ void testMixedBatch(int scenario) {
     if (scenario == 2) changing.changedSource = last;
     LogicalCopy copy;
     copy.volumes = &volumes;
+    copy.protectedChecks = true; // 복사 일꾼의 보장이 있어도 혼합 계획은 기존 검사를 유지한다.
     LogicalRemoval removal;
     nookbit::WindowsTransferFileInspector files;
     nookbit::ExecuteTransferStepUseCase transfer(copy, removal, journal, history, hasher);
@@ -803,6 +807,104 @@ void testStreamingContentHash() {
 
 } // namespace
 
+// 승인 해시 계산은 허용하고 실행기의 중복 파일 읽기만 세거나 거부하는 일꾼.
+class CountingContentHasher final : public nookbit::IPlanHasher {
+public:
+    nookbit::QtPlanHasher native;
+    mutable int reads{0};
+    bool forbid{false};
+    // 작은 승인 문서의 해시는 그대로 계산하는 함수.
+    std::string sha256(std::string_view bytes) const override { return native.sha256(bytes); }
+    // 실제 파일 읽기 호출만 계수하며 금지 모드에서는 실패시키는 함수.
+    nookbit::Result<std::string> sha256File(const std::filesystem::path& path) const override {
+        ++reads;
+        if (forbid) return nookbit::Result<std::string>::failure({"test.unexpected_hash", "Unexpected upstream content read"});
+        return native.sha256File(path);
+    }
+};
+
+// 보호 복사만 중복 읽기를 생략하고 동크기·동시각 변조도 임시 파일 생성 전에 거부하는 함수.
+void testDeferredCopyChecks(int scenario) {
+#ifdef _WIN32
+    using namespace nookbit;
+    QTemporaryDir directory(QCoreApplication::applicationDirPath() + "/deferred-copy-XXXXXX");
+    if (!directory.isValid()) { expect(false, "deferred copy directory"); return; }
+    const auto source = directory.filePath("photo.jpg");
+    const QByteArray original("owned deferred copy contents");
+    expect(writeFile(source, original), "deferred copy source");
+    const std::filesystem::path sourcePath(source.toStdWString()), appData(directory.filePath("app-data").toStdWString());
+    TestSettingsRepository settings; settings.settings.homeRoot = std::filesystem::path(directory.filePath("organized").toStdWString());
+    JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
+    FilesystemScanner scanner; RuleEngine engine; Planner planner(engine, appData); CountingContentHasher hasher;
+    SqliteHistoryRepository history(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    SqliteTransferJournal journal(directory.filePath("history.sqlite"), projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"));
+    ChangingVolumes volumes; volumes.differentDestination = true;
+    CreatePreviewUseCase preview(settings, rules, scanner, planner, &hasher, &volumes);
+    const auto loadedRules = rules.load();
+    if (!loadedRules) { expect(false, "deferred copy rules"); return; }
+    const auto draft = preview.execute({loadedRules.value().version, {sourcePath}});
+    if (!draft) { expect(false, "deferred copy draft"); return; }
+    FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history, &volumes);
+    const auto frozen = freeze.execute(draft.value(), {sourcePath}, settings.settings);
+    if (!frozen) { expect(false, "deferred copy freeze"); return; }
+    VerifySavedPlanUseCase verifier(rules, scanner, planner, hasher, history, &volumes);
+    // 내용을 바꾸되 객체·크기·수정 시각은 승인 당시와 같게 유지하는 함수.
+    const auto mutate = [&] {
+        const auto time = std::filesystem::last_write_time(sourcePath);
+        expect(writeFile(source, QByteArray(original.size(), 'x')), "same-size mutation fixture");
+        std::filesystem::last_write_time(sourcePath, time);
+    };
+    if (scenario == 4) mutate();
+    ApprovePlanUseCase approver(verifier, history);
+    hasher.reads = 0;
+    const auto approval = approver.execute(frozen.value().id, {sourcePath}, settings.settings);
+    expect(hasher.reads == 1, "approval still validates actual content once");
+    if (scenario == 4) {
+        expect(!approval && history.loadPlan(frozen.value().id).value().status == PlanStatus::Planned,
+            "approval rejects same-size same-time mutation without authorizing movement");
+        return;
+    }
+    if (!approval) { expect(false, "deferred copy approval"); return; }
+    const auto approved = history.loadPlan(frozen.value().id);
+    if (!approved) { expect(false, "deferred copy approved plan"); return; }
+    expect(PlanSignature::isFreshVerifiedCopyPlan(approved.value()), "copy-only fixture qualifies");
+    expect(!verifier.executeForProtectedCopy(frozen.value().id, {sourcePath}, UserSettings{}), "deferred mode still rejects changed settings");
+    const auto destination = QString::fromStdWString(approved.value().steps[0].destination.wstring());
+    expect(QDir().mkpath(QFileInfo(destination).absolutePath()), "logical native-copy parent");
+    FailingIntentHistory changing(history); changing.injectIntentFailure = false;
+    LogicalCopy copy; copy.volumes = &volumes; copy.protectedChecks = scenario != 3 && scenario != 7;
+    LogicalRemoval removal;
+    ExecuteTransferStepUseCase transfer(copy, removal, journal, history, hasher);
+    expect(transfer.verifiesSourceBeforeStaging() == copy.protectedChecks, "copy capability propagated through use-case port");
+    if (scenario == 1) mutate();
+    if (scenario == 2) changing.onIntent = mutate;
+    if (scenario == 5) settings.settings.defaultCollisionPolicy = CollisionPolicy::Skip;
+    if (scenario == 6) volumes.changed = true;
+    hasher.reads = 0; hasher.forbid = scenario != 7;
+    SafeExecutor executor(settings, verifier, scanner, hasher, changing, appData, &volumes, &transfer);
+    const auto result = executor.execute(approved.value(), approval.value(), {sourcePath});
+    expect(hasher.reads == (scenario == 3 ? 1 : scenario == 7 ? 3 : 0), "only explicitly protected copy omits three upstream hashes");
+    const auto attempts = journal.forStep(approved.value().steps[0].id);
+    if (scenario == 0 || scenario == 7) {
+        expect(result && !QFile::exists(source) && readFile(destination) == original, "copy remains correct with either validation policy");
+        expect(attempts && attempts.value().size() == 1 && attempts.value()[0].phase == TransferPhase::Completed,
+            "successful deferred copy records completion");
+    } else if (scenario == 1 || scenario == 2) {
+        expect(!result && result.error().code == "transfer.source_changed", "protected open detects metadata-invisible source change");
+        expect(QFile::exists(source) && readFile(source) == QByteArray(original.size(), 'x') && !QFile::exists(destination),
+            "changed source retained and no final destination created");
+        expect(attempts && attempts.value().size() == 1 && !std::filesystem::exists(attempts.value()[0].staging) &&
+            history.loadPlan(frozen.value().id).value().status == PlanStatus::NeedsRecovery,
+            "mismatch creates no staging and records uncertainty for explicit review");
+    } else {
+        expect(!result && copy.approvedCalls == 0 && QFile::exists(source) && !QFile::exists(destination),
+            "unsupported policy, changed settings or volume reject before protected copy");
+    }
+#else
+    (void)scenario;
+#endif
+}
+
 // 안전한 단일 파일 이동·되돌리기 테스트를 실행하는 함수.
 // 빠른 승인 경로에서 파일 내용 읽기를 시도하면 실패시키는 검사 대역.
 class NoContentHasher final : public nookbit::IPlanHasher {
@@ -924,6 +1026,7 @@ void testMetadataRename(int scenario) {
 // 안전한 단일 파일 이동·되돌리기 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
+    for (int scenario = 0; scenario < 8; ++scenario) testDeferredCopyChecks(scenario);
     for (int scenario = 0; scenario < 8; ++scenario) testMetadataRename(scenario);
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();

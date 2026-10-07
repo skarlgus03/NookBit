@@ -17,6 +17,11 @@ public:
         const std::vector<std::filesystem::path>& selectedFiles,
         const UserSettings& settings,
         PlanStatus expectedStatus = PlanStatus::Planned) = 0;
+    /// 보호 복사 실행 전 계약·메타데이터를 검사하며 기존 구현은 전체 검사를 유지하는 함수.
+    [[nodiscard]] virtual Result<OperationPlan> executeForProtectedCopy(
+        const PlanId& planId, const std::vector<std::filesystem::path>& selectedFiles, const UserSettings& settings) {
+        return execute(planId, selectedFiles, settings, PlanStatus::Approved);
+    }
 };
 
 } // namespace nookbit

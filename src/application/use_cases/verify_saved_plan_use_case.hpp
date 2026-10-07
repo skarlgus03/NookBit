@@ -23,8 +23,14 @@ public:
         const std::vector<std::filesystem::path>& selectedFiles,
         const UserSettings& settings,
         PlanStatus expectedStatus = PlanStatus::Planned) override;
+    /// 보호 복사 전에는 계약을 검사하고 전체 내용 비교를 해당 보호 세션에 맡기는 함수.
+    [[nodiscard]] Result<OperationPlan> executeForProtectedCopy(const PlanId& planId,
+        const std::vector<std::filesystem::path>& selectedFiles, const UserSettings& settings) override;
 
 private:
+    /// 승인·복구는 전체 검사하며 보호 복사 실행 직전만 제한된 지연을 허용하는 함수.
+    Result<OperationPlan> executeImpl(const PlanId& planId, const std::vector<std::filesystem::path>& selectedFiles,
+        const UserSettings& settings, PlanStatus expectedStatus, bool protectedCopy);
     IRuleSetRepository& rules_;
     IScanner& scanner_;
     IPlanner& planner_;
