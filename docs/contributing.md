@@ -39,4 +39,6 @@ ctest --preset dev
 
 UI 변경 시에는 직접 실행해서 사용자 흐름도 확인한다. `ctest`의 QML 스모크 테스트는 화면이 시작되는지 보는 검사이지, 모든 UI 동작을 대신하지 않는다. 문제가 생기면 사용한 Qt Kit, CMake 구성 명령, 실패한 테스트 이름과 재현 절차를 PR에 남긴다.
 
+MSVC + Ninja 구성은 `cmake/msvc_showincludes.ps1`로 컴파일러의 `/showIncludes` 출력 인코딩과 접두사를 통일한다. 한국어 출력 접두사 인코딩이 구성 시점과 빌드 시점에 다르면 Ninja의 헤더 의존성이 0개로 남아, 헤더 수정 후에도 이전 앱 코드가 그대로 실행될 수 있다. `VSLANG=1033`만 지정해도 영어 언어팩이 없으면 한국어로 돌아가므로, 래퍼가 UTF-8과 영어 ASCII 접두사를 함께 적용한다. 명령 인자·따옴표·컴파일 오류 종료 코드는 보존한다. 직접 빌드와 IDE 빌드에도 적용되고 앱 실행에는 영향을 주지 않는다. 이 변경을 처음 적용하면 기존 객체 파일을 다시 빌드한다. `ninja -C out/build/dev -t deps src/CMakeFiles/nookbit.dir/presentation/main.cpp.obj`에 `src/app/thread_local_operations.hpp`가 있는지 확인하면 된다. 기존 객체의 시간이나 실행 파일에 문자열이 존재한다는 사실만으로 헤더 변경이 반영됐다고 판단하지 않는다.
+
 개발 중 정리 목적지를 고정하려면 `cmake --preset dev -DNOOKBIT_DEV_DESTINATION_ROOT="D:/NookBitTest"`처럼 로컬 빌드에 지정하고 재빌드한다. 이 값은 사용자 기억값보다 우선하며 Git에 공유되지 않는다. 다시 사용자 설정을 사용하려면 같은 옵션에 빈 문자열을 지정한다. 실행 파일에 `--print-default-destination`을 붙이면 창을 열지 않고 실제 시작 기본 경로를 확인할 수 있다.
