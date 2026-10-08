@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Templates as T
@@ -204,6 +205,8 @@ ApplicationWindow {
                 width: parent.width
                 stateKey: characterController.stateKey
                 message: characterController.message
+                animation: characterController.animation
+                playbackEnabled: root.visible && root.visibility !== Window.Minimized
                 dark: root.editorDark
             }
             NavigationButton {

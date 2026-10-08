@@ -254,14 +254,19 @@ int main(int argc, char* argv[]) {
     const auto bundledCharacter = QStringLiteral(":/nookbit/character.presentation.json");
     const auto characterSchema = QStringLiteral(":/nookbit/character-presentation.schema.json");
     const auto customCharacter = QDir(appData).filePath(QStringLiteral("character.presentation.json"));
-    auto characterPresentation = nookbit::loadCharacterPresentation(
-        !verifyUi && QFileInfo::exists(customCharacter) ? customCharacter : bundledCharacter, characterSchema);
+    auto characterPath = !verifyUi && QFileInfo::exists(customCharacter) ? customCharacter : bundledCharacter;
+    auto characterPresentation = nookbit::loadCharacterPresentation(characterPath, characterSchema);
     if (!characterPresentation && !verifyUi) {
         QTextStream(stderr) << QString::fromStdString(characterPresentation.error().message) << Qt::endl;
+        characterPath = bundledCharacter;
         characterPresentation = nookbit::loadCharacterPresentation(bundledCharacter, characterSchema);
     }
     if (!characterPresentation) return EXIT_FAILURE;
-    const auto configuredCharacter = characterController.setPresentation(std::move(characterPresentation.value()));
+    const auto characterImageBase = characterPath.startsWith(QStringLiteral(":/"))
+        ? QUrl(QStringLiteral("qrc") + QFileInfo(characterPath).path() + QStringLiteral("/"))
+        : QUrl::fromLocalFile(QFileInfo(characterPath).absolutePath() + QStringLiteral("/"));
+    const auto configuredCharacter = characterController.setPresentation(
+        std::move(characterPresentation.value()), characterImageBase);
     if (!configuredCharacter) return EXIT_FAILURE;
     nookbit::ICharacterChannel& characterChannel = characterController;
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
@@ -335,6 +340,7 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
         const bool ready = !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
+                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&
@@ -357,7 +363,22 @@ int main(int argc, char* argv[]) {
         if (!ready) {
             return EXIT_FAILURE;
         }
-        QTimer::singleShot(0, &application, &QCoreApplication::quit);
+        // 비동기로 읽는 내장 PNG의 크기 검증까지 마친 뒤 자동 검사를 완료한다.
+        auto* sprite = engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite"));
+        QTimer spriteCheck;
+        spriteCheck.setInterval(10);
+        QTimer deadline;
+        deadline.setSingleShot(true);
+        QObject::connect(&deadline, &QTimer::timeout, &application, [] { QCoreApplication::exit(EXIT_FAILURE); });
+        QObject::connect(&spriteCheck, &QTimer::timeout, &application, [sprite] {
+            if (sprite->property("ready").toBool()) QCoreApplication::exit(EXIT_SUCCESS);
+            else if (!sprite->property("error").toString().isEmpty()) {
+                QTextStream(stderr) << sprite->property("error").toString() << Qt::endl;
+                QCoreApplication::exit(EXIT_FAILURE);
+            }
+        });
+        spriteCheck.start();
+        deadline.start(2000);
         return application.exec();
     }
 

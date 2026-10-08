@@ -50,17 +50,26 @@ Image paths are relative to the profile's directory, use `/`, and must end in
 `.png`. Absolute paths, drive prefixes and parent traversal are rejected.
 The JSON loader validates metadata and references only. Reading image pixels,
 checking actual dimensions and playing frames are renderer responsibilities.
+`CharacterSprite.qml` now checks the decoded image dimensions, clips a single
+frame from the cached atlas and implements the declared frame order and looping.
+Invalid or missing images leave the placeholder face visible with an error message.
 
 ## Files and current scope
 
 - `schemas/character-presentation.schema.json`: JSON structure.
-- `resources/character/default.presentation.json`: current text-only default.
+- `resources/character/default.presentation.json`: current test-sprite default.
+- `resources/character/sprites/test-character.png`: included transparent 512-by-384
+  test atlas, twelve 128-by-128 cells with visible frame numbers.
 - `resources/character/example.sprite.presentation.json`: a 4-column, 3-row,
   128-by-128-cell example; its `sprites/nookbit.png` is a placeholder path, not
   an included asset.
-- `CharacterController`: selects `cueId`, `message`, and `animationId` and retains
-  validated metadata for a future renderer.
-- `CharacterBadge.qml`: current placeholder face; it does not play sprite sheets.
+- `CharacterController`: selects `cueId`, `message`, and `animationId` and provides
+  the renderer with the resolved image URL and playback metadata.
+- `CharacterBadge.qml`: displays the test sprite and retains a placeholder face
+  when a profile has no animation or its image cannot be played.
+- `tools/generate_test_character_sheet.ps1`: regenerates the test atlas from code.
 
-No sprite image, animation timer, audio system, expression editor or Explorer
-window integration is introduced by this contract.
+Frame timers stop when the sprite is hidden, the application is hidden or minimized,
+the image is invalid, playback has finished, or the animation contains one frame.
+Text-only changes do not restart playback. Production character artwork, audio,
+an expression editor and Explorer window integration remain future work.

@@ -61,7 +61,7 @@ add_test(NAME nookbit_operation_timing_tests COMMAND nookbit_operation_timing_te
 add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progress_tests)
 
 if(TARGET nookbit_json_config)
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Qml Quick)
   add_executable(nookbit_plan_contract_tests plan_contract_tests.cpp)
   target_link_libraries(nookbit_plan_contract_tests PRIVATE nookbit_history Qt6::Core Qt6::Sql)
   target_include_directories(nookbit_plan_contract_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -133,6 +133,22 @@ if(TARGET nookbit_json_config)
   if(WIN32)
     set_tests_properties(nookbit_character_controller_tests PROPERTIES
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+
+  add_executable(nookbit_character_sprite_tests
+    character_sprite_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.cpp
+  )
+  set_target_properties(nookbit_character_sprite_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_character_sprite_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_character_sprite_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_character_sprite_tests PRIVATE nookbit_json_config Qt6::Gui Qt6::Qml Qt6::Quick)
+  add_test(NAME nookbit_character_sprite_tests COMMAND nookbit_character_sprite_tests)
+  set_tests_properties(nookbit_character_sprite_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+  if(WIN32)
+    set_tests_properties(nookbit_character_sprite_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
   endif()
 
   add_executable(nookbit_watch_controller_tests

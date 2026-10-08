@@ -131,6 +131,7 @@ if(NOOKBIT_BUILD_QT_APP)
       QML_FILES
         presentation/qml/Main.qml
         presentation/qml/CharacterBadge.qml
+        presentation/qml/CharacterSprite.qml
         presentation/qml/RuleEditorPage.qml
     )
 

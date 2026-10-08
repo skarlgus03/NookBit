@@ -131,7 +131,7 @@ void testPresentationConfiguration() {
     const auto schema = profilePath("schemas/character-presentation.schema.json");
     const auto defaults = nookbit::loadCharacterPresentation(
         profilePath("resources/character/default.presentation.json"), schema);
-    expect(defaults.hasValue(), "bundled text-only presentation should validate");
+    expect(defaults.hasValue(), "bundled test sprite presentation should validate");
     const auto sample = nookbit::loadCharacterPresentation(
         profilePath("resources/character/example.sprite.presentation.json"), schema);
     expect(sample.hasValue(), "sprite metadata example should validate without pretending its PNG exists");

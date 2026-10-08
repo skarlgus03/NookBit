@@ -25,16 +25,35 @@ QString CharacterController::message() const {
 QString CharacterController::cueId() const { return cueId_; }
 // 현재 상황에 연결된 애니메이션 이름을 반환하는 함수.
 QString CharacterController::animationId() const { return animationId_; }
-// 향후 재생기가 참조할 검증된 스프라이트·애니메이션 설정을 반환하는 함수.
+// 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
+QVariantMap CharacterController::animation() const {
+    const auto selected = std::find_if(presentation_.animations.begin(), presentation_.animations.end(),
+        [this](const CharacterAnimation& value) { return QString::fromStdString(value.id) == animationId_; });
+    if (selected == presentation_.animations.end() || imageBaseUrl_.isEmpty()) return {};
+    const auto sheet = std::find_if(presentation_.sheets.begin(), presentation_.sheets.end(),
+        [&selected](const CharacterSpriteSheet& value) { return value.id == selected->sheetId; });
+    if (sheet == presentation_.sheets.end()) return {};
+    QVariantList frames;
+    for (const auto frame : selected->frames) frames.append(frame);
+    return {{"id", animationId_}, {"cueId", cueId_}, {"source", imageBaseUrl_.resolved(QUrl(QString::fromStdString(sheet->image)))},
+        {"frameWidth", sheet->frameWidth}, {"frameHeight", sheet->frameHeight},
+        {"columns", sheet->columns}, {"rows", sheet->rows}, {"frames", frames},
+        {"frameDurationMs", selected->frameDurationMs}, {"loop", selected->loop}};
+}
+// 검증된 스프라이트·애니메이션 설정을 반환하는 함수.
 const CharacterPresentation& CharacterController::presentation() const noexcept { return presentation_; }
 // 검증한 표현 설정을 교체하고 현재 상황을 다시 선택하는 함수.
-Result<void> CharacterController::setPresentation(CharacterPresentation presentation) {
+Result<void> CharacterController::setPresentation(CharacterPresentation presentation, QUrl imageBaseUrl) {
     if (QThread::currentThread() != thread())
         return Result<void>::failure({"character.wrong_thread", "Configure on the character's owning thread."});
     const auto checked = validateCharacterPresentation(presentation);
     if (!checked) return checked;
+    const auto previousAnimationId = animationId_;
+    const auto previousCueId = cueId_;
     presentation_ = std::move(presentation);
+    imageBaseUrl_ = std::move(imageBaseUrl);
     refreshState();
+    if (previousAnimationId == animationId_ && previousCueId == cueId_) emit animationChanged();
     return Result<void>::success();
 }
 // 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.
@@ -81,10 +100,12 @@ void CharacterController::refreshState() {
     if (selected && !selected->message.empty()) text = QString::fromStdString(selected->message);
     const auto cueName = QString::fromStdString(requestedCue);
     if (next == state_ && text == message_ && cueName == cueId_ && animation == animationId_) return;
+    const bool animationReplaced = animationId_ != animation || cueId_ != cueName;
     state_ = next;
     message_ = text;
     cueId_ = cueName;
     animationId_ = animation;
     emit stateChanged();
+    if (animationReplaced) emit animationChanged();
 }
 } // namespace nookbit

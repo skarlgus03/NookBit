@@ -8,7 +8,9 @@ Rectangle {
     required property string stateKey
     required property string message
     property bool dark: false
-    implicitHeight: 132
+    property var animation: ({})
+    property bool playbackEnabled: true
+    implicitHeight: 156
     radius: 12
     color: dark ? "#263246" : "#edf2e9"
     border.color: dark ? "#46566e" : "#cfdbcb"
@@ -18,30 +20,43 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: 10
         spacing: 5
-        Rectangle {
+        Item {
             Layout.alignment: Qt.AlignHCenter
-            width: 56; height: 48; radius: 17
-            color: badge.stateKey === "working" ? "#91b5db"
-                 : badge.stateKey === "calling" ? "#e9bf7c" : "#a6c1a2"
-            Row {
+            Layout.minimumHeight: 64
+            width: 64; height: 64
+            CharacterSprite {
+                id: sprite
+                objectName: "characterSprite"
+                anchors.fill: parent
+                descriptor: badge.animation
+                playing: badge.playbackEnabled && badge.visible
+            }
+            Rectangle {
                 anchors.centerIn: parent
-                spacing: 12
-                Repeater {
-                    model: 2
-                    Rectangle {
-                        width: 7
-                        height: badge.stateKey === "resting" ? 2 : 8
-                        radius: 3
-                        color: "#283b3a"
+                visible: !sprite.ready
+                width: 56; height: 48; radius: 17
+                color: badge.stateKey === "working" ? "#91b5db"
+                     : badge.stateKey === "calling" ? "#e9bf7c" : "#a6c1a2"
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 12
+                    Repeater {
+                        model: 2
+                        Rectangle {
+                            width: 7
+                            height: badge.stateKey === "resting" ? 2 : 8
+                            radius: 3
+                            color: "#283b3a"
+                        }
                     }
                 }
-            }
-            Text {
-                anchors.left: parent.right
-                anchors.top: parent.top
-                text: badge.stateKey === "resting" ? "z" : badge.stateKey === "calling" ? "!" : "…"
-                color: badge.dark ? "#e6edf7" : "#374b3b"
-                font.bold: true
+                Text {
+                    anchors.left: parent.right
+                    anchors.top: parent.top
+                    text: badge.stateKey === "resting" ? "z" : badge.stateKey === "calling" ? "!" : "…"
+                    color: badge.dark ? "#e6edf7" : "#374b3b"
+                    font.bold: true
+                }
             }
         }
         Label {
@@ -54,7 +69,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: badge.message
+            text: sprite.error.length > 0 ? sprite.error : badge.message
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             font.pixelSize: 11
