@@ -12,6 +12,8 @@
 namespace nookbit {
 namespace {
 
+constexpr qint64 proposalSnoozeMs = 30 * 60 * 1000;
+
 // 설정에서 지정한 조건 종류의 기준값을 찾는 함수.
 int thresholdFor(const WatchSettings& settings, WatchConditionType type) {
     const auto found = std::find_if(settings.conditions.begin(), settings.conditions.end(),
@@ -55,6 +57,9 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
     connect(&rescanTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     readinessTimer_.setSingleShot(true);
     connect(&readinessTimer_, &QTimer::timeout, this, &WatchController::checkNow);
+    snoozeTimer_.setSingleShot(true);
+    snoozeTimer_.setTimerType(Qt::PreciseTimer);
+    connect(&snoozeTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     // 대기 목록이 바뀌면 이전 제안을 닫고 최신 목록으로 조건을 다시 검사하는 함수.
     connect(&pendingFiles_, &PendingFilesModel::countChanged, this, [this] {
         const bool recheck = settings_.enabled || proposalVisible_;
@@ -118,6 +123,26 @@ QString WatchController::proposalText() const { return proposalText_; }
 // 제안에 포함된 파일의 경로를 반환하는 함수.
 QStringList WatchController::proposalFiles() const { return proposedFiles_; }
 
+// 정리 제안을 쉬는 종료 시각을 UTC 밀리초로 반환하는 함수.
+qint64 WatchController::snoozedUntilUtcMs() const noexcept { return snoozedUntilUtcMs_; }
+
+// 저장된 제안 대기 시각을 복원하고 재검사 타이머를 준비하는 함수.
+void WatchController::restoreSnoozeUntil(qint64 deadlineUtcMs) {
+    snoozeTimer_.stop();
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    snoozedUntilUtcMs_ = deadlineUtcMs > now ? std::min(deadlineUtcMs, now + proposalSnoozeMs) : 0;
+    lastOfferedSignature_.clear();
+    if (snoozedUntilUtcMs_ > 0) {
+        clearProposal();
+        readinessTimer_.stop();
+        statusMessage_ = QStringLiteral("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
+            .arg(QDateTime::fromMSecsSinceEpoch(snoozedUntilUtcMs_).toString(QStringLiteral("HH:mm")));
+        if (settings_.enabled) snoozeTimer_.start(static_cast<int>(snoozedUntilUtcMs_ - now));
+    }
+    emit snoozeDeadlineChanged(snoozedUntilUtcMs_);
+    emit watchChanged();
+}
+
 // 저장된 조건을 불러오고 기본값을 준비하는 함수.
 void WatchController::loadSettings(const QString& defaultFolder) {
     const auto loaded = repository_.load();
@@ -143,14 +168,21 @@ void WatchController::restartMonitoring() {
     debounceTimer_.stop();
     rescanTimer_.stop();
     readinessTimer_.stop();
+    snoozeTimer_.stop();
     if (!directoryWatcher_.directories().isEmpty()) {
         directoryWatcher_.removePaths(directoryWatcher_.directories());
     }
     if (!settings_.enabled) return;
+    const auto snoozeRemaining = snoozedUntilUtcMs_ - QDateTime::currentMSecsSinceEpoch();
+    if (snoozeRemaining > 0)
+        snoozeTimer_.start(static_cast<int>(std::min(snoozeRemaining, proposalSnoozeMs)));
     const auto path = folder();
     if (QFileInfo(path).isDir()) directoryWatcher_.addPath(path);
     rescanTimer_.start(settings_.rescanIntervalMinutes * 60000);
-    QTimer::singleShot(1000, this, &WatchController::checkNow);
+    // 예약된 시작 검사 전에 감시를 껐다면 자동 검사를 실행하지 않는다.
+    QTimer::singleShot(1000, this, [this] {
+        if (settings_.enabled) checkNow();
+    });
 }
 
 // 사용자에게 표시 중인 제안을 지우는 함수.
@@ -198,7 +230,9 @@ void WatchController::saveSettings(const QString& folder,
         emit watchChanged();
         return;
     }
+    const bool folderChanged = settings_.folder.lexically_normal() != proposed.folder.lexically_normal();
     settings_ = std::move(proposed);
+    if (folderChanged || !settings_.enabled) restoreSnoozeUntil(0);
     lastOfferedSignature_.clear();
     clearProposal();
     restartMonitoring();
@@ -212,6 +246,17 @@ void WatchController::saveSettings(const QString& folder,
 // 저장된 조건으로 감시 폴더를 즉시 읽어 제안 여부를 판단하는 함수.
 void WatchController::checkNow() {
     readinessTimer_.stop();
+    const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
+    if (snoozedUntilUtcMs_ > nowUtcMs) {
+        clearProposal();
+        statusMessage_ = QStringLiteral("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
+            .arg(QDateTime::fromMSecsSinceEpoch(snoozedUntilUtcMs_).toString(QStringLiteral("HH:mm")));
+        if (settings_.enabled)
+            snoozeTimer_.start(static_cast<int>(std::min(snoozedUntilUtcMs_ - nowUtcMs, proposalSnoozeMs)));
+        emit watchChanged();
+        return;
+    }
+    if (snoozedUntilUtcMs_ != 0) restoreSnoozeUntil(0);
     if (settings_.folder.empty() || settings_.conditions.empty()) {
         statusMessage_ = QStringLiteral("먼저 감시 폴더와 조건을 저장해 주세요.");
         emit watchChanged();
@@ -220,7 +265,6 @@ void WatchController::checkNow() {
     if (settings_.enabled && directoryWatcher_.directories().isEmpty() && QFileInfo(folder()).isDir()) {
         directoryWatcher_.addPath(folder());
     }
-    const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
     std::vector<std::filesystem::path> pendingPaths;
     for (const auto& path : pendingFiles_.filePaths()) pendingPaths.emplace_back(path.toStdWString());
     const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths);
@@ -296,6 +340,12 @@ void WatchController::dismissProposal() {
     clearProposal();
     statusMessage_ = QStringLiteral("이번 제안을 닫았어요. 파일 상태가 바뀌면 다시 검사해요.");
     emit watchChanged();
+}
+
+// 현재 제안을 닫고 30분 뒤 현재 조건으로 다시 확인하는 함수.
+void WatchController::snoozeProposal() {
+    if (!proposalVisible_) return;
+    restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + proposalSnoozeMs);
 }
 
 // 바뀐 분류 규칙으로 감시 제안을 다시 계산하는 함수.

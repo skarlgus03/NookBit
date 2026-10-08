@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QDateTime>
 
 #include <iostream>
 
@@ -121,10 +122,12 @@ public:
     /// 기본 안정 대기 정책을 사용하는 유스케이스를 연결하는 생성자.
     explicit TimedWatchUseCase(nookbit::EvaluateWatchFolderUseCase& useCase) : useCase_(useCase) {}
     std::int64_t nowMs{100000};
+    int calls{0};
     // 실제 파일을 가짜 시각으로 관찰하고 테스트 재검사 타이머만 단축하는 함수.
     nookbit::Result<nookbit::WatchProposal> execute(
         const nookbit::WatchSettings& settings, std::int64_t,
         const std::vector<std::filesystem::path>& pendingPaths) override {
+        ++calls;
         auto result = useCase_.execute(settings, nowMs, pendingPaths);
         if (result && result.value().nextCheckDelayMs > 0) result.value().nextCheckDelayMs = 1;
         return result;
@@ -181,6 +184,107 @@ void testReadinessRetryAndAcceptance() {
            "stable accepted files should only enter pending without movement");
 }
 
+// 나중에 알림 중 새 파일·규칙 변경은 제안하지 않고 만료 때 현재 후보를 다시 검사하는 함수.
+void testSnoozeAndCurrentCandidates() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "snooze test directory should be available");
+    if (!directory.isValid()) return;
+    const auto first = directory.filePath(QStringLiteral("first.jpg"));
+    const auto second = directory.filePath(QStringLiteral("second.jpg"));
+    expect(writeFile(first), "snooze source should be created");
+    nookbit::PendingFilesModel pending;
+    nookbit::JsonWatchSettingsRepository settings(
+        directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
+    TimedWatchUseCase timed(evaluate);
+    nookbit::WatchController controller(pending, settings, timed, directory.path());
+    controller.saveSettings(directory.path(), true, false, 10, false,
+                            true, 1, false, 1, false, 1, {});
+    controller.checkNow();
+    expect(controller.proposalVisible(), "a qualifying folder should offer before snoozing");
+    const auto before = QDateTime::currentMSecsSinceEpoch();
+    qint64 savedDeadline = 0;
+    QObject::connect(&controller, &nookbit::WatchController::snoozeDeadlineChanged,
+        &controller, [&savedDeadline](qint64 deadline) { savedDeadline = deadline; });
+    controller.snoozeProposal();
+    expect(!controller.proposalVisible() && savedDeadline >= before + 30 * 60000 &&
+               savedDeadline <= QDateTime::currentMSecsSinceEpoch() + 30 * 60000 &&
+               pending.count() == 0 && QFile::exists(first),
+           "snoozing should publish a thirty-minute deadline without touching files or queue");
+    const auto calls = timed.calls;
+    expect(writeFile(second), "a new file should appear during snooze");
+    controller.checkNow();
+    controller.rulesChanged();
+    expect(!controller.proposalVisible() && timed.calls == calls,
+           "snooze should suppress new file and rule triggers without scanning");
+    pending.addUrl(QUrl::fromLocalFile(first));
+    controller.checkNow();
+    expect(controller.snoozedUntilUtcMs() == savedDeadline && timed.calls == calls,
+           "queue changes must not cancel snooze or trigger scans");
+
+    nookbit::PendingFilesModel restoredPending;
+    restoredPending.restorePaths(pending.filePaths());
+    nookbit::WatchController restored(restoredPending, settings, timed, directory.path());
+    restored.restoreSnoozeUntil(savedDeadline);
+    restored.checkNow();
+    expect(!restored.proposalVisible() && restored.snoozedUntilUtcMs() > 0 && timed.calls == calls,
+           "restored snooze must suppress startup checks on the same folder");
+
+    // 30분을 실제 기다리지 않고 짧은 저장 시각을 복원해 같은 만료 흐름을 검사한다.
+    controller.restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + 150);
+    QElapsedTimer timeout;
+    timeout.start();
+    while (!controller.proposalVisible() && timeout.elapsed() < 1500) {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    expect(controller.proposalVisible() && controller.snoozedUntilUtcMs() == 0 && savedDeadline == 0 &&
+               controller.proposalFiles().size() == 1 && controller.proposalFiles().contains(second) &&
+               pending.count() == 1 && QFile::exists(first),
+           "expiry must reevaluate current files, exclude queued paths and clear persisted deadline");
+
+    controller.snoozeProposal();
+    controller.restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + 100);
+    expect(QFile::remove(second), "owned snooze fixture should be removed");
+    timeout.restart();
+    while (controller.snoozedUntilUtcMs() != 0 && timeout.elapsed() < 1500) {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    expect(!controller.proposalVisible() && controller.snoozedUntilUtcMs() == 0,
+           "expiry must not reopen stale proposals for deleted or queued files");
+    expect(writeFile(second), "unchanged reminder fixture should be recreated");
+    controller.checkNow();
+    expect(controller.proposalVisible(), "recreated candidate should offer before the reminder test");
+    const auto unchangedProposal = controller.proposalFiles();
+    controller.snoozeProposal();
+    controller.restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + 100);
+    timeout.restart();
+    while (!controller.proposalVisible() && timeout.elapsed() < 1500) {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    expect(controller.proposalVisible() && controller.proposalFiles() == unchangedProposal,
+           "expiry must remind even when the same candidate snapshot has not changed");
+    controller.restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + 60000);
+    controller.saveSettings(directory.path(), false, false, 10, false,
+                            true, 1, false, 1, false, 1, {});
+    expect(controller.snoozedUntilUtcMs() == 0 && !controller.enabled(),
+           "turning monitoring off must cancel snooze and its timer");
+    QTemporaryDir otherFolder;
+    expect(otherFolder.isValid(), "another watched folder should be available");
+    if (!otherFolder.isValid()) return;
+    controller.restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + 60000);
+    controller.saveSettings(otherFolder.path(), true, false, 10, false,
+                            true, 1, false, 1, false, 1, {});
+    expect(controller.snoozedUntilUtcMs() == 0,
+           "switching watched folders must cancel the old folder snooze");
+}
+
 } // namespace
 
 // 폴더 감시 컨트롤러 테스트를 실행하는 함수.
@@ -188,6 +292,7 @@ int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testProposalAndPendingOnly();
     testReadinessRetryAndAcceptance();
+    testSnoozeAndCurrentCandidates();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;

@@ -248,6 +248,20 @@ int main(int argc, char* argv[]) {
     nookbit::WatchController watchController(
         pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
+    QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
+        &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {
+            if (verifyUi) return;
+            uiPreferences.setValue(QStringLiteral("watchSnoozeFolder"), watchController.folder());
+            uiPreferences.setValue(QStringLiteral("watchSnoozeUntilUtcMs"), deadline);
+            uiPreferences.sync();
+        });
+    if (!verifyUi && QString::compare(
+            QDir::cleanPath(uiPreferences.value(QStringLiteral("watchSnoozeFolder")).toString()),
+            QDir::cleanPath(watchController.folder()), Qt::CaseInsensitive) == 0) {
+        watchController.restoreSnoozeUntil(
+            uiPreferences.value(QStringLiteral("watchSnoozeUntilUtcMs"), 0).toLongLong());
+    }
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;

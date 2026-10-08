@@ -1208,9 +1208,9 @@ ApplicationWindow {
                     }
                 }
                 Button {
-                    text: qsTr("이번 제안 닫기")
+                    text: qsTr("30분 뒤 다시 알림")
                     onClicked: {
-                        watchController.dismissProposal()
+                        watchController.snoozeProposal()
                         watchProposalDialog.close()
                     }
                 }

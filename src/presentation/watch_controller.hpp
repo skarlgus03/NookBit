@@ -72,6 +72,10 @@ public:
     [[nodiscard]] QString proposalText() const;
     /// 제안에 포함된 파일의 경로를 반환하는 함수.
     [[nodiscard]] QStringList proposalFiles() const;
+    /// 정리 제안을 쉬는 종료 시각을 UTC 밀리초로 반환하는 함수.
+    [[nodiscard]] qint64 snoozedUntilUtcMs() const noexcept;
+    /// 저장된 제안 대기 시각을 복원하고 재검사 타이머를 준비하는 함수.
+    void restoreSnoozeUntil(qint64 deadlineUtcMs);
 
     /// 화면에서 고른 폴더와 조건을 검증해 저장하는 함수.
     Q_INVOKABLE void saveSettings(const QString& folder,
@@ -93,12 +97,15 @@ public:
     Q_INVOKABLE void addProposalToPending();
     /// 현재 제안을 닫고 같은 파일 상태에서는 다시 묻지 않는 함수.
     Q_INVOKABLE void dismissProposal();
+    /// 현재 제안을 닫고 30분 뒤 현재 조건으로 다시 확인하는 함수.
+    Q_INVOKABLE void snoozeProposal();
     /// 분류 규칙 저장 후 이전 제안을 지우고 새 규칙으로 다시 평가하는 함수.
     void rulesChanged();
 
 signals:
     void settingsChanged();
     void watchChanged();
+    void snoozeDeadlineChanged(qint64 deadlineUtcMs);
 
 private:
     /// 저장된 조건을 불러오고 기본값을 준비하는 함수.
@@ -115,6 +122,8 @@ private:
     QTimer rescanTimer_;
     QTimer debounceTimer_;
     QTimer readinessTimer_;
+    QTimer snoozeTimer_;
+    qint64 snoozedUntilUtcMs_{0};
     WatchSettings settings_;
     QString statusMessage_;
     QString proposalText_;
