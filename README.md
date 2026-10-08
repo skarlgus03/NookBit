@@ -25,6 +25,21 @@ ctest --preset dev
 
 Qt Creator에서는 저장소 루트의 `CMakeLists.txt`를 열고 MSVC x64 Qt Kit를 선택한 뒤 `nookbit`을 빌드·실행할 수 있다. Visual Studio에서도 **폴더 열기**로 CMake 프로젝트를 열 수 있으며, 같은 Qt 경로를 CMake 구성에 지정해야 한다. 일반적인 `.sln` 프로젝트가 아니라 CMake 프로젝트다.
 
+### Release 빌드와 실행 폴더
+
+같은 x64 개발자 터미널에서 배포용 최적화 빌드와 테스트를 실행한다.
+
+```powershell
+cmake --preset release -DCMAKE_PREFIX_PATH="C:/Qt/6.11.2/msvc2022_64"
+cmake --build --preset release
+ctest --preset release
+cmake --build --preset package-release
+```
+
+Release 빌드·테스트는 `out/build/release`에, 실행 파일과 Qt 런타임은 `out/package/NookBit-Release`에 모인다. `out/package/NookBit-Release/nookbit.exe`를 더블클릭하면 실행된다. 폴더 전체가 필요하므로 exe만 옮기지 않는다. 패키지에는 테스트 실행 파일, 정적 라이브러리, 컴파일 중간 파일을 포함하지 않는다. Windows 패키징에는 Qt의 `windeployqt`가 필요하다.
+
+Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교 테스트는 한 앱씩 실행한다. Release에는 개발용 고정 목적지 경로를 지정하지 않으며 저장된 정리 위치를 사용한다. 이 실행 폴더는 로컬 테스트용 구성으로, 외부 배포 전 라이선스 고지·설치 방식은 별도로 준비한다.
+
 ## 앱에서 해볼 수 있는 흐름
 
 왼쪽 메뉴의 **파일 정리**에는 대기 목록·미리보기·정리 동작을 모았다. **분류 규칙**은 편집 페이지로 이동하고, **폴더 감시**와 **작업 기록**은 별도 창을 연다. 감시 제안이 생기면 메뉴에 **새 정리 제안 확인**이 나타나며, 수락하면 파일 정리 화면으로 돌아온다. 작은 창에서는 정리 화면을 세로로 스크롤할 수 있다.

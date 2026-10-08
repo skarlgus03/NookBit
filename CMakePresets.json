@@ -16,15 +16,42 @@
         "NOOKBIT_BUILD_TESTS": "ON",
         "NOOKBIT_BUILD_QT_APP": "ON"
       }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NOOKBIT_BUILD_TESTS": "ON",
+        "NOOKBIT_BUILD_QT_APP": "ON"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "dev",
       "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "package-release",
+      "configurePreset": "release",
+      "targets": ["nookbit_package"]
     }
   ],
   "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
     {
       "name": "dev",
       "configurePreset": "dev",

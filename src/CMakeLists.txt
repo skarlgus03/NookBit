@@ -145,6 +145,17 @@ if(NOOKBIT_BUILD_QT_APP)
         HINTS "${Qt6_DIR}/../../../bin")
     endif()
     if(NOOKBIT_WINDEPLOYQT)
+      add_custom_target(nookbit_package
+        COMMAND "${CMAKE_COMMAND}"
+          "-DNOOKBIT_EXECUTABLE=$<TARGET_FILE:nookbit>"
+          "-DNOOKBIT_DEPLOY_TOOL=${NOOKBIT_WINDEPLOYQT}"
+          "-DNOOKBIT_QML_DIR=${CMAKE_CURRENT_SOURCE_DIR}/presentation/qml"
+          "-DNOOKBIT_PACKAGE_DIR=${PROJECT_SOURCE_DIR}/out/package/NookBit-$<CONFIG>"
+          "-DNOOKBIT_BUILD_CONFIG=$<CONFIG>"
+          -P "${PROJECT_SOURCE_DIR}/cmake/package_windows.cmake"
+        DEPENDS nookbit
+        COMMENT "Packaging the NookBit Windows runtime"
+        VERBATIM)
       add_custom_command(TARGET nookbit POST_BUILD
         COMMAND "${NOOKBIT_WINDEPLOYQT}"
           $<$<CONFIG:Debug>:--debug>$<$<NOT:$<CONFIG:Debug>>:--release>
