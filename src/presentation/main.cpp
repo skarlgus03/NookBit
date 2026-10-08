@@ -50,6 +50,7 @@
 #include <algorithm>
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
+#include "presentation/character_controller.hpp"
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -248,6 +249,19 @@ int main(int argc, char* argv[]) {
     nookbit::WatchController watchController(
         pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    nookbit::CharacterController characterController;
+    // 작업 상태를 값으로 전달하고 캐릭터가 다른 컨트롤러를 호출하지 않게 연결하는 함수.
+    QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged,
+        &characterController, [&characterController, &backgroundTasks] {
+            characterController.setWorking(backgroundTasks.fileWorkActive());
+        });
+    // 감시 제안의 생성·수락·나중에 처리 결과를 캐릭터에 전달하는 함수.
+    QObject::connect(&watchController, &nookbit::WatchController::watchChanged,
+        &characterController, [&characterController, &watchController] {
+            characterController.setProposalAvailable(watchController.proposalVisible());
+        });
+    characterController.setWorking(backgroundTasks.fileWorkActive());
+    characterController.setProposalAvailable(watchController.proposalVisible());
     // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
         &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {
@@ -271,6 +285,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
+    engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
@@ -297,6 +312,7 @@ int main(int argc, char* argv[]) {
         QObject* recoveryConfirmDialog = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
         const bool ready = !engine.rootObjects().isEmpty() &&
+                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&

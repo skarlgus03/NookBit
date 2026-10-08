@@ -199,6 +199,13 @@ ApplicationWindow {
                 color: root.editorDark ? "#edf2f8" : "#253428"
                 bottomPadding: 20
             }
+            CharacterBadge {
+                objectName: "characterBadge"
+                width: parent.width
+                stateKey: characterController.stateKey
+                message: characterController.message
+                dark: root.editorDark
+            }
             NavigationButton {
                 width: parent.width
                 text: qsTr("파일 정리")

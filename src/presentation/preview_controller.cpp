@@ -346,7 +346,7 @@ void PreviewController::confirmSortInBackground() {
                 message_ += QStringLiteral(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 emit previewChanged();
             }
-        });
+        }, BackgroundTaskRunner::TaskKind::FileWork);
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
@@ -463,7 +463,7 @@ void PreviewController::moveApprovedFile() {
             return operations->executeApproved(plan, approval, selectedFiles, settings);
         }, [this, movedPlanId, movedSteps](const Result<void>& result) {
         finishMovement(movedPlanId, movedSteps, result);
-    });
+      }, BackgroundTaskRunner::TaskKind::FileWork);
 }
 
 // 이동 완료/실패를 화면 스레드에서 동일한 규칙으로 처리하는 함수.
@@ -528,7 +528,7 @@ void PreviewController::undoLastMove() {
         undoPlanId_.reset();
         message_ = QStringLiteral("파일을 원래 위치로 되돌렸어요.");
         emit previewChanged();
-    });
+    }, BackgroundTaskRunner::TaskKind::FileWork);
 }
 
 // 기록에서 되돌린 작업이 마지막 이동이면 버튼 상태를 갱신하는 함수.

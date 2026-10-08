@@ -13,6 +13,7 @@ namespace nookbit {
 class BackgroundTaskRunner final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    Q_PROPERTY(bool fileWorkActive READ fileWorkActive NOTIFY busyChanged)
     Q_PROPERTY(QString stageLabel READ stageLabel NOTIFY progressChanged)
     Q_PROPERTY(QString currentFileName READ currentFileName NOTIFY progressChanged)
     Q_PROPERTY(QString filePosition READ filePosition NOTIFY progressChanged)
@@ -20,6 +21,7 @@ class BackgroundTaskRunner final : public QObject {
     Q_PROPERTY(double byteFraction READ byteFraction NOTIFY progressChanged)
     Q_PROPERTY(QString byteProgressText READ byteProgressText NOTIFY progressChanged)
 public:
+    enum class TaskKind { Inspection, FileWork };
     using Work = std::function<Result<void>()>;
     using Completion = std::function<void(const Result<void>&)>;
     /// 화면 수명의 단일 작업 실행기를 준비하는 함수.
@@ -28,6 +30,8 @@ public:
     ~BackgroundTaskRunner() override { if (thread_) { thread_->wait(); delete thread_; } }
     /// 작업 실행 및 결과 전달 대기 여부를 반환하는 함수.
     bool busy() const { return busy_; }
+    /// 읽기 전용 검사와 구분해 실제 파일 작업 요청의 실행 여부를 반환하는 함수.
+    bool fileWorkActive() const { return busy_ && taskKind_ == TaskKind::FileWork; }
     /// 화면 스레드에 전달된 최신 진행 값만 반환하는 함수.
     const OperationProgress& progress() const { return progress_; }
     /// 파일명을 전체 경로 없이 화면 문자열로 변환하는 함수.
@@ -74,10 +78,11 @@ public:
         }
     }
     /// 값으로 고정된 작업을 실행하고 결과만 화면 스레드에 전달하는 함수.
-    bool submit(QObject* receiver, Work work, Completion complete) {
+    bool submit(QObject* receiver, Work work, Completion complete, TaskKind kind = TaskKind::Inspection) {
         if (busy_) return false;
         if (thread_) { thread_->wait(); delete thread_; thread_ = nullptr; }
         progress_ = {}; emit progressChanged();
+        taskKind_ = kind;
         busy_ = true; emit busyChanged();
         QPointer<QObject> target(receiver);
         thread_ = QThread::create([this, target, work = std::move(work), complete = std::move(complete)] {
@@ -112,11 +117,13 @@ private:
     OperationProgress progress_;
     QThread* thread_{nullptr};
     bool busy_{false};
+    TaskKind taskKind_{TaskKind::Inspection};
 };
 /// 실행기를 주입하지 않은 기존 계약 시험은 동기 실행하고 앱은 비동기로 전달하는 함수.
 inline void dispatchOperation(BackgroundTaskRunner* runner, QObject* receiver,
-    BackgroundTaskRunner::Work work, BackgroundTaskRunner::Completion complete) {
-    if (runner) runner->submit(receiver, std::move(work), std::move(complete));
+    BackgroundTaskRunner::Work work, BackgroundTaskRunner::Completion complete,
+    BackgroundTaskRunner::TaskKind kind = BackgroundTaskRunner::TaskKind::Inspection) {
+    if (runner) runner->submit(receiver, std::move(work), std::move(complete), kind);
     else complete(work());
 }
 }

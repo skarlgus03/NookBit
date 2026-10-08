@@ -125,7 +125,7 @@ void RecoveryController::applyChoice(const RecoveryRequest& request) {
         emit recoveryAttempted(id);
         if (result) emit recoveryCompleted(id, request.action == RecoveryAction::Resume ? "resume" : "rollback");
         emit recoveryCasesChanged();
-    });
+    }, BackgroundTaskRunner::TaskKind::FileWork);
 }
 
 // 진단·선택 후보·차단 이유를 작업당 한 항목으로 표시하는 함수.

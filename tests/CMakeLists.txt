@@ -119,6 +119,21 @@ if(TARGET nookbit_json_config)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
 
+  add_executable(nookbit_character_controller_tests
+    character_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp
+  )
+  set_target_properties(nookbit_character_controller_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_character_controller_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_character_controller_tests PRIVATE nookbit_core Qt6::Core)
+  add_test(NAME nookbit_character_controller_tests COMMAND nookbit_character_controller_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_character_controller_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+
   add_executable(nookbit_watch_controller_tests
     watch_controller_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp

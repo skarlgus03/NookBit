@@ -172,7 +172,7 @@ void HistoryController::undoSelectedHistory() {
             historyMessage_ = QStringLiteral("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
         }
         emit historyChanged();
-    });
+    }, BackgroundTaskRunner::TaskKind::FileWork);
 }
 
 } // namespace nookbit

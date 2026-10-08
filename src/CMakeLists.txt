@@ -101,6 +101,8 @@ if(NOOKBIT_BUILD_QT_APP)
     qt_add_executable(nookbit
       presentation/main.cpp
       presentation/background_task_runner.hpp
+      presentation/character_controller.hpp
+      presentation/character_controller.cpp
       presentation/pending_files_model.hpp
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
@@ -126,6 +128,7 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/CharacterBadge.qml
         presentation/qml/RuleEditorPage.qml
     )
 
