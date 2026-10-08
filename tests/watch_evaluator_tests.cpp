@@ -1,5 +1,6 @@
 #include "modules/watch/watch_evaluator.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "modules/watch/watch_file_readiness.hpp"
 
 #include <iostream>
 #include <vector>
@@ -113,7 +114,7 @@ void testWatchUseCase() {
     FakeScanner scanner;
     FakeRuleEngine rulesEngine;
     FakeRules rules;
-    nookbit::EvaluateWatchFolderUseCase useCase(scanner, rulesEngine, rules);
+    nookbit::EvaluateWatchFolderUseCase useCase(scanner, rulesEngine, rules, 0);
     nookbit::WatchSettings settings;
     settings.folder = L"C:/fake/Downloads";
     settings.recursive = true;
@@ -152,12 +153,89 @@ void testWatchUseCase() {
            "watch use case should return scanner failures unchanged");
 }
 
+// 관찰 시각을 직접 넘겨 다운로드 대기와 변경·재등장 경계값을 검사하는 함수.
+void testFileReadiness() {
+    nookbit::WatchFileReadiness readiness;
+    auto file = fact(100, 0);
+    file.absolutePath = L"C:/downloads/photo.jpg";
+    file.fingerprint.fileId = "first";
+    auto first = readiness.observe({file}, 100000);
+    expect(first.readyFiles.empty() && first.waitingCount == 1 && first.nextCheckDelayMs == 30000,
+           "even an old file must be observed before it can be offered");
+    auto early = readiness.observe({file}, 129999);
+    expect(early.readyFiles.empty() && early.nextCheckDelayMs == 1,
+           "unchanged files must wait until the stable window boundary");
+    auto ready = readiness.observe({file}, 130000);
+    expect(ready.readyFiles.size() == 1 && ready.waitingCount == 0 && ready.nextCheckDelayMs == 0,
+           "an unchanged file should become ready at thirty seconds with no further polling");
+    file.fingerprint.size = 101;
+    auto grew = readiness.observe({file}, 140000);
+    expect(grew.readyFiles.empty() && grew.nextCheckDelayMs == 30000,
+           "a growing file must start a new stable window");
+    file.fingerprint.modifiedUtcMs = 150000;
+    auto rewritten = readiness.observe({file}, 150000);
+    expect(rewritten.readyFiles.empty() && rewritten.nextCheckDelayMs == 30000,
+           "a same-size rewrite must restart the wait");
+    file.fingerprint.fileId = "replacement";
+    auto replaced = readiness.observe({file}, 180000);
+    expect(replaced.readyFiles.empty(), "replacement at the same path must restart the wait");
+    expect(readiness.observe({file}, 210000).readyFiles.size() == 1,
+           "the replacement should become ready after its own stable window");
+    expect(readiness.observe({}, 220000).nextCheckDelayMs == 0,
+           "disappeared files must stop readiness retries");
+    expect(readiness.observe({file}, 250000).readyFiles.empty(),
+           "reappearing files must not reuse a disappeared observation");
+    expect(readiness.observe({file}, 240000).nextCheckDelayMs == 30000,
+           "a backwards clock must reset observations instead of accepting early");
+    auto temporary = file;
+    for (const auto* name : {L"photo.jpg.CRDOWNLOAD", L"photo.jpg.part", L"photo.jpg.partial", L"photo.jpg.download"}) {
+        temporary.absolutePath = std::filesystem::path(L"C:/downloads") / name;
+        readiness.reset();
+        expect(readiness.observe({temporary}, 300000).nextCheckDelayMs == 0 &&
+                   readiness.observe({temporary}, 400000).readyFiles.empty(),
+               "download temporary names must stay excluded even when unchanged");
+    }
+    expect(readiness.observe({file}, 400000).readyFiles.empty(),
+           "renaming a temporary download to its final name must begin observation");
+}
+
+// 안정 대기 중인 파일이 조건 계산에 들어가지 않고 검사 실패 후 새로 관찰되는지 검사하는 함수.
+void testStableWatchUseCase() {
+    FakeScanner scanner;
+    FakeRuleEngine engine;
+    FakeRules rules;
+    nookbit::EvaluateWatchFolderUseCase useCase(scanner, engine, rules);
+    nookbit::WatchSettings settings;
+    settings.folder = L"C:/fake/Downloads";
+    settings.conditions = {{nookbit::WatchConditionType::FileCount, 1}};
+    const auto waiting = useCase.execute(settings, 100000);
+    expect(waiting && !waiting.value().evaluation.shouldOffer &&
+               waiting.value().evaluation.fileCount == 0 && waiting.value().evaluation.totalBytes == 0 &&
+               waiting.value().waitingFileCount == 1 && waiting.value().nextCheckDelayMs == 30000,
+           "unstable classified files must not contribute to watch conditions");
+    const auto ready = useCase.execute(settings, 130000);
+    expect(ready && ready.value().evaluation.shouldOffer && ready.value().eligibleFiles.size() == 1,
+           "stable classified files should trigger normal watch conditions");
+    scanner.fail = true;
+    expect(!useCase.execute(settings, 140000), "scanner failure must propagate");
+    scanner.fail = false;
+    const auto afterFailure = useCase.execute(settings, 170000);
+    expect(afterFailure && !afterFailure.value().evaluation.shouldOffer,
+           "a failed scan must invalidate earlier stable observations");
+    settings.folder = L"C:/other";
+    const auto switched = useCase.execute(settings, 200000);
+    expect(switched && !switched.value().evaluation.shouldOffer,
+           "switching watched folders must reset observations");
+}
+
 } // namespace
 
 // 감시 조건 판단 테스트를 실행하는 함수.
 int main() {
     testConditions();
     testWatchUseCase();
+    testFileReadiness();
+    testStableWatchUseCase();
     if (failures == 0) {
         std::cout << "All watch evaluator tests passed.\n";
         return 0;

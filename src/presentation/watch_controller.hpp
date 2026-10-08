@@ -114,6 +114,7 @@ private:
     QFileSystemWatcher directoryWatcher_;
     QTimer rescanTimer_;
     QTimer debounceTimer_;
+    QTimer readinessTimer_;
     WatchSettings settings_;
     QString statusMessage_;
     QString proposalText_;

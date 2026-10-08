@@ -29,6 +29,10 @@ QString snapshotSignature(const std::vector<FileFact>& files) {
         hash.addData("\0", 1);
         hash.addData(QByteArray::number(file.fingerprint.modifiedUtcMs));
         hash.addData("\0", 1);
+        hash.addData(QByteArray::fromStdString(file.fingerprint.volumeId.value_or("")));
+        hash.addData("\0", 1);
+        hash.addData(QByteArray::fromStdString(file.fingerprint.fileId.value_or("")));
+        hash.addData("\0", 1);
     }
     return QString::fromLatin1(hash.result().toHex());
 }
@@ -49,6 +53,8 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
             this, [this] { debounceTimer_.start(); });
     connect(&debounceTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     connect(&rescanTimer_, &QTimer::timeout, this, &WatchController::checkNow);
+    readinessTimer_.setSingleShot(true);
+    connect(&readinessTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     // 대기 목록이 바뀌면 이전 제안을 닫고 최신 목록으로 조건을 다시 검사하는 함수.
     connect(&pendingFiles_, &PendingFilesModel::countChanged, this, [this] {
         const bool recheck = settings_.enabled || proposalVisible_;
@@ -136,6 +142,7 @@ void WatchController::loadSettings(const QString& defaultFolder) {
 void WatchController::restartMonitoring() {
     debounceTimer_.stop();
     rescanTimer_.stop();
+    readinessTimer_.stop();
     if (!directoryWatcher_.directories().isEmpty()) {
         directoryWatcher_.removePaths(directoryWatcher_.directories());
     }
@@ -204,6 +211,7 @@ void WatchController::saveSettings(const QString& folder,
 
 // 저장된 조건으로 감시 폴더를 즉시 읽어 제안 여부를 판단하는 함수.
 void WatchController::checkNow() {
+    readinessTimer_.stop();
     if (settings_.folder.empty() || settings_.conditions.empty()) {
         statusMessage_ = QStringLiteral("먼저 감시 폴더와 조건을 저장해 주세요.");
         emit watchChanged();
@@ -225,12 +233,20 @@ void WatchController::checkNow() {
     }
     const auto& evaluation = result.value().evaluation;
     const auto& eligible = result.value().eligibleFiles;
+    // 대기 중인 파일이 있을 때만 안정 시간 이후 한 번 더 검사하는 타이머.
+    if (settings_.enabled && result.value().nextCheckDelayMs > 0) {
+        readinessTimer_.start(std::max(1000, result.value().nextCheckDelayMs));
+    }
     if (!evaluation.shouldOffer) {
         clearProposal();
         statusMessage_ = QStringLiteral("조건 미충족: 분류 가능한 파일 %1개 · 총 %2 MiB · 가장 오래된 파일 %3분")
                              .arg(evaluation.fileCount)
                              .arg(evaluation.totalBytes / (1024ULL * 1024ULL))
                              .arg(evaluation.oldestAgeMinutes);
+        if (result.value().waitingFileCount > 0) {
+            statusMessage_ += QStringLiteral(" · 전송 완료 확인 중 %1개 (크기·수정 시간 안정 대기)")
+                                  .arg(result.value().waitingFileCount);
+        }
         emit watchChanged();
         return;
     }
@@ -256,9 +272,17 @@ void WatchController::checkNow() {
 // 현재 제안의 파일들을 이동 없이 대기 목록에 등록하는 함수.
 void WatchController::addProposalToPending() {
     if (!proposalVisible_) return;
-    const int before = pendingFiles_.count();
-    // 등록 중 countChanged가 제안을 비우므로 경로 목록을 먼저 복사한다.
     const auto files = proposedFiles_;
+    // 수락 직전에도 다시 검사해 전송이 재개된 파일이나 바뀐 제안을 등록하지 않는다.
+    checkNow();
+    if (!proposalVisible_) return;
+    if (proposedFiles_ != files) {
+        statusMessage_ = QStringLiteral("제안 파일이 바뀌었어요. 새 제안을 확인해 주세요.");
+        emit watchChanged();
+        return;
+    }
+    const int before = pendingFiles_.count();
+    // 등록 중 countChanged가 제안을 비우므로 복사한 경로 목록을 사용한다.
     for (const auto& path : files) pendingFiles_.addUrl(QUrl::fromLocalFile(path));
     const int added = pendingFiles_.count() - before;
     clearProposal();

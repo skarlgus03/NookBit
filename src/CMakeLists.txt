@@ -28,6 +28,7 @@ add_library(nookbit_core STATIC
   application/use_cases/rollback_transfer_use_case.cpp
   modules/rules/rule_engine.cpp
   modules/watch/watch_evaluator.cpp
+  modules/watch/watch_file_readiness.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
   modules/planner/path_safety_validator.cpp

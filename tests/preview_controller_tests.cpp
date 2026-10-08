@@ -440,7 +440,7 @@ void testWatchedFilesUseNormalSortWorkflow() {
     expect(preview.hasPreview(), "manual first file should have a draft");
     nookbit::JsonWatchSettingsRepository watchSettings(
         directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
-    nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, workflow.ruleEngine, workflow.rules);
+    nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, workflow.ruleEngine, workflow.rules, 0);
     nookbit::WatchController watch(pending, watchSettings, evaluate, incoming);
     watch.saveSettings(incoming, true, false, 10, false, true, 1, false, 1, false, 1, {});
     watch.checkNow();

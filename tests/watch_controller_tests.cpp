@@ -9,6 +9,8 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QElapsedTimer>
+#include <QThread>
 
 #include <iostream>
 
@@ -55,7 +57,7 @@ void testProposalAndPendingOnly() {
         projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine ruleEngine;
-    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, ruleEngine, rules);
+    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, ruleEngine, rules, 0);
     nookbit::WatchController controller(
         pending, repository, evaluateWatchFolder, folder);
     controller.saveSettings(folder, true, false, 10, false,
@@ -113,12 +115,79 @@ void testProposalAndPendingOnly() {
            "restored pending paths must be excluded after restarting the controller");
 }
 
+/// 실제 파일 검사에 테스트 관찰 시각을 전달하는 유스케이스 어댑터.
+class TimedWatchUseCase final : public nookbit::IWatchProposalUseCase {
+public:
+    /// 기본 안정 대기 정책을 사용하는 유스케이스를 연결하는 생성자.
+    explicit TimedWatchUseCase(nookbit::EvaluateWatchFolderUseCase& useCase) : useCase_(useCase) {}
+    std::int64_t nowMs{100000};
+    // 실제 파일을 가짜 시각으로 관찰하고 테스트 재검사 타이머만 단축하는 함수.
+    nookbit::Result<nookbit::WatchProposal> execute(
+        const nookbit::WatchSettings& settings, std::int64_t,
+        const std::vector<std::filesystem::path>& pendingPaths) override {
+        auto result = useCase_.execute(settings, nowMs, pendingPaths);
+        if (result && result.value().nextCheckDelayMs > 0) result.value().nextCheckDelayMs = 1;
+        return result;
+    }
+private:
+    nookbit::EvaluateWatchFolderUseCase& useCase_;
+};
+
+// 파일 변경 알림이 없어도 안정 대기가 끝나면 재검사하고 수락 전 변경은 막는지 검사하는 함수.
+void testReadinessRetryAndAcceptance() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "readiness test directory should be available");
+    if (!directory.isValid()) return;
+    const auto file = directory.filePath(QStringLiteral("download.jpg"));
+    expect(writeFile(file), "download test file should be created");
+    nookbit::PendingFilesModel pending;
+    nookbit::JsonWatchSettingsRepository settings(
+        directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"),
+        projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules);
+    TimedWatchUseCase timed(evaluate);
+    nookbit::WatchController controller(pending, settings, timed, directory.path());
+    controller.saveSettings(directory.path(), true, false, 10, false,
+                            true, 1, false, 1, false, 1, {});
+    controller.checkNow();
+    expect(!controller.proposalVisible() && controller.statusMessage().contains(QStringLiteral("확인 중")),
+           "first observation must show waiting without proposing or queueing");
+    timed.nowMs += 30000;
+    QElapsedTimer timeout;
+    timeout.start();
+    while (!controller.proposalVisible() && timeout.elapsed() < 2500) {
+        QCoreApplication::processEvents();
+        QThread::msleep(5);
+    }
+    expect(controller.proposalVisible() && pending.count() == 0,
+           "readiness retry must produce a proposal without another directory change");
+    QFile growing(file);
+    expect(growing.open(QIODevice::Append), "download should reopen for writing");
+    if (!growing.isOpen()) return;
+    growing.write("more bytes");
+    growing.close();
+    timed.nowMs += 1000;
+    controller.addProposalToPending();
+    expect(pending.count() == 0 && !controller.proposalVisible(),
+           "acceptance must reject a file that resumed writing after the proposal");
+    timed.nowMs += 30000;
+    controller.checkNow();
+    expect(controller.proposalVisible(), "completed download should become eligible after a new stable window");
+    controller.addProposalToPending();
+    expect(pending.count() == 1 && QFile::exists(file),
+           "stable accepted files should only enter pending without movement");
+}
+
 } // namespace
 
 // 폴더 감시 컨트롤러 테스트를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testProposalAndPendingOnly();
+    testReadinessRetryAndAcceptance();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;
