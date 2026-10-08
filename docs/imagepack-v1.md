@@ -197,8 +197,32 @@ different source files and step durations. It also converts old grid descriptors
 to the same runtime step shape.
 
 `CharacterSprite.qml` accepts `userScale`, `userPivotOffset`, and a local `anchor`.
-The current sidebar uses scale 0.5 and offset (0, 0); adjustment controls and saving
-these personal values are not implemented yet. The nominal widget rectangle does
+The sidebar starts at scale 0.5 and offset (0, 0). The character settings dialog
+allows selection, folder import and personal scale adjustment (10–200%). The
+nominal widget rectangle does
 not auto-fit or clip a wider pose. The actual app window still bounds rendering.
 New PNGs may pause playback during their first asynchronous decode; the current
-test pack uses one cached atlas. Next build the pack import/selection workflow.
+test pack uses one cached atlas.
+
+## Folder import and selection
+
+Choose a local folder containing `imagepack.json` and its declared PNG assets.
+`IImagePackLibrary` separates storage from playback. `DirectoryImagePackLibrary`
+validates the source, copies only the manifest and declared sources to an owned
+temporary directory, revalidates that snapshot and publishes it by renaming the
+directory. Failure removes only the owned temporary copy; the original folder
+and current selection are untouched. Import runs off the UI thread without
+creating file-organization activity. A header-valid PNG may still fail at decode
+time, as described above; import does not guarantee full pixel integrity.
+
+Imported packs live under the app data directory's `imagepacks/<UUID>/`. The
+library key is not the pack's content `id`: reimporting never overwrites another
+copy. The bundled test pack has key `builtin` and remains beside the executable.
+Invalid stored packs are omitted from the list and rechecked when selected.
+
+QSettings stores `character/selectedPack` and `character/scales/<library-key>`.
+These are personal settings, not edits to the pack. Startup restores the chosen
+key and scale; a missing/unusable selection falls back to the bundled character
+(or an existing legacy presentation). `--verify-ui` uses only bundled data and
+does not write these settings. Offset editing, pack deletion, ZIP import and
+multi-character placement are deliberately not included in this step.

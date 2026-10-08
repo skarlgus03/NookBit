@@ -58,7 +58,9 @@ Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교
 
 ## 프로젝트 지도
 
-개별 PNG·격자/직사각형 아틀라스·공통 pivot·개인 배율 분리 규칙은 [ImagePack v1](docs/imagepack-v1.md)에 정의했다. [JSON Schema](schemas/imagepack.schema.json)와 두 방식의 예제를 제공한다. 로더는 이미지 헤더·실제 크기·프레임 범위·참조를 검증하고 기본 pivot·배율을 적용한 공통 프레임 데이터를 반환한다. 기본 테스트 캐릭터는 실행 파일 옆 `imagepacks/test/`의 실제 팩을 로딩해 프레임별 pivot·시간·개인 배율로 재생한다. 기존 `character.presentation.json` 사용자 격자 프로필도 유지한다. 팩 임포트·선택 및 크기 조절 UI는 다음 작업이다.
+개별 PNG·격자/직사각형 아틀라스·공통 pivot·개인 배율 분리 규칙은 [ImagePack v1](docs/imagepack-v1.md)에 정의했다. [JSON Schema](schemas/imagepack.schema.json)와 두 방식의 예제를 제공한다. 로더는 이미지 헤더·실제 크기·프레임 범위·참조를 검증하고 기본 pivot·배율을 적용한 공통 프레임 데이터를 반환한다. 기본 테스트 캐릭터는 실행 파일 옆 `imagepacks/test/`의 실제 팩을 로딩해 프레임별 pivot·시간·개인 배율로 재생한다. 기존 `character.presentation.json` 사용자 격자 프로필도 유지한다.
+
+왼쪽 **캐릭터 설정**에서 팩 폴더 가져오기·캐릭터 선택·표시 크기(10~200%)를 조정한다. 폴더에는 `imagepack.json`과 참조된 PNG가 있어야 한다. 가져오기는 화면을 막지 않고 원본을 보존하며, 검증 성공한 복사본만 `%APPDATA%/NookBitProject/NookBit/imagepacks/<UUID>/`에 보관한다. 재가져오기도 기존 팩을 덮어쓰지 않는다. 선택과 팩별 개인 배율은 QSettings에 자동 저장되어 재실행 시 복원된다. 실제 테스트용 완성 팩은 `resources/imagepacks/test/`이며, `examples/`의 JSON들은 이미지가 없는 문서 예제다.
 
 캐릭터 상황별 문구와 스프라이트 시트 규격은 [캐릭터 표현 규격](docs/character-presentation.md)에 정의했다. `cueId`를 공통 창구로 전달하면 JSON 설정에서 문구와 애니메이션 이름을 선택한다. 사용자 앱 데이터 폴더의 `character.presentation.json`으로 기본 설정을 교체할 수 있다. 현재는 프레임 번호가 보이는 임시 테스트 시트로 실제 격자 재생·반복·상태 전환을 확인할 수 있다. 창을 숨기거나 최소화하면 프레임 타이머를 멈춘다. 최종 캐릭터 그림과 탐색기 연동은 아직 없다.
 

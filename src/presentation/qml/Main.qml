@@ -3,12 +3,13 @@ import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Templates as T
+import QtQuick.Dialogs as NativeDialogs
 
 ApplicationWindow {
     id: root
     // 파일 작업 중에는 입력과 창 닫기를 막고 화면 렌더링은 계속하는 함수.
     onClosing: function(close) {
-        if (backgroundTasks.busy) close.accepted = false
+        if (backgroundTasks.busy || characterSettings.busy) close.accepted = false
     }
     contentItem.enabled: !backgroundTasks.busy
     Popup {
@@ -206,8 +207,15 @@ ApplicationWindow {
                 stateKey: characterController.stateKey
                 message: characterController.message
                 animation: characterController.animation
+                userScale: characterSettings.userScale
                 playbackEnabled: root.visible && root.visibility !== Window.Minimized
                 dark: root.editorDark
+                TapHandler { onTapped: characterSettingsDialog.open() }
+            }
+            NavigationButton {
+                width: parent.width
+                text: qsTr("캐릭터 설정")
+                onClicked: characterSettingsDialog.open()
             }
             NavigationButton {
                 width: parent.width
@@ -678,6 +686,66 @@ ApplicationWindow {
                 sortConfirmation.open()
             else if (!previewController.awaitingConfirmation && sortConfirmation.visible)
                 sortConfirmation.close()
+        }
+    }
+
+    NativeDialogs.FolderDialog {
+        id: imagePackFolderDialog
+        title: qsTr("imagepack.json이 들어 있는 캐릭터 팩 폴더 선택")
+        onAccepted: characterSettings.importFolder(selectedFolder)
+    }
+
+    Dialog {
+        id: characterSettingsDialog
+        objectName: "characterSettingsDialog"
+        anchors.centerIn: parent
+        width: Math.min(root.width - 32, 440)
+        modal: false
+        title: qsTr("캐릭터 설정")
+        standardButtons: Dialog.Close
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+            Label { text: qsTr("캐릭터 팩"); font.bold: true }
+            ComboBox {
+                id: characterPackChoice
+                Layout.fillWidth: true
+                model: characterSettings.packs
+                textRole: "label"
+                valueRole: "key"
+                currentIndex: {
+                    const items = characterSettings.packs
+                    for (let i = 0; i < items.length; ++i)
+                        if (items[i].key === characterSettings.selectedKey) return i
+                    return -1
+                }
+                enabled: !characterSettings.busy
+                onActivated: characterSettings.selectPack(currentValue)
+            }
+            Button {
+                text: qsTr("팩 폴더 가져오기…")
+                enabled: !characterSettings.busy
+                onClicked: imagePackFolderDialog.open()
+            }
+            Label { text: qsTr("표시 크기: %1%").arg(Math.round(characterSettings.userScale * 100)) }
+            Slider {
+                Layout.fillWidth: true
+                from: 0.1; to: 2.0; stepSize: 0.05
+                value: characterSettings.userScale
+                onMoved: characterSettings.setUserScale(value)
+            }
+            Button { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
+            Label {
+                Layout.fillWidth: true
+                text: characterSettings.status
+                wrapMode: Text.Wrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("선택과 크기는 자동 저장돼요. 팩 원본은 변경하지 않아요.")
+                wrapMode: Text.Wrap
+                font.pixelSize: 12
+            }
         }
     }
 

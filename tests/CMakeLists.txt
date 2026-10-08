@@ -120,6 +120,20 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_executable(nookbit_image_pack_loader_tests image_pack_loader_tests.cpp)
+  add_executable(nookbit_image_pack_library_tests
+    image_pack_library_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_settings_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_settings_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp)
+  set_target_properties(nookbit_image_pack_library_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_image_pack_library_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_image_pack_library_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_image_pack_library_tests PRIVATE nookbit_json_config Qt6::Gui)
+  add_test(NAME nookbit_image_pack_library_tests COMMAND nookbit_image_pack_library_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_image_pack_library_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   target_include_directories(nookbit_image_pack_loader_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(nookbit_image_pack_loader_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   target_link_libraries(nookbit_image_pack_loader_tests PRIVATE nookbit_json_config Qt6::Gui)

@@ -51,8 +51,10 @@
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
+#include "presentation/character_settings_controller.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
+#include "infrastructure/configuration/directory_image_pack_library.hpp"
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -269,19 +271,42 @@ int main(int argc, char* argv[]) {
     const auto configuredCharacter = characterController.setPresentation(
         std::move(characterPresentation.value()), characterImageBase);
     if (!configuredCharacter) return EXIT_FAILURE;
-    // 기본 테스트 캐릭터는 ImagePack 로더의 공통 프레임으로 재생한다.
-    if (verifyUi || characterPath == bundledCharacter) {
-        const nookbit::JsonImagePackLoader imagePackLoader;
-        const auto packPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/test/imagepack.json"));
-        auto imagePack = imagePackLoader.load(std::filesystem::path(packPath.toStdWString()));
-        if (!imagePack) {
-            QTextStream(stderr) << QString::fromStdString(imagePack.error().message) << Qt::endl;
-            if (verifyUi) return EXIT_FAILURE;
-        } else {
-            const auto applied = characterController.setImagePack(std::move(imagePack.value()));
-            if (!applied) return EXIT_FAILURE;
-        }
+    const nookbit::JsonImagePackLoader imagePackLoader;
+    nookbit::DirectoryImagePackLibrary imagePackLibrary(imagePackLoader,
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/test/imagepack.json")),
+        QDir(verifyUi ? QCoreApplication::applicationDirPath() : appData).filePath(
+            verifyUi ? QStringLiteral("verify-unused-imagepacks") : QStringLiteral("imagepacks")));
+    // 임포트 수명은 보관소보다 짧게 유지하고 파일 정리 실행기와 분리한다.
+    nookbit::BackgroundTaskRunner characterImports;
+    nookbit::CharacterSettingsController characterSettings(imagePackLibrary,
+        [&characterController](nookbit::ImagePack pack) {
+            // 값으로 전달된 팩을 캐릭터 표현 창구에 적용하는 함수.
+            return characterController.setImagePack(std::move(pack));
+        }, characterImports);
+    characterSettings.refresh();
+    const auto savedPack = verifyUi ? QString() : uiPreferences.value(QStringLiteral("character/selectedPack")).toString();
+    if (!savedPack.isEmpty() && !characterSettings.selectPack(savedPack))
+        QTextStream(stderr) << characterSettings.status() << Qt::endl;
+    if (characterSettings.selectedKey().isEmpty() && (verifyUi || characterPath == bundledCharacter)) {
+        if (!characterSettings.selectPack(QStringLiteral("builtin")) && verifyUi) return EXIT_FAILURE;
     }
+    if (!verifyUi) characterSettings.setUserScale(uiPreferences.value(
+        QStringLiteral("character/scales/") + characterSettings.selectedKey(), 0.5).toDouble());
+    // 선택한 팩과 개인 배율을 사용자 설정에서 복원하는 함수.
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &application,
+        [&uiPreferences, &characterSettings, verifyUi](const QString& key) {
+            if (verifyUi) return;
+            characterSettings.setUserScale(uiPreferences.value(QStringLiteral("character/scales/") + key, 0.5).toDouble());
+            uiPreferences.setValue(QStringLiteral("character/selectedPack"), key);
+            uiPreferences.sync();
+        });
+    // 개인 배율 변경만 저장하고 팩 매니페스트는 수정하지 않는 함수.
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::scaleChanged, &application,
+        [&uiPreferences, &characterSettings, verifyUi] {
+            if (verifyUi || characterSettings.selectedKey().isEmpty()) return;
+            uiPreferences.setValue(QStringLiteral("character/scales/") + characterSettings.selectedKey(), characterSettings.userScale());
+            uiPreferences.sync();
+        });
     nookbit::ICharacterChannel& characterChannel = characterController;
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
@@ -327,6 +352,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
+    engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
@@ -352,9 +378,16 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryDialog"));
         QObject* recoveryConfirmDialog = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
+        QObject* characterSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSettingsDialog"));
         const bool ready = !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
+                           characterSettingsDialog != nullptr &&
+                           QMetaObject::invokeMethod(characterSettingsDialog, "open") &&
+                           characterSettingsDialog->property("opened").toBool() &&
+                           QMetaObject::invokeMethod(characterSettingsDialog, "close") &&
+                           characterSettings.selectedKey() == QStringLiteral("builtin") &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&
