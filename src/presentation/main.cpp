@@ -250,18 +250,27 @@ int main(int argc, char* argv[]) {
         pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
     nookbit::CharacterController characterController;
+    nookbit::ICharacterChannel& characterChannel = characterController;
+    // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
+    const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
+        const auto received = characterChannel.publish({"file-operations", "current-operation",
+            nookbit::CharacterUpdateKind::Activity, backgroundTasks.fileWorkActive(), "파일을 옮기고 있어요."});
+        if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
+    };
+    // 감시 제안 상태를 공통 주의 요청으로 변환해 인터페이스 창구에 전달하는 함수.
+    const auto reportCharacterAttention = [&characterChannel, &watchController] {
+        const auto received = characterChannel.publish({"folder-watch", "organization-offer",
+            nookbit::CharacterUpdateKind::Attention, watchController.proposalVisible(), "정리할 파일이 있어요!"});
+        if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
+    };
     // 작업 상태를 값으로 전달하고 캐릭터가 다른 컨트롤러를 호출하지 않게 연결하는 함수.
     QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged,
-        &characterController, [&characterController, &backgroundTasks] {
-            characterController.setWorking(backgroundTasks.fileWorkActive());
-        });
+        &characterController, reportCharacterActivity);
     // 감시 제안의 생성·수락·나중에 처리 결과를 캐릭터에 전달하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::watchChanged,
-        &characterController, [&characterController, &watchController] {
-            characterController.setProposalAvailable(watchController.proposalVisible());
-        });
-    characterController.setWorking(backgroundTasks.fileWorkActive());
-    characterController.setProposalAvailable(watchController.proposalVisible());
+        &characterController, reportCharacterAttention);
+    reportCharacterActivity();
+    reportCharacterAttention();
     // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
         &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {

@@ -1,10 +1,12 @@
 #pragma once
 #include <QObject>
 #include <QString>
+#include <nookbit/application/character_channel.hpp>
+#include <map>
 
 namespace nookbit {
 /// 다른 화면이나 파일 작업을 호출하지 않고 캐릭터 표시 상태만 관리한다.
-class CharacterController final : public QObject {
+class CharacterController final : public QObject, public ICharacterChannel {
     Q_OBJECT
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString stateKey READ stateKey NOTIFY stateChanged)
@@ -20,17 +22,17 @@ public:
     [[nodiscard]] QString stateKey() const;
     /// 현재 상태에 맞는 임시 말풍선 문구를 반환하는 함수.
     [[nodiscard]] QString message() const;
-    /// 파일 작업 여부를 전달받고 표시 상태를 갱신하는 함수.
-    void setWorking(bool working);
-    /// 정리 제안 여부를 전달받고 표시 상태를 갱신하는 함수.
-    void setProposalAvailable(bool available);
+    /// 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.
+    [[nodiscard]] Result<void> publish(const CharacterUpdate& update) override;
 signals:
     void stateChanged();
 private:
     /// 작업 중을 우선하고 남은 제안 여부로 다음 상태를 고르는 함수.
     void refreshState();
-    bool working_{false};
-    bool proposalAvailable_{false};
+    using EntryKey = std::pair<std::string, std::string>;
+    std::map<EntryKey, CharacterUpdate> activities_;
+    std::map<EntryKey, CharacterUpdate> attentions_;
+    QString message_{QStringLiteral("잠깐 쉬고 있어요.")};
     State state_{State::Resting};
 };
 } // namespace nookbit
