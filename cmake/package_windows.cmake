@@ -6,7 +6,11 @@ if(NOT EXISTS "${NOOKBIT_EXECUTABLE}" OR NOT EXISTS "${NOOKBIT_DEPLOY_TOOL}")
   message(FATAL_ERROR "The Release executable or windeployqt is missing.")
 endif()
 file(MAKE_DIRECTORY "${NOOKBIT_PACKAGE_DIR}")
+if(NOT EXISTS "${NOOKBIT_TEST_PACK}/imagepack.json" OR NOT EXISTS "${NOOKBIT_TEST_PACK}/images/test-character.png")
+  message(FATAL_ERROR "The bundled test ImagePack is missing.")
+endif()
 file(COPY_FILE "${NOOKBIT_EXECUTABLE}" "${NOOKBIT_PACKAGE_DIR}/nookbit.exe" ONLY_IF_DIFFERENT)
+file(COPY "${NOOKBIT_TEST_PACK}/" DESTINATION "${NOOKBIT_PACKAGE_DIR}/imagepacks/test")
 execute_process(
   COMMAND "${NOOKBIT_DEPLOY_TOOL}" --release --no-translations
     --include-plugins qoffscreen

@@ -10,6 +10,8 @@ Rectangle {
     property bool dark: false
     property var animation: ({})
     property bool playbackEnabled: true
+    property real userScale: 0.5
+    property point userPivotOffset: Qt.point(0, 0)
     implicitHeight: 156
     radius: 12
     color: dark ? "#263246" : "#edf2e9"
@@ -30,6 +32,8 @@ Rectangle {
                 anchors.fill: parent
                 descriptor: badge.animation
                 playing: badge.playbackEnabled && badge.visible
+                userScale: badge.userScale
+                userPivotOffset: badge.userPivotOffset
             }
             Rectangle {
                 anchors.centerIn: parent

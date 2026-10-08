@@ -30,6 +30,7 @@ add_library(nookbit_core STATIC
   modules/watch/watch_evaluator.cpp
   modules/watch/watch_file_readiness.cpp
   modules/character/character_presentation.cpp
+  modules/character/image_pack.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
   modules/planner/path_safety_validator.cpp
@@ -121,6 +122,15 @@ if(NOOKBIT_BUILD_QT_APP)
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)
+    set_property(TARGET nookbit APPEND PROPERTY LINK_DEPENDS
+      "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/imagepack.json"
+      "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/images/test-character.png")
+    add_custom_command(TARGET nookbit POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
+        "$<TARGET_FILE_DIR:nookbit>/imagepacks/test"
+      COMMENT "Deploying the test ImagePack"
+      VERBATIM)
     target_include_directories(nookbit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     file(TO_CMAKE_PATH "${NOOKBIT_DEV_DESTINATION_ROOT}" NOOKBIT_DEV_DESTINATION_PATH)
     target_compile_definitions(nookbit PRIVATE
@@ -160,6 +170,7 @@ if(NOOKBIT_BUILD_QT_APP)
           "-DNOOKBIT_QML_DIR=${CMAKE_CURRENT_SOURCE_DIR}/presentation/qml"
           "-DNOOKBIT_PACKAGE_DIR=${PROJECT_SOURCE_DIR}/out/package/NookBit-$<CONFIG>"
           "-DNOOKBIT_BUILD_CONFIG=$<CONFIG>"
+          "-DNOOKBIT_TEST_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
           -P "${PROJECT_SOURCE_DIR}/cmake/package_windows.cmake"
         DEPENDS nookbit
         COMMENT "Packaging the NookBit Windows runtime"

@@ -3,6 +3,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <nookbit/domain/result.hpp>
 
 namespace nookbit {
 struct ImagePackPoint { double x{0}, y{0}; };
@@ -28,4 +29,6 @@ struct ImagePack {
     std::map<std::string, ImagePackAnimation> animations;
     std::map<std::string, std::string> bindings;
 };
+/// 로더 결과나 메모리의 팩이 재생 가능한 공통 프레임 불변조건을 지키는지 확인하는 함수.
+[[nodiscard]] Result<void> validateImagePack(const ImagePack& pack);
 } // namespace nookbit

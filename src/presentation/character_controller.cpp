@@ -27,6 +27,23 @@ QString CharacterController::cueId() const { return cueId_; }
 QString CharacterController::animationId() const { return animationId_; }
 // 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
 QVariantMap CharacterController::animation() const {
+    if (imagePack_) {
+        const auto selected = imagePack_->animations.find(animationId_.toStdString());
+        if (selected == imagePack_->animations.end()) return {};
+        QVariantList steps;
+        for (const auto& step : selected->second.steps) {
+            const auto& frame = imagePack_->frames.at(step.frameId);
+            steps.append(QVariantMap{{"frameId", QString::fromStdString(step.frameId)},
+                {"source", QUrl::fromLocalFile(QString::fromStdWString(frame.imagePath.wstring()))},
+                {"imageWidth", frame.imageWidth}, {"imageHeight", frame.imageHeight},
+                {"region", QVariantMap{{"x", frame.region.x}, {"y", frame.region.y},
+                    {"width", frame.region.width}, {"height", frame.region.height}}},
+                {"pivot", QVariantMap{{"x", frame.pivot.x}, {"y", frame.pivot.y}}},
+                {"pixelsPerUnit", frame.pixelsPerUnit}, {"durationMs", step.durationMs}});
+        }
+        return {{"id", animationId_}, {"cueId", cueId_}, {"steps", steps}, {"loop", selected->second.loop},
+            {"filtering", imagePack_->filtering == ImagePackFiltering::Linear ? "linear" : "nearest"}};
+    }
     const auto selected = std::find_if(presentation_.animations.begin(), presentation_.animations.end(),
         [this](const CharacterAnimation& value) { return QString::fromStdString(value.id) == animationId_; });
     if (selected == presentation_.animations.end() || imageBaseUrl_.isEmpty()) return {};
@@ -52,8 +69,22 @@ Result<void> CharacterController::setPresentation(CharacterPresentation presenta
     const auto previousCueId = cueId_;
     presentation_ = std::move(presentation);
     imageBaseUrl_ = std::move(imageBaseUrl);
+    imagePack_.reset();
     refreshState();
     if (previousAnimationId == animationId_ && previousCueId == cueId_) emit animationChanged();
+    return Result<void>::success();
+}
+// 검증된 ImagePack의 프레임과 상황 연결을 재생 데이터로 적용하는 함수.
+Result<void> CharacterController::setImagePack(ImagePack pack) {
+    if (QThread::currentThread() != thread())
+        return Result<void>::failure({"character.wrong_thread", "Configure on the character's owning thread."});
+    const auto checked = validateImagePack(pack);
+    if (!checked) return checked;
+    const auto previousAnimation = animationId_;
+    const auto previousCue = cueId_;
+    imagePack_ = std::move(pack);
+    refreshState();
+    if (previousAnimation == animationId_ && previousCue == cueId_) emit animationChanged();
     return Result<void>::success();
 }
 // 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.
@@ -91,11 +122,18 @@ void CharacterController::refreshState() {
             [&id](const CharacterCue& cue) { return cue.id == id; });
     };
     auto cue = findCue(requestedCue);
-    if (cue == presentation_.cues.end()) { requestedCue = fallback; cue = findCue(fallback); }
+    if (cue == presentation_.cues.end()) cue = findCue(fallback);
     QString animation;
     if (cue != presentation_.cues.end()) {
         text = QString::fromStdString(cue->message);
-        animation = QString::fromStdString(cue->animationId);
+    }
+    if (imagePack_) {
+        auto binding = imagePack_->bindings.find(requestedCue);
+        if (binding == imagePack_->bindings.end()) { requestedCue = fallback; binding = imagePack_->bindings.find(fallback); }
+        animation = QString::fromStdString(binding->second);
+    } else {
+        if (findCue(requestedCue) == presentation_.cues.end()) requestedCue = fallback;
+        if (cue != presentation_.cues.end()) animation = QString::fromStdString(cue->animationId);
     }
     if (selected && !selected->message.empty()) text = QString::fromStdString(selected->message);
     const auto cueName = QString::fromStdString(requestedCue);

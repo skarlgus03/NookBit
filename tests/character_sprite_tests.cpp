@@ -1,5 +1,8 @@
 #include "presentation/character_controller.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
+#include "infrastructure/configuration/json_image_pack_loader.hpp"
+#include <QTemporaryDir>
+#include <QPointF>
 #include <QGuiApplication>
 #include <QQmlEngine>
 #include <QQmlComponent>
@@ -120,11 +123,89 @@ void testPlayback() {
     expect(waitFor([&] { return !sprite->property("error").toString().isEmpty(); }) && !sprite->property("ready").toBool(),
            "missing images must block playback and report an error");
 }
+// ImagePack 공통 데이터로 pivot·개인 배율·잘린 PNG·프레임별 시간을 재생하는지 검사하는 함수.
+void testImagePackPlayback() {
+    nookbit::JsonImagePackLoader loader(projectPath("schemas/imagepack.schema.json"));
+    const auto loaded = loader.load(std::filesystem::path(projectPath("resources/imagepacks/test/imagepack.json").toStdWString()));
+    expect(loaded.hasValue(), "complete test ImagePack should load");
+    if (!loaded) return;
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(projectPath("src/presentation/qml/CharacterSprite.qml")));
+    std::unique_ptr<QObject> sprite(component.create());
+    expect(sprite != nullptr, "common-frame player should instantiate");
+    if (!sprite) return;
+    sprite->setProperty("width", 64); sprite->setProperty("height", 64);
+    sprite->setProperty("playing", false);
+    nookbit::CharacterController character;
+    QObject::connect(&character, &nookbit::CharacterController::animationChanged, sprite.get(),
+        [&] { sprite->setProperty("descriptor", character.animation()); });
+    expect(character.setImagePack(loaded.value()).hasValue(), "resolved ImagePack should configure");
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }), "common frame image should load");
+    auto* region = sprite->findChild<QObject*>("characterFrameRegion");
+    auto* timer = sprite->findChild<QObject*>("characterSpriteTimer");
+    expect(region && timer, "player should expose testable crop geometry and timer");
+    if (!region || !timer) return;
+    expect(region->property("x").toDouble() == 0 && region->property("y").toDouble() == 0 &&
+        region->property("width").toDouble() == 64, "default pivot should align to the default screen anchor at half scale");
+    sprite->setProperty("anchor", QPointF(100, 200));
+    sprite->setProperty("userScale", 1.0);
+    expect(region->property("x").toDouble() == 36 && region->property("y").toDouble() == 104 &&
+        region->property("width").toDouble() == 128, "user scale should change size while preserving the pivot's screen anchor");
+    sprite->setProperty("userPivotOffset", QPointF(3, -4));
+    expect(region->property("x").toDouble() == 33 && region->property("y").toDouble() == 108,
+        "user pivot adjustment must be applied in logical units");
+    sprite->setProperty("userPivotOffset", QPointF(0, 0));
+    auto pack = loaded.value();
+    pack.frames.at("idle-1").pivot = {-10, 150};
+    pack.animations.at("idle").steps[0].durationMs = 70;
+    pack.animations.at("idle").steps[1].durationMs = 130;
+    expect(character.setImagePack(pack).hasValue(), "pack with per-frame logical pivots should configure");
+    expect(timer->property("interval").toInt() == 70, "first step must use its own duration");
+    QMetaObject::invokeMethod(sprite.get(), "advanceFrame");
+    expect(sprite->property("currentFrameId").toString() == "idle-1" && timer->property("interval").toInt() == 130 &&
+        region->property("x").toDouble() == 110 && region->property("y").toDouble() == 50,
+        "outside-image pivots and per-step durations must survive playback");
+    auto invalid = pack; invalid.frames.at("idle-0").pixelsPerUnit = 0;
+    expect(!character.setImagePack(invalid) && sprite->property("currentFrameId").toString() == "idle-1",
+        "invalid pack replacement must preserve selected pack and playback");
+
+    QTemporaryDir directory;
+    expect(directory.isValid(), "mixed-frame fixture directory should exist");
+    if (!directory.isValid()) return;
+    const auto fullPath = directory.filePath("full.png");
+    const auto trimPath = directory.filePath("trim.png");
+    QImage full(512, 512, QImage::Format_ARGB32); full.fill(Qt::transparent);
+    QImage trim(384, 448, QImage::Format_ARGB32); trim.fill(Qt::transparent);
+    expect(full.save(fullPath, "PNG") && trim.save(trimPath, "PNG"), "owned individual image fixtures should save");
+    pack.frames["full"] = {std::filesystem::path(fullPath.toStdWString()), 512, 512,
+        {0, 0, 512, 512}, {64, 112}, 4};
+    pack.frames["trim"] = {std::filesystem::path(trimPath.toStdWString()), 384, 448,
+        {0, 0, 384, 448}, {32, 96}, 4};
+    pack.animations["idle"] = {true, {{"full", 60}, {"trim", 90}}};
+    pack.filtering = nookbit::ImagePackFiltering::Linear;
+    expect(character.setImagePack(pack).hasValue(), "mixed atlas/individual-image pack should configure");
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }), "512-pixel PNG should load");
+    expect(sprite->findChild<QObject*>("characterAtlas")->property("smooth").toBool(),
+        "illustration packs must select linear filtering");
+    expect(region->property("x").toDouble() == 36 && region->property("y").toDouble() == 88 &&
+        region->property("width").toDouble() == 128, "high-resolution PNG must use logical density rather than viewport fitting");
+    QMetaObject::invokeMethod(sprite.get(), "advanceFrame");
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }), "cropped PNG should load");
+    expect(region->property("x").toDouble() == 68 && region->property("y").toDouble() == 104 &&
+        region->property("width").toDouble() == 96 && region->property("height").toDouble() == 112,
+        "trimming must change bounds without changing the character's logical scale or anchor");
+    expect(!sprite->property("clip").toBool(), "nominal viewport must not clip wider or outside-pivot poses");
+    expect(character.publish({"work", "job", nookbit::CharacterUpdateKind::Activity, true, {}, "file.work"}).hasValue(),
+        "work cue should select the remaining atlas animation");
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }) &&
+        sprite->property("currentFrameId").toString() == "work-0", "atlas playback must work after individual PNG steps");
+}
 } // namespace
 
 // 화면을 띄우지 않고 캐릭터 스프라이트 재생 검사를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QGuiApplication application(argc, argv);
     testPlayback();
+    testImagePackPlayback();
     return failures == 0 ? 0 : 1;
 }

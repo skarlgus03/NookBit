@@ -5,6 +5,8 @@
 #include <QVariantMap>
 #include <nookbit/application/character_channel.hpp>
 #include <nookbit/domain/character_presentation.hpp>
+#include <nookbit/domain/image_pack.hpp>
+#include <optional>
 #include <map>
 
 namespace nookbit {
@@ -36,6 +38,8 @@ public:
     [[nodiscard]] QVariantMap animation() const;
     /// 검증한 표현 설정을 교체하고 현재 상황을 다시 선택하는 함수.
     [[nodiscard]] Result<void> setPresentation(CharacterPresentation presentation, QUrl imageBaseUrl = {});
+    /// 검증된 ImagePack의 프레임과 상황 연결을 재생 데이터로 적용하는 함수.
+    [[nodiscard]] Result<void> setImagePack(ImagePack pack);
     /// 검증된 스프라이트·애니메이션 설정을 반환하는 함수.
     [[nodiscard]] const CharacterPresentation& presentation() const noexcept;
     /// 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.
@@ -54,6 +58,7 @@ private:
     QString animationId_;
     CharacterPresentation presentation_;
     QUrl imageBaseUrl_;
+    std::optional<ImagePack> imagePack_;
     State state_{State::Resting};
 };
 } // namespace nookbit

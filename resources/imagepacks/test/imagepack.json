@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "packType": "imagepack",
+  "id": "nookbit.test",
+  "name": "NookBit test character",
+  "version": "0.1.0",
+  "author": "NookBit",
+  "display": {
+    "referenceSize": { "width": 128, "height": 128 },
+    "pixelsPerUnit": 1,
+    "pivot": { "x": 64, "y": 96 },
+    "filtering": "nearest"
+  },
+  "sources": [
+    { "id": "sheet", "kind": "atlas", "file": "images/test-character.png", "grid": { "frameWidth": 128, "frameHeight": 128, "columns": 4, "rows": 3 } }
+  ],
+  "frames": [
+    { "id": "idle-0", "sourceId": "sheet", "region": { "type": "cell", "index": 0 } },
+    { "id": "idle-1", "sourceId": "sheet", "region": { "type": "cell", "index": 1 } },
+    { "id": "idle-2", "sourceId": "sheet", "region": { "type": "cell", "index": 2 } },
+    { "id": "idle-3", "sourceId": "sheet", "region": { "type": "cell", "index": 3 } },
+    { "id": "call-0", "sourceId": "sheet", "region": { "type": "cell", "index": 4 } },
+    { "id": "call-1", "sourceId": "sheet", "region": { "type": "cell", "index": 5 } },
+    { "id": "call-2", "sourceId": "sheet", "region": { "type": "cell", "index": 6 } },
+    { "id": "call-3", "sourceId": "sheet", "region": { "type": "cell", "index": 7 } },
+    { "id": "work-0", "sourceId": "sheet", "region": { "type": "cell", "index": 8 } },
+    { "id": "work-1", "sourceId": "sheet", "region": { "type": "cell", "index": 9 } },
+    { "id": "work-2", "sourceId": "sheet", "region": { "type": "cell", "index": 10 } },
+    { "id": "work-3", "sourceId": "sheet", "region": { "type": "cell", "index": 11 } }
+  ],
+  "animations": [
+    { "id": "idle", "loop": true, "steps": [ { "frameId": "idle-0", "durationMs": 400 }, { "frameId": "idle-1", "durationMs": 400 }, { "frameId": "idle-2", "durationMs": 400 }, { "frameId": "idle-3", "durationMs": 400 } ] },
+    { "id": "call", "loop": true, "steps": [ { "frameId": "call-0", "durationMs": 200 }, { "frameId": "call-1", "durationMs": 200 }, { "frameId": "call-2", "durationMs": 200 }, { "frameId": "call-3", "durationMs": 200 } ] },
+    { "id": "work", "loop": true, "steps": [ { "frameId": "work-0", "durationMs": 150 }, { "frameId": "work-1", "durationMs": 150 }, { "frameId": "work-2", "durationMs": 150 }, { "frameId": "work-3", "durationMs": 150 } ] }
+  ],
+  "bindings": [
+    { "cueId": "resting", "animationId": "idle" },
+    { "cueId": "calling", "animationId": "call" },
+    { "cueId": "working", "animationId": "work" },
+    { "cueId": "file.offer", "animationId": "call" },
+    { "cueId": "file.work", "animationId": "work" }
+  ]
+}

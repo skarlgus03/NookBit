@@ -52,6 +52,7 @@
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
+#include "infrastructure/configuration/json_image_pack_loader.hpp"
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -268,6 +269,19 @@ int main(int argc, char* argv[]) {
     const auto configuredCharacter = characterController.setPresentation(
         std::move(characterPresentation.value()), characterImageBase);
     if (!configuredCharacter) return EXIT_FAILURE;
+    // 기본 테스트 캐릭터는 ImagePack 로더의 공통 프레임으로 재생한다.
+    if (verifyUi || characterPath == bundledCharacter) {
+        const nookbit::JsonImagePackLoader imagePackLoader;
+        const auto packPath = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/test/imagepack.json"));
+        auto imagePack = imagePackLoader.load(std::filesystem::path(packPath.toStdWString()));
+        if (!imagePack) {
+            QTextStream(stderr) << QString::fromStdString(imagePack.error().message) << Qt::endl;
+            if (verifyUi) return EXIT_FAILURE;
+        } else {
+            const auto applied = characterController.setImagePack(std::move(imagePack.value()));
+            if (!applied) return EXIT_FAILURE;
+        }
+    }
     nookbit::ICharacterChannel& characterChannel = characterController;
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {

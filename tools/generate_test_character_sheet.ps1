@@ -46,6 +46,9 @@ function New-TestCharacterSheet {
             $graphics.ResetTransform()
         }
         $bitmap.Save($sheetPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        $packImage = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../resources/imagepacks/test/images/test-character.png'))
+        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($packImage))
+        Copy-Item -LiteralPath $sheetPath -Destination $packImage -Force
         Write-Output $sheetPath
     } finally {
         $font.Dispose(); $pen.Dispose(); $ink.Dispose(); $graphics.Dispose(); $bitmap.Dispose()

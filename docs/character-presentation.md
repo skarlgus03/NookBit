@@ -1,5 +1,9 @@
 # Character presentation contract v1
 
+The default visual path now uses a complete ImagePack and the common-frame player;
+see `imagepack-v1.md`. This older profile continues to supply default messages and
+supports existing custom grid profiles. It is not the new ImagePack manifest format.
+
 The character receives feature-independent updates through `ICharacterChannel`.
 `sourceId` identifies the feature, `entryId` identifies its active item, and
 `kind` is `Activity` or `Attention`. `active=false` removes only that item.

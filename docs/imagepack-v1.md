@@ -1,9 +1,10 @@
 # NookBit ImagePack v1
 
-Status: the JSON loader and common resolved frame data are implemented. The
-application still uses the existing character presentation profile and grid
-player. Importing, selecting and pivot-aware rendering are subsequent tasks.
-Do not pass these examples to the existing `character.presentation.json` loader.
+Status: the JSON loader, common resolved frame data and pivot-aware renderer are
+implemented. The default test character now loads a complete ImagePack beside
+the executable. Importing, pack selection and user adjustment UI remain subsequent
+tasks. Do not pass ImagePack manifests to the older `character.presentation.json`
+loader; older custom profiles remain supported separately.
 
 ## Scope and layout
 
@@ -160,6 +161,12 @@ or relabeled as an ImagePack.
 
 ## Examples and next step
 
+`resources/imagepacks/test/` is a complete, ready-to-load test pack with its PNG.
+Builds copy it beside the executable under `imagepacks/test/`; Release packaging
+copies it into the same relative location. The default startup and headless app
+check both use the ImagePack loader and the common-frame player. Existing custom
+legacy profiles retain their legacy visual selection.
+
 `resources/imagepacks/examples/individual.imagepack.json` assumes 512-by-512
 frames at density 4; `carry` demonstrates a trimmed-frame pivot override.
 `resources/imagepacks/examples/atlas.imagepack.json` demonstrates density 1,
@@ -182,4 +189,16 @@ targets. Unusable input returns a field/item-specific error rather than partial
 pack data. The shared JSON validator now handles v1's `oneOf` variants and positive
 numeric bounds.
 
-Next adapt the current renderer to resolved ImagePack frame data, then build import UI.
+`CharacterController::setImagePack` checks common-frame invariants before replacing
+the selected visual pack. Invalid input leaves previous playback unchanged.
+The renderer consumes resolved step data, clips only the requested image region,
+positions it relative to its logical pivot, applies personal scale and supports
+different source files and step durations. It also converts old grid descriptors
+to the same runtime step shape.
+
+`CharacterSprite.qml` accepts `userScale`, `userPivotOffset`, and a local `anchor`.
+The current sidebar uses scale 0.5 and offset (0, 0); adjustment controls and saving
+these personal values are not implemented yet. The nominal widget rectangle does
+not auto-fit or clip a wider pose. The actual app window still bounds rendering.
+New PNGs may pause playback during their first asynchronous decode; the current
+test pack uses one cached atlas. Next build the pack import/selection workflow.
