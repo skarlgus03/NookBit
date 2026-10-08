@@ -223,9 +223,10 @@ class IWatchProposalUseCase {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.
     virtual ~IWatchProposalUseCase() = default;
-    /// 설정된 폴더를 검사하고 분류 가능 파일의 조건 충족 여부를 반환하는 함수.
+    /// 대기 경로를 제외한 분류 가능 파일의 조건 충족 여부를 반환하는 함수.
     [[nodiscard]] virtual Result<WatchProposal> execute(
-        const WatchSettings& settings, std::int64_t nowUtcMs) = 0;
+        const WatchSettings& settings, std::int64_t nowUtcMs,
+        const std::vector<std::filesystem::path>& pendingPaths = {}) = 0;
 };
 
 } // namespace nookbit

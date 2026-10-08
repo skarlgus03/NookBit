@@ -12,9 +12,10 @@ public:
                                IRuleEngine& ruleEngine,
                                IRuleSetRepository& rules);
 
-    /// 감시 폴더를 읽고 분류 가능한 파일의 제안 조건을 판단하는 함수.
+    /// 대기 경로를 제외하고 감시 폴더의 분류 가능한 파일로 제안 조건을 판단하는 함수.
     [[nodiscard]] Result<WatchProposal> execute(
-        const WatchSettings& settings, std::int64_t nowUtcMs) override;
+        const WatchSettings& settings, std::int64_t nowUtcMs,
+        const std::vector<std::filesystem::path>& pendingPaths = {}) override;
 
 private:
     IScanner& scanner_;

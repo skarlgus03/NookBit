@@ -442,9 +442,10 @@ void testWatchedFilesUseNormalSortWorkflow() {
         directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
     nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, workflow.ruleEngine, workflow.rules);
     nookbit::WatchController watch(pending, watchSettings, evaluate, incoming);
-    watch.saveSettings(incoming, true, false, 10, false, true, 2, false, 1, false, 1, {});
+    watch.saveSettings(incoming, true, false, 10, false, true, 1, false, 1, false, 1, {});
     watch.checkNow();
-    expect(watch.proposalVisible() && pending.count() == 1 && preview.hasPreview(),
+    expect(watch.proposalVisible() && watch.proposalFiles().size() == 1 &&
+               watch.proposalFiles().contains(second) && pending.count() == 1 && preview.hasPreview(),
            "proposal alone must not alter the queue or authorize movement");
     watch.addProposalToPending();
     expect(pending.count() == 2 && !preview.hasPreview() && !preview.hasApprovedPlan() &&

@@ -79,12 +79,38 @@ void testProposalAndPendingOnly() {
     expect(pending.count() == 3 && QFile::exists(first) && QFile::exists(second) &&
                QFile::exists(third) && !controller.proposalVisible(),
            "accepting a proposal should register paths without moving files");
+    controller.checkNow();
+    expect(!controller.proposalVisible(), "queued files must not be offered again");
+    const auto fourth = directory.filePath(QStringLiteral("fourth.jpg"));
+    const auto fifth = directory.filePath(QStringLiteral("fifth.jpg"));
+    expect(writeFile(fourth), "fourth watched file should be written");
+    controller.checkNow();
+    expect(!controller.proposalVisible(),
+           "three pending files and one new file must not meet a two-file threshold");
+    expect(writeFile(fifth), "fifth watched file should be written");
+    controller.checkNow();
+    expect(controller.proposalVisible() && controller.proposalFiles().size() == 2 &&
+               controller.proposalFiles().contains(fourth) && controller.proposalFiles().contains(fifth),
+           "only the two new files should be offered");
+    pending.addUrl(QUrl::fromLocalFile(fourth));
+    expect(!controller.proposalVisible(), "manual queueing must invalidate a visible old proposal");
+    controller.checkNow();
+    expect(!controller.proposalVisible(), "one remaining candidate must not satisfy the threshold");
+    pending.removeAt(pending.count() - 1);
+    controller.checkNow();
+    expect(controller.proposalVisible() && controller.proposalFiles().size() == 2,
+           "removing a file from pending should make it eligible again");
     nookbit::PendingFilesModel restartedPending;
+    restartedPending.restorePaths(pending.filePaths());
     nookbit::WatchController restarted(
         restartedPending, repository, evaluateWatchFolder, QString());
     expect(restarted.enabled() && restarted.folder() == folder &&
                restarted.minimumFileCount() == 2 && restarted.rescanIntervalMinutes() == 10,
            "watch settings should reload after restarting the controller");
+    restarted.checkNow();
+    expect(restarted.proposalVisible() && restarted.proposalFiles().size() == 2 &&
+               !restarted.proposalFiles().contains(first),
+           "restored pending paths must be excluded after restarting the controller");
 }
 
 } // namespace

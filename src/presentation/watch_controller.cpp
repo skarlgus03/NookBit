@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QUrl>
 
@@ -48,6 +49,14 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
             this, [this] { debounceTimer_.start(); });
     connect(&debounceTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     connect(&rescanTimer_, &QTimer::timeout, this, &WatchController::checkNow);
+    // 대기 목록이 바뀌면 이전 제안을 닫고 최신 목록으로 조건을 다시 검사하는 함수.
+    connect(&pendingFiles_, &PendingFilesModel::countChanged, this, [this] {
+        const bool recheck = settings_.enabled || proposalVisible_;
+        lastOfferedSignature_.clear();
+        clearProposal();
+        emit watchChanged();
+        if (recheck) debounceTimer_.start();
+    });
     loadSettings(defaultFolder);
     restartMonitoring();
 }
@@ -204,7 +213,9 @@ void WatchController::checkNow() {
         directoryWatcher_.addPath(folder());
     }
     const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
-    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs);
+    std::vector<std::filesystem::path> pendingPaths;
+    for (const auto& path : pendingFiles_.filePaths()) pendingPaths.emplace_back(path.toStdWString());
+    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths);
     if (!result) {
         clearProposal();
         statusMessage_ = QStringLiteral("감시 폴더를 평가하지 못했어요: %1")
@@ -232,7 +243,8 @@ void WatchController::checkNow() {
     lastOfferedSignature_ = signature;
     proposedFiles_.clear();
     for (const auto& file : eligible) {
-        proposedFiles_.append(QString::fromStdWString(file.absolutePath.wstring()));
+        proposedFiles_.append(QDir::fromNativeSeparators(
+            QString::fromStdWString(file.absolutePath.wstring())));
     }
     proposalVisible_ = true;
     proposalText_ = QStringLiteral("분류 가능한 파일 %1개가 설정한 조건에 닿았어요. 정리 대기 목록에 담을까요? 실제 이동은 별도 승인 후에만 합니다.")
@@ -245,7 +257,9 @@ void WatchController::checkNow() {
 void WatchController::addProposalToPending() {
     if (!proposalVisible_) return;
     const int before = pendingFiles_.count();
-    for (const auto& path : proposedFiles_) pendingFiles_.addUrl(QUrl::fromLocalFile(path));
+    // 등록 중 countChanged가 제안을 비우므로 경로 목록을 먼저 복사한다.
+    const auto files = proposedFiles_;
+    for (const auto& path : files) pendingFiles_.addUrl(QUrl::fromLocalFile(path));
     const int added = pendingFiles_.count() - before;
     clearProposal();
     statusMessage_ = QStringLiteral("파일 %1개를 대기 목록에만 담았어요. 이동하려면 미리보기와 승인이 필요해요.")

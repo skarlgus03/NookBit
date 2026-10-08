@@ -3,8 +3,25 @@
 #include "modules/watch/watch_evaluator.hpp"
 
 #include <utility>
+#include <algorithm>
+#include <cwctype>
+#include <set>
 
 namespace nookbit {
+namespace {
+
+// 경로 구분자·상대 구간과 Windows 대소문자를 정리해 비교 키를 만드는 함수.
+std::wstring pendingPathKey(const std::filesystem::path& path) {
+    auto key = path.lexically_normal().generic_wstring();
+#ifdef _WIN32
+    std::transform(key.begin(), key.end(), key.begin(), [](wchar_t character) {
+        return static_cast<wchar_t>(std::towlower(character));
+    });
+#endif
+    return key;
+}
+
+} // namespace
 
 // 파일 검사·규칙 판단·규칙 조회 계약을 주입받는 생성자.
 EvaluateWatchFolderUseCase::EvaluateWatchFolderUseCase(
@@ -13,7 +30,8 @@ EvaluateWatchFolderUseCase::EvaluateWatchFolderUseCase(
 
 // 감시 폴더를 읽고 분류 가능한 파일의 제안 조건을 판단하는 함수.
 Result<WatchProposal> EvaluateWatchFolderUseCase::execute(
-    const WatchSettings& settings, std::int64_t nowUtcMs) {
+    const WatchSettings& settings, std::int64_t nowUtcMs,
+    const std::vector<std::filesystem::path>& pendingPaths) {
     if (settings.folder.empty() || settings.conditions.empty()) {
         return Result<WatchProposal>::failure({
             "watch.settings_incomplete", "A folder and at least one condition are required.",
@@ -31,7 +49,10 @@ Result<WatchProposal> EvaluateWatchFolderUseCase::execute(
     WatchProposal proposal;
     proposal.warnings = std::move(scanned.value().warnings);
     proposal.eligibleFiles.reserve(scanned.value().files.size());
+    std::set<std::wstring> pendingKeys;
+    for (const auto& path : pendingPaths) pendingKeys.insert(pendingPathKey(path));
     for (const auto& file : scanned.value().files) {
+        if (pendingKeys.contains(pendingPathKey(file.absolutePath))) continue;
         auto decision = ruleEngine_.decide(
             file, rules.value(), MultiMatchPolicy::FirstMatch, nowUtcMs);
         if (!decision) return Result<WatchProposal>::failure(decision.error());

@@ -127,6 +127,25 @@ void testWatchUseCase() {
                scanner.lastRequest.excludePatterns.size() == 1 &&
                scanner.lastRequest.selectedFiles.empty(),
            "watch use case should pass folder options through the scanner port");
+    const auto pendingPhoto = useCase.execute(settings, 60000,
+        {L"C:/fake/Downloads/./photo.jpg"});
+    expect(pendingPhoto.hasValue() && pendingPhoto.value().eligibleFiles.empty() &&
+               !pendingPhoto.value().evaluation.shouldOffer &&
+               pendingPhoto.value().evaluation.fileCount == 0 &&
+               pendingPhoto.value().evaluation.totalBytes == 0 &&
+               pendingPhoto.value().evaluation.oldestAgeMinutes == 0 &&
+               pendingPhoto.value().warnings.size() == 1,
+           "pending files must not contribute to count, size, age or proposal paths");
+#ifdef _WIN32
+    const auto differentCase = useCase.execute(settings, 60000,
+        {L"c:\\FAKE\\downloads\\PHOTO.JPG"});
+    expect(differentCase.hasValue() && differentCase.value().eligibleFiles.empty(),
+           "Windows pending path comparison must ignore case and slash differences");
+#endif
+    const auto unrelatedPending = useCase.execute(settings, 60000,
+        {L"C:/another/photo.jpg"});
+    expect(unrelatedPending.hasValue() && unrelatedPending.value().evaluation.shouldOffer,
+           "a same-named pending file in another folder must not suppress the candidate");
     scanner.fail = true;
     const auto failed = useCase.execute(settings, 60000);
     expect(!failed.hasValue() && failed.error().code == "test.scan_failed",
