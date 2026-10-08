@@ -1,9 +1,9 @@
 # NookBit ImagePack v1
 
-Status: defined data contract. The application still uses the existing character
-presentation profile and grid player. ImagePack loading, importing, selecting and
-pivot-aware rendering are subsequent implementation tasks. Do not pass these new
-examples to the existing `character.presentation.json` loader.
+Status: the JSON loader and common resolved frame data are implemented. The
+application still uses the existing character presentation profile and grid
+player. Importing, selecting and pivot-aware rendering are subsequent tasks.
+Do not pass these examples to the existing `character.presentation.json` loader.
 
 ## Scope and layout
 
@@ -167,5 +167,19 @@ frames at density 4; `carry` demonstrates a trimmed-frame pivot override.
 Both examples are manifests only: their `images/` paths are placeholders, not
 ready-to-import packs with included assets.
 
-Next implement a loader that resolves these manifests to shared frame data,
-then adapt the current test renderer to that data before building import UI.
+`IImagePackLoader` returns Qt-independent `ImagePack` values. `JsonImagePackLoader`
+reads an absolute local manifest path and the v1 schema, validates references and
+resolves full-image/cell/rectangle regions to source pixel rectangles. Every
+returned frame has a canonical absolute image path, actual image dimensions,
+effective logical pivot and positive pixel density. It does not copy/import files,
+modify selected packs, render images, store user scale or execute feature work.
+
+Asset validation probes the PNG header and dimensions without decoding all pixel
+data. A valid header is not proof that every compressed pixel is intact; decoding
+errors and files changed after loading remain renderer checks. Asset paths are
+canonicalized and must remain under the manifest directory, including symlink
+targets. Unusable input returns a field/item-specific error rather than partial
+pack data. The shared JSON validator now handles v1's `oneOf` variants and positive
+numeric bounds.
+
+Next adapt the current renderer to resolved ImagePack frame data, then build import UI.

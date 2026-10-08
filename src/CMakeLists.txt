@@ -84,9 +84,10 @@ if(NOOKBIT_BUILD_QT_APP)
       infrastructure/configuration/json_pending_files_repository.cpp
       infrastructure/configuration/json_rule_set_repository.cpp
       infrastructure/configuration/json_character_presentation.cpp
+      infrastructure/configuration/json_image_pack_loader.cpp
     )
     target_include_directories(nookbit_json_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(nookbit_json_config PUBLIC nookbit_core Qt6::Core)
+    target_link_libraries(nookbit_json_config PUBLIC nookbit_core Qt6::Core PRIVATE Qt6::Gui)
 
     add_library(nookbit_history STATIC
       infrastructure/cryptography/qt_plan_hasher.cpp

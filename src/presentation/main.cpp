@@ -359,6 +359,7 @@ int main(int argc, char* argv[]) {
                            pendingFiles.count() == 0 && !previewController.hasPreview() &&
                            bundledRules.load().hasValue() &&
                            QFile::exists(QStringLiteral(":/nookbit/001_initial.sql")) &&
+                           QFile::exists(QStringLiteral(":/nookbit/imagepack.schema.json")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));
         if (!ready) {
             return EXIT_FAILURE;

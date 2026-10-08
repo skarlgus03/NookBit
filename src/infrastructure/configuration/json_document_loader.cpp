@@ -62,6 +62,26 @@ Result<void> validateValue(
         !hasType(value, schema.value(QStringLiteral("type")).toString())) {
         return invalid(location, QStringLiteral("incorrect JSON type"));
     }
+    if (schema.contains(QStringLiteral("oneOf"))) {
+        int matches = 0;
+        std::string detail;
+        for (const auto& branch : schema.value(QStringLiteral("oneOf")).toArray()) {
+            const auto variant = branch.toObject();
+            const auto checked = validateValue(value, variant, schemaRoot, location, depth + 1);
+            if (checked) ++matches;
+            else {
+                const auto properties = variant.value(QStringLiteral("properties")).toObject();
+                for (const auto& tag : {QStringLiteral("kind"), QStringLiteral("type")}) {
+                    const auto tagSchema = properties.value(tag).toObject();
+                    if (tagSchema.contains(QStringLiteral("const")) &&
+                        value.toObject().value(tag) == tagSchema.value(QStringLiteral("const")))
+                        detail = checked.error().message;
+                }
+            }
+        }
+        if (matches != 1) return Result<void>::failure({"json.schema_invalid", detail.empty()
+            ? (location + QStringLiteral(": expected exactly one supported variant")).toStdString() : detail});
+    }
     if (schema.contains(QStringLiteral("const")) &&
         value != schema.value(QStringLiteral("const"))) {
         return invalid(location, QStringLiteral("required constant differs"));
@@ -158,6 +178,10 @@ Result<void> validateValue(
 
     if (value.isDouble()) {
         const double number = value.toDouble();
+        if (!std::isfinite(number)) return invalid(location, QStringLiteral("number must be finite"));
+        if (schema.contains(QStringLiteral("exclusiveMinimum")) &&
+            number <= schema.value(QStringLiteral("exclusiveMinimum")).toDouble())
+            return invalid(location, QStringLiteral("number must exceed the exclusive minimum"));
         if (schema.contains(QStringLiteral("minimum")) &&
             number < schema.value(QStringLiteral("minimum")).toDouble()) {
             return invalid(location, QStringLiteral("number is below minimum"));

@@ -58,7 +58,7 @@ Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교
 
 ## 프로젝트 지도
 
-개별 PNG·격자/직사각형 아틀라스·공통 pivot·개인 배율 분리 규칙은 [ImagePack v1](docs/imagepack-v1.md)에 정의했다. [JSON Schema](schemas/imagepack.schema.json)와 두 방식의 예제를 제공한다. 이 새 규격의 로더·임포트·pivot 재생은 다음 구현 작업이며, 현재 실행 앱의 `character.presentation.json`과는 다른 규격이다.
+개별 PNG·격자/직사각형 아틀라스·공통 pivot·개인 배율 분리 규칙은 [ImagePack v1](docs/imagepack-v1.md)에 정의했다. [JSON Schema](schemas/imagepack.schema.json)와 두 방식의 예제를 제공한다. 로더는 이미지 헤더·실제 크기·프레임 범위·참조를 검증하고 기본 pivot·배율을 적용한 공통 프레임 데이터를 반환한다. 임포트·선택·pivot 재생 연결은 다음 작업이며, 현재 실행 앱의 `character.presentation.json`과는 다른 규격이다.
 
 캐릭터 상황별 문구와 스프라이트 시트 규격은 [캐릭터 표현 규격](docs/character-presentation.md)에 정의했다. `cueId`를 공통 창구로 전달하면 JSON 설정에서 문구와 애니메이션 이름을 선택한다. 사용자 앱 데이터 폴더의 `character.presentation.json`으로 기본 설정을 교체할 수 있다. 현재는 프레임 번호가 보이는 임시 테스트 시트로 실제 격자 재생·반복·상태 전환을 확인할 수 있다. 창을 숨기거나 최소화하면 프레임 타이머를 멈춘다. 최종 캐릭터 그림과 탐색기 연동은 아직 없다.
 

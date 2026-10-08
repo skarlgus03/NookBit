@@ -119,6 +119,16 @@ if(TARGET nookbit_json_config)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
 
+  add_executable(nookbit_image_pack_loader_tests image_pack_loader_tests.cpp)
+  target_include_directories(nookbit_image_pack_loader_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_image_pack_loader_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_image_pack_loader_tests PRIVATE nookbit_json_config Qt6::Gui)
+  add_test(NAME nookbit_image_pack_loader_tests COMMAND nookbit_image_pack_loader_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_image_pack_loader_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+
   add_executable(nookbit_character_controller_tests
     character_controller_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.hpp
