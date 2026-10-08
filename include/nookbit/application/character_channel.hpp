@@ -14,6 +14,7 @@ struct CharacterUpdate {
     CharacterUpdateKind kind{CharacterUpdateKind::Attention};
     bool active{false};
     std::string message;
+    std::string cueId;
 };
 
 /// 기능별 상태를 전달하는 창구. 같은 sourceId·entryId·kind는 갱신하고 비활성 입력은 제거한다.

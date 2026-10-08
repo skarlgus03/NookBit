@@ -29,6 +29,7 @@ add_library(nookbit_core STATIC
   modules/rules/rule_engine.cpp
   modules/watch/watch_evaluator.cpp
   modules/watch/watch_file_readiness.cpp
+  modules/character/character_presentation.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
   modules/planner/path_safety_validator.cpp
@@ -82,6 +83,7 @@ if(NOOKBIT_BUILD_QT_APP)
       infrastructure/configuration/json_watch_settings_repository.cpp
       infrastructure/configuration/json_pending_files_repository.cpp
       infrastructure/configuration/json_rule_set_repository.cpp
+      infrastructure/configuration/json_character_presentation.cpp
     )
     target_include_directories(nookbit_json_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(nookbit_json_config PUBLIC nookbit_core Qt6::Core)

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "sheets": [
+    { "id": "nookbit", "image": "sprites/nookbit.png", "frameWidth": 128, "frameHeight": 128, "columns": 4, "rows": 3 }
+  ],
+  "animations": [
+    { "id": "idle", "sheetId": "nookbit", "frames": [0, 1, 2, 3], "frameDurationMs": 250, "loop": true },
+    { "id": "call", "sheetId": "nookbit", "frames": [4, 5, 6, 7], "frameDurationMs": 150, "loop": true },
+    { "id": "work", "sheetId": "nookbit", "frames": [8, 9, 10, 11], "frameDurationMs": 100, "loop": true }
+  ],
+  "cues": [
+    { "id": "resting", "message": "잠깐 쉬고 있어요.", "animationId": "idle" },
+    { "id": "calling", "message": "확인할 내용이 있어요!", "animationId": "call" },
+    { "id": "working", "message": "작업 중이에요.", "animationId": "work" },
+    { "id": "file.work", "message": "파일을 옮기고 있어요.", "animationId": "work" },
+    { "id": "file.offer", "message": "정리할 파일이 있어요!", "animationId": "call" }
+  ]
+}

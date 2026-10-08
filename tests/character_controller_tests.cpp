@@ -1,5 +1,6 @@
 #include "presentation/character_controller.hpp"
 #include "presentation/background_task_runner.hpp"
+#include "infrastructure/configuration/json_character_presentation.hpp"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QSemaphore>
@@ -7,6 +8,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <atomic>
+#include <QTemporaryDir>
+#include <QFile>
 
 namespace {
 int failures = 0;
@@ -119,6 +122,64 @@ void testIndependentSources() {
     expect(channel.publish({"feature-a", "shared-id", Kind::Attention, false, {}}).hasValue() &&
                character.stateKey() == "resting", "removing the final request must return to rest");
 }
+// 프로젝트의 캐릭터 설정 예제 경로를 만드는 함수.
+QString profilePath(const char* relative) {
+    return QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/" + QString::fromUtf8(relative);
+}
+// 실제 JSON 예제로 상황 선택·문구 우선순위·잘못된 참조를 검사하는 함수.
+void testPresentationConfiguration() {
+    const auto schema = profilePath("schemas/character-presentation.schema.json");
+    const auto defaults = nookbit::loadCharacterPresentation(
+        profilePath("resources/character/default.presentation.json"), schema);
+    expect(defaults.hasValue(), "bundled text-only presentation should validate");
+    const auto sample = nookbit::loadCharacterPresentation(
+        profilePath("resources/character/example.sprite.presentation.json"), schema);
+    expect(sample.hasValue(), "sprite metadata example should validate without pretending its PNG exists");
+    if (!sample) return;
+    nookbit::CharacterController character;
+    expect(character.setPresentation(sample.value()).hasValue() && character.animationId() == "idle",
+           "resting should select the configured sprite animation");
+    auto custom = sample.value();
+    custom.cues.push_back({"other.feature.offer", "별도 기능의 안내", "call"});
+    expect(character.setPresentation(custom).hasValue(), "new situations should be configurable without state code changes");
+    nookbit::ICharacterChannel& channel = character;
+    expect(channel.publish({"other-feature", "offer", nookbit::CharacterUpdateKind::Attention, true, {},
+                "other.feature.offer"}).hasValue() && character.cueId() == "other.feature.offer" &&
+                character.animationId() == "call" && character.message() == QString::fromUtf8("별도 기능의 안내"),
+           "a generic feature cue should choose its configured text and animation");
+    expect(channel.publish({"other-feature", "offer", nookbit::CharacterUpdateKind::Attention, true, "동적 안내",
+                "other.feature.offer"}).hasValue() && character.message() == QString::fromUtf8("동적 안내"),
+           "explicit dynamic messages should override configured static text");
+    expect(channel.publish({"other-feature", "offer", nookbit::CharacterUpdateKind::Attention, true, {},
+                "not.configured"}).hasValue() && character.cueId() == "calling" && character.animationId() == "call",
+           "unknown situations should fall back to the current generic state");
+    auto invalid = custom;
+    invalid.animations.front().frames = {12};
+    expect(!character.setPresentation(invalid) && character.animationId() == "call",
+           "invalid frame references must not replace a working profile");
+    invalid = custom; invalid.animations.front().sheetId = "missing";
+    expect(!nookbit::validateCharacterPresentation(invalid), "unknown sheets must fail");
+    invalid = custom; invalid.cues.back().animationId = "missing";
+    expect(!nookbit::validateCharacterPresentation(invalid), "unknown animations must fail");
+    invalid = custom; invalid.sheets.front().image = "../outside.png";
+    expect(!nookbit::validateCharacterPresentation(invalid), "parent traversal paths must fail");
+    invalid = custom; invalid.sheets.front().image = "C:/outside.png";
+    expect(!nookbit::validateCharacterPresentation(invalid), "absolute sheet paths must fail");
+    invalid = custom; invalid.cues.push_back(invalid.cues.front());
+    expect(!nookbit::validateCharacterPresentation(invalid), "duplicate situation identifiers must fail");
+    invalid = custom; invalid.cues.erase(invalid.cues.begin());
+    expect(!nookbit::validateCharacterPresentation(invalid), "required fallback situations must exist");
+    QTemporaryDir directory;
+    expect(directory.isValid(), "malformed profile fixture directory should be available");
+    if (!directory.isValid()) return;
+    QFile malformed(directory.filePath("invalid.json"));
+    expect(malformed.open(QIODevice::WriteOnly), "malformed profile fixture should open");
+    if (!malformed.isOpen()) return;
+    malformed.write("{\"schemaVersion\":999,\"sheets\":[],\"animations\":[],\"cues\":[]}");
+    malformed.close();
+    expect(!nookbit::loadCharacterPresentation(malformed.fileName(), schema),
+           "unsupported profile versions must fail schema validation");
+}
 } // namespace
 
 // 캐릭터 상태와 작업 알림 연결 검사를 실행하는 함수.
@@ -127,5 +188,6 @@ int main(int argc, char* argv[]) {
     testStatePriority();
     testRunnerConnection();
     testIndependentSources();
+    testPresentationConfiguration();
     return failures == 0 ? 0 : 1;
 }

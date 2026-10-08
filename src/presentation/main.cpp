@@ -51,6 +51,7 @@
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
+#include "infrastructure/configuration/json_character_presentation.hpp"
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -250,17 +251,29 @@ int main(int argc, char* argv[]) {
         pendingFiles, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
     nookbit::CharacterController characterController;
+    const auto bundledCharacter = QStringLiteral(":/nookbit/character.presentation.json");
+    const auto characterSchema = QStringLiteral(":/nookbit/character-presentation.schema.json");
+    const auto customCharacter = QDir(appData).filePath(QStringLiteral("character.presentation.json"));
+    auto characterPresentation = nookbit::loadCharacterPresentation(
+        !verifyUi && QFileInfo::exists(customCharacter) ? customCharacter : bundledCharacter, characterSchema);
+    if (!characterPresentation && !verifyUi) {
+        QTextStream(stderr) << QString::fromStdString(characterPresentation.error().message) << Qt::endl;
+        characterPresentation = nookbit::loadCharacterPresentation(bundledCharacter, characterSchema);
+    }
+    if (!characterPresentation) return EXIT_FAILURE;
+    const auto configuredCharacter = characterController.setPresentation(std::move(characterPresentation.value()));
+    if (!configuredCharacter) return EXIT_FAILURE;
     nookbit::ICharacterChannel& characterChannel = characterController;
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
         const auto received = characterChannel.publish({"file-operations", "current-operation",
-            nookbit::CharacterUpdateKind::Activity, backgroundTasks.fileWorkActive(), "파일을 옮기고 있어요."});
+            nookbit::CharacterUpdateKind::Activity, backgroundTasks.fileWorkActive(), {}, "file.work"});
         if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
     };
     // 감시 제안 상태를 공통 주의 요청으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterAttention = [&characterChannel, &watchController] {
         const auto received = characterChannel.publish({"folder-watch", "organization-offer",
-            nookbit::CharacterUpdateKind::Attention, watchController.proposalVisible(), "정리할 파일이 있어요!"});
+            nookbit::CharacterUpdateKind::Attention, watchController.proposalVisible(), {}, "file.offer"});
         if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
     };
     // 작업 상태를 값으로 전달하고 캐릭터가 다른 컨트롤러를 호출하지 않게 연결하는 함수.

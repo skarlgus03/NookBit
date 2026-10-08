@@ -1,5 +1,7 @@
 <RCC>
   <qresource prefix="/nookbit">
+    <file alias="character.presentation.json">character/default.presentation.json</file>
+    <file alias="character-presentation.schema.json">../schemas/character-presentation.schema.json</file>
     <file alias="rules.json">rules/default.example.json</file>
     <file alias="rules.schema.json">../schemas/rules.schema.json</file>
     <file alias="default-tree.json">rules/default.tree.json</file>
