@@ -46,7 +46,9 @@ Result<void> migrateHistorySchema(QSqlDatabase& database, const QString& initial
                 QStringLiteral("008_staging_commit.sql") : QStringLiteral("009_removal_proof.sql"));
         QFile migration(path);
         if (!migration.open(QIODevice::ReadOnly))
-            return Result<void>::failure({"history.migration_missing", "Cannot read a required SQLite migration."});
+            return Result<void>::failure({"history.migration_missing",
+                QStringLiteral("Cannot read a required SQLite migration: %1 (%2)")
+                    .arg(path, migration.errorString()).toStdString()});
         if (!database.transaction())
             return Result<void>::failure({"history.transaction_failed", database.lastError().text().toStdString()});
         const auto statements = QString::fromUtf8(migration.readAll()).split(';', Qt::SkipEmptyParts);

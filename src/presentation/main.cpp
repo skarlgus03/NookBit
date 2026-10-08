@@ -29,6 +29,7 @@
 #include "modules/planner/planner.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
+#include "infrastructure/persistence_sqlite/sqlite_schema.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -39,6 +40,7 @@
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QSettings>
+#include <QSqlQuery>
 #include <QTextStream>
 #include <QTimer>
 #include <QUrl>
@@ -48,6 +50,29 @@
 #include <algorithm>
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
+
+// 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
+static bool verifyBundledHistorySchema(const QString& migrationPath) {
+    const auto connectionName = QStringLiteral("nookbit-bundled-schema-check");
+    bool ready = false;
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(QStringLiteral(":memory:"));
+        if (database.open()) {
+            const auto migrated = nookbit::migrateHistorySchema(database, migrationPath);
+            if (migrated) {
+                QSqlQuery proofTable(database);
+                ready = proofTable.exec(QStringLiteral("SELECT count(*) FROM transfer_removal_proofs")) &&
+                        proofTable.next() && proofTable.value(0).toInt() == 0;
+            } else {
+                QTextStream(stderr) << QString::fromStdString(migrated.error().message) << Qt::endl;
+            }
+        }
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    return ready;
+}
 
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
 int main(int argc, char* argv[]) {
@@ -243,6 +268,7 @@ int main(int argc, char* argv[]) {
 
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
+        if (!verifyBundledHistorySchema(migrationPath)) return EXIT_FAILURE;
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
         QObject* editorPage = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
