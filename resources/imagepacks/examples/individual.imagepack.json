@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "packType": "imagepack",
+  "id": "nookbit.example.individual",
+  "name": "Individual PNG example",
+  "version": "0.1.0",
+  "author": "NookBit",
+  "display": {
+    "referenceSize": { "width": 128, "height": 128 },
+    "pixelsPerUnit": 4,
+    "pivot": { "x": 64, "y": 112 },
+    "filtering": "linear"
+  },
+  "sources": [
+    { "id": "idle-a", "kind": "image", "file": "images/idle-a.png" },
+    { "id": "idle-b", "kind": "image", "file": "images/idle-b.png" },
+    { "id": "wave", "kind": "image", "file": "images/wave.png" },
+    { "id": "carry", "kind": "image", "file": "images/carry.png" }
+  ],
+  "frames": [
+    { "id": "idle-a", "sourceId": "idle-a", "region": { "type": "image" } },
+    { "id": "idle-b", "sourceId": "idle-b", "region": { "type": "image" } },
+    { "id": "wave", "sourceId": "wave", "region": { "type": "image" } },
+    { "id": "carry", "sourceId": "carry", "region": { "type": "image" }, "pivot": { "x": 32, "y": 96 } }
+  ],
+  "animations": [
+    { "id": "idle", "loop": true, "steps": [ { "frameId": "idle-a", "durationMs": 400 }, { "frameId": "idle-b", "durationMs": 400 } ] },
+    { "id": "call", "loop": true, "steps": [ { "frameId": "wave", "durationMs": 200 } ] },
+    { "id": "work", "loop": true, "steps": [ { "frameId": "carry", "durationMs": 150 } ] }
+  ],
+  "bindings": [
+    { "cueId": "resting", "animationId": "idle" },
+    { "cueId": "calling", "animationId": "call" },
+    { "cueId": "working", "animationId": "work" },
+    { "cueId": "file.offer", "animationId": "call" },
+    { "cueId": "file.work", "animationId": "work" }
+  ]
+}

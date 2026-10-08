@@ -58,6 +58,8 @@ Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교
 
 ## 프로젝트 지도
 
+개별 PNG·격자/직사각형 아틀라스·공통 pivot·개인 배율 분리 규칙은 [ImagePack v1](docs/imagepack-v1.md)에 정의했다. [JSON Schema](schemas/imagepack.schema.json)와 두 방식의 예제를 제공한다. 이 새 규격의 로더·임포트·pivot 재생은 다음 구현 작업이며, 현재 실행 앱의 `character.presentation.json`과는 다른 규격이다.
+
 캐릭터 상황별 문구와 스프라이트 시트 규격은 [캐릭터 표현 규격](docs/character-presentation.md)에 정의했다. `cueId`를 공통 창구로 전달하면 JSON 설정에서 문구와 애니메이션 이름을 선택한다. 사용자 앱 데이터 폴더의 `character.presentation.json`으로 기본 설정을 교체할 수 있다. 현재는 프레임 번호가 보이는 임시 테스트 시트로 실제 격자 재생·반복·상태 전환을 확인할 수 있다. 창을 숨기거나 최소화하면 프레임 타이머를 멈춘다. 최종 캐릭터 그림과 탐색기 연동은 아직 없다.
 
 캐릭터는 현재 왼쪽 메뉴의 테스트 스프라이트로 상태 연결과 재생을 확인할 수 있다. Qt·파일 관리와 독립된 `ICharacterChannel`이 공통 상태 입력 창구이며, `CharacterController`는 그 수신 구현이다. 기능 연결부는 `CharacterUpdate`의 `sourceId`, `entryId`, 종류(`Activity` / `Attention`), `active`, UTF-8 안내 문구와 `cueId`를 전달한다. 같은 식별자·종류는 갱신하고 `active=false`로 해당 항목만 해제한다. 다른 기능의 활동·주의 요청은 유지한다. 작업 중이 가장 우선이고, 끝나면 남은 주의 요청에 따라 말 걸기 또는 휴식으로 돌아간다. 같은 종류의 여러 항목은 현재 식별자 정렬 순서의 첫 항목을 표시하며 별도 우선순위·대기열은 제공하지 않는다.
