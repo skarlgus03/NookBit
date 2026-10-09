@@ -35,6 +35,12 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QApplication>
+#include <QSystemTrayIcon>
+#include <QMenu>
+#include <QAction>
+#include <QPainter>
+#include "presentation/app_lifecycle_controller.hpp"
 #include <QMetaObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -82,12 +88,32 @@ static bool verifyBundledHistorySchema(const QString& migrationPath) {
     return ready;
 }
 
+// 추가 이미지 팩에 의존하지 않는 작은 앱 식별 아이콘을 만드는 함수.
+static QIcon applicationIcon() {
+    QPixmap image(32, 32);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(QStringLiteral("#263246")));
+    painter.drawRoundedRect(QRectF(1, 1, 30, 30), 8, 8);
+    QFont font; font.setPixelSize(22); font.setBold(true);
+    painter.setFont(font); painter.setPen(QColor(QStringLiteral("#b6d8c5")));
+    painter.drawText(image.rect(), Qt::AlignCenter, QStringLiteral("N"));
+    painter.end();
+    return QIcon(image);
+}
+
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
 int main(int argc, char* argv[]) {
-    QGuiApplication application(argc, argv);
+    QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
     const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
+    application.setWindowIcon(applicationIcon());
+    // 숨긴 메인 창과 도구 창의 개수로 프로세스 수명을 결정하지 않는다.
+    application.setQuitOnLastWindowClosed(false);
+    nookbit::AppLifecycleController appLifecycle;
 
     nookbit::PendingFilesModel pendingFiles;
     const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -389,6 +415,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
+    engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
@@ -398,9 +425,84 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection);
     engine.loadFromModule(QStringLiteral("NookBit"), QStringLiteral("Main"));
 
+    // 트레이 요청을 화면·캐릭터 상태에 연결하는 일은 조립부에서만 처리한다.
+    QMenu trayMenu;
+    auto* openAction = trayMenu.addAction(QStringLiteral("NookBit 열기"));
+    auto* characterAction = trayMenu.addAction(QStringLiteral("캐릭터 표시"));
+    characterAction->setCheckable(true);
+    characterAction->setChecked(characterWindow.shown());
+    trayMenu.addSeparator();
+    auto* exitAction = trayMenu.addAction(QStringLiteral("완전 종료"));
+    QSystemTrayIcon tray(application.windowIcon());
+    tray.setToolTip(QStringLiteral("NookBit · 창을 닫아도 실행 중"));
+    tray.setContextMenu(&trayMenu);
+    QObject::connect(openAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::openWindow);
+    QObject::connect(exitAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::requestExit);
+    QObject::connect(characterAction, &QAction::triggered, &characterWindow, &nookbit::CharacterWindowController::setShown);
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &trayMenu,
+        [&characterWindow, characterAction] {
+            // 캐릭터 설정과 트레이 메뉴의 표시 상태를 일치시키는 함수.
+            characterAction->setChecked(characterWindow.shown());
+        });
+    QObject::connect(&tray, &QSystemTrayIcon::activated, &appLifecycle,
+        [&appLifecycle](QSystemTrayIcon::ActivationReason reason) {
+            // 왼쪽 클릭 또는 더블클릭으로 숨긴 메인 창을 복원하는 함수.
+            if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) appLifecycle.openWindow();
+        });
+    if (!engine.rootObjects().isEmpty()) {
+        auto* mainWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+        QObject::connect(&appLifecycle, &nookbit::AppLifecycleController::hideRequested, mainWindow, &QWindow::hide);
+        QObject::connect(&appLifecycle, &nookbit::AppLifecycleController::showRequested, mainWindow, [mainWindow] {
+            // 창을 다시 표시하고 키보드 입력을 받을 수 있도록 활성화하는 함수.
+            mainWindow->showNormal(); mainWindow->raise(); mainWindow->requestActivate();
+        });
+    }
+    QObject::connect(&appLifecycle, &nookbit::AppLifecycleController::exitRequested, &application,
+        [&engine, &uiPreferences] {
+            // 마지막 캐릭터 위치를 확정한 후 설정을 반영하고 완전히 종료하는 함수.
+            if (!engine.rootObjects().isEmpty()) QMetaObject::invokeMethod(engine.rootObjects().first(), "commitCharacterPosition");
+            uiPreferences.sync();
+            QCoreApplication::quit();
+        });
+    // 종료는 막되 창 숨기기는 허용하도록 모든 백그라운드 작업 상태를 합치는 함수.
+    const auto refreshExitState = [&appLifecycle, &backgroundTasks, &characterImports, exitAction] {
+        const bool busy = backgroundTasks.busy() || characterImports.busy();
+        appLifecycle.setBusy(busy);
+        exitAction->setEnabled(!busy);
+        exitAction->setText(busy ? QStringLiteral("작업 중 · 완료 후 종료 가능") : QStringLiteral("완전 종료"));
+    };
+    QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged, &appLifecycle, refreshExitState);
+    QObject::connect(&characterImports, &nookbit::BackgroundTaskRunner::busyChanged, &appLifecycle, refreshExitState);
+    refreshExitState();
+    // 시스템 트레이가 없어졌을 때 숨긴 앱이 접근 불가능해지지 않도록 확인하는 함수.
+    const auto refreshTray = [&appLifecycle, &tray, verifyUi] {
+        const bool available = !verifyUi && QSystemTrayIcon::isSystemTrayAvailable();
+        appLifecycle.setTrayAvailable(available);
+        if (available && !tray.isVisible()) tray.show();
+        else if (!available && tray.isVisible()) tray.hide();
+    };
+    refreshTray();
+    QTimer trayAvailability;
+    trayAvailability.setInterval(15000);
+    QObject::connect(&trayAvailability, &QTimer::timeout, &appLifecycle, refreshTray);
+    if (!verifyUi) trayAvailability.start();
+
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
         if (!verifyBundledHistorySchema(migrationPath)) return EXIT_FAILURE;
+        bool closeToTray = false;
+        if (!engine.rootObjects().isEmpty()) {
+            auto* mainWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+            if (mainWindow) {
+                // 실제 시스템 트레이 없이도 QML 닫기와 화면 복원 연결을 검사한다.
+                appLifecycle.setTrayAvailable(true);
+                const bool intercepted = !mainWindow->close();
+                closeToTray = intercepted && !mainWindow->isVisible() && characterWindow.shown();
+                appLifecycle.openWindow();
+                closeToTray = closeToTray && mainWindow->isVisible();
+                appLifecycle.setTrayAvailable(false);
+            }
+        }
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
         QObject* editorPage = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
@@ -420,7 +522,7 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("desktopCharacterWindow"));
         QObject* desktopSprite = desktopCharacter
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
-        const bool ready = !engine.rootObjects().isEmpty() &&
+        const bool ready = closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
                            characterSettingsDialog != nullptr &&

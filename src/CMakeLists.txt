@@ -73,7 +73,7 @@ else()
 endif()
 
 if(NOOKBIT_BUILD_QT_APP)
-  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Qml Quick QuickDialogs2 Sql)
+  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Widgets Qml Quick QuickDialogs2 Sql)
 
   if(Qt6_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
@@ -111,6 +111,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_settings_controller.hpp
       presentation/character_settings_controller.cpp
       presentation/character_window_controller.hpp
+      presentation/app_lifecycle_controller.hpp
       presentation/pending_files_model.hpp
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
@@ -158,6 +159,7 @@ if(NOOKBIT_BUILD_QT_APP)
       nookbit_history
       Qt6::Core
       Qt6::Gui
+      Qt6::Widgets
       Qt6::Qml
       Qt6::Quick
       Qt6::QuickDialogs2

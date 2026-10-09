@@ -242,7 +242,18 @@ are clamped to the nearest available screen after startup or monitor changes;
 this protects the anchor, not the entirety of an arbitrarily large pose.
 QSettings stores `character/windowAnchor` and `character/windowShown`. Dragging
 uses the operating system's window move operation. Right-click opens settings;
-closing the character hides only that window. Closing the main app exits both.
+closing the character hides only that window. Closing the main window hides it
+when the system tray is available; organization work and character playback
+continue. The tray's explicit exit closes both after active operations finish.
 Hidden playback is paused and sidebar playback is paused while the desktop
 character is shown. Transparency currently does not imply per-pixel input
-pass-through. Tray residency and Explorer anchoring are not implemented.
+pass-through. Explorer anchoring is not implemented.
+
+`AppLifecycleController` separates window hiding from process exit using injected
+availability/busy values and presentation signals. The composition root connects
+native tray actions, window visibility and operation notifications. It does not
+give the character or lifecycle controller access to file workers. Losing tray
+availability restores the main window; without a tray, idle close requests exit
+and busy close remains blocked. Native tray UI uses Qt Widgets alongside Qt Quick;
+the Qt-independent core and pack format are unchanged. Startup registration and
+automatic restart are not included.

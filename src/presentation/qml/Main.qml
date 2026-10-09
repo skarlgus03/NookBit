@@ -7,13 +7,13 @@ import QtQuick.Dialogs as NativeDialogs
 
 ApplicationWindow {
     id: root
-    // 파일 작업 중에는 입력과 창 닫기를 막고 화면 렌더링은 계속하는 함수.
+    // 트레이 종료에서도 마지막 캐릭터 이동 좌표를 저장하는 함수.
+    function commitCharacterPosition() { desktopPet.commitPosition() }
+    // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
     onClosing: function(close) {
-        if (backgroundTasks.busy || characterSettings.busy) close.accepted = false
-        else {
-            desktopPet.commitPosition()
-            Qt.quit()
-        }
+        close.accepted = false
+        desktopPet.commitPosition()
+        appLifecycle.closeWindow()
     }
     contentItem.enabled: !backgroundTasks.busy
     CharacterWindow {
