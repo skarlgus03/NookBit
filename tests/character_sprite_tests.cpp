@@ -140,6 +140,8 @@ void testImagePackPlayback() {
     QObject::connect(&character, &nookbit::CharacterController::animationChanged, sprite.get(),
         [&] { sprite->setProperty("descriptor", character.animation()); });
     expect(character.setImagePack(loaded.value()).hasValue(), "resolved ImagePack should configure");
+    expect(character.bubble().value("attachment").toMap().value("y").toDouble() == -120 &&
+        character.bubble().value("skin").toMap().value("kind").toString() == "default", "default bubble descriptor supplied");
     expect(waitFor([&] { return sprite->property("ready").toBool(); }), "common frame image should load");
     auto* region = sprite->findChild<QObject*>("characterFrameRegion");
     auto* timer = sprite->findChild<QObject*>("characterSpriteTimer");
@@ -156,10 +158,14 @@ void testImagePackPlayback() {
         "user pivot adjustment must be applied in logical units");
     sprite->setProperty("userPivotOffset", QPointF(0, 0));
     auto pack = loaded.value();
+    pack.bubble.attachment = {12, -160};
+    pack.bubble.pivot = {0.25, 1};
     pack.frames.at("idle-1").pivot = {-10, 150};
     pack.animations.at("idle").steps[0].durationMs = 70;
     pack.animations.at("idle").steps[1].durationMs = 130;
     expect(character.setImagePack(pack).hasValue(), "pack with per-frame logical pivots should configure");
+    expect(character.bubble().value("attachment").toMap().value("x").toDouble() == 12 &&
+        character.bubble().value("pivot").toMap().value("x").toDouble() == 0.25, "bubble axes passed independently to presenter");
     expect(timer->property("interval").toInt() == 70, "first step must use its own duration");
     QMetaObject::invokeMethod(sprite.get(), "advanceFrame");
     expect(sprite->property("currentFrameId").toString() == "idle-1" && timer->property("interval").toInt() == 130 &&

@@ -4,6 +4,23 @@
 #include <utility>
 
 namespace nookbit {
+// 캐릭터 이미지와 별개인 말풍선 설정을 화면 값으로 변환하는 함수.
+QVariantMap CharacterController::bubble() const {
+    const auto value = imagePack_ ? imagePack_->bubble : ImagePackBubble{};
+    QVariantMap result{{"attachment", QVariantMap{{"x", value.attachment.x}, {"y", value.attachment.y}}},
+        {"pivot", QVariantMap{{"x", value.pivot.x}, {"y", value.pivot.y}}}};
+    QVariantMap skin{{"kind", QStringLiteral("default")}};
+    if (value.image) {
+        const auto& image = *value.image;
+        // 글과 버튼의 논리 사각형을 화면 데이터로 변환하는 함수.
+        const auto rect = [](const ImagePackRect& r) { return QVariantMap{{"x", r.x}, {"y", r.y}, {"width", r.width}, {"height", r.height}}; };
+        skin = {{"kind", QStringLiteral("image")}, {"source", QUrl::fromLocalFile(QString::fromStdWString(image.imagePath.wstring()))},
+            {"imageWidth", image.imageWidth}, {"imageHeight", image.imageHeight}, {"width", image.size.width}, {"height", image.size.height},
+            {"textRect", rect(image.textRect)}, {"actionRect", rect(image.actionRect)}};
+    }
+    result.insert("skin", skin);
+    return result;
+}
 // 휴식 상태의 캐릭터 표시 모델을 만드는 생성자.
 CharacterController::CharacterController(QObject* parent) : QObject(parent) {}
 // 현재 캐릭터 상태를 반환하는 함수.

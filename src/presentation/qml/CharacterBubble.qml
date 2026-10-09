@@ -8,38 +8,96 @@ Window {
     required property point anchorPoint
     required property rect screenArea
     required property string message
+    property var configuration: ({})
     property bool actionAvailable: false
     property string actionText: qsTr("확인")
     signal actionRequested()
     flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     color: "transparent"
     title: qsTr("NookBit 말풍선")
-    width: Math.min(270, Math.max(100, screenArea.width - 16))
-    height: Math.min(screenArea.height - 16, Math.max(64, bodyText.implicitHeight + 34 + (actionAvailable ? 38 : 0)))
-    readonly property bool flippedLeft: anchorPoint.x + width + 12 > screenArea.x + screenArea.width - 8
-    readonly property bool belowAnchor: anchorPoint.y - height - 8 < screenArea.y + 8
+    readonly property var skin: configuration.skin || ({kind: "default"})
+    readonly property bool customSkin: skin.kind === "image"
+    readonly property bool customReady: customSkin && customImage.status === Image.Ready
+        && customImage.sourceSize.width === skin.imageWidth && customImage.sourceSize.height === skin.imageHeight
+    readonly property var pivot: configuration.pivot || ({x: 0.1, y: 1})
+    width: Math.min(customSkin ? skin.width : 270, Math.max(100, screenArea.width - 16))
+    height: Math.min(screenArea.height - 16, customSkin ? skin.height
+        : Math.max(64, bodyText.implicitHeight + 34 + (actionAvailable ? 38 : 0)))
+    readonly property bool flippedLeft: overflow(anchorPoint.x - (1 - pivot.x) * width, width, screenArea.x, screenArea.width)
+        < overflow(anchorPoint.x - pivot.x * width, width, screenArea.x, screenArea.width)
+    readonly property bool belowAnchor: overflow(anchorPoint.y - (1 - pivot.y) * height, height, screenArea.y, screenArea.height)
+        < overflow(anchorPoint.y - pivot.y * height, height, screenArea.y, screenArea.height)
+    readonly property point effectivePivot: Qt.point((flippedLeft ? 1 - pivot.x : pivot.x) * width,
+                                                    (belowAnchor ? 1 - pivot.y : pivot.y) * height)
     x: Math.round(Math.max(screenArea.x + 8, Math.min(screenArea.x + screenArea.width - width - 8,
-        flippedLeft ? anchorPoint.x - width - 12 : anchorPoint.x + 12)))
+        anchorPoint.x - effectivePivot.x)))
     y: Math.round(Math.max(screenArea.y + 8, Math.min(screenArea.y + screenArea.height - height - 8,
-        belowAnchor ? anchorPoint.y + 8 : anchorPoint.y - height - 8)))
-    Rectangle {
-        width: 12; height: 12
-        x: Math.max(16, Math.min(bubble.width - 28, bubble.anchorPoint.x - bubble.x - 6))
-        y: bubble.belowAnchor ? 5 : bubble.height - 17
-        rotation: 45
-        color: "#263246"
-        border.color: "#718298"
+        anchorPoint.y - effectivePivot.y)))
+    // 화면 밖으로 나가는 길이를 계산해 더 안전한 피벗 방향을 선택하는 함수.
+    function overflow(start, length, screenStart, screenLength) {
+        return Math.max(0, screenStart + 8 - start) + Math.max(0, start + length - (screenStart + screenLength - 8))
+    }
+    // 배경만 뒤집고 글과 버튼은 읽을 수 있는 방향으로 배치하는 함수.
+    function contentRect(rect) {
+        const sx = width / skin.width, sy = height / skin.height
+        return {x: (flippedLeft ? skin.width - rect.x - rect.width : rect.x) * sx,
+            y: (belowAnchor ? skin.height - rect.y - rect.height : rect.y) * sy,
+            width: rect.width * sx, height: rect.height * sy}
+    }
+    readonly property var textArea: customSkin ? contentRect(skin.textRect)
+        : ({x: 14, y: (belowAnchor ? 10 : 0) + 12, width: width - 28, height: height - 34 - (actionAvailable ? 38 : 0)})
+    readonly property var actionArea: customSkin ? contentRect(skin.actionRect)
+        : ({x: width - 76, y: height - (belowAnchor ? 0 : 10) - 38, width: 64, height: 28})
+    Canvas {
+        id: tail
+        anchors.fill: parent
+        visible: !bubble.customReady
+        // 기본 말풍선 꼬리 끝을 자체 피벗에 맞춰 그리는 함수.
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+            const px = bubble.effectivePivot.x, py = bubble.effectivePivot.y
+            const base = bubble.belowAnchor ? 14 : height - 14
+            const center = Math.max(12, Math.min(width - 12, px))
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(center - 8, base)
+            ctx.lineTo(center + 8, base); ctx.closePath()
+            ctx.fillStyle = "#263246"; ctx.strokeStyle = "#718298"; ctx.fill(); ctx.stroke()
+        }
+        Connections {
+            target: bubble
+            // 피벗이나 방향이 바뀌면 기본 꼬리를 다시 그리는 함수.
+            function onEffectivePivotChanged() { tail.requestPaint() }
+        }
     }
     Rectangle {
+        visible: !bubble.customReady
         x: 1; width: bubble.width - 2
         y: bubble.belowAnchor ? 10 : 0
         height: bubble.height - 10
         radius: 14
         color: "#263246"
         border.color: "#718298"
+    }
+    Image {
+        id: customImage
+        objectName: "characterBubbleBackground"
+        anchors.fill: parent
+        source: bubble.customSkin ? bubble.skin.source : ""
+        visible: bubble.customReady
+        asynchronous: true
+        smooth: true
+        transform: Scale {
+            origin.x: bubble.width / 2; origin.y: bubble.height / 2
+            xScale: bubble.flippedLeft ? -1 : 1; yScale: bubble.belowAnchor ? -1 : 1
+        }
+    }
+    Item {
+        x: bubble.textArea.x; y: bubble.textArea.y
+        width: bubble.textArea.width; height: Math.max(0, bubble.textArea.height)
+        clip: true
         Text {
             id: bodyText
-            x: 14; y: 12; width: parent.width - 28
+            width: parent.width
             text: bubble.message
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
@@ -48,21 +106,21 @@ Window {
             font.pixelSize: 13
             color: "#edf2f8"
         }
-        Rectangle {
-            objectName: "characterBubbleAction"
-            visible: bubble.actionAvailable
-            x: parent.width - width - 12; y: parent.height - height - 10
-            width: 64; height: 28; radius: 8
-            color: "#33475e"
-            border.color: actionMouse.containsMouse ? "#b6d8c5" : "#718298"
-            Text { anchors.centerIn: parent; text: bubble.actionText; color: "#edf2f8"; font.pixelSize: 12 }
-            MouseArea {
-                id: actionMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                // 확인 요청만 전달하고 파일 작업은 직접 실행하지 않는 함수.
-                onClicked: bubble.actionRequested()
-            }
+    }
+    Rectangle {
+        objectName: "characterBubbleAction"
+        visible: bubble.actionAvailable
+        x: bubble.actionArea.x; y: bubble.actionArea.y
+        width: bubble.actionArea.width; height: bubble.actionArea.height; radius: 8
+        color: "#33475e"
+        border.color: actionMouse.containsMouse ? "#b6d8c5" : "#718298"
+        Text { anchors.centerIn: parent; text: bubble.actionText; color: "#edf2f8"; font.pixelSize: 12 }
+        MouseArea {
+            id: actionMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            // 확인 요청만 전달하고 파일 작업은 직접 실행하지 않는 함수.
+            onClicked: bubble.actionRequested()
         }
     }
 }

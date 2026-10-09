@@ -9,8 +9,10 @@ Window {
     required property var descriptor
     required property string message
     property real userScale: 0.5
-    // 임시 기본값이며 ImagePack 규격에는 아직 추가하지 않는다.
-    property point bubbleOffset: Qt.point(0, -120)
+    property var bubbleSettings: ({})
+    // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
+    readonly property point bubbleOffset: bubbleSettings.attachment
+        ? Qt.point(bubbleSettings.attachment.x, bubbleSettings.attachment.y) : Qt.point(0, -120)
     property bool actionAvailable: false
     property bool testingBubble: false
     signal settingsRequested()
@@ -40,6 +42,7 @@ Window {
         bubbleTestDeadline.restart()
     }
     CharacterBubble {
+        configuration: pet.bubbleSettings
         transientParent: pet
         visible: pet.visible && message.length > 0
         screenArea: pet.placement.screenArea

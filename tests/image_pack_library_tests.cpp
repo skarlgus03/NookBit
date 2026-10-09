@@ -6,6 +6,10 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QThread>
@@ -59,6 +63,21 @@ int main(int argc, char** argv) {
     QDir().mkpath(source + "/images");
     expect(QFile::copy(bundled, source + "/imagepack.json"), "source manifest copied");
     expect(QFile::copy(project + "/resources/imagepacks/test/images/test-character.png", source + "/images/test-character.png"), "source PNG copied");
+    QImage bubbleImage(270, 120, QImage::Format_ARGB32);
+    bubbleImage.fill(QColor("#263246"));
+    expect(bubbleImage.save(source + "/images/bubble.png"), "owned bubble PNG created");
+    QFile sourceManifest(source + "/imagepack.json");
+    expect(sourceManifest.open(QIODevice::ReadOnly), "owned manifest reads");
+    auto manifestObject = QJsonDocument::fromJson(sourceManifest.readAll()).object();
+    sourceManifest.close();
+    auto sources = manifestObject.value("sources").toArray();
+    sources.append(QJsonObject{{"id", "bubble"}, {"kind", "image"}, {"file", "images/bubble.png"}});
+    manifestObject["sources"] = sources;
+    manifestObject["bubble"] = QJsonObject{{"skin", QJsonObject{{"kind", "image"}, {"sourceId", "bubble"},
+        {"size", QJsonObject{{"width", 270}, {"height", 120}}},
+        {"textRect", QJsonObject{{"x", 14}, {"y", 12}, {"width", 242}, {"height", 42}}},
+        {"actionRect", QJsonObject{{"x", 194}, {"y", 72}, {"width", 64}, {"height", 28}}}}}};
+    write(source + "/imagepack.json", QJsonDocument(manifestObject).toJson());
     write(source + "/unrelated.txt", "not an asset");
     const auto root = temporary.filePath("library");
     nookbit::DirectoryImagePackLibrary library(loader, bundled, root);
@@ -70,6 +89,8 @@ int main(int argc, char** argv) {
     const auto key = QString::fromStdString(imported.value().key);
     auto pack = library.load(imported.value().key);
     expect(static_cast<bool>(pack), "owned copy reloads");
+    expect(pack && pack.value().bubble.image && QFileInfo::exists(root + '/' + key + "/images/bubble.png"),
+        "bubble-only PNG source imported and reloaded inside storage");
     expect(!QFileInfo::exists(root + '/' + key + "/unrelated.txt"), "unreferenced files not copied");
     expect(QFileInfo::exists(source + "/images/test-character.png"), "original preserved");
     auto duplicate = library.importFolder(path(source));

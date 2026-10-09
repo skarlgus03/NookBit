@@ -1,6 +1,11 @@
 {
   "schemaVersion": 1,
   "packType": "imagepack",
+  "bubble": {
+    "attachment": { "x": 0, "y": -120 },
+    "pivot": { "x": 0.1, "y": 1 },
+    "skin": { "kind": "default" }
+  },
   "id": "nookbit.test",
   "name": "NookBit test character",
   "version": "0.1.0",

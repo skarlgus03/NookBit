@@ -6,6 +6,10 @@
 #include <QRectF>
 #include <iostream>
 #include <memory>
+#include <QVariantMap>
+#include <QElapsedTimer>
+#include <QThread>
+#include <cmath>
 
 namespace {
 int failures = 0;
@@ -50,5 +54,31 @@ int main(int argc, char** argv) {
     expect(QMetaObject::invokeMethod(bubble, "actionRequested"), "generic action signal available");
     bubble->setProperty("actionAvailable", false);
     expect(action && !action->property("visible").toBool(), "action hidden without proposal");
+    bubble->setProperty("configuration", QVariantMap{{"pivot", QVariantMap{{"x", 0.25}, {"y", 1}}}});
+    checkArea(*bubble, QRectF(0, 0, 800, 600), QPointF(200, 300), false, false);
+    auto pivot = bubble->property("effectivePivot").toPointF();
+    expect(std::abs(bubble->x() + pivot.x() - 200) <= 1 && std::abs(bubble->y() + pivot.y() - 300) <= 1,
+        "bubble local pivot aligns with character attachment point");
+    checkArea(*bubble, QRectF(0, 0, 800, 600), QPointF(790, 10), true, true);
+    pivot = bubble->property("effectivePivot").toPointF();
+    expect(std::abs(pivot.x() - bubble->width() * 0.75) <= 1 && pivot.y() == 0,
+        "both pivot axes transformed during flipping");
+    const auto source = QUrl::fromLocalFile(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/resources/character/sprites/test-character.png");
+    const QVariantMap skin{{"kind", "image"}, {"source", source}, {"imageWidth", 512}, {"imageHeight", 384},
+        {"width", 270}, {"height", 120},
+        {"textRect", QVariantMap{{"x", 14}, {"y", 12}, {"width", 242}, {"height", 42}}},
+        {"actionRect", QVariantMap{{"x", 194}, {"y", 72}, {"width", 64}, {"height", 28}}}};
+    bubble->setProperty("configuration", QVariantMap{{"skin", skin}});
+    bubble->show();
+    QElapsedTimer deadline; deadline.start();
+    while (!bubble->property("customReady").toBool() && deadline.elapsed() < 2000) {
+        QCoreApplication::processEvents(); QThread::msleep(1);
+    }
+    expect(bubble->property("customReady").toBool(), "custom PNG background decodes");
+    checkArea(*bubble, QRectF(0, 0, 800, 600), QPointF(790, 10), true, true);
+    const auto area = bubble->property("actionArea").toMap();
+    expect(area.value("x").toDouble() == 12 && area.value("y").toDouble() == 20, "custom action area mirrored without flipping text");
+    bubble->setProperty("configuration", QVariantMap{});
+    expect(!bubble->property("customSkin").toBool(), "switching to default resets custom visual");
     return failures ? 1 : 0;
 }

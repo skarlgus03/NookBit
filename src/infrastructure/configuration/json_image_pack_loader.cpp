@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <cmath>
 #include <utility>
+#include <nookbit/domain/image_pack.hpp>
 
 namespace nookbit {
 namespace {
@@ -22,6 +23,10 @@ Error problem(const char* code, const std::string& id, const std::string& detail
 // JSON의 논리 좌표를 Qt 독립 자료형으로 읽는 함수.
 ImagePackPoint point(const QJsonObject& object) {
     return {object.value("x").toDouble(), object.value("y").toDouble()};
+}
+// 말풍선의 논리 영역을 정수 좌표로 읽는 함수.
+ImagePackRect bubbleRect(const QJsonObject& object) {
+    return {object.value("x").toInt(-1), object.value("y").toInt(-1), object.value("width").toInt(-1), object.value("height").toInt(-1)};
 }
 // 팩 내부 PNG의 실제 경로·형식·헤더 크기와 격자를 검증하는 함수.
 Result<Source> readSource(const QJsonObject& object, const QString& root, const std::string& id) {
@@ -163,6 +168,22 @@ Result<ImagePack> JsonImagePackLoader::load(const std::filesystem::path& manifes
     for (const auto* cue : {"resting", "calling", "working"}) {
         if (!pack.bindings.contains(cue)) return Result<ImagePack>::failure(problem("fallback_missing", cue, "Required fallback binding is missing."));
     }
+    const auto bubble = object.value("bubble").toObject();
+    if (bubble.contains("attachment")) pack.bubble.attachment = point(bubble.value("attachment").toObject());
+    if (bubble.contains("pivot")) pack.bubble.pivot = point(bubble.value("pivot").toObject());
+    const auto skin = bubble.value("skin").toObject();
+    if (skin.value("kind").toString() == "image") {
+        const auto id = skin.value("sourceId").toString().toStdString();
+        const auto source = sources.find(id);
+        if (source == sources.end() || source->second.atlas)
+            return Result<ImagePack>::failure(problem("bubble_source", id, "Bubble skin requires a whole-image source."));
+        const auto size = skin.value("size").toObject();
+        pack.bubble.image = ImagePackBubbleImage{std::filesystem::path(source->second.path.toStdWString()),
+            source->second.width, source->second.height, {size.value("width").toDouble(), size.value("height").toDouble()},
+            bubbleRect(skin.value("textRect").toObject()), bubbleRect(skin.value("actionRect").toObject())};
+    }
+    const auto checked = validateImagePack(pack);
+    if (!checked) return Result<ImagePack>::failure(checked.error());
     return Result<ImagePack>::success(std::move(pack));
 }
 } // namespace nookbit

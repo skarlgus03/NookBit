@@ -258,20 +258,87 @@ and busy close remains blocked. Native tray UI uses Qt Widgets alongside Qt Quic
 the Qt-independent core and pack format are unchanged. Startup registration and
 automatic restart are not included.
 
-## Temporary speech-bubble placement
+## Speech-bubble configuration
 
-The image format is unchanged. `CharacterWindow.qml` currently defines a
-presentation-only `bubbleOffset` of `(0, -120)` logical units relative to the
-global pivot; personal scale applies to the offset. `CharacterBubble.qml`
-receives that screen point, available monitor rectangle, text and an optional
-generic action. It chooses right/above by default, flips left/below near edges,
-then clamps the full bubble inside the work area. The bubble is a separate
-transparent tool window owned by the character window, not a change to the
-sprite bounds. No automatic pivot or frame metadata edits are performed.
+ImagePack v1 now accepts an optional top-level `bubble` visual module. Existing
+v1 packs that omit it still load unchanged and use the app-provided skin.
+This does not introduce dialogue or feature execution into the pack; a future
+CharacterPack container may reuse this visual module alongside other modules.
+
+```json
+"bubble": {
+  "attachment": { "x": 0, "y": -120 },
+  "pivot": { "x": 0.1, "y": 1 },
+  "skin": { "kind": "default" }
+}
+```
+
+Both `bubble` and each of its three fields are optional. Defaults are shown
+above. Omit `skin` or select `default` to keep the app skin while changing only
+the attachment point. Explicit null values are not allowed.
+
+There are TWO independent coordinate systems:
+
+- `attachment`: character-local logical units relative to the character pivot.
+  Values must be finite and within [-4096,4096]. Personal character scale applies
+  to this offset. It is not a PNG pixel coordinate or an absolute atlas position.
+- `pivot`: normalized coordinates INSIDE the bubble's full canvas, including
+  its tail. Values are within [0,1]. (0,0) is top-left, (1,1) is bottom-right.
+  Usually this point is the tail tip. Normalization supports the variable-height
+  app skin without changing its pivot whenever the text wraps. For the app skin,
+  y=1 is recommended; x controls the tail's horizontal position.
+
+Placement, before screen clamping:
+
+```
+A = characterGlobalPivot + characterUserScale * bubble.attachment
+P = (bubble.pivot.x * renderedWidth, bubble.pivot.y * renderedHeight)
+bubbleTopLeft = A - P
+```
+
+Horizontal flip transforms pivot.x to 1-pivot.x; vertical flip transforms
+pivot.y to 1-pivot.y. Choose the orientation with less overflow, then clamp the
+window inside the available monitor area. Full visibility wins if exact
+alignment is impossible; screen clamping can therefore detach the tail tip
+from A. The separate window never changes character position or sprite bounds.
+Bubble size is UI size, not multiplied by personal character scale.
+
+For a custom PNG, declare a `kind: "image"` entry in the existing `sources` list
+(for example id `bubble-bg`, file `images/bubble.png`), then reference it:
+
+```json
+"bubble": {
+  "attachment": { "x": 12, "y": -140 },
+  "pivot": { "x": 0.1, "y": 1 },
+  "skin": {
+    "kind": "image",
+    "sourceId": "bubble-bg",
+    "size": { "width": 270, "height": 120 },
+    "textRect": { "x": 14, "y": 12, "width": 242, "height": 42 },
+    "actionRect": { "x": 194, "y": 72, "width": 64, "height": 28 }
+  }
+}
+```
+
+Custom background sources must be whole PNG images, not atlas sources. They are
+validated and copied by the same safe source pipeline, even if no character
+animation references them. Logical size is independent of PNG pixel resolution:
+width 100–1024, height 64–1024. Text/action rectangles use integer logical units,
+must fit inside that size, must be at least 32x20 and must not overlap. An action
+area is required even if a particular message has no action. The skin remains
+fixed-height; text exceeding its area is clipped/elided. Current text is light
+colored, so provide a sufficiently dark readable content area.
+
+The background is stretched to the declared logical canvas, and that canvas may
+shrink to fit a smaller work area. Flip the PNG and transform the content
+rectangles, but do not mirror the text glyphs. Nine-slice scaling, atlas skins,
+animated skins and per-animation overrides are not implemented. PNG decode
+failure or changed dimensions falls back to an app-colored surface with the
+configured canvas/content areas; header validation is not full pixel validation.
 
 The composition in Main connects the generic action to opening an existing
 watch proposal, rechecking proposal availability and operation state at click
 time. It does not directly organize files. A 10-second placement test overrides
 only displayed text and supplies a local dismiss button; it does not publish a
-fake backend event or modify pending files. Per-pack/animation bubble anchors,
-dialogue packs and dismiss/scheduling policies remain future work.
+fake backend event or modify pending files. Dialogue packs and
+dismiss/scheduling policies remain future work.

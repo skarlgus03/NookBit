@@ -181,10 +181,44 @@ void testFailures() {
     invalid.write("not a PNG"); invalid.close();
     fails(fixture, [](auto& object) { edit(object, "sources", 0, [](auto& source) { source["file"] = "images/broken.png"; }); }, "imagepack.asset_format", "test-sheet");
 }
+// 기본 말풍선 호환성과 두 축·사용자 PNG·잘못된 영역을 검사하는 함수.
+void testBubble() {
+    Fixture fixture(true);
+    fixture.write(fixture.original);
+    auto legacy = fixture.load();
+    expect(legacy && legacy.value().bubble.attachment.y == -120 && !legacy.value().bubble.image,
+        "old packs use app default bubble without new fields");
+    auto object = fixture.original;
+    QJsonObject bubble{{"attachment", QJsonObject{{"x", 20}, {"y", -140}}},
+        {"pivot", QJsonObject{{"x", 0.2}, {"y", 0.9}}}, {"skin", QJsonObject{{"kind", "default"}}}};
+    object["bubble"] = bubble; fixture.write(object);
+    auto defaults = fixture.load();
+    expect(defaults && defaults.value().bubble.attachment.x == 20 && defaults.value().bubble.pivot.y == 0.9 && !defaults.value().bubble.image,
+        "default skin accepts independent attachment and bubble pivot");
+    auto sources = object.value("sources").toArray();
+    sources.append(QJsonObject{{"id", "bubble-image"}, {"kind", "image"}, {"file", "images/test-character.png"}});
+    object["sources"] = sources;
+    QJsonObject skin{{"kind", "image"}, {"sourceId", "bubble-image"}, {"size", QJsonObject{{"width", 270}, {"height", 120}}},
+        {"textRect", QJsonObject{{"x", 14}, {"y", 12}, {"width", 242}, {"height", 42}}},
+        {"actionRect", QJsonObject{{"x", 194}, {"y", 72}, {"width", 64}, {"height", 28}}}};
+    bubble["skin"] = skin; object["bubble"] = bubble; fixture.write(object);
+    auto custom = fixture.load();
+    expect(custom && custom.value().bubble.image && custom.value().bubble.image->imagePath.is_absolute()
+        && custom.value().bubble.image->imageWidth == 512, "custom whole PNG skin resolved safely");
+    skin["sourceId"] = "test-sheet"; bubble["skin"] = skin; object["bubble"] = bubble; fixture.write(object);
+    expect(!fixture.load(), "atlas rejected as bubble skin source");
+    skin["sourceId"] = "bubble-image";
+    skin["actionRect"] = QJsonObject{{"x", 14}, {"y", 12}, {"width", 64}, {"height", 28}};
+    bubble["skin"] = skin; object["bubble"] = bubble; fixture.write(object);
+    expect(!fixture.load(), "overlapping text and action regions rejected");
+    bubble["skin"] = QJsonObject{{"kind", "default"}};
+    bubble["pivot"] = QJsonObject{{"x", 1.5}, {"y", 1}}; object["bubble"] = bubble; fixture.write(object);
+    expect(!fixture.load(), "normalized pivot out of range rejected");
+}
 } // namespace
 // 이미지를 화면에 표시하지 않고 ImagePack 로더를 검사하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
-    testResolvedFrames(); testFailures();
+    testResolvedFrames(); testFailures(); testBubble();
     return failures == 0 ? 0 : 1;
 }

@@ -19,6 +19,7 @@ class CharacterController final : public QObject, public ICharacterChannel {
     Q_PROPERTY(QString cueId READ cueId NOTIFY stateChanged)
     Q_PROPERTY(QString animationId READ animationId NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap animation READ animation NOTIFY animationChanged)
+    Q_PROPERTY(QVariantMap bubble READ bubble NOTIFY animationChanged)
 public:
     enum class State { Resting, Calling, Working };
     Q_ENUM(State)
@@ -36,6 +37,8 @@ public:
     [[nodiscard]] QString animationId() const;
     /// 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
     [[nodiscard]] QVariantMap animation() const;
+    /// 말풍선의 부착점·피벗·선택적 배경을 값으로 전달하는 함수.
+    [[nodiscard]] QVariantMap bubble() const;
     /// 검증한 표현 설정을 교체하고 현재 상황을 다시 선택하는 함수.
     [[nodiscard]] Result<void> setPresentation(CharacterPresentation presentation, QUrl imageBaseUrl = {});
     /// 검증된 ImagePack의 프레임과 상황 연결을 재생 데이터로 적용하는 함수.

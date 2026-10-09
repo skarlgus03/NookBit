@@ -20,6 +20,7 @@ ApplicationWindow {
         id: desktopPet
         placement: characterWindow
         descriptor: characterController.animation
+        bubbleSettings: characterController.bubble
         message: characterController.message
         userScale: characterSettings.userScale
         actionAvailable: watchController.proposalVisible && !backgroundTasks.busy
