@@ -52,6 +52,9 @@
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
+#include "presentation/character_window_controller.hpp"
+#include <QScreen>
+#include <QQuickWindow>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "infrastructure/configuration/directory_image_pack_library.hpp"
@@ -307,6 +310,38 @@ int main(int argc, char* argv[]) {
             uiPreferences.setValue(QStringLiteral("character/scales/") + characterSettings.selectedKey(), characterSettings.userScale());
             uiPreferences.sync();
         });
+    // 화면의 작업 표시줄을 제외한 사용 가능 영역을 수집하는 함수.
+    const auto characterScreens = [] {
+        QList<QRect> areas;
+        for (const auto* screen : QGuiApplication::screens()) areas.append(screen->availableGeometry());
+        return areas;
+    };
+    const auto screens = characterScreens();
+    const auto initialAnchor = screens.isEmpty() ? QPoint(200, 200)
+        : QPoint(screens.first().right() - 180, screens.first().bottom() - 140);
+    nookbit::CharacterWindowController characterWindow(screens,
+        verifyUi ? initialAnchor : uiPreferences.value(QStringLiteral("character/windowAnchor"), initialAnchor).toPoint(),
+        verifyUi || uiPreferences.value(QStringLiteral("character/windowShown"), true).toBool());
+    // 독립 창 위치와 노출만 사용자 설정에 저장하는 함수.
+    const auto saveCharacterWindow = [&uiPreferences, &characterWindow, verifyUi] {
+        if (verifyUi) return;
+        uiPreferences.setValue(QStringLiteral("character/windowAnchor"), QPoint(characterWindow.anchorX(), characterWindow.anchorY()));
+        uiPreferences.setValue(QStringLiteral("character/windowShown"), characterWindow.shown());
+        uiPreferences.sync();
+    };
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::positionChanged, &application, saveCharacterWindow);
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &application, saveCharacterWindow);
+    // 모니터 추가·제거와 작업 영역 변경 시 보이지 않는 위치를 복원하는 함수.
+    const auto refreshCharacterScreens = [&characterWindow, characterScreens] { characterWindow.setScreens(characterScreens()); };
+    QObject::connect(&application, &QGuiApplication::screenRemoved, &characterWindow, refreshCharacterScreens);
+    QObject::connect(&application, &QGuiApplication::screenAdded, &characterWindow,
+        [&characterWindow, refreshCharacterScreens](QScreen* screen) {
+            // 새 화면의 작업 영역 변경도 같은 위치 복원 창구에 연결하는 함수.
+            QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
+            refreshCharacterScreens();
+        });
+    for (auto* screen : QGuiApplication::screens())
+        QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
     nookbit::ICharacterChannel& characterChannel = characterController;
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
@@ -353,6 +388,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
+    engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
@@ -380,6 +416,10 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
         QObject* characterSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSettingsDialog"));
+        auto* desktopCharacter = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("desktopCharacterWindow"));
+        QObject* desktopSprite = desktopCharacter
+            ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
         const bool ready = !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
@@ -388,6 +428,12 @@ int main(int argc, char* argv[]) {
                            characterSettingsDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(characterSettingsDialog, "close") &&
                            characterSettings.selectedKey() == QStringLiteral("builtin") &&
+                           desktopCharacter != nullptr && desktopSprite != nullptr &&
+                           desktopCharacter->color().alpha() == 0 &&
+                           desktopCharacter->flags().testFlag(Qt::FramelessWindowHint) &&
+                           desktopCharacter->flags().testFlag(Qt::WindowStaysOnTopHint) &&
+                           desktopCharacter->transientParent() == nullptr &&
+                           !desktopCharacter->close() && !characterWindow.shown() &&
                            editorPage != nullptr && ruleTestPanel != nullptr &&
                            QMetaObject::invokeMethod(ruleTestPanel, "open") &&
                            ruleTestPanel->property("opened").toBool() &&
@@ -412,7 +458,8 @@ int main(int argc, char* argv[]) {
             return EXIT_FAILURE;
         }
         // 비동기로 읽는 내장 PNG의 크기 검증까지 마친 뒤 자동 검사를 완료한다.
-        auto* sprite = engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite"));
+        characterWindow.setShown(true);
+        auto* sprite = desktopSprite;
         QTimer spriteCheck;
         spriteCheck.setInterval(10);
         QTimer deadline;

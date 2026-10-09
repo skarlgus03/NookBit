@@ -110,6 +110,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_controller.cpp
       presentation/character_settings_controller.hpp
       presentation/character_settings_controller.cpp
+      presentation/character_window_controller.hpp
       presentation/pending_files_model.hpp
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
@@ -146,6 +147,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/Main.qml
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
+        presentation/qml/CharacterWindow.qml
         presentation/qml/RuleEditorPage.qml
     )
 

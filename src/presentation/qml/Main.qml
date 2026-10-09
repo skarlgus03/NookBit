@@ -10,8 +10,25 @@ ApplicationWindow {
     // 파일 작업 중에는 입력과 창 닫기를 막고 화면 렌더링은 계속하는 함수.
     onClosing: function(close) {
         if (backgroundTasks.busy || characterSettings.busy) close.accepted = false
+        else {
+            desktopPet.commitPosition()
+            Qt.quit()
+        }
     }
     contentItem.enabled: !backgroundTasks.busy
+    CharacterWindow {
+        id: desktopPet
+        placement: characterWindow
+        descriptor: characterController.animation
+        message: characterController.message
+        userScale: characterSettings.userScale
+        onSettingsRequested: {
+            root.showNormal()
+            root.raise()
+            root.requestActivate()
+            characterSettingsDialog.open()
+        }
+    }
     Popup {
         parent: Overlay.overlay
         visible: backgroundTasks.busy
@@ -208,7 +225,8 @@ ApplicationWindow {
                 message: characterController.message
                 animation: characterController.animation
                 userScale: characterSettings.userScale
-                playbackEnabled: root.visible && root.visibility !== Window.Minimized
+                playbackEnabled: !characterWindow.shown && root.visible && root.visibility !== Window.Minimized
+                visible: !characterWindow.shown
                 dark: root.editorDark
                 TapHandler { onTapped: characterSettingsDialog.open() }
             }
@@ -707,6 +725,13 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 12
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
+            CheckBox {
+                text: qsTr("캐릭터를 앱 밖에 표시")
+                checked: characterWindow.shown
+                onToggled: characterWindow.setShown(checked)
+            }
+            Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
+            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 12 }
             ComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true
