@@ -33,7 +33,7 @@ ApplicationWindow {
             root.showNormal()
             root.raise()
             root.requestActivate()
-            characterSettingsDialog.open()
+            root.openCharacterSettings()
         }
     }
     Popup {
@@ -97,6 +97,17 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
+    readonly property int homeWidth: 380
+    // 편집 상태를 유지한 채 본체 오른쪽의 페이지를 펼치거나 접는 함수.
+    onCurrentPageChanged: {
+        if (visibility === Window.Maximized) showNormal()
+        if (currentPage !== 3) watchDialog.close()
+        if (currentPage !== 4) historyDialog.close()
+        if (currentPage !== 5) characterSettingsDialog.close()
+        width = currentPage === 0 ? homeWidth : Math.min(homeWidth + 860, Screen.desktopAvailableWidth - 32)
+        if (currentPage !== 0)
+            x = Math.max(Screen.virtualX + 8, Math.min(x, Screen.virtualX + Screen.width - width - 8))
+    }
     property string selectedRulePath: ""
     property var selectedRuleDetail: ({})
     property var collapsedRulePaths: ({})
@@ -106,6 +117,7 @@ ApplicationWindow {
 
     // 저장된 감시 설정으로 입력창을 채운 뒤 별도 창을 여는 함수.
     function openWatchSettings() {
+        currentPage = 3
         watchFolderField.text = watchController.folder
         watchEnabledCheck.checked = watchController.enabled
         watchRecursiveCheck.checked = watchController.recursive
@@ -123,8 +135,14 @@ ApplicationWindow {
 
     // 최신 작업 기록을 조회하고 별도 창을 여는 함수.
     function openHistory() {
+        currentPage = 4
         historyController.refreshHistory()
         historyDialog.open()
+    }
+    // 캐릭터 설정을 오른쪽 확장 영역에 여는 함수.
+    function openCharacterSettings() {
+        currentPage = 5
+        characterSettingsDialog.open()
     }
 
     // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
@@ -194,104 +212,88 @@ ApplicationWindow {
         ruleDestinationField.text = selectedRuleDetail.destination || ""
         ruleFormDirty = false
     }
-    width: 1240
-    height: 800
-    minimumWidth: 960
-    minimumHeight: 620
+    width: homeWidth
+    height: Math.min(780, Screen.desktopAvailableHeight - 60)
+    minimumWidth: currentPage === 0 ? homeWidth : Math.min(homeWidth + 520, Screen.desktopAvailableWidth - 32)
+    minimumHeight: 560
     visible: true
     title: qsTr("NookBit")
     color: root.editorDark ? "#161a22" : "#f5f5f2"
 
-    Rectangle {
-        id: navigation
-        width: 190
+    CompactHome {
+        id: compactHome
+        width: root.homeWidth
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: root.editorDark ? "#1b2230" : "#edf0e9"
-        border.color: root.editorDark ? "#3d4757" : "#d9dfd4"
+        dark: root.editorDark
+        onPageRequested: function(page) { root.currentPage = page }
+        onWatchRequested: root.openWatchSettings()
+        onHistoryRequested: root.openHistory()
+        onCharacterRequested: root.openCharacterSettings()
+        onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
+        onProposalRequested: watchProposalDialog.open()
+    }
 
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 18
-            spacing: 10
-
+    Rectangle {
+        id: extensionPanel
+        objectName: "extensionPanel"
+        anchors.left: compactHome.right
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        visible: root.currentPage !== 0
+        color: root.editorDark ? "#161a22" : "#ffffff"
+        border.color: root.editorDark ? "#3d4757" : "#e1e6ed"
+        RowLayout {
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            anchors.margins: 12; height: 36
             Label {
-                text: qsTr("NookBit")
-                font.pixelSize: 24
-                font.bold: true
-                color: root.editorDark ? "#edf2f8" : "#253428"
-                bottomPadding: 20
+                Layout.fillWidth: true
+                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시"), qsTr("작업 기록"), qsTr("캐릭터"), qsTr("이름 충돌")][root.currentPage] || qsTr("개발 도구")
+                color: root.editorDark ? "#edf2f8" : "#273344"
+                font.pixelSize: 17; font.bold: true
             }
-            CharacterBadge {
-                objectName: "characterBadge"
-                width: parent.width
-                stateKey: characterController.stateKey
-                message: characterController.message
-                animation: characterController.animation
-                userScale: characterSettings.userScale
-                playbackEnabled: !characterWindow.shown && root.visible && root.visibility !== Window.Minimized
-                visible: !characterWindow.shown
-                dark: root.editorDark
-                TapHandler { onTapped: characterSettingsDialog.open() }
-            }
-            NavigationButton {
-                width: parent.width
-                text: qsTr("캐릭터 설정")
-                onClicked: characterSettingsDialog.open()
-            }
-            NavigationButton {
-                width: parent.width
-                text: qsTr("파일 정리")
-                highlighted: root.currentPage === 0
-                onClicked: root.currentPage = 0
-            }
-            NavigationButton {
-                width: parent.width
-                text: qsTr("분류 규칙")
-                highlighted: root.currentPage === 1
-                onClicked: root.currentPage = 1
-            }
-            NavigationButton {
-                width: parent.width
-                text: qsTr("폴더 감시")
-                highlighted: watchDialog.visible
-                onClicked: root.openWatchSettings()
-            }
-            NavigationButton {
-                width: parent.width
-                text: qsTr("작업 기록")
-                highlighted: historyDialog.visible
-                onClicked: root.openHistory()
-            }
-            Label {
-                width: parent.width
-                topPadding: 14
-                text: watchController.enabled ? qsTr("폴더 감시 중") : qsTr("폴더 감시 꺼짐")
-                wrapMode: Text.WordWrap
-                color: root.editorDark ? "#aab6c7" : "#68756b"
-                font.pixelSize: 12
-            }
-            NavigationButton {
-                width: parent.width
-                visible: watchController.proposalVisible
-                highlighted: true
-                text: qsTr("새 정리 제안 확인")
-                onClicked: watchProposalDialog.open()
-            }
+            NavigationButton { text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
         }
+    }
+    Item {
+        id: extensionHost
+        anchors.left: compactHome.right
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: 58
+        anchors.bottom: parent.bottom
+        visible: root.currentPage !== 0
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+D"
+        // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
+        onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
+    }
+    ColumnLayout {
+        anchors.fill: extensionHost
+        anchors.margins: 18
+        visible: root.currentPage === 6
+        Label { text: qsTr("같은 이름의 파일이 이미 있으면"); font.bold: true }
+        ComboBox {
+            textRole: "label"; valueRole: "key"
+            model: [{label: qsTr("이름 변경"), key: "rename"}, {label: qsTr("건너뛰기"), key: "skip"}, {label: qsTr("작업 중단"), key: "abort"}]
+            currentIndex: previewController.collisionPolicy === "skip" ? 1 : previewController.collisionPolicy === "abort" ? 2 : 0
+            onActivated: previewController.collisionPolicy = currentValue
+        }
+        Label { Layout.fillWidth: true; text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정이 우선합니다."); wrapMode: Text.Wrap }
+        Item { Layout.fillHeight: true }
     }
 
     ScrollView {
         id: sortingScroll
         anchors.fill: parent
-        anchors.leftMargin: navigation.width + 28
+        anchors.leftMargin: root.homeWidth + 18
         anchors.rightMargin: 28
-        anchors.topMargin: 28
+        anchors.topMargin: 68
         anchors.bottomMargin: 28
-        visible: root.currentPage === 0
+        visible: root.currentPage === 2 || root.currentPage === 9
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -299,6 +301,14 @@ ApplicationWindow {
         ColumnLayout {
             width: sortingScroll.availableWidth
             spacing: 14
+
+            ColumnLayout {
+                objectName: "developerTools"
+                Layout.fillWidth: true
+                visible: root.currentPage === 9
+                Label { text: qsTr("개발용 기존 정리 화면 · Ctrl+Shift+D로 접기"); font.bold: true }
+                Button { text: qsTr("말풍선 배치 테스트"); onClicked: { characterWindow.setShown(true); desktopPet.testBubble() } }
+                Button { text: qsTr("기존 규칙 폼 열기"); onClicked: ruleDialog.open() }
 
             Label {
                 text: qsTr("파일 정리")
@@ -572,8 +582,9 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
             }
 
+            }
             Label {
-                text: qsTr("2. 분류 미리보기")
+                text: qsTr("분류 미리보기")
                 font.pixelSize: 19
                 font.bold: true
                 color: "#232323"
@@ -690,7 +701,8 @@ ApplicationWindow {
         objectName: "ruleEditorPage"
         oldEditorFormDirty: root.ruleFormDirty || root.globalFormDirty
         anchors.fill: parent
-        anchors.leftMargin: navigation.width
+        anchors.leftMargin: root.homeWidth
+        anchors.topMargin: 58
         visible: root.currentPage === 1
         onOpenCurrentEditor: ruleDialog.open()
         onEditorDraftReplaced: {
@@ -723,11 +735,15 @@ ApplicationWindow {
     Dialog {
         id: characterSettingsDialog
         objectName: "characterSettingsDialog"
+        parent: extensionHost
         anchors.centerIn: parent
-        width: Math.min(root.width - 32, 440)
+        width: Math.max(1, extensionHost.width - 32)
+        height: Math.max(1, extensionHost.height - 24)
         modal: false
+        dim: false
+        closePolicy: Popup.NoAutoClose
         title: qsTr("캐릭터 설정")
-        standardButtons: Dialog.Close
+        standardButtons: Dialog.NoButton
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
@@ -738,14 +754,6 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
-            Button {
-                text: qsTr("말풍선 위치 테스트 (10초)")
-                onClicked: {
-                    characterWindow.setShown(true)
-                    desktopPet.testBubble()
-                    characterSettingsDialog.close()
-                }
-            }
             Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 12 }
             ComboBox {
                 id: characterPackChoice
@@ -1152,12 +1160,15 @@ ApplicationWindow {
     Dialog {
         id: watchDialog
         objectName: "watchSettingsDialog"
+        parent: extensionHost
         anchors.centerIn: parent
-        width: Math.min(root.width - 32, 720)
-        height: Math.min(root.height - 32, 640)
-        modal: true
+        width: Math.max(1, extensionHost.width - 32)
+        height: Math.max(1, extensionHost.height - 24)
+        modal: false
+        dim: false
+        closePolicy: Popup.NoAutoClose
         title: qsTr("폴더 감시 조건")
-        standardButtons: Dialog.Close
+        standardButtons: Dialog.NoButton
 
         ColumnLayout {
             anchors.fill: parent
@@ -1339,12 +1350,15 @@ ApplicationWindow {
     Dialog {
         id: historyDialog
         objectName: "historyDialog"
+        parent: extensionHost
         anchors.centerIn: parent
-        width: Math.min(root.width - 32, 840)
-        height: Math.min(root.height - 32, 600)
-        modal: true
+        width: Math.max(1, extensionHost.width - 32)
+        height: Math.max(1, extensionHost.height - 24)
+        modal: false
+        dim: false
+        closePolicy: Popup.NoAutoClose
         title: qsTr("지난 작업 기록")
-        standardButtons: Dialog.Close
+        standardButtons: Dialog.NoButton
 
         ColumnLayout {
             anchors.fill: parent

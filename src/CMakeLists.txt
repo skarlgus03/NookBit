@@ -146,6 +146,7 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/CompactHome.qml
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
         presentation/qml/CharacterWindow.qml

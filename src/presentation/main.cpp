@@ -490,6 +490,22 @@ int main(int argc, char* argv[]) {
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
         if (!verifyBundledHistorySchema(migrationPath)) return EXIT_FAILURE;
+        bool compactLayout = false;
+        if (!engine.rootObjects().isEmpty()) {
+            auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+            auto* home = window ? window->findChild<QObject*>(QStringLiteral("compactHome")) : nullptr;
+            auto* developer = window ? window->findChild<QObject*>(QStringLiteral("developerTools")) : nullptr;
+            if (window && home && developer) {
+                // 좁은 본체·확장·접기와 개발 도구의 기본 숨김을 실제 QML에서 검사한다.
+                compactLayout = window->width() == 380 && !developer->property("visible").toBool();
+                QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 1));
+                compactLayout = compactLayout && window->width() > 380 && home->property("visible").toBool();
+                window->setProperty("currentPage", 9);
+                compactLayout = compactLayout && developer->property("visible").toBool();
+                window->setProperty("currentPage", 0);
+                compactLayout = compactLayout && window->width() == 380 && !developer->property("visible").toBool();
+            }
+        }
         bool closeToTray = false;
         if (!engine.rootObjects().isEmpty()) {
             auto* mainWindow = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
@@ -524,10 +540,11 @@ int main(int argc, char* argv[]) {
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
         auto* characterBubble = desktopCharacter
             ? desktopCharacter->findChild<QQuickWindow*>(QStringLiteral("characterBubbleWindow")) : nullptr;
-        const bool ready = closeToTray && !engine.rootObjects().isEmpty() &&
-                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
-                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
+        const bool ready = compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
+                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
+                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
+                           QMetaObject::invokeMethod(engine.rootObjects().first(), "openCharacterSettings") &&
                            QMetaObject::invokeMethod(characterSettingsDialog, "open") &&
                            characterSettingsDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(characterSettingsDialog, "close") &&
@@ -549,7 +566,7 @@ int main(int argc, char* argv[]) {
                            QMetaObject::invokeMethod(engine.rootObjects().first(), "openWatchSettings") &&
                            watchSettingsDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(watchSettingsDialog, "close") &&
-                           QMetaObject::invokeMethod(historyDialog, "open") &&
+                           QMetaObject::invokeMethod(engine.rootObjects().first(), "openHistory") &&
                            historyDialog->property("opened").toBool() &&
                            QMetaObject::invokeMethod(historyDialog, "close") &&
                            QMetaObject::invokeMethod(recoveryDialog, "open") && recoveryDialog->property("visible").toBool() &&

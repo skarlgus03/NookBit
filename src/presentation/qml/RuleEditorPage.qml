@@ -964,6 +964,7 @@ Item {
             }
             ThemeButton {
                 text: qsTr("기존 편집기")
+                visible: false
                 onClicked: page.openCurrentEditor()
             }
         }
