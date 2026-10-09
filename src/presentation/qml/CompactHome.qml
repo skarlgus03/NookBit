@@ -23,7 +23,7 @@ Rectangle {
     readonly property color surface: dark ? "#242d3b" : "#ffffff"
     readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
     color: dark ? "#1b2230" : "#f5f7fa"
-    radius: 16
+    radius: 8
     border.color: edge
 
     component FlatButton: T.Button {

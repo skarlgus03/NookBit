@@ -943,6 +943,7 @@ Item {
             }
             ThemeButton {
                 text: qsTr("규칙 테스트")
+                objectName: "ruleTestButton"
                 onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
             }
             ThemeButton {

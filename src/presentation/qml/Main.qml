@@ -145,6 +145,7 @@ ApplicationWindow {
     component NavigationButton: T.Button {
         id: navButton
         padding: 8
+        implicitWidth: Math.max(76, contentItem.implicitWidth + leftPadding + rightPadding)
         implicitHeight: Math.max(36, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: navButton.text
@@ -163,6 +164,19 @@ ApplicationWindow {
                           : (root.editorDark ? "#3d4757" : "#d9dfd4")
             border.width: navButton.hovered || navButton.visualFocus || navButton.down ? 2 : 1
         }
+    }
+
+    // 설정 본문은 팝업 오버레이 없이 확장 창 안의 일반 페이지로 표시한다.
+    component EmbeddedPage: Pane {
+        required property int pageIndex
+        readonly property bool opened: visible
+        visible: root.currentPage === pageIndex
+        background: null
+        padding: 0
+        // 해당 페이지를 선택하는 함수.
+        function open() { root.currentPage = pageIndex }
+        // 자신이 선택되어 있을 때만 확장 창을 접는 함수.
+        function close() { if (root.currentPage === pageIndex) root.currentPage = 0 }
     }
 
     // 접힌 부모 아래의 노드를 화면에서 숨기는 함수.
@@ -274,7 +288,14 @@ ApplicationWindow {
         visible: root.currentPage !== 0
         color: root.editorDark ? "#161a22" : "#ffffff"
         border.color: root.editorDark ? "#3d4757" : "#e1e6ed"
-        radius: 16
+        radius: 8
+        z: 0
+    }
+    Item {
+        parent: extensionWindow.contentItem
+        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+        height: 58
+        z: 100
         RowLayout {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
             anchors.margins: 12; height: 36
@@ -284,7 +305,7 @@ ApplicationWindow {
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: 17; font.bold: true
             }
-            NavigationButton { text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
+            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
         }
     }
     Item {
@@ -293,6 +314,8 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.topMargin: 58
         visible: root.currentPage !== 0
+        clip: true
+        z: 1
     }
     Shortcut {
         sequence: "Ctrl+Shift+D"
@@ -319,11 +342,11 @@ ApplicationWindow {
 
     ScrollView {
         id: sortingScroll
-        parent: extensionWindow.contentItem
+        parent: extensionHost
         anchors.fill: parent
         anchors.leftMargin: 18
         anchors.rightMargin: 28
-        anchors.topMargin: 68
+        anchors.topMargin: 10
         anchors.bottomMargin: 28
         visible: root.currentPage === 2 || root.currentPage === 9
         clip: true
@@ -730,12 +753,12 @@ ApplicationWindow {
 
     RuleEditorPage {
         id: ruleEditorPage
-        parent: extensionWindow.contentItem
+        parent: extensionHost
         objectName: "ruleEditorPage"
         oldEditorFormDirty: root.ruleFormDirty || root.globalFormDirty
         anchors.fill: parent
         anchors.leftMargin: 0
-        anchors.topMargin: 58
+        anchors.topMargin: 0
         visible: root.currentPage === 1
         onOpenCurrentEditor: ruleDialog.open()
         onEditorDraftReplaced: {
@@ -765,18 +788,13 @@ ApplicationWindow {
         onAccepted: characterSettings.importFolder(selectedFolder)
     }
 
-    Dialog {
+    EmbeddedPage {
         id: characterSettingsDialog
         objectName: "characterSettingsDialog"
         parent: extensionHost
-        anchors.centerIn: parent
-        width: Math.max(1, extensionHost.width - 32)
-        height: Math.max(1, extensionHost.height - 24)
-        modal: false
-        dim: false
-        closePolicy: Popup.NoAutoClose
-        title: qsTr("캐릭터 설정")
-        standardButtons: Dialog.NoButton
+        pageIndex: 5
+        anchors.fill: parent
+        anchors.margins: 16
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
@@ -1190,18 +1208,13 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
+    EmbeddedPage {
         id: watchDialog
         objectName: "watchSettingsDialog"
         parent: extensionHost
-        anchors.centerIn: parent
-        width: Math.max(1, extensionHost.width - 32)
-        height: Math.max(1, extensionHost.height - 24)
-        modal: false
-        dim: false
-        closePolicy: Popup.NoAutoClose
-        title: qsTr("폴더 감시 조건")
-        standardButtons: Dialog.NoButton
+        pageIndex: 3
+        anchors.fill: parent
+        anchors.margins: 16
 
         ColumnLayout {
             anchors.fill: parent
@@ -1380,18 +1393,13 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
+    EmbeddedPage {
         id: historyDialog
         objectName: "historyDialog"
         parent: extensionHost
-        anchors.centerIn: parent
-        width: Math.max(1, extensionHost.width - 32)
-        height: Math.max(1, extensionHost.height - 24)
-        modal: false
-        dim: false
-        closePolicy: Popup.NoAutoClose
-        title: qsTr("지난 작업 기록")
-        standardButtons: Dialog.NoButton
+        pageIndex: 4
+        anchors.fill: parent
+        anchors.margins: 16
 
         ColumnLayout {
             anchors.fill: parent

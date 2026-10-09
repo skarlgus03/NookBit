@@ -62,6 +62,8 @@
 #include "presentation/character_window_controller.hpp"
 #include <QScreen>
 #include <QQuickWindow>
+#include <QQuickItem>
+#include <QMouseEvent>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "infrastructure/configuration/directory_image_pack_library.hpp"
@@ -103,6 +105,47 @@ static QIcon applicationIcon() {
     painter.drawText(image.rect(), Qt::AlignCenter, QStringLiteral("N"));
     painter.end();
     return QIcon(image);
+}
+
+// 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
+static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension) {
+    auto* button = mainWindow->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
+    auto* rules = mainWindow->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
+    if (!button || !rules) return false;
+    // 창 안의 실제 버튼 좌표로 눌렀다 떼는 입력을 전달하는 함수.
+    const auto click = [extension](QQuickItem* item) {
+        const auto local = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
+        const QPointF global = extension->mapToGlobal(local.toPoint());
+        QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, local, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(extension, &press);
+        QCoreApplication::sendEvent(extension, &release);
+        QCoreApplication::processEvents();
+    };
+    for (const int page : {1, 2, 3, 4, 5, 6, 9}) {
+        mainWindow->setProperty("currentPage", page);
+        QCoreApplication::processEvents();
+        if (page == 1) {
+            auto* ruleTestButton = rules->findChild<QQuickItem*>(QStringLiteral("ruleTestButton"));
+            auto* testPanel = rules->findChild<QObject*>(QStringLiteral("ruleTestPanel"));
+            if (!rules->isVisible() || rules->width() <= 0 || rules->height() <= 0 || !ruleTestButton || !testPanel) {
+                QTextStream(stderr) << "Rule editor is hidden or covered in the extension window." << Qt::endl;
+                return false;
+            }
+            click(ruleTestButton);
+            if (!testPanel->property("opened").toBool()) {
+                QTextStream(stderr) << "Rule editor toolbar click is blocked." << Qt::endl;
+                return false;
+            }
+            QMetaObject::invokeMethod(testPanel, "close");
+        }
+        click(button);
+        if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
+            QTextStream(stderr) << "Extension close click blocked on page " << page << Qt::endl;
+            return false;
+        }
+    }
+    return true;
 }
 
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
@@ -504,6 +547,10 @@ int main(int argc, char* argv[]) {
                 };
                 // 본체 크기를 유지하는 별도 창·프레임 제거·연결 위치·개발 도구 숨김을 검사한다.
                 compactLayout = true;
+                auto* rulePage = window->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
+                auto* closeButton = window->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
+                checkLayout(rulePage && rulePage->window() == extension, "rule page belongs to extension window");
+                checkLayout(closeButton && closeButton->window() == extension, "close button belongs to extension window");
                 checkLayout(window->width() == 380 && !developer->property("visible").toBool()
                     && window->flags().testFlag(Qt::FramelessWindowHint) && !extension->isVisible(), "initial");
                 QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 1));
@@ -525,6 +572,7 @@ int main(int argc, char* argv[]) {
                 checkLayout(developer->property("visible").toBool(), "developer tools");
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
+                checkLayout(verifyExtensionInteraction(window, extension), "page content and real close clicks");
             }
         }
         bool closeToTray = false;
