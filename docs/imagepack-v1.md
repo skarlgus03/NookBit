@@ -257,3 +257,21 @@ availability restores the main window; without a tray, idle close requests exit
 and busy close remains blocked. Native tray UI uses Qt Widgets alongside Qt Quick;
 the Qt-independent core and pack format are unchanged. Startup registration and
 automatic restart are not included.
+
+## Temporary speech-bubble placement
+
+The image format is unchanged. `CharacterWindow.qml` currently defines a
+presentation-only `bubbleOffset` of `(0, -120)` logical units relative to the
+global pivot; personal scale applies to the offset. `CharacterBubble.qml`
+receives that screen point, available monitor rectangle, text and an optional
+generic action. It chooses right/above by default, flips left/below near edges,
+then clamps the full bubble inside the work area. The bubble is a separate
+transparent tool window owned by the character window, not a change to the
+sprite bounds. No automatic pivot or frame metadata edits are performed.
+
+The composition in Main connects the generic action to opening an existing
+watch proposal, rechecking proposal availability and operation state at click
+time. It does not directly organize files. A 10-second placement test overrides
+only displayed text and supplies a local dismiss button; it does not publish a
+fake backend event or modify pending files. Per-pack/animation bubble anchors,
+dialogue packs and dismiss/scheduling policies remain future work.

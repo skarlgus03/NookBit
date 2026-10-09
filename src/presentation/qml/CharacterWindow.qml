@@ -9,7 +9,12 @@ Window {
     required property var descriptor
     required property string message
     property real userScale: 0.5
+    // 임시 기본값이며 ImagePack 규격에는 아직 추가하지 않는다.
+    property point bubbleOffset: Qt.point(0, -120)
+    property bool actionAvailable: false
+    property bool testingBubble: false
     signal settingsRequested()
+    signal actionRequested()
     transientParent: null
     flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     color: "transparent"
@@ -29,6 +34,28 @@ Window {
     function commitPosition() {
         placement.moveAnchor(Math.round(x + sprite.anchor.x), Math.round(y + sprite.anchor.y))
     }
+    // 정리 제안이나 캐릭터 상태를 바꾸지 않고 말풍선 배치만 시험하는 함수.
+    function testBubble() {
+        testingBubble = true
+        bubbleTestDeadline.restart()
+    }
+    CharacterBubble {
+        transientParent: pet
+        visible: pet.visible && message.length > 0
+        screenArea: pet.placement.screenArea
+        anchorPoint: Qt.point(pet.x + sprite.anchor.x + pet.bubbleOffset.x * pet.userScale,
+                              pet.y + sprite.anchor.y + pet.bubbleOffset.y * pet.userScale)
+        message: pet.testingBubble ? qsTr("말풍선 위치 테스트예요. 캐릭터를 화면 가장자리로 옮겨보세요!") : pet.message
+        actionAvailable: pet.testingBubble || pet.actionAvailable
+        actionText: pet.testingBubble ? qsTr("닫기") : qsTr("확인")
+        onActionRequested: {
+            if (pet.testingBubble) pet.testingBubble = false
+            else pet.actionRequested()
+        }
+        // 말풍선 닫기로 앱이 종료되지 않도록 캐릭터 표시만 해제하는 함수.
+        onClosing: function(event) { event.accepted = false; pet.placement.setShown(false) }
+    }
+    Timer { id: bubbleTestDeadline; interval: 10000; onTriggered: pet.testingBubble = false }
 
     // 애니메이션 전체 포즈의 피벗 기준 영역을 구해 프레임마다 창이 흔들리지 않게 하는 함수.
     function frameBounds() {
@@ -74,24 +101,6 @@ Window {
         onPressed: function(mouse) {
             if (mouse.button === Qt.LeftButton) pet.startSystemMove()
             else pet.settingsRequested()
-        }
-    }
-    Rectangle {
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: pet.height - 36
-        width: Math.min(pet.width - 8, 320)
-        height: 30
-        radius: 10
-        color: "#e6263246"
-        Text {
-            anchors.fill: parent
-            anchors.margins: 6
-            text: pet.message
-            elide: Text.ElideRight
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            color: "#edf2f8"
-            font.pixelSize: 12
         }
     }
     Rectangle {

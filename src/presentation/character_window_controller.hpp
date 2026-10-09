@@ -13,6 +13,7 @@ class CharacterWindowController final : public QObject {
     Q_PROPERTY(bool shown READ shown WRITE setShown NOTIFY visibilityChanged)
     Q_PROPERTY(int anchorX READ anchorX NOTIFY positionChanged)
     Q_PROPERTY(int anchorY READ anchorY NOTIFY positionChanged)
+    Q_PROPERTY(QRect screenArea READ screenArea NOTIFY screenAreaChanged)
 public:
     /// 화면 배치 범위와 초기 위치를 주입하는 생성자.
     CharacterWindowController(QList<QRect> screens, QPoint anchor, bool shown, QObject* parent = nullptr)
@@ -23,6 +24,11 @@ public:
     int anchorX() const { return anchor_.x(); }
     /// 화면 기준 피벗의 세로 좌표를 반환하는 함수.
     int anchorY() const { return anchor_.y(); }
+    /// 피벗이 있는 화면의 말풍선 배치 가능 영역을 반환하는 함수.
+    QRect screenArea() const {
+        for (const auto& area : screens_) if (area.contains(anchor_)) return area;
+        return screens_.isEmpty() ? QRect(0, 0, 800, 600) : screens_.first();
+    }
     /// 앱 종료 대신 표시 여부만 변경하는 함수.
     Q_INVOKABLE void setShown(bool value) {
         if (shown_ == value) return;
@@ -40,11 +46,11 @@ public:
             if (dx * dx + dy * dy < distance) { best = candidate; distance = dx * dx + dy * dy; }
         }
         if (best == anchor_) return;
-        anchor_ = best; emit positionChanged();
+        anchor_ = best; emit positionChanged(); emit screenAreaChanged();
     }
     /// 모니터 변경 시 현재 위치를 새 배치 안으로 복원하는 함수.
     void setScreens(QList<QRect> screens) {
-        screens_ = std::move(screens); moveAnchor(anchor_.x(), anchor_.y());
+        screens_ = std::move(screens); moveAnchor(anchor_.x(), anchor_.y()); emit screenAreaChanged();
     }
     /// 기본 화면 오른쪽 아래로 캐릭터를 가져오는 함수.
     Q_INVOKABLE void resetPosition() {
@@ -54,6 +60,7 @@ public:
 signals:
     void visibilityChanged();
     void positionChanged();
+    void screenAreaChanged();
 private:
     QList<QRect> screens_;
     QPoint anchor_;

@@ -122,6 +122,15 @@ if(TARGET nookbit_json_config)
   add_executable(nookbit_image_pack_loader_tests image_pack_loader_tests.cpp)
   add_executable(nookbit_character_window_tests character_window_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/character_window_controller.hpp)
+  add_executable(nookbit_character_bubble_tests character_bubble_tests.cpp)
+  target_compile_definitions(nookbit_character_bubble_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_character_bubble_tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
+  add_test(NAME nookbit_character_bubble_tests COMMAND nookbit_character_bubble_tests)
+  set_tests_properties(nookbit_character_bubble_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+  if(WIN32)
+    set_tests_properties(nookbit_character_bubble_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_app_lifecycle_tests app_lifecycle_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/app_lifecycle_controller.hpp)
   set_target_properties(nookbit_app_lifecycle_tests PROPERTIES AUTOMOC ON)

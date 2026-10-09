@@ -522,6 +522,8 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("desktopCharacterWindow"));
         QObject* desktopSprite = desktopCharacter
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
+        auto* characterBubble = desktopCharacter
+            ? desktopCharacter->findChild<QQuickWindow*>(QStringLiteral("characterBubbleWindow")) : nullptr;
         const bool ready = closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterBadge")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSprite")) != nullptr &&
@@ -531,6 +533,9 @@ int main(int argc, char* argv[]) {
                            QMetaObject::invokeMethod(characterSettingsDialog, "close") &&
                            characterSettings.selectedKey() == QStringLiteral("builtin") &&
                            desktopCharacter != nullptr && desktopSprite != nullptr &&
+                           characterBubble != nullptr && characterBubble->color().alpha() == 0 &&
+                           QMetaObject::invokeMethod(desktopCharacter, "testBubble") &&
+                           desktopCharacter->property("testingBubble").toBool() &&
                            desktopCharacter->color().alpha() == 0 &&
                            desktopCharacter->flags().testFlag(Qt::FramelessWindowHint) &&
                            desktopCharacter->flags().testFlag(Qt::WindowStaysOnTopHint) &&

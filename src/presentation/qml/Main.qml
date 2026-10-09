@@ -22,6 +22,12 @@ ApplicationWindow {
         descriptor: characterController.animation
         message: characterController.message
         userScale: characterSettings.userScale
+        actionAvailable: watchController.proposalVisible && !backgroundTasks.busy
+        onActionRequested: {
+            if (!watchController.proposalVisible || backgroundTasks.busy) return
+            appLifecycle.openWindow()
+            watchProposalDialog.open()
+        }
         onSettingsRequested: {
             root.showNormal()
             root.raise()
@@ -731,6 +737,14 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
+            Button {
+                text: qsTr("말풍선 위치 테스트 (10초)")
+                onClicked: {
+                    characterWindow.setShown(true)
+                    desktopPet.testBubble()
+                    characterSettingsDialog.close()
+                }
+            }
             Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 12 }
             ComboBox {
                 id: characterPackChoice

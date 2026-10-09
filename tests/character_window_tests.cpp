@@ -17,11 +17,13 @@ int main(int argc, char** argv) {
     const QList<QRect> screens{QRect(0, 0, 1920, 1040), QRect(-1280, -200, 1280, 960)};
     nookbit::CharacterWindowController window(screens, QPoint(-500, 200), true);
     expect(window.anchorX() == -500 && window.anchorY() == 200, "negative second-screen position preserved");
+    expect(window.screenArea() == screens.last(), "bubble receives negative-coordinate monitor area");
     window.moveAnchor(99999, -99999);
     expect(window.anchorX() == 1887 && window.anchorY() == 32, "offscreen position restored inside nearest screen");
     window.moveAnchor(-500, 200);
     window.setScreens({screens.first()});
     expect(window.anchorX() == 32 && window.anchorY() == 200, "removed monitor returns character to remaining screen");
+    expect(window.screenArea() == screens.first(), "bubble placement follows remaining monitor");
     window.setShown(false);
     expect(!window.shown(), "hide affects only display state");
     window.resetPosition();
