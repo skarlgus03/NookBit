@@ -98,15 +98,11 @@ ApplicationWindow {
     }
     property int currentPage: 0
     readonly property int homeWidth: 380
-    // 편집 상태를 유지한 채 본체 오른쪽의 페이지를 펼치거나 접는 함수.
+    // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
-        if (visibility === Window.Maximized) showNormal()
         if (currentPage !== 3) watchDialog.close()
         if (currentPage !== 4) historyDialog.close()
         if (currentPage !== 5) characterSettingsDialog.close()
-        width = currentPage === 0 ? homeWidth : Math.min(homeWidth + 860, Screen.desktopAvailableWidth - 32)
-        if (currentPage !== 0)
-            x = Math.max(Screen.virtualX + 8, Math.min(x, Screen.virtualX + Screen.width - width - 8))
     }
     property string selectedRulePath: ""
     property var selectedRuleDetail: ({})
@@ -214,11 +210,13 @@ ApplicationWindow {
     }
     width: homeWidth
     height: Math.min(780, Screen.desktopAvailableHeight - 60)
-    minimumWidth: currentPage === 0 ? homeWidth : Math.min(homeWidth + 520, Screen.desktopAvailableWidth - 32)
+    minimumWidth: homeWidth
+    maximumWidth: homeWidth
     minimumHeight: 560
     visible: true
     title: qsTr("NookBit")
-    color: root.editorDark ? "#161a22" : "#f5f5f2"
+    color: "transparent"
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     CompactHome {
         id: compactHome
@@ -227,24 +225,56 @@ ApplicationWindow {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         dark: root.editorDark
+        // 선택한 페이지를 본체와 별개인 연결 창에 표시하는 함수.
         onPageRequested: function(page) { root.currentPage = page }
+        onMoveRequested: root.startSystemMove()
+        onMinimizeRequested: root.showMinimized()
+        onCloseRequested: root.close()
         onWatchRequested: root.openWatchSettings()
         onHistoryRequested: root.openHistory()
         onCharacterRequested: root.openCharacterSettings()
         onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
         onProposalRequested: watchProposalDialog.open()
     }
+    MouseArea {
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        height: 7
+        cursorShape: Qt.SizeVerCursor
+        // 제목 표시줄 없이도 창 아래쪽에서 높이를 조절하는 함수.
+        onPressed: root.startSystemResize(Qt.BottomEdge)
+    }
 
+    Window {
+        id: extensionWindow
+        objectName: "extensionWindow"
+        transientParent: root
+        screen: root.screen
+        flags: Qt.Tool | Qt.FramelessWindowHint
+        color: "transparent"
+        title: qsTr("NookBit 확장 페이지")
+        readonly property real rightSpace: Screen.virtualX + Screen.width - 8 - root.x - root.width - 10
+        readonly property real leftSpace: root.x - Screen.virtualX - 18
+        readonly property bool dockRight: rightSpace >= 620 || rightSpace >= leftSpace
+        width: Math.min(860, Screen.desktopAvailableWidth - 16, Math.max(520, dockRight ? rightSpace : leftSpace))
+        height: root.height
+        // 오른쪽 공간이 부족하면 왼쪽에 붙이고 화면 영역 안으로 제한한다.
+        readonly property real dockX: dockRight ? root.x + root.width + 10 : root.x - width - 10
+        x: Math.max(Screen.virtualX + 8, Math.min(dockX, Screen.virtualX + Screen.width - width - 8))
+        y: Math.max(Screen.virtualY + 8, Math.min(root.y, Screen.virtualY + Screen.desktopAvailableHeight - height - 8))
+        visible: root.currentPage !== 0 && root.visible && root.visibility !== Window.Minimized
+        contentItem.enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
+        // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
+        onClosing: function(event) { event.accepted = false; root.currentPage = 0 }
+    }
     Rectangle {
         id: extensionPanel
         objectName: "extensionPanel"
-        anchors.left: compactHome.right
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
+        parent: extensionWindow.contentItem
+        anchors.fill: parent
         visible: root.currentPage !== 0
         color: root.editorDark ? "#161a22" : "#ffffff"
         border.color: root.editorDark ? "#3d4757" : "#e1e6ed"
+        radius: 16
         RowLayout {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
             anchors.margins: 12; height: 36
@@ -259,20 +289,21 @@ ApplicationWindow {
     }
     Item {
         id: extensionHost
-        anchors.left: compactHome.right
-        anchors.right: parent.right
-        anchors.top: parent.top
+        parent: extensionWindow.contentItem
+        anchors.fill: parent
         anchors.topMargin: 58
-        anchors.bottom: parent.bottom
         visible: root.currentPage !== 0
     }
     Shortcut {
         sequence: "Ctrl+Shift+D"
+        context: Qt.ApplicationShortcut
+        enabled: !backgroundTasks.busy
         // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
         onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
     }
     ColumnLayout {
-        anchors.fill: extensionHost
+        parent: extensionHost
+        anchors.fill: parent
         anchors.margins: 18
         visible: root.currentPage === 6
         Label { text: qsTr("같은 이름의 파일이 이미 있으면"); font.bold: true }
@@ -288,8 +319,9 @@ ApplicationWindow {
 
     ScrollView {
         id: sortingScroll
+        parent: extensionWindow.contentItem
         anchors.fill: parent
-        anchors.leftMargin: root.homeWidth + 18
+        anchors.leftMargin: 18
         anchors.rightMargin: 28
         anchors.topMargin: 68
         anchors.bottomMargin: 28
@@ -698,10 +730,11 @@ ApplicationWindow {
 
     RuleEditorPage {
         id: ruleEditorPage
+        parent: extensionWindow.contentItem
         objectName: "ruleEditorPage"
         oldEditorFormDirty: root.ruleFormDirty || root.globalFormDirty
         anchors.fill: parent
-        anchors.leftMargin: root.homeWidth
+        anchors.leftMargin: 0
         anchors.topMargin: 58
         visible: root.currentPage === 1
         onOpenCurrentEditor: ruleDialog.open()

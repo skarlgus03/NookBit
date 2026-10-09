@@ -54,6 +54,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <algorithm>
+#include <cmath>
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
@@ -495,15 +496,35 @@ int main(int argc, char* argv[]) {
             auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
             auto* home = window ? window->findChild<QObject*>(QStringLiteral("compactHome")) : nullptr;
             auto* developer = window ? window->findChild<QObject*>(QStringLiteral("developerTools")) : nullptr;
-            if (window && home && developer) {
-                // 좁은 본체·확장·접기와 개발 도구의 기본 숨김을 실제 QML에서 검사한다.
-                compactLayout = window->width() == 380 && !developer->property("visible").toBool();
+            auto* extension = window ? window->findChild<QQuickWindow*>(QStringLiteral("extensionWindow")) : nullptr;
+            if (window && home && developer && extension) {
+                // 다른 창의 배치·노출 문제를 검사 단계 이름으로 식별하는 함수.
+                const auto checkLayout = [&compactLayout](bool condition, const char* stage) {
+                    if (!condition) { compactLayout = false; QTextStream(stderr) << "Layout check failed: " << stage << Qt::endl; }
+                };
+                // 본체 크기를 유지하는 별도 창·프레임 제거·연결 위치·개발 도구 숨김을 검사한다.
+                compactLayout = true;
+                checkLayout(window->width() == 380 && !developer->property("visible").toBool()
+                    && window->flags().testFlag(Qt::FramelessWindowHint) && !extension->isVisible(), "initial");
                 QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 1));
-                compactLayout = compactLayout && window->width() > 380 && home->property("visible").toBool();
+                checkLayout(window->width() == 380 && extension->isVisible()
+                    && extension->transientParent() == window && extension->flags().testFlag(Qt::FramelessWindowHint), "open extension");
+                const auto previousX = window->x();
+                window->setX(previousX + 12);
+                QCoreApplication::processEvents();
+                const auto expectedDock = extension->property("dockRight").toBool()
+                    ? window->x() + window->width() + 10 : window->x() - extension->width() - 10;
+                checkLayout(std::abs(extension->property("dockX").toDouble() - expectedDock) < 1, "follow position");
+                window->setX(previousX);
+                QCoreApplication::processEvents();
+                window->hide();
+                checkLayout(!extension->isVisible(), "hide main");
+                window->showNormal();
+                checkLayout(extension->isVisible(), "restore main");
                 window->setProperty("currentPage", 9);
-                compactLayout = compactLayout && developer->property("visible").toBool();
+                checkLayout(developer->property("visible").toBool(), "developer tools");
                 window->setProperty("currentPage", 0);
-                compactLayout = compactLayout && window->width() == 380 && !developer->property("visible").toBool();
+                checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
             }
         }
         bool closeToTray = false;

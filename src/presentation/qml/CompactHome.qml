@@ -14,12 +14,17 @@ Rectangle {
     signal characterRequested()
     signal recoveryRequested()
     signal proposalRequested()
+    signal moveRequested()
+    signal minimizeRequested()
+    signal closeRequested()
     property alias destinationPath: destination.text
     readonly property color foreground: dark ? "#edf2f8" : "#273344"
     readonly property color muted: dark ? "#aab6c7" : "#748091"
     readonly property color surface: dark ? "#242d3b" : "#ffffff"
     readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
     color: dark ? "#1b2230" : "#f5f7fa"
+    radius: 16
+    border.color: edge
 
     component FlatButton: T.Button {
         id: control
@@ -52,9 +57,19 @@ Rectangle {
             spacing: 8
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "NookBit"; font.pixelSize: 25; font.bold: true; color: home.foreground }
-                Item { Layout.fillWidth: true }
-                Label { text: "FILE ORGANIZER"; font.pixelSize: 9; font.letterSpacing: 1; color: home.muted }
+                Item {
+                    Layout.fillWidth: true
+                    implicitHeight: 38
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "NookBit"; font.pixelSize: 25; font.bold: true; color: home.foreground }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.SizeAllCursor
+                        // 앱 내부 제목 영역으로 네이티브 창 이동을 요청하는 함수.
+                        onPressed: home.moveRequested()
+                    }
+                }
+                FlatButton { text: "−"; implicitWidth: 32; Accessible.name: qsTr("최소화"); onClicked: home.minimizeRequested() }
+                FlatButton { text: "×"; implicitWidth: 32; Accessible.name: qsTr("트레이로 숨기기"); onClicked: home.closeRequested() }
             }
             Label { text: qsTr("파일을 담고, 가볍게 정리하세요."); color: home.muted; font.pixelSize: 12 }
             Rectangle {
