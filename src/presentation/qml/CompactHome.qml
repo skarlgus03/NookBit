@@ -29,6 +29,7 @@ Rectangle {
     component FlatButton: T.Button {
         id: control
         padding: 8
+        implicitWidth: Math.max(36, contentItem.implicitWidth + leftPadding + rightPadding)
         implicitHeight: 36
         contentItem: Text {
             text: control.text
@@ -164,6 +165,7 @@ Rectangle {
                     onClicked: { previewController.createPreview(destination.text); home.pageRequested(2) }
                 }
                 FlatButton {
+                    objectName: "compactUndoButton"
                     text: qsTr("되돌리기")
                     enabled: previewController.canUndo
                     onClicked: previewController.undoLastMove()

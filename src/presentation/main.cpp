@@ -559,9 +559,16 @@ int main(int argc, char* argv[]) {
                 const auto previousX = window->x();
                 window->setX(previousX + 12);
                 QCoreApplication::processEvents();
-                const auto expectedDock = extension->property("dockRight").toBool()
-                    ? window->x() + window->width() + 10 : window->x() - extension->width() - 10;
+                const auto expectedDock = window->x() + window->width() + 10;
                 checkLayout(std::abs(extension->property("dockX").toDouble() - expectedDock) < 1, "follow position");
+                // 음수 좌표와 다른 모니터 영역에서도 위치를 되돌려 가두지 않는지 검사한다.
+                for (const int position : {-1400, 1500, 3500}) {
+                    window->setX(position);
+                    QCoreApplication::processEvents();
+                    checkLayout(extension->x() == window->x() + window->width() + 10, "cross-monitor follow");
+                }
+                auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
+                checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");
                 window->setX(previousX);
                 QCoreApplication::processEvents();
                 window->hide();

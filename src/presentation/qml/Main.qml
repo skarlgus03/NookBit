@@ -262,19 +262,15 @@ ApplicationWindow {
         id: extensionWindow
         objectName: "extensionWindow"
         transientParent: root
-        screen: root.screen
         flags: Qt.Tool | Qt.FramelessWindowHint
         color: "transparent"
         title: qsTr("NookBit 확장 페이지")
-        readonly property real rightSpace: Screen.virtualX + Screen.width - 8 - root.x - root.width - 10
-        readonly property real leftSpace: root.x - Screen.virtualX - 18
-        readonly property bool dockRight: rightSpace >= 620 || rightSpace >= leftSpace
-        width: Math.min(860, Screen.desktopAvailableWidth - 16, Math.max(520, dockRight ? rightSpace : leftSpace))
+        width: 860
         height: root.height
-        // 오른쪽 공간이 부족하면 왼쪽에 붙이고 화면 영역 안으로 제한한다.
-        readonly property real dockX: dockRight ? root.x + root.width + 10 : root.x - width - 10
-        x: Math.max(Screen.virtualX + 8, Math.min(dockX, Screen.virtualX + Screen.width - width - 8))
-        y: Math.max(Screen.virtualY + 8, Math.min(root.y, Screen.virtualY + Screen.desktopAvailableHeight - height - 8))
+        // 개별 모니터 경계로 제한하지 않고 가상 데스크톱에서 본체 오른쪽을 따라간다.
+        readonly property real dockX: root.x + root.width + 10
+        x: dockX
+        y: root.y
         visible: root.currentPage !== 0 && root.visible && root.visibility !== Window.Minimized
         contentItem.enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
