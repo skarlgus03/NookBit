@@ -124,7 +124,7 @@ Item {
     }
     property var blocks: [
         { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
-        { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MiB" },
+        { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MB" },
         { id: 3, type: "extension", x: 720, y: 220, value: "png, jpg" },
         { id: 4, type: "destination", x: 1050, y: 220, value: "Pictures" }
     ]
@@ -343,7 +343,7 @@ Item {
                 greaterThan: qsTr("초과"), atLeast: qsTr("이상"),
                 lessThan: qsTr("미만"), atMost: qsTr("이하")
             }
-            const unit = block.type === "size" ? (block.unit || "MiB") : qsTr("일")
+            const unit = block.type === "size" ? (block.unit || "MB") : qsTr("일")
             return block.value + " " + unit + " " + (comparisons[block.comparison] || "")
         }
         return block.value
@@ -494,7 +494,7 @@ Item {
             y: worldY,
             value: examples[type],
             comparison: type === "size" ? "greaterThan" : "atLeast",
-            unit: "MiB"
+            unit: "MB"
         }
         blocks = blocks.concat([block])
         selectOnly(block.id)
@@ -634,22 +634,22 @@ Item {
         statusText = qsTr("입력값을 바꿨어요. 규칙 초안으로 변환해야 적용됩니다.")
     }
 
-    // 숫자 조건의 비교 방식을 다음 항목으로 바꾸는 함수.
-    function cycleComparison(id) {
+    // 드롭다운에서 선택한 비교 방식을 해당 조건에 적용하는 함수.
+    function setComparison(id, value) {
         blocks = blocks.map(block => {
             if (block.id !== id) return block
             const choices = block.type === "size"
                             ? ["greaterThan", "atLeast", "lessThan", "atMost"]
                             : ["atLeast", "lessThan"]
-            const index = choices.indexOf(block.comparison)
-            return Object.assign({}, block, { comparison: choices[(index + 1) % choices.length] })
+            return choices.indexOf(value) >= 0 ? Object.assign({}, block, { comparison: value }) : block
         })
     }
 
-    // 크기 조건의 바이트·MiB 단위를 바꾸는 함수.
-    function toggleUnit(id) {
+    // 선택한 표시 단위를 적용하고 기존 바이트·MiB 규칙도 유지하는 함수.
+    function setSizeUnit(id, unit) {
+        if (["KB", "MB", "GB", "B", "MiB"].indexOf(unit) < 0) return
         blocks = blocks.map(block => block.id === id
-                            ? Object.assign({}, block, { unit: block.unit === "MiB" ? "B" : "MiB" })
+                            ? Object.assign({}, block, { unit: unit })
                             : block)
     }
 
@@ -799,7 +799,7 @@ Item {
     function resetExample() {
         blocks = [
             { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
-            { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MiB" },
+            { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MB" },
             { id: 3, type: "extension", x: 720, y: 220, value: "png, jpg" },
             { id: 4, type: "destination", x: 1050, y: 220, value: "Pictures" }
         ]
@@ -1627,18 +1627,33 @@ Item {
                                 page.updateValue(page.selectedBlock.id, text)
                         }
                     }
-                    ThemeButton {
+                    ComboBox {
+                        objectName: "sizeComparisonCombo"
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null &&
                                  (page.selectedBlock.type === "size" || page.selectedBlock.type === "age")
-                        text: page.selectedBlock ? qsTr("비교: %1").arg(page.comparisonTitle(page.selectedBlock)) : ""
-                        onClicked: page.cycleComparison(page.selectedId)
+                        textRole: "text"; valueRole: "value"
+                        model: page.selectedBlock && page.selectedBlock.type === "age"
+                            ? [{text: qsTr("이상 (≥)"), value: "atLeast"}, {text: qsTr("미만 (<)"), value: "lessThan"}]
+                            : [{text: qsTr("초과 (>)"), value: "greaterThan"}, {text: qsTr("이상 (≥)"), value: "atLeast"},
+                               {text: qsTr("미만 (<)"), value: "lessThan"}, {text: qsTr("이하 (≤)"), value: "atMost"}]
+                        currentIndex: page.selectedBlock ? model.findIndex(entry => entry.value === page.selectedBlock.comparison) : -1
+                        onActivated: page.setComparison(page.selectedId, currentValue)
                     }
-                    ThemeButton {
+                    ComboBox {
+                        objectName: "sizeUnitCombo"
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "size"
-                        text: page.selectedBlock ? qsTr("단위: %1").arg(page.selectedBlock.unit || "MiB") : ""
-                        onClicked: page.toggleUnit(page.selectedId)
+                        textRole: "text"; valueRole: "value"
+                        model: {
+                            const choices = [{text: "KB", value: "KB"}, {text: "MB", value: "MB"}, {text: "GB", value: "GB"}]
+                            const legacy = page.selectedBlock ? page.selectedBlock.unit : ""
+                            if (legacy === "B") choices.push({text: qsTr("B (바이트 · 기존 규칙)"), value: "B"})
+                            if (legacy === "MiB") choices.push({text: qsTr("MiB (1024 기준 · 기존 규칙)"), value: "MiB"})
+                            return choices
+                        }
+                        currentIndex: page.selectedBlock ? model.findIndex(entry => entry.value === (page.selectedBlock.unit || "MB")) : -1
+                        onActivated: page.setSizeUnit(page.selectedId, currentValue)
                     }
                     ThemeButton {
                         Layout.fillWidth: true

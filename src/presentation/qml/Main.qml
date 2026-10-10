@@ -1169,7 +1169,10 @@ ApplicationWindow {
                             valueRole: "value"
                             model: [
                                 { text: "MiB (1 MiB = 1,048,576 B)", value: "MiB" },
-                                { text: "B", value: "B" }
+                                { text: "B", value: "B" },
+                                { text: "KB", value: "KB" },
+                                { text: "MB", value: "MB" },
+                                { text: "GB", value: "GB" }
                             ]
                             onActivated: root.ruleFormDirty = true
                         }

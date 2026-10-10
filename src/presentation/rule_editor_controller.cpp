@@ -22,6 +22,23 @@
 
 namespace nookbit {
 namespace {
+// 사용자 단위를 정확한 정수 바이트 배수로 변환하고 기존 MiB도 지원하는 함수.
+qulonglong sizeFactor(const QString& unit) {
+    if (unit == "B") return 1;
+    if (unit == "KB") return 1000;
+    if (unit == "MB") return 1000000;
+    if (unit == "GB") return 1000000000;
+    if (unit == "MiB") return 1048576;
+    return 0;
+}
+// 반올림 없이 원래 바이트 값을 보존하는 표시 단위와 정수를 고르는 함수.
+std::pair<qulonglong, QString> sizeDisplay(qulonglong bytes) {
+    for (const auto* unit : {"GB", "MB", "MiB", "KB"}) {
+        const auto factor = sizeFactor(QString::fromLatin1(unit));
+        if (bytes > 0 && bytes % factor == 0) return {bytes / factor, QString::fromLatin1(unit)};
+    }
+    return {bytes, QStringLiteral("B")};
+}
 
 // 숫자 경로를 따라 트리의 형제 목록을 찾는 함수.
 std::vector<RuleNode>* siblingsAt(RuleSet& rules, const QString& parentPath) {
@@ -212,8 +229,8 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                 const auto comparison = block.value(QStringLiteral("comparison")).toString();
                 if (type == QStringLiteral("size")) {
                     const auto unit = block.value(QStringLiteral("unit")).toString();
-                    const auto factor = unit == QStringLiteral("MiB") ? 1048576ULL : 1ULL;
-                    if ((unit != QStringLiteral("MiB") && unit != QStringLiteral("B")) ||
+                    const auto factor = sizeFactor(unit);
+                    if (!factor ||
                         amount > 9007199254740991ULL / factor)
                         return graphError(id, QStringLiteral("크기 또는 단위가 올바르지 않아요."));
                     SizeComparison mode;
@@ -364,11 +381,9 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
             block.insert(QStringLiteral("value"), QString::fromStdString(name->text));
         } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {
             block.insert(QStringLiteral("type"), QStringLiteral("size"));
-            const bool wholeMiB = size->bytes % 1048576ULL == 0;
-            block.insert(QStringLiteral("value"), QString::number(
-                wholeMiB ? size->bytes / 1048576ULL : size->bytes));
-            block.insert(QStringLiteral("unit"), wholeMiB ? QStringLiteral("MiB")
-                                                          : QStringLiteral("B"));
+            const auto [amount, unit] = sizeDisplay(size->bytes);
+            block.insert(QStringLiteral("value"), QString::number(amount));
+            block.insert(QStringLiteral("unit"), unit);
             QString comparison = QStringLiteral("greaterThan");
             if (size->comparison == SizeComparison::AtLeast) comparison = QStringLiteral("atLeast");
             else if (size->comparison == SizeComparison::LessThan) comparison = QStringLiteral("lessThan");
@@ -535,11 +550,9 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
         result.insert(QStringLiteral("value"), QString::fromStdString(name->text));
     } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("size"));
-        const bool wholeMiB = size->bytes % 1048576ULL == 0;
-        result.insert(QStringLiteral("value"), QString::number(
-            wholeMiB ? size->bytes / 1048576ULL : size->bytes));
-        result.insert(QStringLiteral("sizeUnit"), wholeMiB ? QStringLiteral("MiB")
-                                                          : QStringLiteral("B"));
+        const auto [amount, unit] = sizeDisplay(size->bytes);
+        result.insert(QStringLiteral("value"), QString::number(amount));
+        result.insert(QStringLiteral("sizeUnit"), unit);
         const char* comparison = "greaterThan";
         if (size->comparison == SizeComparison::AtLeast) comparison = "atLeast";
         if (size->comparison == SizeComparison::LessThan) comparison = "lessThan";
@@ -592,8 +605,8 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
         } else if (type == QStringLiteral("size")) {
             bool valid = false;
             const auto amount = value.trimmed().toULongLong(&valid);
-            const auto multiplier = sizeUnit == QStringLiteral("MiB") ? 1048576ULL : 1ULL;
-            if (!valid || amount > 9007199254740991ULL / multiplier) {
+            const auto multiplier = sizeFactor(sizeUnit);
+            if (!valid || !multiplier || amount > 9007199254740991ULL / multiplier) {
                 message_ = QStringLiteral("크기는 0 이상의 정수로 입력해 주세요.");
                 emit changed();
                 return false;

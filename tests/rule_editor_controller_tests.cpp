@@ -537,6 +537,42 @@ void testGraphRoundTripAndLayout() {
     }
     expect(positionRestored, "saved node position should survive reopening the editor");
 }
+// 새 크기 단위와 기존 단위가 저장·복원 과정에서 바이트 값을 보존하는지 검사하는 함수.
+void testSizeUnits() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath("units.json"), schema);
+    const auto initial = defaults.load();
+    if (!initial || !active.save(initial.value())) { expect(false, "unit fixture initializes"); return; }
+    nookbit::RuleEditorController editor(active, active);
+    QVariantList edges{QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 3}}};
+    for (const auto& [unit, factor] : std::initializer_list<std::pair<const char*, qulonglong>>{
+            {"KB", 1000}, {"MB", 1000000}, {"GB", 1000000000}, {"MiB", 1048576}, {"B", 1}}) {
+        QVariantList blocks{QVariantMap{{"id", 1}, {"type", "start"}},
+            QVariantMap{{"id", 2}, {"type", "size"}, {"value", "5"}, {"unit", unit}, {"comparison", "atLeast"}},
+            QVariantMap{{"id", 3}, {"type", "destination"}, {"value", "Sorted"}}};
+        expect(editor.importGraph(blocks, edges) && editor.save(), "unit graph saves");
+        const auto saved = active.load();
+        expect(saved && std::get<nookbit::SizePredicate>(*saved.value().nodes[0].atomicCondition).bytes == 5 * factor,
+            "unit multiplication preserves exact bytes");
+        auto graph = editor.graph();
+        bool found = false;
+        for (const auto& item : graph.value("blocks").toList()) {
+            const auto block = item.toMap();
+            if (block.value("type") == "size") found = block.value("unit").toString() == unit && block.value("value") == "5";
+        }
+        expect(found, "graph restores the exact display unit");
+    }
+    QVariantList invalid{QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "size"}, {"value", "5"}, {"unit", "unknown"}, {"comparison", "greaterThan"}},
+        QVariantMap{{"id", 3}, {"type", "destination"}, {"value", "Sorted"}}};
+    expect(!editor.importGraph(invalid, edges), "unknown units rejected without division by zero");
+    auto tooLarge = invalid[1].toMap();
+    tooLarge["unit"] = "GB"; tooLarge["value"] = "9007199254740991";
+    invalid[1] = tooLarge;
+    expect(!editor.importGraph(invalid, edges), "oversized GB conversion rejected before multiplication");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -550,5 +586,6 @@ int main(int argc, char* argv[]) {
     testNestedAndFallback();
     testGraphImport();
     testGraphRoundTripAndLayout();
+    testSizeUnits();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -68,6 +68,7 @@
 #include <QQuickItem>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QJSValue>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "infrastructure/configuration/directory_image_pack_library.hpp"
@@ -142,6 +143,18 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 return false;
             }
             QMetaObject::invokeMethod(testPanel, "close");
+            // 새 크기 블록의 선택 목록이 초안을 직접 갱신하는지 검사한다.
+            if (!QMetaObject::invokeMethod(rules, "addBlock", Q_ARG(QVariant, QVariant("size")),
+                    Q_ARG(QVariant, QVariant(350)), Q_ARG(QVariant, QVariant(220)))) return false;
+            auto* comparison = rules->findChild<QObject*>(QStringLiteral("sizeComparisonCombo"));
+            auto* unit = rules->findChild<QObject*>(QStringLiteral("sizeUnitCombo"));
+            if (!comparison || !unit || unit->property("count").toInt() != 3) return false;
+            comparison->setProperty("currentIndex", 1);
+            QMetaObject::invokeMethod(comparison, "activated", Q_ARG(int, 1));
+            unit->setProperty("currentIndex", 2);
+            QMetaObject::invokeMethod(unit, "activated", Q_ARG(int, 2));
+            const auto selected = rules->property("selectedBlock").value<QJSValue>();
+            if (selected.property("comparison").toString() != "atLeast" || selected.property("unit").toString() != "GB") return false;
         }
         if (page == 8) {
             auto* themeSwitch = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalDarkModeSwitch"));
