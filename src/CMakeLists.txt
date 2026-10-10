@@ -147,6 +147,10 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/AppComboBox.qml
+        presentation/qml/DropdownIndicator.qml
+        presentation/qml/AppTextField.qml
+        presentation/qml/AppSpinBox.qml
         presentation/qml/CompactHome.qml
         presentation/qml/FileSortPage.qml
         presentation/qml/CharacterBadge.qml

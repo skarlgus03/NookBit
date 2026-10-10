@@ -40,7 +40,7 @@ Item {
         id: themedButton
         padding: 8
         implicitWidth: Math.max(80, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(36, contentItem.implicitHeight + topPadding + bottomPadding)
+        implicitHeight: Math.max(40, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: themedButton.text
             font: themedButton.font
@@ -61,67 +61,6 @@ Item {
         }
     }
 
-    // 테마 색을 유지하며 열거형 선택지를 하나의 드롭다운으로 보여주는 컨트롤.
-    component ThemeComboBox: T.ComboBox {
-        id: themedCombo
-        implicitWidth: 104
-        implicitHeight: 36
-        padding: 8
-        contentItem: Text {
-            leftPadding: 10
-            rightPadding: 28
-            text: themedCombo.displayText
-            color: page.primaryText
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        indicator: Text {
-            x: themedCombo.width - width - 11
-            anchors.verticalCenter: parent.verticalCenter
-            text: "▾"
-            font.pixelSize: 15
-            color: page.primaryText
-        }
-        background: Rectangle {
-            radius: 7
-            color: page.buttonColor
-            border.color: themedCombo.hovered || themedCombo.visualFocus || themedCombo.pressed
-                          ? page.buttonFocusColor : page.borderColor
-            border.width: themedCombo.hovered || themedCombo.visualFocus || themedCombo.pressed ? 2 : 1
-        }
-        delegate: T.ItemDelegate {
-            width: themedCombo.width - 2
-            height: 34
-            text: themedCombo.textAt(index)
-            highlighted: themedCombo.highlightedIndex === index
-            contentItem: Text {
-                text: parent.text
-                color: page.primaryText
-                leftPadding: 10
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                color: parent.hovered || parent.highlighted
-                       ? (page.darkMode ? "#394b62" : "#e5eee7") : page.surfaceColor
-            }
-        }
-        popup: T.Popup {
-            y: themedCombo.height + 2
-            width: themedCombo.width
-            implicitHeight: themedCombo.count * 34 + 2
-            padding: 1
-            contentItem: ListView {
-                clip: true
-                model: themedCombo.delegateModel
-                currentIndex: themedCombo.highlightedIndex
-            }
-            background: Rectangle {
-                radius: 7
-                color: page.surfaceColor
-                border.color: page.borderColor
-            }
-        }
-    }
     property var blocks: [
         { id: 1, type: "start", x: 70, y: 270, value: "정리할 파일" },
         { id: 2, type: "size", x: 390, y: 220, value: "5", comparison: "greaterThan", unit: "MB" },
@@ -993,15 +932,15 @@ Item {
             }
         }
 
-        RowLayout {
+        Flow {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: 8
             ThemeButton {
                 text: qsTr("+ 블록 추가")
                 onClicked: page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2)
             }
-            Label { text: qsTr("연결선 모양"); color: page.primaryText }
-            ThemeComboBox {
+            Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("연결선 모양"); color: page.primaryText }
+            AppComboBox {
                 model: [qsTr("곡선"), qsTr("직선")]
                 currentIndex: page.connectionStyle
                 onActivated: (index) => {
@@ -1018,16 +957,17 @@ Item {
                 enabled: page.selectedIds.filter(id => id !== 1).length >= 2
                 onClicked: page.alignSelectedVertically()
             }
-            Label { text: qsTr("글씨 크기"); color: page.primaryText }
-            ThemeComboBox {
+            Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("글씨 크기"); color: page.primaryText }
+            AppComboBox {
                 model: [qsTr("작게"), qsTr("보통"), qsTr("크게")]
                 currentIndex: page.fontPresetIndex
                 onActivated: (index) => page.fontPresetIndex = index
             }
-            Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("%1%").arg(Math.round(page.zoom * 100))
                 color: page.mutedText
+                height: 40
+                verticalAlignment: Text.AlignVCenter
             }
         }
 
@@ -1606,7 +1546,7 @@ Item {
                                  page.selectedBlock.type !== "otherwise" &&
                                  page.selectedBlock.type !== "exclude"
                     }
-                    TextField {
+                    AppTextField {
                         id: inspectorValue
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null &&
@@ -1627,7 +1567,7 @@ Item {
                                 page.updateValue(page.selectedBlock.id, text)
                         }
                     }
-                    ComboBox {
+                    AppComboBox {
                         objectName: "sizeComparisonCombo"
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null &&
@@ -1640,7 +1580,7 @@ Item {
                         currentIndex: page.selectedBlock ? model.findIndex(entry => entry.value === page.selectedBlock.comparison) : -1
                         onActivated: page.setComparison(page.selectedId, currentValue)
                     }
-                    ComboBox {
+                    AppComboBox {
                         objectName: "sizeUnitCombo"
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "size"
@@ -1949,7 +1889,7 @@ Item {
                 Layout.fillWidth: true
                 columns: 2
                 Label { text: qsTr("파일 이름"); color: page.primaryText }
-                TextField {
+                AppTextField {
                     id: testNameField
                     Layout.fillWidth: true
                     text: "example.png"
@@ -1957,7 +1897,7 @@ Item {
                     onTextEdited: { page.testResult = ({}); page.testTraceBlockIds = [] }
                 }
                 Label { text: qsTr("파일 크기 (B)"); color: page.primaryText }
-                TextField {
+                AppTextField {
                     id: testSizeField
                     Layout.fillWidth: true
                     text: "1048576"
@@ -1965,7 +1905,7 @@ Item {
                     onTextEdited: { page.testResult = ({}); page.testTraceBlockIds = [] }
                 }
                 Label { text: qsTr("수정 후 경과일"); color: page.primaryText }
-                TextField {
+                AppTextField {
                     id: testAgeField
                     Layout.fillWidth: true
                     text: "0"

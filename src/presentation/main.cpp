@@ -146,9 +146,30 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 새 크기 블록의 선택 목록이 초안을 직접 갱신하는지 검사한다.
             if (!QMetaObject::invokeMethod(rules, "addBlock", Q_ARG(QVariant, QVariant("size")),
                     Q_ARG(QVariant, QVariant(350)), Q_ARG(QVariant, QVariant(220)))) return false;
+            QCoreApplication::processEvents();
             auto* comparison = rules->findChild<QObject*>(QStringLiteral("sizeComparisonCombo"));
             auto* unit = rules->findChild<QObject*>(QStringLiteral("sizeUnitCombo"));
             if (!comparison || !unit || unit->property("count").toInt() != 3) return false;
+            // 공통 드롭다운의 높이·화살표 규격과 실제 메뉴 열림을 검사한다.
+            for (auto* combo : {comparison, unit}) {
+                auto* indicator = combo->property("indicator").value<QObject*>();
+                if (combo->property("height").toInt() != 40 || !indicator
+                    || indicator->objectName() != QStringLiteral("appDropdownIndicator")
+                    || indicator->property("width").toInt() != 12
+                    || indicator->property("height").toInt() != 8) {
+                    QTextStream(stderr) << "Dropdown dimensions failed: " << combo->objectName()
+                        << " height=" << combo->property("height").toInt() << Qt::endl;
+                    return false;
+                }
+                auto* popup = combo->property("popup").value<QObject*>();
+                click(qobject_cast<QQuickItem*>(combo));
+                if (!popup || !popup->property("visible").toBool()) {
+                    QTextStream(stderr) << "Dropdown popup did not open: " << combo->objectName() << Qt::endl;
+                    return false;
+                }
+                QMetaObject::invokeMethod(popup, "close");
+                QCoreApplication::processEvents();
+            }
             comparison->setProperty("currentIndex", 1);
             QMetaObject::invokeMethod(comparison, "activated", Q_ARG(int, 1));
             unit->setProperty("currentIndex", 2);
@@ -169,7 +190,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 감시 조건 네 항목에 실제 키 입력 후 Enter로 숫자를 확정하는 검사.
             for (const auto* name : {"watchIntervalSpin", "watchCountSpin", "watchSizeSpin", "watchAgeSpin"}) {
                 auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
-                if (!spin || !spin->property("editable").toBool()) return false;
+                if (!spin || !spin->property("editable").toBool() || spin->height() != 40) return false;
                 const bool wasEnabled = spin->isEnabled();
                 spin->setEnabled(true);
                 auto* editor = qobject_cast<QQuickItem*>(spin->property("contentItem").value<QObject*>());

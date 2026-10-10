@@ -165,7 +165,7 @@ ApplicationWindow {
         id: navButton
         padding: 8
         implicitWidth: Math.max(76, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(36, contentItem.implicitHeight + topPadding + bottomPadding)
+        implicitHeight: Math.max(40, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: navButton.text
             font: navButton.font
@@ -344,7 +344,7 @@ ApplicationWindow {
         anchors.margins: 18
         visible: root.currentPage === 6
         Label { text: qsTr("같은 이름의 파일이 이미 있으면"); font.bold: true }
-        ComboBox {
+        AppComboBox {
             textRole: "label"; valueRole: "key"
             model: [{label: qsTr("이름 변경"), key: "rename"}, {label: qsTr("건너뛰기"), key: "skip"}, {label: qsTr("작업 중단"), key: "abort"}]
             currentIndex: previewController.collisionPolicy === "skip" ? 1 : previewController.collisionPolicy === "abort" ? 2 : 0
@@ -608,7 +608,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 12
                 Label { text: qsTr("같은 이름의 파일이 있으면"); color: root.primaryText }
-                ComboBox {
+                AppComboBox {
                     textRole: "label"
                     valueRole: "key"
                     model: [
@@ -636,7 +636,7 @@ ApplicationWindow {
                     text: qsTr("정리할 위치")
                     color: root.primaryText
                 }
-                TextField {
+                AppTextField {
                     id: destinationField
                     Layout.fillWidth: true
                     text: previewController.defaultDestinationRoot
@@ -854,7 +854,7 @@ ApplicationWindow {
             }
             Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
             Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 14 }
-            ComboBox {
+            AppComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true
                 model: characterSettings.packs
@@ -1024,7 +1024,7 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: qsTr("전체 예외 목적지") }
-                TextField {
+                AppTextField {
                     id: globalDestinationField
                     Layout.fillWidth: true
                     text: ruleEditor.globalDestination
@@ -1096,7 +1096,7 @@ ApplicationWindow {
                             font.bold: true
                         }
                         Label { text: qsTr("규칙 ID (영문·숫자)") }
-                        TextField {
+                        AppTextField {
                             id: ruleIdField
                             Layout.fillWidth: true
                             enabled: root.selectedRulePath.length > 0
@@ -1109,7 +1109,7 @@ ApplicationWindow {
                             onToggled: root.ruleFormDirty = true
                         }
                         Label { text: qsTr("분류 조건") }
-                        ComboBox {
+                        AppComboBox {
                             id: ruleConditionType
                             Layout.fillWidth: true
                             enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.otherwise
@@ -1124,7 +1124,7 @@ ApplicationWindow {
                             onCurrentValueChanged: ruleConditionComparison.currentIndex = 0
                             onActivated: root.ruleFormDirty = true
                         }
-                        ComboBox {
+                        AppComboBox {
                             id: ruleConditionComparison
                             Layout.fillWidth: true
                             visible: ruleConditionType.currentValue === "size" ||
@@ -1150,7 +1150,7 @@ ApplicationWindow {
                                 : ruleConditionType.currentValue === "size" ? qsTr("크기")
                                 : qsTr("수정 후 지난 일수")
                         }
-                        TextField {
+                        AppTextField {
                             id: ruleConditionValue
                             Layout.fillWidth: true
                             enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.otherwise
@@ -1161,7 +1161,7 @@ ApplicationWindow {
                                              ? qsTr("예: png, jpg") : qsTr("값 입력")
                             onTextEdited: root.ruleFormDirty = true
                         }
-                        ComboBox {
+                        AppComboBox {
                             id: ruleSizeUnit
                             Layout.fillWidth: true
                             visible: ruleConditionType.currentValue === "size"
@@ -1181,7 +1181,7 @@ ApplicationWindow {
                                   ? qsTr("정리 제외 · 이 규칙에 맞으면 이동하지 않음")
                                   : qsTr("목적지 (자식이 있으면 비워 둠)")
                         }
-                        TextField {
+                        AppTextField {
                             id: ruleDestinationField
                             Layout.fillWidth: true
                             enabled: root.selectedRulePath.length > 0 && !root.selectedRuleDetail.exclude
@@ -1286,7 +1286,7 @@ ApplicationWindow {
                     width: watchSettingsScroll.availableWidth
                     spacing: 12
                     Label { text: qsTr("감시할 폴더") }
-                    TextField {
+                    AppTextField {
                         id: watchFolderField
                         Layout.fillWidth: true
                         placeholderText: qsTr("예: C:/Users/이름/Downloads")
@@ -1303,7 +1303,7 @@ ApplicationWindow {
                     }
                     RowLayout {
                         Label { text: qsTr("정기 재검사 간격") }
-                        SpinBox {
+                        AppSpinBox {
                             id: watchIntervalSpin
                             objectName: "watchIntervalSpin"
                             editable: true
@@ -1316,7 +1316,7 @@ ApplicationWindow {
                     }
                     RowLayout {
                         Label { text: qsTr("조건 조합") }
-                        ComboBox {
+                        AppComboBox {
                             id: watchCombination
                             model: [qsTr("하나만 충족"), qsTr("모두 충족")]
                         }
@@ -1326,7 +1326,7 @@ ApplicationWindow {
                             id: watchCountCheck
                             text: qsTr("분류 가능한 파일이")
                         }
-                        SpinBox {
+                        AppSpinBox {
                             id: watchCountSpin
                             objectName: "watchCountSpin"
                             editable: true
@@ -1343,7 +1343,7 @@ ApplicationWindow {
                             id: watchSizeCheck
                             text: qsTr("파일 전체 크기가")
                         }
-                        SpinBox {
+                        AppSpinBox {
                             id: watchSizeSpin
                             objectName: "watchSizeSpin"
                             editable: true
@@ -1360,7 +1360,7 @@ ApplicationWindow {
                             id: watchAgeCheck
                             text: qsTr("가장 오래된 파일이")
                         }
-                        SpinBox {
+                        AppSpinBox {
                             id: watchAgeSpin
                             objectName: "watchAgeSpin"
                             editable: true
@@ -1373,7 +1373,7 @@ ApplicationWindow {
                         Label { text: qsTr("분 이상") }
                     }
                     Label { text: qsTr("제외할 파일명 패턴 · 쉼표로 구분") }
-                    TextField {
+                    AppTextField {
                         id: watchExcludeField
                         Layout.fillWidth: true
                         placeholderText: qsTr("*.partial, *.crdownload, ~$*")

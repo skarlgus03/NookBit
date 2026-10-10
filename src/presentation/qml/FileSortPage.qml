@@ -22,7 +22,7 @@ Rectangle {
         id: control
         padding: 8
         implicitWidth: Math.max(36, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: 36
+        implicitHeight: 40
         contentItem: Text {
             text: control.text
             color: control.enabled ? home.foreground : home.muted
@@ -120,7 +120,7 @@ Rectangle {
                 onClicked: home.pageRequested(1)
             }
             Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: 14 }
-            TextField {
+            AppTextField {
                 id: destination
                 objectName: "compactDestinationField"
                 Layout.fillWidth: true
@@ -128,7 +128,6 @@ Rectangle {
                 placeholderText: qsTr("정리 폴더의 전체 경로")
                 font.pixelSize: 14
                 color: home.foreground
-                background: Rectangle { color: home.surface; radius: 9; border.color: home.edge }
                 onTextEdited: previewController.clear()
             }
             RowLayout {
