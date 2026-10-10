@@ -52,30 +52,14 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 92
                 radius: 14
-                color: drop.containsDrag ? (home.dark ? "#304457" : "#eaf1f9") : home.surface
-                border.color: drop.containsDrag ? "#7898bb" : home.edge
-                border.width: drop.containsDrag ? 2 : 1
+                color: pageDrop.containsDrag ? (home.dark ? "#304457" : "#eaf1f9") : home.surface
+                border.color: pageDrop.containsDrag ? "#7898bb" : home.edge
+                border.width: pageDrop.containsDrag ? UiMetrics.borderActive : UiMetrics.borderNormal
                 Column {
                     anchors.centerIn: parent
                     spacing: UiMetrics.spaceSmall
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 파일 끌어놓기"); font.bold: true; font.pixelSize: UiMetrics.textEmphasis; color: home.foreground }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("아직 원본 파일은 이동하지 않아요"); font.pixelSize: UiMetrics.textBody; color: home.muted }
-                }
-                DropArea {
-                    id: drop
-                    anchors.fill: parent
-                    // 외부 드래그에는 복사 형식의 목록 등록만 허용하는 함수.
-                    onEntered: function(drag) {
-                        if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
-                        else drag.accepted = false
-                    }
-                    // 파일을 이동하지 않고 대기 목록에 등록하는 함수.
-                    onDropped: function(event) {
-                        if (event.hasUrls && (event.supportedActions & Qt.CopyAction)) {
-                            for (const url of event.urls) pendingFiles.addUrl(url)
-                            event.accept(Qt.CopyAction)
-                        } else event.accepted = false
-                    }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 이 페이지 어디든 파일을 놓으세요"); font.bold: true; font.pixelSize: UiMetrics.textEmphasis; color: home.foreground }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("대기 목록에만 추가돼요. 원본은 그대로 있어요"); font.pixelSize: UiMetrics.textBody; color: home.muted }
                 }
             }
             RowLayout {
@@ -101,6 +85,17 @@ Rectangle {
                         width: files.width; height: 54
                         RowLayout {
                             anchors.fill: parent
+                            spacing: UiMetrics.spaceGroup
+                            Image {
+                                objectName: "pendingFileIcon"
+                                Layout.preferredWidth: UiMetrics.fileIconSize
+                                Layout.preferredHeight: UiMetrics.fileIconSize
+                                source: "image://fileicons/" + encodeURIComponent(fileName)
+                                sourceSize: Qt.size(UiMetrics.fileIconSize, UiMetrics.fileIconSize)
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectFit
+                                opacity: available ? 1 : 0.45
+                            }
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: UiMetrics.spaceTiny
                                 Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: UiMetrics.textBody }
@@ -162,6 +157,33 @@ Rectangle {
             Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
             Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
             FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
+        }
+    }
+    DropArea {
+        id: pageDrop
+        objectName: "fileSortPageDropArea"
+        anchors.fill: parent
+        z: 10
+        enabled: home.visible && home.enabled
+        // 외부 파일 드래그만 받아 목록 등록에 복사 응답을 사용하는 함수.
+        onEntered: function(drag) {
+            if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
+            else drag.accepted = false
+        }
+        // 페이지 어느 위치에 놓아도 파일을 이동하지 않고 대기 목록에 등록하는 함수.
+        onDropped: function(event) {
+            if (event.hasUrls && (event.supportedActions & Qt.CopyAction)) {
+                for (const url of event.urls) pendingFiles.addUrl(url)
+                event.accept(Qt.CopyAction)
+            } else event.accepted = false
+        }
+        Rectangle {
+            anchors.fill: parent
+            visible: pageDrop.containsDrag
+            color: "transparent"
+            radius: UiMetrics.radiusControl
+            border.color: "#7898bb"
+            border.width: UiMetrics.borderActive
         }
     }
 }

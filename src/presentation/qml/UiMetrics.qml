@@ -26,6 +26,7 @@ QtObject {
     readonly property int dropdownIconHeight: 8
     readonly property int dropdownVisibleRows: 8
     readonly property int iconSize: 20
+    readonly property int fileIconSize: 32
     readonly property int floatingCloseSize: 24
     readonly property int spaceTiny: 2
     readonly property int spaceExtraSmall: 4

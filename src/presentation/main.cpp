@@ -1,4 +1,5 @@
 #include "presentation/pending_files_model.hpp"
+#include "presentation/file_icon_provider.hpp"
 #include "presentation/preview_controller.hpp"
 #include "presentation/history_controller.hpp"
 #include "presentation/recovery_controller.hpp"
@@ -69,6 +70,10 @@
 #include <QQuickItem>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QTemporaryDir>
 #include <QJSValue>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
@@ -232,6 +237,61 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         }
     }
     return true;
+}
+
+// 상단 안내 밖의 드롭·중복·폴더 거절·아이콘 로딩이 원본을 바꾸지 않는지 검사하는 함수.
+static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::PendingFilesModel& pending) {
+    QTemporaryDir directory;
+    if (!directory.isValid() || !page) return false;
+    const auto path = directory.filePath(QStringLiteral("report.pdf"));
+    QFile fixture(path);
+    if (!fixture.open(QIODevice::WriteOnly) || fixture.write("unchanged") != 9) return false;
+    fixture.close();
+    auto* area = page->findChild<QQuickItem*>(QStringLiteral("fileSortPageDropArea"));
+    if (!area || area->width() != page->width() || area->height() != page->height()) return false;
+    // 상단 안내 밖인 페이지 아래쪽에 외부 파일 드래그 이벤트를 전달하는 함수.
+    const auto drop = [window, page](const QUrl& url, Qt::DropActions actions) {
+        QMimeData mime;
+        mime.setUrls({url});
+        const auto point = page->mapToScene(QPointF(page->width() / 2, page->height() - 30)).toPoint();
+        QDragEnterEvent enter(point, actions, &mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &enter);
+        QDropEvent dropped(point, actions, &mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(window, &dropped);
+        QCoreApplication::processEvents();
+        return dropped.isAccepted() && dropped.dropAction() == Qt::CopyAction;
+    };
+    if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction | Qt::MoveAction) || pending.count() != 1) return false;
+    if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction) || pending.count() != 1) return false;
+    drop(QUrl::fromLocalFile(directory.path()), Qt::CopyAction);
+    if (pending.count() != 1) return false;
+    if (drop(QUrl::fromLocalFile(path), Qt::MoveAction) || pending.count() != 1) return false;
+    bool loaded = false;
+    // ListView에서 따로 소유하는 대리 항목까지 실제 화면 트리로 찾는 함수.
+    const auto findIcon = [](auto&& self, QQuickItem* item) -> QQuickItem* {
+        if (item->objectName() == QStringLiteral("pendingFileIcon")) return item;
+        for (auto* child : item->childItems()) if (auto* found = self(self, child)) return found;
+        return nullptr;
+    };
+    QEventLoop images;
+    QTimer check;
+    QTimer deadline;
+    deadline.setSingleShot(true);
+    // 비동기 파일 아이콘이 실제 QML 이미지에 로딩되는지 확인하는 함수.
+    QObject::connect(&check, &QTimer::timeout, &images, [&] {
+        auto* icon = findIcon(findIcon, page);
+        if (icon && icon->property("status").toInt() == 1) { loaded = true; images.quit(); }
+    });
+    QObject::connect(&deadline, &QTimer::timeout, &images, &QEventLoop::quit);
+    check.start(10);
+    deadline.start(3000);
+    images.exec();
+    if (!loaded) {
+        auto* icon = findIcon(findIcon, page);
+        QTextStream(stderr) << "Pending icon did not load: " << (icon ? icon->property("status").toInt() : -1) << Qt::endl;
+    }
+    pending.removeAt(0);
+    return loaded && pending.count() == 0 && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
 }
 
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
@@ -558,6 +618,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
     // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.
     auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
     if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
@@ -713,6 +774,7 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents();
                 auto* filePage = window->findChild<QQuickItem*>(QStringLiteral("fileSortPage"));
                 checkLayout(filePage && filePage->isVisible() && filePage->window() == extension, "file sorting is a separate page");
+                checkLayout(verifyPageFileDrop(extension, filePage, pendingFiles), "whole-page drop and file icon");
                 auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
                 checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");
                 window->setX(previousX);

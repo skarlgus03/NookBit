@@ -23,6 +23,8 @@ These are initial application decisions, not universal UX standards. Choose a se
 
 Use `AppButton`, `AppComboBox`, `AppTextField`, and `AppSpinBox` for ordinary controls. Specialized themed buttons must also read the shared size tokens. Use `controlPadding`, `buttonPadding`, spacing, radius, and border tokens instead of inline common metrics. Icons use `iconSize`; dropdown indicators use their own shared width and height.
 
+Pending file rows use `fileIconSize` (32 px) for file-type icons. The presentation-only image provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, not real-file content or thumbnails. It loads asynchronously, caches at most 128 file types, and falls back to a generic document icon. Core file classification and movement are not involved.
+
 ## Deliberate exceptions
 
 Not every number is a design token. Window positioning and sizes, canvas coordinates, hit testing, image crop rectangles, animation timing, and ImagePack pivots/scales are feature geometry or data, not shared control metrics. Do not mechanically replace these with unrelated spacing tokens. Character drawing proportions also remain local.

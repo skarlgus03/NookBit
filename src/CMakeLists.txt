@@ -113,6 +113,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp
+      presentation/file_icon_provider.hpp
       presentation/pending_files_model.hpp
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
@@ -178,6 +179,7 @@ if(NOOKBIT_BUILD_QT_APP)
       Qt6::Sql
     )
     if(WIN32)
+      target_link_libraries(nookbit PRIVATE shell32 ole32 user32)
       find_program(NOOKBIT_WINDEPLOYQT NAMES windeployqt windeployqt6
         HINTS "${Qt6_DIR}/../../../bin")
     endif()
