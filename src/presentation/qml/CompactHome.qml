@@ -35,7 +35,7 @@ Rectangle {
             Button { text: "−"; implicitWidth: 32; implicitHeight: 32; flat: true; Accessible.name: qsTr("최소화"); onClicked: home.minimizeRequested() }
             Button { text: "×"; implicitWidth: 32; implicitHeight: 32; flat: true; Accessible.name: qsTr("트레이로 숨기기"); onClicked: home.closeRequested() }
         }
-        Label { text: qsTr("필요한 페이지를 열어보세요."); color: dark ? "#aab6c7" : "#748091"; font.pixelSize: 12 }
+        Label { text: qsTr("필요한 페이지를 열어보세요."); color: dark ? "#aab6c7" : "#748091"; font.pixelSize: 14 }
         Item { Layout.preferredHeight: 14 }
         Repeater {
             model: [{label: qsTr("파일 정리"), page: 7}, {label: qsTr("분류 규칙"), page: 1}, {label: qsTr("작업 기록"), page: 4}, {label: qsTr("설정"), page: 8}]

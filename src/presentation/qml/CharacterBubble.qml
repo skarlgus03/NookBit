@@ -108,7 +108,7 @@ Window {
             wrapMode: Text.Wrap
             maximumLineCount: 5
             elide: Text.ElideRight
-            font.pixelSize: 13
+            font.pixelSize: 14
             color: bubble.customSkin || bubble.dark ? "#edf2f8" : "#273344"
         }
     }
@@ -119,7 +119,7 @@ Window {
         width: bubble.actionArea.width; height: bubble.actionArea.height; radius: 8
         color: "#33475e"
         border.color: actionMouse.containsMouse ? "#b6d8c5" : "#718298"
-        Text { anchors.centerIn: parent; text: bubble.actionText; color: "#edf2f8"; font.pixelSize: 12 }
+        Text { anchors.centerIn: parent; text: bubble.actionText; color: "#edf2f8"; font.pixelSize: 14 }
         MouseArea {
             id: actionMouse
             anchors.fill: parent

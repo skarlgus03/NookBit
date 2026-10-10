@@ -7,6 +7,7 @@ import QtQuick.Dialogs as NativeDialogs
 
 ApplicationWindow {
     id: root
+    font.pixelSize: 14
     // 트레이 종료에서도 마지막 캐릭터 이동 좌표를 저장하는 함수.
     function commitCharacterPosition() { desktopPet.commitPosition() }
     // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
@@ -91,8 +92,9 @@ ApplicationWindow {
             }
             Label {
                 text: "복사 후 검증·확정까지 마쳐야 완료돼요."
+                wrapMode: Text.WordWrap
                 color: root.editorDark ? "#b7c6dc" : "#4b6153"
-                font.pixelSize: 11
+                font.pixelSize: 14
                 Layout.fillWidth: true
             }
         }
@@ -278,6 +280,7 @@ ApplicationWindow {
         flags: Qt.Tool | Qt.FramelessWindowHint
         color: "transparent"
         palette: root.palette
+        font: root.font
         title: qsTr("NookBit 확장 페이지")
         width: 860
         height: Math.max(680, root.height)
@@ -850,7 +853,7 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
-            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 12 }
+            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 14 }
             ComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true
@@ -888,7 +891,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: qsTr("선택과 크기는 자동 저장돼요. 팩 원본은 변경하지 않아요.")
                 wrapMode: Text.Wrap
-                font.pixelSize: 12
+                font.pixelSize: 14
             }
         }
     }
@@ -1299,6 +1302,9 @@ ApplicationWindow {
                         Label { text: qsTr("정기 재검사 간격") }
                         SpinBox {
                             id: watchIntervalSpin
+                            objectName: "watchIntervalSpin"
+                            editable: true
+                            Layout.preferredWidth: 180
                             from: 1
                             to: 1440
                             value: 30
@@ -1319,6 +1325,9 @@ ApplicationWindow {
                         }
                         SpinBox {
                             id: watchCountSpin
+                            objectName: "watchCountSpin"
+                            editable: true
+                            Layout.preferredWidth: 180
                             from: 1
                             to: 1000000
                             value: 20
@@ -1333,6 +1342,9 @@ ApplicationWindow {
                         }
                         SpinBox {
                             id: watchSizeSpin
+                            objectName: "watchSizeSpin"
+                            editable: true
+                            Layout.preferredWidth: 180
                             from: 1
                             to: 1000000
                             value: 100
@@ -1347,6 +1359,9 @@ ApplicationWindow {
                         }
                         SpinBox {
                             id: watchAgeSpin
+                            objectName: "watchAgeSpin"
+                            editable: true
+                            Layout.preferredWidth: 180
                             from: 1
                             to: 1000000
                             value: 60

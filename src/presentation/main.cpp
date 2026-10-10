@@ -67,6 +67,7 @@
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "infrastructure/configuration/directory_image_pack_library.hpp"
@@ -151,6 +152,34 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             click(themeSwitch);
             if (mainWindow->property("editorDark").toBool() != initial) return false;
         }
+        if (page == 3) {
+            // 감시 조건 네 항목에 실제 키 입력 후 Enter로 숫자를 확정하는 검사.
+            for (const auto* name : {"watchIntervalSpin", "watchCountSpin", "watchSizeSpin", "watchAgeSpin"}) {
+                auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
+                if (!spin || !spin->property("editable").toBool()) return false;
+                const bool wasEnabled = spin->isEnabled();
+                spin->setEnabled(true);
+                auto* editor = qobject_cast<QQuickItem*>(spin->property("contentItem").value<QObject*>());
+                if (!editor || editor->property("readOnly").toBool()) return false;
+                editor->forceActiveFocus();
+                extension->requestActivate();
+                QCoreApplication::processEvents();
+                QKeyEvent selectAll(QEvent::KeyPress, Qt::Key_A, Qt::ControlModifier, QStringLiteral("a"));
+                QKeyEvent three(QEvent::KeyPress, Qt::Key_3, Qt::NoModifier, QStringLiteral("3"));
+                QKeyEvent seven(QEvent::KeyPress, Qt::Key_7, Qt::NoModifier, QStringLiteral("7"));
+                QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+                for (auto* event : {&selectAll, &three, &seven, &enter}) QCoreApplication::sendEvent(extension, event);
+                QKeyEvent enterRelease(QEvent::KeyRelease, Qt::Key_Return, Qt::NoModifier);
+                QCoreApplication::sendEvent(extension, &enterRelease);
+                QCoreApplication::processEvents();
+                if (spin->property("value").toInt() != 37) {
+                    QTextStream(stderr) << "Keyboard number entry failed: " << name << " text=" << editor->property("text").toString()
+                        << " value=" << spin->property("value").toInt() << Qt::endl;
+                    return false;
+                }
+                spin->setEnabled(wasEnabled);
+            }
+        }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
             QTextStream(stderr) << "Extension close click blocked on page " << page << Qt::endl;
@@ -164,6 +193,9 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
+    QFont baseFont = application.font();
+    baseFont.setPixelSize(14);
+    application.setFont(baseFont);
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
     const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));

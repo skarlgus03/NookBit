@@ -26,7 +26,7 @@ Rectangle {
         contentItem: Text {
             text: control.text
             color: control.enabled ? home.foreground : home.muted
-            font.pixelSize: 12
+            font.pixelSize: 14
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
@@ -59,7 +59,7 @@ Rectangle {
                     anchors.centerIn: parent
                     spacing: 6
                     Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 파일 끌어놓기"); font.bold: true; font.pixelSize: 16; color: home.foreground }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("아직 원본 파일은 이동하지 않아요"); font.pixelSize: 11; color: home.muted }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("아직 원본 파일은 이동하지 않아요"); font.pixelSize: 14; color: home.muted }
                 }
                 DropArea {
                     id: drop
@@ -87,7 +87,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(120, Math.min(170, home.height - 485))
                 color: home.surface; radius: 12; border.color: home.edge
-                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: 12 }
+                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: 14 }
                 ListView {
                     id: files
                     anchors.fill: parent; anchors.margins: 8
@@ -98,35 +98,35 @@ Rectangle {
                         required property string fileName
                         required property string fullPath
                         required property bool available
-                        width: files.width; height: 45
+                        width: files.width; height: 54
                         RowLayout {
                             anchors.fill: parent
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 2
-                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: 12 }
-                                Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: 10 }
+                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: 14 }
+                                Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: 14 }
                             }
                             FlatButton { text: "×"; implicitWidth: 30; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
                         }
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 11 }
-            Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: 11 }
+            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 14 }
+            Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: 14 }
             FlatButton {
                 Layout.fillWidth: true
                 text: previewController.activeRuleLabel + "  ›"
-                contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter }
+                contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: 14; verticalAlignment: Text.AlignVCenter }
                 onClicked: home.pageRequested(1)
             }
-            Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: 11 }
+            Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: 14 }
             TextField {
                 id: destination
                 objectName: "compactDestinationField"
                 Layout.fillWidth: true
                 text: previewController.defaultDestinationRoot
                 placeholderText: qsTr("정리 폴더의 전체 경로")
-                font.pixelSize: 12
+                font.pixelSize: 14
                 color: home.foreground
                 background: Rectangle { color: home.surface; radius: 9; border.color: home.edge }
                 onTextEdited: previewController.clear()
@@ -160,8 +160,8 @@ Rectangle {
                     if (previewController.hasPreview && previewController.hasMovableSteps) previewController.prepareSort()
                 }
             }
-            Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: 11 }
-            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 11 }
+            Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: 14 }
+            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 14 }
             FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
         }
     }
