@@ -8,12 +8,13 @@ import QtQuick.Dialogs as NativeDialogs
 ApplicationWindow {
     id: root
     font.pixelSize: UiMetrics.textBody
-    // 트레이 종료에서도 마지막 캐릭터 이동 좌표를 저장하는 함수.
-    function commitCharacterPosition() { desktopPet.commitPosition() }
+    // 트레이 종료에서도 마지막 캐릭터 위치와 열린 페이지 크기를 저장하는 함수.
+    function commitCharacterPosition() { desktopPet.commitPosition(); extensionWindow.commitSize() }
     // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
     onClosing: function(close) {
         close.accepted = false
         desktopPet.commitPosition()
+        extensionWindow.commitSize()
         appLifecycle.closeWindow()
     }
     contentItem.enabled: !backgroundTasks.busy
@@ -282,8 +283,44 @@ ApplicationWindow {
         palette: root.palette
         font: root.font
         title: qsTr("NookBit 확장 페이지")
-        width: 860
-        height: Math.max(680, root.height)
+        property int activePage: 0
+        property bool restoringSize: false
+        width: UiMetrics.extensionDefaults[1].width
+        height: UiMetrics.extensionDefaults[1].height
+        // 크기 조절 중에는 저장을 늦추고 페이지 전환·닫기 때는 즉시 확정하는 함수.
+        function commitSize() {
+            sizeSaveTimer.stop()
+            if (activePage > 0 && !restoringSize)
+                uiSettings.rememberExtensionSize(activePage, width, height)
+        }
+        // 이전 페이지 크기를 보존한 뒤 새 페이지의 기본값 또는 마지막 크기를 복원하는 함수.
+        function activatePage(page) {
+            commitSize()
+            activePage = page
+            if (page === 0) return
+            const spec = UiMetrics.extensionDefaults[page]
+            if (!spec) return
+            restoringSize = true
+            minimumWidth = spec.minWidth
+            minimumHeight = spec.minHeight
+            const saved = uiSettings.extensionSize(page, Qt.size(spec.width, spec.height))
+            width = Math.max(minimumWidth, Math.min(saved.width, Screen.desktopAvailableWidth - UiMetrics.spaceSection * 2))
+            height = Math.max(minimumHeight, Math.min(saved.height, Screen.desktopAvailableHeight - UiMetrics.spaceSection * 2))
+            restoringSize = false
+        }
+        onWidthChanged: if (activePage > 0 && !restoringSize) sizeSaveTimer.restart()
+        onHeightChanged: if (activePage > 0 && !restoringSize) sizeSaveTimer.restart()
+        Timer {
+            id: sizeSaveTimer
+            interval: 300
+            // 크기 조절이 잠시 멈추면 마지막 크기를 저장하는 함수.
+            onTriggered: extensionWindow.commitSize()
+        }
+        Connections {
+            target: root
+            // 페이지를 전환할 때 해당 페이지의 저장 크기를 복원하는 함수.
+            function onCurrentPageChanged() { extensionWindow.activatePage(root.currentPage) }
+        }
         // 개별 모니터 경계로 제한하지 않고 가상 데스크톱에서 본체 오른쪽을 따라간다.
         readonly property real dockX: root.x + root.width + 10
         x: dockX
@@ -292,6 +329,27 @@ ApplicationWindow {
         contentItem.enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
         onClosing: function(event) { event.accepted = false; root.currentPage = 0 }
+    }
+    Repeater {
+        parent: extensionWindow.contentItem
+        model: [
+            {edges: Qt.RightEdge, horizontal: 1, vertical: 0, cursor: Qt.SizeHorCursor},
+            {edges: Qt.BottomEdge, horizontal: 0, vertical: 1, cursor: Qt.SizeVerCursor},
+            {edges: Qt.RightEdge | Qt.BottomEdge, horizontal: 1, vertical: 1, cursor: Qt.SizeFDiagCursor}
+        ]
+        delegate: MouseArea {
+            required property var modelData
+            objectName: "extensionResizeEdge"
+            readonly property bool corner: modelData.horizontal !== 0 && modelData.vertical !== 0
+            width: modelData.horizontal !== 0 ? UiMetrics.windowResizeGrip * (corner ? 2 : 1) : parent.width
+            height: modelData.vertical !== 0 ? UiMetrics.windowResizeGrip * (corner ? 2 : 1) : parent.height
+            x: modelData.horizontal > 0 ? parent.width - width : 0
+            y: modelData.vertical > 0 ? parent.height - height : 0
+            z: 200
+            cursorShape: modelData.cursor
+            // 본체에 붙는 위치는 유지하고 오른쪽·아래쪽에서 시스템 크기 조절을 시작하는 함수.
+            onPressed: extensionWindow.startSystemResize(modelData.edges)
+        }
     }
     Rectangle {
         id: extensionPanel

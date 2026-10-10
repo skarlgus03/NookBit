@@ -43,6 +43,20 @@ QtObject {
     readonly property int radiusCard: 12
     readonly property int borderNormal: 1
     readonly property int borderActive: 2
+    readonly property int windowResizeGrip: 7
+    // 페이지 순서는 Main의 페이지 번호와 같고 창 크기는 본체와 독립적이다.
+    readonly property var extensionDefaults: [
+        null,
+        {width: 1100, height: 760, minWidth: 860, minHeight: 680},
+        {width: 860, height: 680, minWidth: 720, minHeight: 540},
+        {width: 720, height: 640, minWidth: 640, minHeight: 500},
+        {width: 960, height: 700, minWidth: 860, minHeight: 540},
+        {width: 720, height: 640, minWidth: 640, minHeight: 500},
+        {width: 520, height: 360, minWidth: 460, minHeight: 280},
+        {width: 720, height: 680, minWidth: 640, minHeight: 580},
+        {width: 560, height: 520, minWidth: 500, minHeight: 520},
+        {width: 960, height: 760, minWidth: 860, minHeight: 680}
+    ]
 
     // 규칙 캔버스의 글씨·블록 크기는 독립적인 표시 프리셋으로 관리한다.
     readonly property var nodeTextSizes: [11, 13, 16]

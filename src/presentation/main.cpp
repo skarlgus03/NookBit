@@ -46,6 +46,7 @@
 #include "presentation/app_lifecycle_controller.hpp"
 #include <QMetaObject>
 #include <QQmlApplicationEngine>
+#include <QEventLoop>
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QSettings>
@@ -119,6 +120,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
     if (!button || !rules) return false;
     // 창 안의 실제 버튼 좌표로 눌렀다 떼는 입력을 전달하는 함수.
     const auto click = [extension](QQuickItem* item) {
+        // 크기 복원 뒤 렌더링 프레임의 레이아웃·클리핑 갱신을 기다린다.
+        QEventLoop layoutFrame;
+        QTimer::singleShot(40, &layoutFrame, &QEventLoop::quit);
+        layoutFrame.exec();
         const auto local = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
         const QPointF global = extension->mapToGlobal(local.toPoint());
         QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -164,7 +169,12 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 auto* popup = combo->property("popup").value<QObject*>();
                 click(qobject_cast<QQuickItem*>(combo));
                 if (!popup || !popup->property("visible").toBool()) {
-                    QTextStream(stderr) << "Dropdown popup did not open: " << combo->objectName() << Qt::endl;
+                    auto* item = qobject_cast<QQuickItem*>(combo);
+                    QTextStream(stderr) << "Dropdown popup did not open: " << combo->objectName()
+                        << " at " << item->mapToScene(QPointF()).x() << "," << item->mapToScene(QPointF()).y()
+                        << " window=" << extension->width() << "x" << extension->height()
+                        << " item=" << item->width() << "x" << item->height()
+                        << " visible=" << item->isVisible() << Qt::endl;
                     return false;
                 }
                 QMetaObject::invokeMethod(popup, "close");
@@ -664,6 +674,30 @@ int main(int argc, char* argv[]) {
                 QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 1));
                 checkLayout(window->width() == 380 && extension->isVisible()
                     && extension->transientParent() == window && extension->flags().testFlag(Qt::FramelessWindowHint), "open extension");
+                // 페이지 전환 직전 크기를 저장하고 다시 열 때 복원하는지 검사한다.
+                const QSize ruleSize(extension->minimumWidth(), extension->minimumHeight());
+                extension->resize(ruleSize);
+                QCoreApplication::processEvents();
+                window->setProperty("currentPage", 8);
+                QCoreApplication::processEvents();
+                const QSize settingsSize(extension->minimumWidth(), extension->minimumHeight());
+                extension->resize(settingsSize);
+                QCoreApplication::processEvents();
+                window->setProperty("currentPage", 1);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == ruleSize, "restore rule page size");
+                window->setProperty("currentPage", 8);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == settingsSize && settingsSize != ruleSize, "independent settings size");
+                window->setProperty("currentPage", 0);
+                window->setProperty("currentPage", 1);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == ruleSize, "restore after closing extension");
+                const auto previousHeight = window->height();
+                window->setHeight(previousHeight + 10);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == ruleSize, "main height does not resize extension");
+                window->setHeight(previousHeight);
                 const auto previousX = window->x();
                 window->setX(previousX + 12);
                 QCoreApplication::processEvents();

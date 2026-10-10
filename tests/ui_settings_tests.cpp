@@ -3,7 +3,7 @@
 #include <QTemporaryDir>
 #include <iostream>
 
-// 앱 테마 저장·재실행 복원과 자동 검사 시 무저장을 검사하는 함수.
+// 앱 테마·페이지 크기의 재실행 복원과 자동 검사 시 무저장을 검사하는 함수.
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     QTemporaryDir directory;
@@ -21,6 +21,27 @@ int main(int argc, char** argv) {
     restored.setDarkMode(false);
     nookbit::UiSettingsController light(settings, true);
     if (light.darkMode()) return 1;
-    std::cout << "UI theme persistence passed\n";
+    const QSize fallback(860, 680);
+    if (first.extensionSize(1, fallback) != fallback) return 1;
+    first.rememberExtensionSize(1, 1200, 800);
+    first.rememberExtensionSize(8, 560, 520);
+    QSettings reopened(directory.filePath("ui.ini"), QSettings::IniFormat);
+    nookbit::UiSettingsController sized(reopened, true);
+    if (sized.extensionSize(1, fallback) != QSize(1200, 800)
+        || sized.extensionSize(8, fallback) != QSize(560, 520)
+        || sized.extensionSize(7, fallback) != fallback) return 1;
+    sized.rememberExtensionSize(1, -20, 700);
+    sized.rememberExtensionSize(1, 20000, 700);
+    sized.rememberExtensionSize(99, 700, 600);
+    if (sized.extensionSize(1, fallback) != QSize(1200, 800)
+        || sized.extensionSize(99, fallback) != fallback) return 1;
+    reopened.setValue("windows/history/size", QString("broken"));
+    reopened.setValue("windows/preview/size", QSize(50000, 100));
+    if (sized.extensionSize(4, fallback) != fallback || sized.extensionSize(2, fallback) != fallback) return 1;
+    if (dryRun.extensionSize(1, fallback) != fallback) return 1;
+    dryRun.rememberExtensionSize(1, 900, 700);
+    if (dryRun.extensionSize(1, fallback) != QSize(900, 700)
+        || reopened.value("windows/ruleEditor/size").value<QSize>() != QSize(1200, 800)) return 1;
+    std::cout << "UI theme and page size persistence passed\n";
     return 0;
 }
