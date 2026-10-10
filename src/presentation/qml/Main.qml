@@ -7,7 +7,7 @@ import QtQuick.Dialogs as NativeDialogs
 
 ApplicationWindow {
     id: root
-    font.pixelSize: 14
+    font.pixelSize: UiMetrics.textBody
     // 트레이 종료에서도 마지막 캐릭터 이동 좌표를 저장하는 함수.
     function commitCharacterPosition() { desktopPet.commitPosition() }
     // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
@@ -49,14 +49,14 @@ ApplicationWindow {
         y: parent.height - height - 24
         width: Math.min(440, root.width - 32)
         height: 174
-        padding: 10
+        padding: UiMetrics.spaceCompact
         background: Rectangle {
-            radius: 12
+            radius: UiMetrics.radiusCard
             color: root.editorDark ? "#243044" : "#edf4ef"
             border.color: root.editorDark ? "#617a9c" : "#739b83"
         }
         contentItem: ColumnLayout {
-            spacing: 6
+            spacing: UiMetrics.spaceSmall
             Label {
                 text: backgroundTasks.stageLabel
                 color: root.editorDark ? "#edf2f8" : "#253428"
@@ -94,7 +94,7 @@ ApplicationWindow {
                 text: "복사 후 검증·확정까지 마쳐야 완료돼요."
                 wrapMode: Text.WordWrap
                 color: root.editorDark ? "#b7c6dc" : "#4b6153"
-                font.pixelSize: 14
+                font.pixelSize: UiMetrics.textBody
                 Layout.fillWidth: true
             }
         }
@@ -163,9 +163,9 @@ ApplicationWindow {
     // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
     component NavigationButton: T.Button {
         id: navButton
-        padding: 8
-        implicitWidth: Math.max(76, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(40, contentItem.implicitHeight + topPadding + bottomPadding)
+        padding: UiMetrics.buttonPadding
+        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
+        implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: navButton.text
             font: navButton.font
@@ -174,7 +174,7 @@ ApplicationWindow {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            radius: 7
+            radius: UiMetrics.radiusControl
             color: root.editorDark
                    ? (navButton.highlighted ? "#3e5270" : "#2b3546")
                    : (navButton.highlighted ? "#dce9db" : "#f3f5f1")
@@ -301,7 +301,7 @@ ApplicationWindow {
         visible: root.currentPage !== 0
         color: root.editorDark ? "#161a22" : "#ffffff"
         border.color: root.editorDark ? "#3d4757" : "#e1e6ed"
-        radius: 8
+        radius: UiMetrics.radiusControl
         z: 0
     }
     Item {
@@ -311,12 +311,12 @@ ApplicationWindow {
         z: 100
         RowLayout {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.margins: 12; height: 36
+            anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
                 text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("캐릭터 설정"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정")][root.currentPage] || qsTr("개발 도구")
                 color: root.editorDark ? "#edf2f8" : "#273344"
-                font.pixelSize: 17; font.bold: true
+                font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
             NavigationButton { text: qsTr("설정 ‹"); visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
@@ -341,7 +341,7 @@ ApplicationWindow {
     ColumnLayout {
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: 18
+        anchors.margins: UiMetrics.pageInset
         visible: root.currentPage === 6
         Label { text: qsTr("같은 이름의 파일이 이미 있으면"); font.bold: true }
         AppComboBox {
@@ -367,9 +367,9 @@ ApplicationWindow {
         objectName: "settingsPage"
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: 24
+        anchors.margins: UiMetrics.editorInset
         visible: root.currentPage === 8
-        spacing: 14
+        spacing: UiMetrics.spaceSection
         Label { text: qsTr("화면"); color: root.primaryText; font.bold: true }
         Switch {
             objectName: "globalDarkModeSwitch"
@@ -401,26 +401,26 @@ ApplicationWindow {
 
         ColumnLayout {
             width: sortingScroll.availableWidth
-            spacing: 14
+            spacing: UiMetrics.spaceSection
 
             ColumnLayout {
                 objectName: "developerTools"
                 Layout.fillWidth: true
                 visible: root.currentPage === 9
                 Label { text: qsTr("개발용 기존 정리 화면 · Ctrl+Shift+D로 접기"); font.bold: true }
-                Button { text: qsTr("말풍선 배치 테스트"); onClicked: { characterWindow.setShown(true); desktopPet.testBubble() } }
-                Button { text: qsTr("기존 규칙 폼 열기"); onClicked: ruleDialog.open() }
+                AppButton { text: qsTr("말풍선 배치 테스트"); onClicked: { characterWindow.setShown(true); desktopPet.testBubble() } }
+                AppButton { text: qsTr("기존 규칙 폼 열기"); onClicked: ruleDialog.open() }
 
             Label {
                 text: qsTr("파일 정리")
-                font.pixelSize: 30
+                font.pixelSize: UiMetrics.textPageTitle
                 font.bold: true
                 color: root.primaryText
             }
 
             Label {
                 text: qsTr("정리할 파일을 먼저 대기 목록에 담아 주세요.")
-                font.pixelSize: 16
+                font.pixelSize: UiMetrics.textEmphasis
                 color: root.mutedText
             }
 
@@ -432,7 +432,7 @@ ApplicationWindow {
                     color: root.editorDark ? "#b6d8c5" : "#426349"
                     elide: Text.ElideMiddle
                 }
-                Button {
+                AppButton {
                     text: qsTr("규칙 편집기로")
                     onClicked: root.currentPage = 1
                 }
@@ -446,7 +446,7 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
             }
 
-            Button {
+            AppButton {
                 visible: recoveryController.recoveryCases.length > 0
                 text: qsTr("중단 작업 확인")
                 onClicked: {
@@ -467,12 +467,12 @@ ApplicationWindow {
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: 8
+                    spacing: UiMetrics.spaceControl
 
                     Label {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: qsTr("파일을 여기로 끌어놓으세요")
-                        font.pixelSize: 19
+                        font.pixelSize: UiMetrics.textSectionTitle
                         font.bold: true
                         color: root.primaryText
                     }
@@ -512,7 +512,7 @@ ApplicationWindow {
 
                 Label {
                     text: qsTr("1. 대기 목록")
-                    font.pixelSize: 19
+                    font.pixelSize: UiMetrics.textSectionTitle
                     font.bold: true
                     color: root.primaryText
                 }
@@ -540,9 +540,9 @@ ApplicationWindow {
                 ListView {
                     id: pendingList
                     anchors.fill: parent
-                    anchors.margins: 12
+                    anchors.margins: UiMetrics.spaceGroup
                     clip: true
-                    spacing: 4
+                    spacing: UiMetrics.spaceExtraSmall
                     visible: pendingFiles.count > 0
                     model: pendingFiles
 
@@ -553,18 +553,18 @@ ApplicationWindow {
                         required property bool available
                         width: pendingList.width
                         height: 70
-                        radius: 10
+                        radius: UiMetrics.radiusPanel
                         color: !available ? (root.editorDark ? "#4a3033" : "#fff0ec") : index % 2 === 0 ? (root.editorDark ? "#242d3b" : "#f7f9f6") : root.surfaceColor
 
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 16
                             anchors.rightMargin: 12
-                            spacing: 12
+                            spacing: UiMetrics.spaceGroup
 
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 3
+                                spacing: UiMetrics.spaceExtraSmall
                                 Label {
                                     text: available ? fileName : qsTr("[파일 없음] %1").arg(fileName)
                                     font.bold: true
@@ -579,7 +579,7 @@ ApplicationWindow {
                                 }
                             }
 
-                            Button {
+                            AppButton {
                                 text: qsTr("목록에서 빼기")
                                 onClicked: pendingFiles.removeAt(index)
                             }
@@ -606,7 +606,7 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 12
+                spacing: UiMetrics.spaceGroup
                 Label { text: qsTr("같은 이름의 파일이 있으면"); color: root.primaryText }
                 AppComboBox {
                     textRole: "label"
@@ -630,7 +630,7 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 12
+                spacing: UiMetrics.spaceGroup
 
                 Label {
                     text: qsTr("정리할 위치")
@@ -643,12 +643,12 @@ ApplicationWindow {
                     placeholderText: qsTr("정리할 폴더의 전체 경로")
                     onTextEdited: previewController.clear()
                 }
-                Button {
+                AppButton {
                     text: qsTr("미리보기 만들기")
                     enabled: pendingFiles.count > 0
                     onClicked: previewController.createPreview(destinationField.text)
                 }
-                Button {
+                AppButton {
                     text: qsTr("정리하기")
                     enabled: previewController.hasPreview && previewController.hasMovableSteps
                              && !previewController.awaitingConfirmation
@@ -660,9 +660,9 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 12
+                spacing: UiMetrics.spaceGroup
 
-                Button {
+                AppButton {
                     text: qsTr("마지막 이동 되돌리기")
                     enabled: previewController.canUndo
                     onClicked: previewController.undoLastMove()
@@ -686,7 +686,7 @@ ApplicationWindow {
             }
             Label {
                 text: qsTr("분류 미리보기")
-                font.pixelSize: 19
+                font.pixelSize: UiMetrics.textSectionTitle
                 font.bold: true
                 color: root.primaryText
             }
@@ -707,22 +707,22 @@ ApplicationWindow {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
+                    anchors.margins: UiMetrics.spaceGroup
                     visible: previewController.hasPreview
-                    spacing: 6
+                    spacing: UiMetrics.spaceSmall
 
                     ListView {
                         id: previewList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        spacing: 8
+                        spacing: UiMetrics.spaceControl
                         model: previewController.outcomes
                         delegate: Rectangle {
                             required property var modelData
                             width: previewList.width
                             height: previewRow.implicitHeight + 20
-                            radius: 10
+                            radius: UiMetrics.radiusPanel
                             color: modelData.statusKey === "planned" ? (root.editorDark ? "#25382e" : "#f3f9f2") : (root.editorDark ? "#242d3b" : "#f7f7f4")
                             border.color: modelData.statusKey === "planned" ? (root.editorDark ? "#4e705a" : "#b9d8b9") : root.borderColor
                             ColumnLayout {
@@ -730,8 +730,8 @@ ApplicationWindow {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.top: parent.top
-                                anchors.margins: 10
-                                spacing: 3
+                                anchors.margins: UiMetrics.spaceCompact
+                                spacing: UiMetrics.spaceExtraSmall
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label {
@@ -842,18 +842,18 @@ ApplicationWindow {
         parent: extensionHost
         pageIndex: 5
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: UiMetrics.spaceSection
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: UiMetrics.spaceGroup
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
             CheckBox {
                 text: qsTr("캐릭터를 앱 밖에 표시")
                 checked: characterWindow.shown
                 onToggled: characterWindow.setShown(checked)
             }
-            Button { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
-            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: 14 }
+            AppButton { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
+            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: UiMetrics.textBody }
             AppComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true
@@ -869,7 +869,7 @@ ApplicationWindow {
                 enabled: !characterSettings.busy
                 onActivated: characterSettings.selectPack(currentValue)
             }
-            Button {
+            AppButton {
                 text: qsTr("팩 폴더 가져오기…")
                 enabled: !characterSettings.busy
                 onClicked: imagePackFolderDialog.open()
@@ -881,7 +881,7 @@ ApplicationWindow {
                 value: characterSettings.userScale
                 onMoved: characterSettings.setUserScale(value)
             }
-            Button { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
+            AppButton { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
             Label {
                 Layout.fillWidth: true
                 text: characterSettings.status
@@ -891,7 +891,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: qsTr("선택과 크기는 자동 저장돼요. 팩 원본은 변경하지 않아요.")
                 wrapMode: Text.Wrap
-                font.pixelSize: 14
+                font.pixelSize: UiMetrics.textBody
             }
         }
     }
@@ -907,7 +907,7 @@ ApplicationWindow {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: UiMetrics.spaceGroup
             Label {
                 Layout.fillWidth: true
                 text: qsTr("아래 %1개 파일을 이동할까요? 미분류·제외·건너뜀 파일은 그대로 둡니다.")
@@ -918,13 +918,13 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                spacing: 10
+                spacing: UiMetrics.spaceCompact
                 model: previewController.confirmationSteps
                 ScrollBar.vertical: ScrollBar {}
                 delegate: Column {
                     required property var modelData
                     width: ListView.view.width
-                    spacing: 4
+                    spacing: UiMetrics.spaceExtraSmall
                     Label { width: parent.width; text: modelData.source; wrapMode: Text.WrapAnywhere }
                     Label { width: parent.width; text: qsTr("→ %1").arg(modelData.destination); wrapMode: Text.WrapAnywhere }
                 }
@@ -936,8 +936,8 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("취소"); onClicked: sortConfirmation.close() }
-                Button {
+                AppButton { text: qsTr("취소"); onClicked: sortConfirmation.close() }
+                AppButton {
                     text: qsTr("확인하고 이동")
                     enabled: previewController.awaitingConfirmation
                     onClicked: previewController.confirmSort()
@@ -957,7 +957,7 @@ ApplicationWindow {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
+            spacing: UiMetrics.spaceControl
 
             Label {
                 Layout.fillWidth: true
@@ -970,14 +970,14 @@ ApplicationWindow {
                 color: ruleEditor.dirty ? (root.editorDark ? "#e5bf85" : "#9b5c23") : (root.editorDark ? "#b6d8c5" : "#426349")
                 wrapMode: Text.WordWrap
             }
-            Button {
+            AppButton {
                 visible: ruleEditor.legacyRules
                 text: qsTr("기존 규칙 백업 후 새 형식으로 변환")
                 onClicked: ruleEditor.migrateLegacyRules()
             }
             RowLayout {
                 Layout.fillWidth: true
-                Button {
+                AppButton {
                     text: qsTr("루트 규칙 추가")
                     onClicked: {
                         if (root.commitRuleForm() && ruleEditor.add("")) {
@@ -986,7 +986,7 @@ ApplicationWindow {
                         }
                     }
                 }
-                Button {
+                AppButton {
                     text: qsTr("루트 '그 외' 추가")
                     onClicked: {
                         if (root.commitRuleForm() && ruleEditor.addOtherwise("")) {
@@ -996,7 +996,7 @@ ApplicationWindow {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                Button {
+                AppButton {
                     text: qsTr("저장 전 변경 버리기")
                     enabled: ruleEditor.dirty || root.ruleFormDirty || root.globalFormDirty
                     onClicked: {
@@ -1006,7 +1006,7 @@ ApplicationWindow {
                         root.globalFormDirty = false
                     }
                 }
-                Button {
+                AppButton {
                     text: qsTr("규칙 저장")
                     enabled: ruleEditor.dirty || root.ruleFormDirty || root.globalFormDirty
                     onClicked: {
@@ -1031,7 +1031,7 @@ ApplicationWindow {
                     placeholderText: qsTr("비우면 미분류")
                     onTextEdited: root.globalFormDirty = true
                 }
-                Button {
+                AppButton {
                     text: qsTr("적용")
                     onClicked: {
                         ruleEditor.setGlobalDestination(globalDestinationField.text)
@@ -1050,7 +1050,7 @@ ApplicationWindow {
                     clip: true
                     Column {
                         width: parent.width
-                        spacing: 4
+                        spacing: UiMetrics.spaceExtraSmall
                         Repeater {
                             model: ruleEditor.nodes
                             delegate: Row {
@@ -1058,9 +1058,9 @@ ApplicationWindow {
                                 width: parent.width
                                 visible: root.ruleVisible(modelData.path)
                                 height: visible ? 36 : 0
-                                spacing: 2
+                                spacing: UiMetrics.spaceTiny
                                 Item { width: modelData.depth * 16; height: 1 }
-                                Button {
+                                AppButton {
                                     width: 32
                                     height: 34
                                     flat: true
@@ -1068,7 +1068,7 @@ ApplicationWindow {
                                     text: root.collapsedRulePaths[modelData.path] ? "▸" : "▾"
                                     onClicked: root.toggleRule(modelData.path)
                                 }
-                                Button {
+                                AppButton {
                                     width: parent.width - modelData.depth * 16 - 36
                                     height: 34
                                     flat: true
@@ -1090,7 +1090,7 @@ ApplicationWindow {
                     clip: true
                     ColumnLayout {
                         width: parent.width
-                        spacing: 8
+                        spacing: UiMetrics.spaceControl
                         Label {
                             text: root.selectedRulePath.length > 0 ? qsTr("선택한 규칙") : qsTr("왼쪽에서 규칙을 선택하세요")
                             font.bold: true
@@ -1188,7 +1188,7 @@ ApplicationWindow {
                             placeholderText: qsTr("예: Pictures/PNG")
                             onTextEdited: root.ruleFormDirty = true
                         }
-                        Button {
+                        AppButton {
                             text: qsTr("이 규칙 수정")
                             enabled: root.selectedRulePath.length > 0
                             onClicked: {
@@ -1201,7 +1201,7 @@ ApplicationWindow {
                             }
                         }
                         RowLayout {
-                            Button {
+                            AppButton {
                                 text: qsTr("자식 추가")
                                 enabled: root.selectedRulePath.length > 0
                                 onClicked: {
@@ -1211,7 +1211,7 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            Button {
+                            AppButton {
                                 text: qsTr("그 아래 '그 외'")
                                 enabled: root.selectedRulePath.length > 0
                                 onClicked: {
@@ -1223,7 +1223,7 @@ ApplicationWindow {
                             }
                         }
                         RowLayout {
-                            Button {
+                            AppButton {
                                 text: qsTr("위로")
                                 enabled: root.selectedRulePath.length > 0
                                 onClicked: {
@@ -1233,7 +1233,7 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            Button {
+                            AppButton {
                                 text: qsTr("아래로")
                                 enabled: root.selectedRulePath.length > 0
                                 onClicked: {
@@ -1243,7 +1243,7 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            Button {
+                            AppButton {
                                 text: qsTr("규칙 제거")
                                 enabled: root.selectedRulePath.length > 0
                                 onClicked: {
@@ -1265,11 +1265,11 @@ ApplicationWindow {
         parent: extensionHost
         pageIndex: 3
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: UiMetrics.spaceSection
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 10
+            spacing: UiMetrics.spaceCompact
 
             Label {
                 Layout.fillWidth: true
@@ -1284,7 +1284,7 @@ ApplicationWindow {
 
                 ColumnLayout {
                     width: watchSettingsScroll.availableWidth
-                    spacing: 12
+                    spacing: UiMetrics.spaceGroup
                     Label { text: qsTr("감시할 폴더") }
                     AppTextField {
                         id: watchFolderField
@@ -1387,7 +1387,7 @@ ApplicationWindow {
                 color: root.editorDark ? "#b6d8c5" : "#426349"
             }
             RowLayout {
-                Button {
+                AppButton {
                     text: qsTr("조건 저장")
                     onClicked: watchController.saveSettings(
                         watchFolderField.text, watchEnabledCheck.checked,
@@ -1398,7 +1398,7 @@ ApplicationWindow {
                         watchAgeCheck.checked, watchAgeSpin.value,
                         watchExcludeField.text)
                 }
-                Button {
+                AppButton {
                     text: qsTr("저장된 조건 지금 검사")
                     onClicked: watchController.checkNow()
                 }
@@ -1432,11 +1432,11 @@ ApplicationWindow {
                     width: parent.width
                     text: modelData
                     wrapMode: Text.WrapAnywhere
-                    padding: 5
+                    padding: UiMetrics.spaceSmall
                 }
             }
             RowLayout {
-                Button {
+                AppButton {
                     text: qsTr("대기 목록에 담기")
                     enabled: watchController.proposalVisible
                     onClicked: {
@@ -1445,7 +1445,7 @@ ApplicationWindow {
                         root.currentPage = 0
                     }
                 }
-                Button {
+                AppButton {
                     text: qsTr("30분 뒤 다시 알림")
                     onClicked: {
                         watchController.snoozeProposal()
@@ -1462,11 +1462,11 @@ ApplicationWindow {
         parent: extensionHost
         pageIndex: 4
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: UiMetrics.spaceSection
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 10
+            spacing: UiMetrics.spaceCompact
 
             Label {
                 Layout.fillWidth: true
@@ -1474,27 +1474,27 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
                 color: root.editorDark ? "#b6d8c5" : "#426349"
             }
-            Button {
+            AppButton {
                 text: qsTr("목록 새로고침")
                 onClicked: historyController.refreshHistory()
             }
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 12
+                spacing: UiMetrics.spaceGroup
 
                 ListView {
                     id: historyList
                     Layout.preferredWidth: 280
                     Layout.fillHeight: true
                     clip: true
-                    spacing: 6
+                    spacing: UiMetrics.spaceSmall
                     model: historyController.historyEntries
                     delegate: Rectangle {
                         required property var modelData
                         width: historyList.width
                         height: 100
-                        radius: 9
+                        radius: UiMetrics.radiusControl
                         color: modelData.planId === historyController.selectedHistoryPlanId
                                ? (root.editorDark ? "#304438" : "#e8f4e5") : (root.editorDark ? "#242d3b" : "#f7f9f6")
                         border.color: root.borderColor
@@ -1502,7 +1502,7 @@ ApplicationWindow {
                         ColumnLayout {
                             anchors.fill: parent
                             anchors.margins: 9
-                            spacing: 2
+                            spacing: UiMetrics.spaceTiny
                             Label {
                                 Layout.fillWidth: true
                                 text: modelData.time + " · " + modelData.status
@@ -1514,7 +1514,7 @@ ApplicationWindow {
                                       .arg(modelData.fileCount).arg(modelData.appliedCount)
                                 color: root.mutedText
                             }
-                            Button {
+                            AppButton {
                                 text: qsTr("파일 보기")
                                 onClicked: historyController.selectHistoryPlan(modelData.planId)
                             }
@@ -1525,7 +1525,7 @@ ApplicationWindow {
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 8
+                    spacing: UiMetrics.spaceControl
 
                     Label {
                         Layout.fillWidth: true
@@ -1540,7 +1540,7 @@ ApplicationWindow {
                         clip: true
                         Column {
                             width: historyStepScroll.availableWidth
-                            spacing: 6
+                            spacing: UiMetrics.spaceSmall
 
                             Repeater {
                                 model: historyController.historySteps
@@ -1571,7 +1571,7 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Button {
+                    AppButton {
                         text: qsTr("이 작업 되돌리기")
                         enabled: historyController.canUndoSelectedHistory
                         onClicked: undoHistoryDialog.open()
@@ -1611,14 +1611,14 @@ ApplicationWindow {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 10
+            spacing: UiMetrics.spaceCompact
 
             Label {
                 Layout.fillWidth: true
                 text: qsTr("시작 검사와 '나중에'는 파일을 변경하지 않습니다. 재개·되돌리기는 직접 선택하고 확인해야 실행됩니다.")
                 wrapMode: Text.WordWrap
             }
-            Button {
+            AppButton {
                 text: qsTr("파일 상태 다시 검사")
                 enabled: !recoveryController.recoveryBusy
                 onClicked: recoveryController.refreshRecoveryCases()
@@ -1637,7 +1637,7 @@ ApplicationWindow {
 
                 Column {
                     width: recoveryScroll.availableWidth
-                    spacing: 8
+                    spacing: UiMetrics.spaceControl
 
                     Repeater {
                         model: recoveryController.recoveryCases
@@ -1699,23 +1699,23 @@ ApplicationWindow {
                                 }
                                 RowLayout {
                                     visible: !!modelData.whole
-                                    Button {
+                                    AppButton {
                                         text: qsTr("재개")
                                         enabled: recoveryCaseFrame.modelData.canResume && !recoveryController.recoveryBusy
                                         onClicked: recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "resume")
                                     }
-                                    Button {
+                                    AppButton {
                                         text: qsTr("되돌리기")
                                         enabled: recoveryCaseFrame.modelData.canRollback && !recoveryController.recoveryBusy
                                         onClicked: recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "rollback")
                                     }
-                                    Button {
+                                    AppButton {
                                         text: qsTr("나중에")
                                         enabled: !recoveryController.recoveryBusy
                                         onClicked: { recoveryController.requestRecoveryChoice(recoveryCaseFrame.modelData.planId, "later"); recoveryDialog.close() }
                                     }
                                 }
-                                Button {
+                                AppButton {
                                     text: qsTr("현재 상태로 기록 확정")
                                     visible: modelData.partIndex === 1 && (!modelData.whole || modelData.canResolve)
                                     enabled: modelData.canResolve && !recoveryController.recoveryBusy

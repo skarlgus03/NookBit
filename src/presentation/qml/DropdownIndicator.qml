@@ -4,8 +4,8 @@ import QtQuick
 Item {
     id: icon
     property color strokeColor: "#273344"
-    implicitWidth: 12
-    implicitHeight: 8
+    implicitWidth: UiMetrics.dropdownIconWidth
+    implicitHeight: UiMetrics.dropdownIconHeight
     width: implicitWidth
     height: implicitHeight
     onStrokeColorChanged: drawing.requestPaint()
@@ -17,10 +17,11 @@ Item {
             const ctx = getContext("2d")
             ctx.clearRect(0, 0, width, height)
             ctx.strokeStyle = icon.strokeColor
-            ctx.lineWidth = 2
+            ctx.lineWidth = UiMetrics.borderActive
             ctx.lineCap = "round"
             ctx.lineJoin = "round"
-            ctx.beginPath(); ctx.moveTo(1, 1); ctx.lineTo(6, 6); ctx.lineTo(11, 1); ctx.stroke()
+            const inset = UiMetrics.borderActive / 2
+            ctx.beginPath(); ctx.moveTo(inset, inset); ctx.lineTo(width / 2, height - inset * 2); ctx.lineTo(width - inset, inset); ctx.stroke()
         }
     }
 }

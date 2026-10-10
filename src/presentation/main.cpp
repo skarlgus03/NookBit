@@ -113,7 +113,7 @@ static QIcon applicationIcon() {
 }
 
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
-static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension) {
+static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension, QObject* metrics) {
     auto* button = mainWindow->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
     auto* rules = mainWindow->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
     if (!button || !rules) return false;
@@ -153,10 +153,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 공통 드롭다운의 높이·화살표 규격과 실제 메뉴 열림을 검사한다.
             for (auto* combo : {comparison, unit}) {
                 auto* indicator = combo->property("indicator").value<QObject*>();
-                if (combo->property("height").toInt() != 40 || !indicator
+                if (combo->property("height").toInt() != metrics->property("controlHeight").toInt() || !indicator
                     || indicator->objectName() != QStringLiteral("appDropdownIndicator")
-                    || indicator->property("width").toInt() != 12
-                    || indicator->property("height").toInt() != 8) {
+                    || indicator->property("width").toInt() != metrics->property("dropdownIconWidth").toInt()
+                    || indicator->property("height").toInt() != metrics->property("dropdownIconHeight").toInt()) {
                     QTextStream(stderr) << "Dropdown dimensions failed: " << combo->objectName()
                         << " height=" << combo->property("height").toInt() << Qt::endl;
                     return false;
@@ -190,7 +190,8 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 감시 조건 네 항목에 실제 키 입력 후 Enter로 숫자를 확정하는 검사.
             for (const auto* name : {"watchIntervalSpin", "watchCountSpin", "watchSizeSpin", "watchAgeSpin"}) {
                 auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
-                if (!spin || !spin->property("editable").toBool() || spin->height() != 40) return false;
+                if (!spin || !spin->property("editable").toBool()
+                    || spin->height() != metrics->property("controlHeight").toInt()) return false;
                 const bool wasEnabled = spin->isEnabled();
                 spin->setEnabled(true);
                 auto* editor = qobject_cast<QQuickItem*>(spin->property("contentItem").value<QObject*>());
@@ -227,9 +228,6 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
-    QFont baseFont = application.font();
-    baseFont.setPixelSize(14);
-    application.setFont(baseFont);
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
     const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
@@ -550,6 +548,15 @@ int main(int argc, char* argv[]) {
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
+    // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.
+    auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
+    if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
+        QTextStream(stderr) << "Cannot load shared UI metrics." << Qt::endl;
+        return 1;
+    }
+    QFont baseFont = application.font();
+    baseFont.setPixelSize(uiMetrics->property("textBody").toInt());
+    application.setFont(baseFont);
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("backgroundTasks"), &backgroundTasks);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
@@ -684,7 +691,7 @@ int main(int argc, char* argv[]) {
                 checkLayout(developer->property("visible").toBool(), "developer tools");
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
-                checkLayout(verifyExtensionInteraction(window, extension), "page content and real close clicks");
+                checkLayout(verifyExtensionInteraction(window, extension, uiMetrics), "page content and real close clicks");
             }
         }
         bool closeToTray = false;

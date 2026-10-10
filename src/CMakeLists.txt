@@ -142,11 +142,14 @@ if(NOOKBIT_BUILD_QT_APP)
     target_compile_definitions(nookbit PRIVATE
       NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
 
+    set_source_files_properties(presentation/qml/UiMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
     qt_add_qml_module(nookbit
       URI NookBit
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/UiMetrics.qml
+        presentation/qml/AppButton.qml
         presentation/qml/AppComboBox.qml
         presentation/qml/DropdownIndicator.qml
         presentation/qml/AppTextField.qml

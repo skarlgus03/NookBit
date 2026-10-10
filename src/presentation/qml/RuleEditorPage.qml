@@ -12,9 +12,9 @@ Item {
 
     property bool oldEditorFormDirty: false
     property int fontPresetIndex: 1
-    readonly property int nodeFontSize: [11, 13, 16][fontPresetIndex]
-    readonly property int blockWidth: [206, 226, 262][fontPresetIndex]
-    readonly property int blockHeight: [82, 90, 104][fontPresetIndex]
+    readonly property int nodeFontSize: UiMetrics.nodeTextSizes[fontPresetIndex]
+    readonly property int blockWidth: UiMetrics.nodeWidths[fontPresetIndex]
+    readonly property int blockHeight: UiMetrics.nodeHeights[fontPresetIndex]
     property bool darkMode: false
     readonly property color pageColor: darkMode ? "#161a22" : "#f5f5f2"
     readonly property color surfaceColor: darkMode ? "#202633" : "#ffffff"
@@ -38,9 +38,9 @@ Item {
     // 마우스를 올려도 배경과 글자색은 유지하고 테두리만 강조하는 버튼.
     component ThemeButton: T.Button {
         id: themedButton
-        padding: 8
-        implicitWidth: Math.max(80, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(40, contentItem.implicitHeight + topPadding + bottomPadding)
+        padding: UiMetrics.buttonPadding
+        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
+        implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: themedButton.text
             font: themedButton.font
@@ -51,7 +51,7 @@ Item {
             elide: Text.ElideRight
         }
         background: Rectangle {
-            radius: 7
+            radius: UiMetrics.radiusControl
             color: page.buttonColor
             border.color: themedButton.enabled &&
                           (themedButton.hovered || themedButton.visualFocus || themedButton.down)
@@ -865,14 +865,14 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 12
+        anchors.margins: UiMetrics.editorInset
+        spacing: UiMetrics.spaceGroup
 
         RowLayout {
             Layout.fillWidth: true
             Label {
                 text: qsTr("분류 규칙")
-                font.pixelSize: 29
+                font.pixelSize: UiMetrics.textPageTitle
                 font.bold: true
                 color: page.primaryText
             }
@@ -919,12 +919,12 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 56
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.darkMode ? "#3b3020" : "#fff4dd"
             border.color: page.darkMode ? "#806240" : "#dfc591"
             Label {
                 anchors.fill: parent
-                anchors.margins: 12
+                anchors.margins: UiMetrics.spaceGroup
                 verticalAlignment: Text.AlignVCenter
                 wrapMode: Text.WordWrap
                 text: qsTr("규칙은 저장 전에 초안으로 검증합니다. 노드 위치는 분류 규칙과 별도로 저장돼 검사 순서를 바꾸지 않아요.")
@@ -934,12 +934,12 @@ Item {
 
         Flow {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: UiMetrics.spaceControl
             ThemeButton {
                 text: qsTr("+ 블록 추가")
                 onClicked: page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2)
             }
-            Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("연결선 모양"); color: page.primaryText }
+            Label { height: UiMetrics.controlHeight; verticalAlignment: Text.AlignVCenter; text: qsTr("연결선 모양"); color: page.primaryText }
             AppComboBox {
                 model: [qsTr("곡선"), qsTr("직선")]
                 currentIndex: page.connectionStyle
@@ -957,7 +957,7 @@ Item {
                 enabled: page.selectedIds.filter(id => id !== 1).length >= 2
                 onClicked: page.alignSelectedVertically()
             }
-            Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("글씨 크기"); color: page.primaryText }
+            Label { height: UiMetrics.controlHeight; verticalAlignment: Text.AlignVCenter; text: qsTr("글씨 크기"); color: page.primaryText }
             AppComboBox {
                 model: [qsTr("작게"), qsTr("보통"), qsTr("크게")]
                 currentIndex: page.fontPresetIndex
@@ -966,7 +966,7 @@ Item {
             Label {
                 text: qsTr("%1%").arg(Math.round(page.zoom * 100))
                 color: page.mutedText
-                height: 40
+                height: UiMetrics.controlHeight
                 verticalAlignment: Text.AlignVCenter
             }
         }
@@ -975,19 +975,19 @@ Item {
             Layout.fillWidth: true
             text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · Ctrl+드래그: 부모/형제 스냅 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
             color: page.mutedText
-            font.pixelSize: 12
+            font.pixelSize: UiMetrics.textCaption
             wrapMode: Text.WordWrap
         }
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 10
+            spacing: UiMetrics.spaceCompact
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 10
+                radius: UiMetrics.radiusPanel
                 color: page.canvasColor
                 border.color: page.borderColor
 
@@ -1195,7 +1195,7 @@ Item {
                                     anchors.left: parent.left
                                     anchors.leftMargin: 18
                                     anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 11
+                                    spacing: UiMetrics.spaceGroup
                                     Rectangle {
                                         width: 42
                                         height: 42
@@ -1205,22 +1205,22 @@ Item {
                                         Label {
                                             anchors.centerIn: parent
                                             text: "▶"
-                                            font.pixelSize: page.nodeFontSize + 5
+                                            font.pixelSize: page.nodeFontSize + UiMetrics.nodeSymbolOffset
                                             color: "#ffffff"
                                         }
                                     }
                                     Column {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 4
+                                        spacing: UiMetrics.spaceExtraSmall
                                         Label {
                                             text: qsTr("파일 입력")
                                             font.bold: true
-                                            font.pixelSize: page.nodeFontSize + 3
+                                            font.pixelSize: page.nodeFontSize + UiMetrics.nodeHeadingOffset
                                             color: page.darkMode ? "#f2fff9" : "#21523f"
                                         }
                                         Label {
                                             text: qsTr("모든 분류의 시작점")
-                                            font.pixelSize: Math.max(10, page.nodeFontSize - 2)
+                                            font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
                                             color: page.darkMode ? "#b7dece" : "#477663"
                                         }
                                     }
@@ -1241,7 +1241,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: page.titleFor(modelData.type)
                                         font.bold: true
-                                        font.pixelSize: page.nodeFontSize + 1
+                                        font.pixelSize: page.nodeFontSize + UiMetrics.nodeBadgeOffset
                                         elide: Text.ElideRight
                                         color: "#ffffff"
                                     }
@@ -1250,7 +1250,7 @@ Item {
                                         x: 9
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 25; height: 24
-                                        radius: 7
+                                        radius: UiMetrics.radiusControl
                                         color: "#ffffff"
                                         opacity: 0.94
                                         Label {
@@ -1276,7 +1276,7 @@ Item {
                                             anchors.centerIn: parent
                                             text: qsTr("루트")
                                             font.bold: true
-                                            font.pixelSize: Math.max(10, page.nodeFontSize - 2)
+                                            font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
                                             color: page.colorFor(modelData.type)
                                         }
                                     }
@@ -1305,7 +1305,7 @@ Item {
                                     anchors.bottomMargin: 8
                                     text: modelData.type === "destination" ? qsTr("도착")
                                           : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
-                                    font.pixelSize: Math.max(10, page.nodeFontSize - 2)
+                                    font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
                                     font.weight: Font.Medium
                                     color: page.mutedText
                                 }
@@ -1373,7 +1373,7 @@ Item {
                                     x: -8
                                     y: parent.height / 2 - 8
                                     width: 16; height: 16
-                                    radius: 8
+                                    radius: UiMetrics.radiusControl
                                     color: page.hasIncoming(modelData.id)
                                            ? page.colorFor(modelData.type) : page.nodeColor
                                     border.width: 3
@@ -1502,8 +1502,8 @@ Item {
             Frame {
                 Layout.preferredWidth: 238
                 Layout.fillHeight: true
-                padding: 16
-                background: Rectangle { radius: 10; color: page.surfaceColor; border.color: page.borderColor }
+                padding: UiMetrics.spaceSection
+                background: Rectangle { radius: UiMetrics.radiusPanel; color: page.surfaceColor; border.color: page.borderColor }
                 ScrollView {
                     id: inspectorScroll
                     anchors.fill: parent
@@ -1514,11 +1514,11 @@ Item {
                     ColumnLayout {
                     id: inspectorContent
                     width: inspectorScroll.availableWidth
-                    spacing: 10
+                    spacing: UiMetrics.spaceCompact
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("블록 설정")
-                        font.pixelSize: 18
+                        font.pixelSize: UiMetrics.textSectionTitle
                         font.bold: true
                         color: page.primaryText
                     }
@@ -1558,7 +1558,7 @@ Item {
                         color: page.primaryText
                         placeholderTextColor: page.mutedText
                         background: Rectangle {
-                            radius: 6
+                            radius: UiMetrics.radiusInner
                             color: page.nodeColor
                             border.color: page.borderColor
                         }
@@ -1649,21 +1649,21 @@ Item {
         id: addNodeMenu
         parent: canvasViewport
         width: 208
-        padding: 8
+        padding: UiMetrics.buttonPadding
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-            radius: 9
+            radius: UiMetrics.radiusControl
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: Column {
-            spacing: 4
+            spacing: UiMetrics.spaceExtraSmall
             Label {
                 width: parent.width
-                leftPadding: 8
-                bottomPadding: 5
+                leftPadding: UiMetrics.spaceControl
+                bottomPadding: UiMetrics.spaceSmall
                 text: qsTr("블록 추가")
                 font.bold: true
                 color: page.primaryText
@@ -1698,17 +1698,17 @@ Item {
         x: 0
         y: jsonFileButton.height + 4
         width: 170
-        padding: 8
+        padding: UiMetrics.buttonPadding
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-            radius: 9
+            radius: UiMetrics.radiusControl
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 4
+            spacing: UiMetrics.spaceExtraSmall
             ThemeButton {
                 Layout.fillWidth: true
                 text: qsTr("JSON 불러오기")
@@ -1740,12 +1740,12 @@ Item {
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 14
+            spacing: UiMetrics.spaceSection
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -1774,7 +1774,7 @@ Item {
         x: 18
         y: 18
         width: Math.max(1, Math.min(canvasViewport.width - 20, 420))
-        padding: 14
+        padding: UiMetrics.spaceSection
         modal: false
         dim: false
         focus: false
@@ -1784,12 +1784,12 @@ Item {
             if (opened) page.clampRuleTestPanel()
         }
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: UiMetrics.spaceGroup
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 38
@@ -1851,12 +1851,12 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 100
                 visible: page.testMode === 0
-                radius: 8
+                radius: UiMetrics.radiusControl
                 color: page.canvasColor
                 border.color: page.borderColor
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.margins: UiMetrics.spaceCompact
                     Label {
                         Layout.fillWidth: true
                         text: page.testFileUrl.toString() === ""
@@ -1928,7 +1928,7 @@ Item {
             ColumnLayout {
                 visible: page.testResult.ok === true
                 Layout.fillWidth: true
-                spacing: 5
+                spacing: UiMetrics.spaceSmall
                 Label {
                     Layout.fillWidth: true
                     font.bold: true
@@ -1981,12 +1981,12 @@ Item {
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 14
+            spacing: UiMetrics.spaceSection
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -2056,7 +2056,7 @@ Item {
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
@@ -2078,12 +2078,12 @@ Item {
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 14
+            spacing: UiMetrics.spaceSection
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -2115,12 +2115,12 @@ Item {
         palette.window: page.surfaceColor
         palette.windowText: page.primaryText
         background: Rectangle {
-            radius: 10
+            radius: UiMetrics.radiusPanel
             color: page.surfaceColor
             border.color: page.borderColor
         }
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: UiMetrics.spaceCompact
             Label {
                 Layout.fillWidth: true
                 text: qsTr("문제 위치: %1").arg(page.importErrorLocation)

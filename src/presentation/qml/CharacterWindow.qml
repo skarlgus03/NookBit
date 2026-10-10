@@ -111,10 +111,10 @@ Window {
     Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 4
-        width: 24; height: 24; radius: 12
+        anchors.margins: UiMetrics.spaceExtraSmall
+        width: UiMetrics.floatingCloseSize; height: UiMetrics.floatingCloseSize; radius: width / 2
         color: "#c0263246"
-        Text { anchors.centerIn: parent; text: "×"; color: "white"; font.pixelSize: 18 }
+        Text { anchors.centerIn: parent; text: "×"; color: "white"; font.pixelSize: UiMetrics.textSectionTitle }
         MouseArea {
             anchors.fill: parent
             // 캐릭터만 숨기는 함수.

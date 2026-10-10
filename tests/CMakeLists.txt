@@ -331,6 +331,9 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_test(NAME nookbit_ui_metrics_contract COMMAND ${CMAKE_COMMAND}
+    "-DNOOKBIT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/ui_metrics_contract.cmake")
   if(WIN32)
     set_tests_properties(nookbit_qml_smoke PROPERTIES
       ENVIRONMENT_MODIFICATION

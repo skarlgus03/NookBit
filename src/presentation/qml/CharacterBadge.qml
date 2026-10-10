@@ -20,8 +20,8 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 10
-        spacing: 5
+        anchors.margins: UiMetrics.spaceCompact
+        spacing: UiMetrics.spaceSmall
         Item {
             Layout.alignment: Qt.AlignHCenter
             Layout.minimumHeight: 64
@@ -43,7 +43,7 @@ Rectangle {
                      : badge.stateKey === "calling" ? "#e9bf7c" : "#a6c1a2"
                 Row {
                     anchors.centerIn: parent
-                    spacing: 12
+                    spacing: UiMetrics.spaceGroup
                     Repeater {
                         model: 2
                         Rectangle {
@@ -76,7 +76,7 @@ Rectangle {
             text: sprite.error.length > 0 ? sprite.error : badge.message
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            font.pixelSize: 11
+            font.pixelSize: UiMetrics.textCompact
             color: badge.dark ? "#bdcce0" : "#536854"
         }
     }

@@ -15,23 +15,23 @@ Rectangle {
     readonly property color surface: dark ? "#242d3b" : "#ffffff"
     readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
     color: dark ? "#161a22" : "#ffffff"
-    radius: 8
+    radius: UiMetrics.radiusControl
     border.color: edge
 
     component FlatButton: T.Button {
         id: control
-        padding: 8
-        implicitWidth: Math.max(36, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: 40
+        padding: UiMetrics.buttonPadding
+        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
+        implicitHeight: UiMetrics.controlHeight
         contentItem: Text {
             text: control.text
             color: control.enabled ? home.foreground : home.muted
-            font.pixelSize: 14
+            font.pixelSize: UiMetrics.textBody
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            radius: 9
+            radius: UiMetrics.radiusControl
             color: home.surface
             border.color: control.hovered || control.visualFocus ? "#7898bb" : home.edge
             border.width: control.hovered || control.visualFocus ? 2 : 1
@@ -41,13 +41,13 @@ Rectangle {
     ScrollView {
         id: homeScroll
         anchors.fill: parent
-        anchors.margins: 18
+        anchors.margins: UiMetrics.pageInset
         contentWidth: availableWidth
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         ColumnLayout {
             width: homeScroll.availableWidth
-            spacing: 8
+            spacing: UiMetrics.spaceControl
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 92
@@ -57,9 +57,9 @@ Rectangle {
                 border.width: drop.containsDrag ? 2 : 1
                 Column {
                     anchors.centerIn: parent
-                    spacing: 6
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 파일 끌어놓기"); font.bold: true; font.pixelSize: 16; color: home.foreground }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("아직 원본 파일은 이동하지 않아요"); font.pixelSize: 14; color: home.muted }
+                    spacing: UiMetrics.spaceSmall
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 파일 끌어놓기"); font.bold: true; font.pixelSize: UiMetrics.textEmphasis; color: home.foreground }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("아직 원본 파일은 이동하지 않아요"); font.pixelSize: UiMetrics.textBody; color: home.muted }
                 }
                 DropArea {
                     id: drop
@@ -86,12 +86,12 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(120, Math.min(170, home.height - 485))
-                color: home.surface; radius: 12; border.color: home.edge
-                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: 14 }
+                color: home.surface; radius: UiMetrics.radiusCard; border.color: home.edge
+                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: UiMetrics.textBody }
                 ListView {
                     id: files
-                    anchors.fill: parent; anchors.margins: 8
-                    model: pendingFiles; clip: true; spacing: 4
+                    anchors.fill: parent; anchors.margins: UiMetrics.spaceControl
+                    model: pendingFiles; clip: true; spacing: UiMetrics.spaceExtraSmall
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
                         required property int index
@@ -102,31 +102,31 @@ Rectangle {
                         RowLayout {
                             anchors.fill: parent
                             ColumnLayout {
-                                Layout.fillWidth: true; spacing: 2
-                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: 14 }
-                                Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: 14 }
+                                Layout.fillWidth: true; spacing: UiMetrics.spaceTiny
+                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: UiMetrics.textBody }
+                                Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: UiMetrics.textBody }
                             }
-                            FlatButton { text: "×"; implicitWidth: 30; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
+                            FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
                         }
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 14 }
-            Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: 14 }
+            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
+            Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: UiMetrics.textBody }
             FlatButton {
                 Layout.fillWidth: true
                 text: previewController.activeRuleLabel + "  ›"
-                contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: 14; verticalAlignment: Text.AlignVCenter }
+                contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: UiMetrics.textBody; verticalAlignment: Text.AlignVCenter }
                 onClicked: home.pageRequested(1)
             }
-            Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: 14 }
+            Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: UiMetrics.textBody }
             AppTextField {
                 id: destination
                 objectName: "compactDestinationField"
                 Layout.fillWidth: true
                 text: previewController.defaultDestinationRoot
                 placeholderText: qsTr("정리 폴더의 전체 경로")
-                font.pixelSize: 14
+                font.pixelSize: UiMetrics.textBody
                 color: home.foreground
                 onTextEdited: previewController.clear()
             }
@@ -148,19 +148,19 @@ Rectangle {
             FlatButton {
                 objectName: "compactSortButton"
                 Layout.fillWidth: true
-                implicitHeight: 46
+                implicitHeight: UiMetrics.primaryActionHeight
                 text: qsTr("정리하기")
                 enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0 && !previewController.awaitingConfirmation
-                contentItem: Text { text: parent.text; color: "#ffffff"; font.pixelSize: 15; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { radius: 12; color: parent.enabled ? "#405e80" : "#a7b4c4"; border.color: parent.hovered ? "#88a8c9" : color }
+                contentItem: Text { text: parent.text; color: "#ffffff"; font.pixelSize: UiMetrics.textAction; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: UiMetrics.radiusCard; color: parent.enabled ? "#405e80" : "#a7b4c4"; border.color: parent.hovered ? "#88a8c9" : color }
                 // 새 분류 결과로 정리를 준비하되 실제 이동은 기존 최종 확인 이후에만 실행하는 함수.
                 onClicked: {
                     previewController.createPreview(destination.text)
                     if (previewController.hasPreview && previewController.hasMovableSteps) previewController.prepareSort()
                 }
             }
-            Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: 14 }
-            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: 14 }
+            Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
             FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
         }
     }
