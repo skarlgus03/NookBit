@@ -14,6 +14,9 @@ QtObject {
     readonly property int textPageTitle: 28
     readonly property int controlHeight: 40
     readonly property int primaryActionHeight: 46
+    readonly property int largeActionHeight: 60
+    readonly property int textDropHint: 20
+    readonly property real dropOverlayOpacity: 0.28
     readonly property int navigationHeight: 48
     readonly property int windowButtonSize: 32
     readonly property int iconButtonSize: 32
@@ -27,6 +30,9 @@ QtObject {
     readonly property int dropdownVisibleRows: 8
     readonly property int iconSize: 20
     readonly property int fileIconSize: 32
+    readonly property int filePreviewSize: 48
+    readonly property int fileRowHeight: 64
+    readonly property int dropHintMaxWidth: 480
     readonly property int floatingCloseSize: 24
     readonly property int spaceTiny: 2
     readonly property int spaceExtraSmall: 4

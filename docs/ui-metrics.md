@@ -16,6 +16,7 @@ The source of truth is `src/presentation/qml/UiMetrics.qml`, a presentation-only
 | Page title | `textPageTitle` | 28 px |
 | Standard field / command | `controlHeight` | 40 px |
 | Primary action | `primaryActionHeight` | 46 px |
+| Paired file actions | `largeActionHeight` | 60 px |
 | Home navigation | `navigationHeight` | 48 px |
 | Window button | `windowButtonSize` | 32 px |
 
@@ -23,7 +24,9 @@ These are initial application decisions, not universal UX standards. Choose a se
 
 Use `AppButton`, `AppComboBox`, `AppTextField`, and `AppSpinBox` for ordinary controls. Specialized themed buttons must also read the shared size tokens. Use `controlPadding`, `buttonPadding`, spacing, radius, and border tokens instead of inline common metrics. Icons use `iconSize`; dropdown indicators use their own shared width and height.
 
-Pending file rows use `fileIconSize` (32 px) for file-type icons. The presentation-only image provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, not real-file content or thumbnails. It loads asynchronously, caches at most 128 file types, and falls back to a generic document icon. Core file classification and movement are not involved.
+Pending rows use `filePreviewSize` (48 px), with a `fileRowHeight` of 64 px. The presentation-only preview provider asynchronously decodes a small first-frame thumbnail for PNG/JPEG/WebP/BMP/GIF, honors image orientation, and preserves aspect ratio. To bound work, originals larger than 32 MiB or 16 megapixels are not decoded. Corrupt, missing, unsupported, or oversized images fall back to file-type icons. Thumbnails are not persisted to disk.
+
+The underlying icon provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, without reading real-file content. It caches at most 128 file types and falls back to a generic document icon. Core file classification and movement are not involved. Dragging files over the page shows a translucent white veil and a readable centered instruction; it does not alter the ordinary button hover style.
 
 ## Deliberate exceptions
 

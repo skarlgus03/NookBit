@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/file_icon_provider.hpp"
+#include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
 #include "presentation/history_controller.hpp"
 #include "presentation/recovery_controller.hpp"
@@ -256,10 +257,12 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
         const auto point = page->mapToScene(QPointF(page->width() / 2, page->height() - 30)).toPoint();
         QDragEnterEvent enter(point, actions, &mime, Qt::LeftButton, Qt::NoModifier);
         QCoreApplication::sendEvent(window, &enter);
+        auto* overlay = page->findChild<QQuickItem*>(QStringLiteral("fileDropOverlay"));
+        if ((actions & Qt::CopyAction) && (!overlay || !overlay->isVisible())) return false;
         QDropEvent dropped(point, actions, &mime, Qt::LeftButton, Qt::NoModifier);
         QCoreApplication::sendEvent(window, &dropped);
         QCoreApplication::processEvents();
-        return dropped.isAccepted() && dropped.dropAction() == Qt::CopyAction;
+        return dropped.isAccepted() && dropped.dropAction() == Qt::CopyAction && overlay && !overlay->isVisible();
     };
     if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction | Qt::MoveAction) || pending.count() != 1) return false;
     if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction) || pending.count() != 1) return false;
@@ -290,6 +293,27 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
         auto* icon = findIcon(findIcon, page);
         QTextStream(stderr) << "Pending icon did not load: " << (icon ? icon->property("status").toInt() : -1) << Qt::endl;
     }
+    pending.removeAt(0);
+    // 실제 이미지 내용의 축소와 손상된 그림의 아이콘 대체를 검사한다.
+    const auto picturePath = directory.filePath(QStringLiteral("picture.png"));
+    QImage picture(80, 40, QImage::Format_RGB32);
+    picture.fill(Qt::red);
+    if (!picture.save(picturePath)) return false;
+    nookbit::FilePreviewProvider previews;
+    QSize previewSize;
+    const auto thumbnail = previews.requestImage(QString::fromUtf8(QUrl::toPercentEncoding(picturePath)), &previewSize, QSize(48, 48));
+    if (thumbnail.size() != QSize(48, 24) || thumbnail.pixelColor(24, 12) != QColor(Qt::red)) return false;
+    const auto brokenPath = directory.filePath(QStringLiteral("broken.png"));
+    QFile broken(brokenPath);
+    if (!broken.open(QIODevice::WriteOnly)) return false;
+    broken.write("not an image");
+    broken.close();
+    if (previews.requestImage(QString::fromUtf8(QUrl::toPercentEncoding(brokenPath)), nullptr, QSize(48, 48)).isNull()) return false;
+    if (!loaded || !drop(QUrl::fromLocalFile(picturePath), Qt::CopyAction) || pending.count() != 1) return false;
+    loaded = false;
+    check.start(10);
+    deadline.start(3000);
+    images.exec();
     pending.removeAt(0);
     return loaded && pending.count() == 0 && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
 }
@@ -619,6 +643,7 @@ int main(int argc, char* argv[]) {
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
+    engine.addImageProvider(QStringLiteral("filepreviews"), new nookbit::FilePreviewProvider);
     // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.
     auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
     if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
@@ -777,6 +802,14 @@ int main(int argc, char* argv[]) {
                 checkLayout(verifyPageFileDrop(extension, filePage, pendingFiles), "whole-page drop and file icon");
                 auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
                 checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");
+                auto* previewButton = window->findChild<QQuickItem*>(QStringLiteral("compactPreviewButton"));
+                auto* sortButton = window->findChild<QQuickItem*>(QStringLiteral("compactSortButton"));
+                checkLayout(previewButton && sortButton && undoButton
+                    && std::abs(previewButton->width() - sortButton->width()) <= 1
+                    && previewButton->height() == uiMetrics->property("largeActionHeight").toInt()
+                    && sortButton->height() == previewButton->height()
+                    && undoButton->mapToScene(QPointF()).y() >= sortButton->mapToScene(QPointF()).y() + sortButton->height(),
+                    "large paired actions and separate undo");
                 window->setX(previousX);
                 QCoreApplication::processEvents();
                 window->hide();
