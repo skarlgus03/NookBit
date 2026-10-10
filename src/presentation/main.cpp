@@ -36,6 +36,9 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QApplication>
+#include <QQuickStyle>
+#include <QPalette>
+#include "presentation/ui_settings_controller.hpp"
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
@@ -122,7 +125,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 2, 3, 4, 5, 6, 9}) {
+    for (const int page : {1, 2, 3, 4, 5, 6, 7, 8, 9}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         if (page == 1) {
@@ -139,6 +142,15 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             }
             QMetaObject::invokeMethod(testPanel, "close");
         }
+        if (page == 8) {
+            auto* themeSwitch = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalDarkModeSwitch"));
+            const bool initial = mainWindow->property("editorDark").toBool();
+            if (!themeSwitch) return false;
+            click(themeSwitch);
+            if (mainWindow->property("editorDark").toBool() == initial || rules->property("darkMode").toBool() == initial) return false;
+            click(themeSwitch);
+            if (mainWindow->property("editorDark").toBool() != initial) return false;
+        }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
             QTextStream(stderr) << "Extension close click blocked on page " << page << Qt::endl;
@@ -151,6 +163,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
 // 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
     const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
@@ -164,6 +177,27 @@ int main(int argc, char* argv[]) {
     const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
     QSettings uiPreferences;
+    nookbit::UiSettingsController uiSettings(uiPreferences, !verifyUi);
+    // 네이티브 트레이 메뉴도 앱의 밝기 선택을 따르도록 기본 팔레트를 갱신하는 함수.
+    const auto lightWidgetPalette = application.palette();
+    const auto applyWidgetTheme = [&application, &uiSettings, lightWidgetPalette] {
+        QPalette palette = lightWidgetPalette;
+        if (uiSettings.darkMode()) {
+            palette.setColor(QPalette::Window, QColor("#161a22"));
+            palette.setColor(QPalette::Base, QColor("#202633"));
+            palette.setColor(QPalette::AlternateBase, QColor("#242d3b"));
+            palette.setColor(QPalette::Button, QColor("#2b3546"));
+            for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
+                palette.setColor(role, QColor("#edf2f8"));
+                palette.setColor(QPalette::Disabled, role, QColor("#aab6c7"));
+            }
+            palette.setColor(QPalette::Highlight, QColor("#405e80"));
+            palette.setColor(QPalette::HighlightedText, Qt::white);
+        }
+        application.setPalette(palette);
+    };
+    QObject::connect(&uiSettings, &nookbit::UiSettingsController::darkModeChanged, &application, applyWidgetTheme);
+    applyWidgetTheme();
     const auto rememberedDestination = verifyUi
         ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
     const auto developmentDestination = QString::fromUtf8(NOOKBIT_DEV_DESTINATION_ROOT);
@@ -460,6 +494,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
+    engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,
@@ -567,6 +602,10 @@ int main(int argc, char* argv[]) {
                     QCoreApplication::processEvents();
                     checkLayout(extension->x() == window->x() + window->width() + 10, "cross-monitor follow");
                 }
+                QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 7));
+                QCoreApplication::processEvents();
+                auto* filePage = window->findChild<QQuickItem*>(QStringLiteral("fileSortPage"));
+                checkLayout(filePage && filePage->isVisible() && filePage->window() == extension, "file sorting is a separate page");
                 auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
                 checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");
                 window->setX(previousX);

@@ -9,6 +9,7 @@ Window {
     required property var descriptor
     required property string message
     property real userScale: 0.5
+    property bool dark: true
     property var bubbleSettings: ({})
     // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
     readonly property point bubbleOffset: bubbleSettings.attachment
@@ -42,6 +43,7 @@ Window {
         bubbleTestDeadline.restart()
     }
     CharacterBubble {
+        dark: pet.dark
         configuration: pet.bubbleSettings
         transientParent: pet
         visible: pet.visible && message.length > 0

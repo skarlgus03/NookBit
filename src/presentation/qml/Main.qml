@@ -21,6 +21,7 @@ ApplicationWindow {
         placement: characterWindow
         descriptor: characterController.animation
         bubbleSettings: characterController.bubble
+        dark: root.editorDark
         message: characterController.message
         userScale: characterSettings.userScale
         actionAvailable: watchController.proposalVisible && !backgroundTasks.busy
@@ -109,7 +110,23 @@ ApplicationWindow {
     property var collapsedRulePaths: ({})
     property bool ruleFormDirty: false
     property bool globalFormDirty: false
-    readonly property bool editorDark: currentPage === 1 && ruleEditorPage.darkMode
+    readonly property bool editorDark: uiSettings.darkMode
+    readonly property color primaryText: editorDark ? "#edf2f8" : "#273344"
+    readonly property color mutedText: editorDark ? "#aab6c7" : "#687586"
+    readonly property color surfaceColor: editorDark ? "#202633" : "#ffffff"
+    readonly property color borderColor: editorDark ? "#3d4757" : "#e1e6ed"
+    palette.window: editorDark ? "#161a22" : "#f5f7fa"
+    palette.windowText: primaryText
+    palette.text: primaryText
+    palette.buttonText: primaryText
+    palette.button: editorDark ? "#2b3546" : "#edf1f6"
+    palette.base: surfaceColor
+    palette.alternateBase: editorDark ? "#242d3b" : "#f5f7fa"
+    palette.mid: borderColor
+    palette.highlight: "#405e80"
+    palette.highlightedText: "#ffffff"
+    palette.disabled.text: mutedText
+    palette.disabled.buttonText: mutedText
 
     // 저장된 감시 설정으로 입력창을 채운 뒤 별도 창을 여는 함수.
     function openWatchSettings() {
@@ -223,10 +240,10 @@ ApplicationWindow {
         ruleFormDirty = false
     }
     width: homeWidth
-    height: Math.min(780, Screen.desktopAvailableHeight - 60)
+    height: Math.min(540, Screen.desktopAvailableHeight - 60)
     minimumWidth: homeWidth
     maximumWidth: homeWidth
-    minimumHeight: 560
+    minimumHeight: 420
     visible: true
     title: qsTr("NookBit")
     color: "transparent"
@@ -244,11 +261,7 @@ ApplicationWindow {
         onMoveRequested: root.startSystemMove()
         onMinimizeRequested: root.showMinimized()
         onCloseRequested: root.close()
-        onWatchRequested: root.openWatchSettings()
         onHistoryRequested: root.openHistory()
-        onCharacterRequested: root.openCharacterSettings()
-        onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
-        onProposalRequested: watchProposalDialog.open()
     }
     MouseArea {
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -258,15 +271,16 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.BottomEdge)
     }
 
-    Window {
+    ApplicationWindow {
         id: extensionWindow
         objectName: "extensionWindow"
         transientParent: root
         flags: Qt.Tool | Qt.FramelessWindowHint
         color: "transparent"
+        palette: root.palette
         title: qsTr("NookBit 확장 페이지")
         width: 860
-        height: root.height
+        height: Math.max(680, root.height)
         // 개별 모니터 경계로 제한하지 않고 가상 데스크톱에서 본체 오른쪽을 따라간다.
         readonly property real dockX: root.x + root.width + 10
         x: dockX
@@ -297,10 +311,11 @@ ApplicationWindow {
             anchors.margins: 12; height: 36
             Label {
                 Layout.fillWidth: true
-                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시"), qsTr("작업 기록"), qsTr("캐릭터"), qsTr("이름 충돌")][root.currentPage] || qsTr("개발 도구")
+                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("캐릭터 설정"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정")][root.currentPage] || qsTr("개발 도구")
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: 17; font.bold: true
             }
+            NavigationButton { text: qsTr("설정 ‹"); visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
         }
     }
@@ -336,6 +351,38 @@ ApplicationWindow {
         Item { Layout.fillHeight: true }
     }
 
+    FileSortPage {
+        parent: extensionHost
+        anchors.fill: parent
+        visible: root.currentPage === 7
+        dark: root.editorDark
+        // 파일 정리에서 요청한 규칙·결과 페이지를 연결 창에 표시하는 함수.
+        onPageRequested: function(page) { root.currentPage = page }
+        onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
+    }
+    ColumnLayout {
+        objectName: "settingsPage"
+        parent: extensionHost
+        anchors.fill: parent
+        anchors.margins: 24
+        visible: root.currentPage === 8
+        spacing: 14
+        Label { text: qsTr("화면"); color: root.primaryText; font.bold: true }
+        Switch {
+            objectName: "globalDarkModeSwitch"
+            text: qsTr("앱 전체 다크모드")
+            checked: uiSettings.darkMode
+            onToggled: uiSettings.darkMode = checked
+        }
+        Label { text: qsTr("기능 설정"); color: root.primaryText; font.bold: true }
+        NavigationButton { text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
+        NavigationButton { text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
+        NavigationButton { text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
+        NavigationButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() } }
+        Label { Layout.fillWidth: true; text: qsTr("테마는 자동 저장돼요. 각 기능의 설정은 해당 페이지에서 변경할 수 있어요."); wrapMode: Text.Wrap; color: root.mutedText }
+        Item { Layout.fillHeight: true }
+    }
+
     ScrollView {
         id: sortingScroll
         parent: extensionHost
@@ -365,13 +412,13 @@ ApplicationWindow {
                 text: qsTr("파일 정리")
                 font.pixelSize: 30
                 font.bold: true
-                color: "#232323"
+                color: root.primaryText
             }
 
             Label {
                 text: qsTr("정리할 파일을 먼저 대기 목록에 담아 주세요.")
                 font.pixelSize: 16
-                color: "#5a5a56"
+                color: root.mutedText
             }
 
             RowLayout {
@@ -379,7 +426,7 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("현재 적용 중인 규칙: ") + previewController.activeRuleLabel
-                    color: "#426349"
+                    color: root.editorDark ? "#b6d8c5" : "#426349"
                     elide: Text.ElideMiddle
                 }
                 Button {
@@ -392,7 +439,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: recoveryController.recoveryNotice.length > 0
                 text: recoveryController.recoveryNotice
-                color: "#9b5c23"
+                color: root.editorDark ? "#e5bf85" : "#9b5c23"
                 wrapMode: Text.WordWrap
             }
 
@@ -411,9 +458,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 120
                 radius: 18
-                color: dragging ? "#e8f4e5" : "#ffffff"
+                color: dragging ? (root.editorDark ? "#304438" : "#e8f4e5") : root.surfaceColor
                 border.width: dragging ? 2 : 1
-                border.color: dragging ? "#4d8f57" : "#d8dcd5"
+                border.color: dragging ? "#4d8f57" : root.borderColor
 
                 Column {
                     anchors.centerIn: parent
@@ -424,12 +471,12 @@ ApplicationWindow {
                         text: qsTr("파일을 여기로 끌어놓으세요")
                         font.pixelSize: 19
                         font.bold: true
-                        color: "#24382a"
+                        color: root.primaryText
                     }
                     Label {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: qsTr("원본 파일은 이동하거나 복사하지 않습니다.")
-                        color: "#657065"
+                        color: root.mutedText
                     }
                 }
 
@@ -464,12 +511,12 @@ ApplicationWindow {
                     text: qsTr("1. 대기 목록")
                     font.pixelSize: 19
                     font.bold: true
-                    color: "#232323"
+                    color: root.primaryText
                 }
                 Item { Layout.fillWidth: true }
                 Label {
                     text: qsTr("%1개 대기 중").arg(pendingFiles.count)
-                    color: "#5a5a56"
+                    color: root.mutedText
                 }
             }
 
@@ -477,14 +524,14 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 170
                 radius: 16
-                color: "#ffffff"
-                border.color: "#deded8"
+                color: root.surfaceColor
+                border.color: root.borderColor
 
                 Label {
                     anchors.centerIn: parent
                     visible: pendingFiles.count === 0
                     text: qsTr("아직 대기 중인 파일이 없어요.")
-                    color: "#7b817a"
+                    color: root.mutedText
                 }
 
                 ListView {
@@ -504,7 +551,7 @@ ApplicationWindow {
                         width: pendingList.width
                         height: 70
                         radius: 10
-                        color: !available ? "#fff0ec" : index % 2 === 0 ? "#f7f9f6" : "#ffffff"
+                        color: !available ? (root.editorDark ? "#4a3033" : "#fff0ec") : index % 2 === 0 ? (root.editorDark ? "#242d3b" : "#f7f9f6") : root.surfaceColor
 
                         RowLayout {
                             anchors.fill: parent
@@ -523,7 +570,7 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: fullPath
-                                    color: "#67716a"
+                                    color: root.mutedText
                                     elide: Text.ElideMiddle
                                     Layout.fillWidth: true
                                 }
@@ -543,21 +590,21 @@ ApplicationWindow {
                 visible: pendingFiles.unavailableCount > 0
                 text: qsTr("찾을 수 없는 파일 %1개가 있어요. 해당 항목을 목록에서 빼거나 파일을 원래 위치에 돌려놓아 주세요.")
                       .arg(pendingFiles.unavailableCount)
-                color: "#b44732"
+                color: root.editorDark ? "#ef9c90" : "#b44732"
                 wrapMode: Text.WordWrap
             }
             Label {
                 Layout.fillWidth: true
                 visible: pendingFiles.storageNotice.length > 0
                 text: pendingFiles.storageNotice
-                color: "#b44732"
+                color: root.editorDark ? "#ef9c90" : "#b44732"
                 wrapMode: Text.WordWrap
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
-                Label { text: qsTr("같은 이름의 파일이 있으면"); color: "#232323" }
+                Label { text: qsTr("같은 이름의 파일이 있으면"); color: root.primaryText }
                 ComboBox {
                     textRole: "label"
                     valueRole: "key"
@@ -573,7 +620,7 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정을 우선해요.")
-                    color: "#67716a"
+                    color: root.mutedText
                     wrapMode: Text.WordWrap
                 }
             }
@@ -584,7 +631,7 @@ ApplicationWindow {
 
                 Label {
                     text: qsTr("정리할 위치")
-                    color: "#232323"
+                    color: root.primaryText
                 }
                 TextField {
                     id: destinationField
@@ -620,7 +667,7 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Label {
                     text: qsTr("중간에 실패하면 되돌리기를 시도하고, 불확실하면 확인을 요청해요.")
-                    color: "#67716a"
+                    color: root.mutedText
                 }
             }
 
@@ -629,7 +676,7 @@ ApplicationWindow {
                 text: previewController.message.length > 0
                       ? previewController.message
                       : qsTr("저장된 규칙으로 미리보기를 만듭니다. 편집 중인 초안은 전체 저장 후 적용돼요.")
-                color: "#426349"
+                color: root.editorDark ? "#b6d8c5" : "#426349"
                 wrapMode: Text.WordWrap
             }
 
@@ -638,21 +685,21 @@ ApplicationWindow {
                 text: qsTr("분류 미리보기")
                 font.pixelSize: 19
                 font.bold: true
-                color: "#232323"
+                color: root.primaryText
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 300
                 radius: 16
-                color: "#ffffff"
-                border.color: "#deded8"
+                color: root.surfaceColor
+                border.color: root.borderColor
 
                 Label {
                     anchors.centerIn: parent
                     visible: !previewController.hasPreview
                     text: qsTr("미리보기를 만들면 예상 목적지가 여기에 표시됩니다.")
-                    color: "#7b817a"
+                    color: root.mutedText
                 }
 
                 ColumnLayout {
@@ -673,8 +720,8 @@ ApplicationWindow {
                             width: previewList.width
                             height: previewRow.implicitHeight + 20
                             radius: 10
-                            color: modelData.statusKey === "planned" ? "#f3f9f2" : "#f7f7f4"
-                            border.color: modelData.statusKey === "planned" ? "#b9d8b9" : "#ddddda"
+                            color: modelData.statusKey === "planned" ? (root.editorDark ? "#25382e" : "#f3f9f2") : (root.editorDark ? "#242d3b" : "#f7f7f4")
+                            border.color: modelData.statusKey === "planned" ? (root.editorDark ? "#4e705a" : "#b9d8b9") : root.borderColor
                             ColumnLayout {
                                 id: previewRow
                                 anchors.left: parent.left
@@ -693,19 +740,19 @@ ApplicationWindow {
                                     Label {
                                         text: modelData.status
                                         font.bold: true
-                                        color: modelData.statusKey === "planned" ? "#327542" : "#805b2c"
+                                        color: modelData.statusKey === "planned" ? (root.editorDark ? "#92c69f" : "#327542") : (root.editorDark ? "#e5bf85" : "#805b2c")
                                     }
                                 }
                                 Label {
                                     Layout.fillWidth: true
                                     text: modelData.reason
-                                    color: "#344039"
+                                    color: root.primaryText
                                     elide: Text.ElideRight
                                 }
                                 Label {
                                     Layout.fillWidth: true
                                     text: qsTr("원본: ") + modelData.source
-                                    color: "#67716a"
+                                    color: root.mutedText
                                     elide: Text.ElideMiddle
                                 }
                                 Label {
@@ -713,7 +760,7 @@ ApplicationWindow {
                                     text: modelData.destination.length > 0
                                           ? qsTr("예상 목적지: ") + modelData.destination
                                           : qsTr("이동하지 않음 · 원본 유지")
-                                    color: "#67716a"
+                                    color: root.mutedText
                                     elide: Text.ElideMiddle
                                 }
                             }
@@ -724,13 +771,13 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         visible: previewController.outcomes.length === 0
                         text: qsTr("표시할 파일별 검사 결과가 없어요. 위의 경고를 확인해 주세요.")
-                        color: "#7b817a"
+                        color: root.mutedText
                     }
                     Label {
                         Layout.fillWidth: true
                         visible: previewController.warnings.length > 0
                         text: qsTr("추가 경고: ") + previewController.warnings.join("\n")
-                        color: "#9b5c23"
+                        color: root.editorDark ? "#e5bf85" : "#9b5c23"
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -741,7 +788,7 @@ ApplicationWindow {
                 text: pendingFiles.lastMessage.length > 0
                       ? pendingFiles.lastMessage
                       : qsTr("승인 전에는 파일을 이동하지 않습니다.")
-                color: "#426349"
+                color: root.editorDark ? "#b6d8c5" : "#426349"
                 wrapMode: Text.WordWrap
             }
         }
@@ -756,6 +803,8 @@ ApplicationWindow {
         anchors.leftMargin: 0
         anchors.topMargin: 0
         visible: root.currentPage === 1
+        darkMode: root.editorDark
+        onThemeChangeRequested: uiSettings.darkMode = !uiSettings.darkMode
         onOpenCurrentEditor: ruleDialog.open()
         onEditorDraftReplaced: {
             root.selectedRulePath = ""
@@ -915,7 +964,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 text: ruleEditor.message
-                color: ruleEditor.dirty ? "#9b5c23" : "#426349"
+                color: ruleEditor.dirty ? (root.editorDark ? "#e5bf85" : "#9b5c23") : (root.editorDark ? "#b6d8c5" : "#426349")
                 wrapMode: Text.WordWrap
             }
             Button {
@@ -1317,7 +1366,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: watchController.statusMessage
                 wrapMode: Text.WordWrap
-                color: "#426349"
+                color: root.editorDark ? "#b6d8c5" : "#426349"
             }
             RowLayout {
                 Button {
@@ -1405,7 +1454,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: historyController.historyMessage
                 wrapMode: Text.WordWrap
-                color: "#426349"
+                color: root.editorDark ? "#b6d8c5" : "#426349"
             }
             Button {
                 text: qsTr("목록 새로고침")
@@ -1429,8 +1478,8 @@ ApplicationWindow {
                         height: 100
                         radius: 9
                         color: modelData.planId === historyController.selectedHistoryPlanId
-                               ? "#e8f4e5" : "#f7f9f6"
-                        border.color: "#d8dcd5"
+                               ? (root.editorDark ? "#304438" : "#e8f4e5") : (root.editorDark ? "#242d3b" : "#f7f9f6")
+                        border.color: root.borderColor
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -1445,7 +1494,7 @@ ApplicationWindow {
                             Label {
                                 text: qsTr("대상 %1개 · 현재 이동됨 %2개")
                                       .arg(modelData.fileCount).arg(modelData.appliedCount)
-                                color: "#67716a"
+                                color: root.mutedText
                             }
                             Button {
                                 text: qsTr("파일 보기")
@@ -1560,7 +1609,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: recoveryController.recoveryMessage
                 wrapMode: Text.WordWrap
-                color: "#9b5c23"
+                color: root.editorDark ? "#e5bf85" : "#9b5c23"
             }
             ScrollView {
                 id: recoveryScroll
@@ -1612,7 +1661,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     text: modelData.detail
                                     wrapMode: Text.WordWrap
-                                    color: "#9b5c23"
+                                    color: root.editorDark ? "#e5bf85" : "#9b5c23"
                                 }
                                 CheckBox {
                                     id: recoveryPathsToggle

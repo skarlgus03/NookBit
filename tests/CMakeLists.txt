@@ -133,6 +133,16 @@ if(TARGET nookbit_json_config)
   endif()
   add_executable(nookbit_app_lifecycle_tests app_lifecycle_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/app_lifecycle_controller.hpp)
+  add_executable(nookbit_ui_settings_tests ui_settings_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/ui_settings_controller.hpp)
+  set_target_properties(nookbit_ui_settings_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_ui_settings_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_ui_settings_tests PRIVATE Qt6::Core)
+  add_test(NAME nookbit_ui_settings_tests COMMAND nookbit_ui_settings_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_ui_settings_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   set_target_properties(nookbit_app_lifecycle_tests PROPERTIES AUTOMOC ON)
   target_include_directories(nookbit_app_lifecycle_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_link_libraries(nookbit_app_lifecycle_tests PRIVATE Qt6::Core)

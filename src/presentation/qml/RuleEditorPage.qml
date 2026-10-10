@@ -7,6 +7,7 @@ import QtQuick.Templates as T
 Item {
     id: page
     signal openCurrentEditor()
+    signal themeChangeRequested()
     signal editorDraftReplaced()
 
     property bool oldEditorFormDirty: false
@@ -939,7 +940,7 @@ Item {
             Item { Layout.fillWidth: true }
             ThemeButton {
                 text: page.darkMode ? qsTr("밝은 화면") : qsTr("어두운 화면")
-                onClicked: page.darkMode = !page.darkMode
+                onClicked: page.themeChangeRequested()
             }
             ThemeButton {
                 text: qsTr("규칙 테스트")

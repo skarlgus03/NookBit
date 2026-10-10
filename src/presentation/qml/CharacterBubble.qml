@@ -9,6 +9,9 @@ Window {
     required property rect screenArea
     required property string message
     property var configuration: ({})
+    property bool dark: true
+    readonly property color surfaceColor: dark ? "#263246" : "#f6f8fb"
+    readonly property color edgeColor: dark ? "#718298" : "#a5b3c4"
     property bool actionAvailable: false
     property string actionText: qsTr("확인")
     signal actionRequested()
@@ -61,12 +64,14 @@ Window {
             const center = Math.max(12, Math.min(width - 12, px))
             ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(center - 8, base)
             ctx.lineTo(center + 8, base); ctx.closePath()
-            ctx.fillStyle = "#263246"; ctx.strokeStyle = "#718298"; ctx.fill(); ctx.stroke()
+            ctx.fillStyle = bubble.surfaceColor; ctx.strokeStyle = bubble.edgeColor; ctx.fill(); ctx.stroke()
         }
         Connections {
             target: bubble
             // 피벗이나 방향이 바뀌면 기본 꼬리를 다시 그리는 함수.
             function onEffectivePivotChanged() { tail.requestPaint() }
+            // 앱 테마 변경을 기본 말풍선 꼬리에도 적용하는 함수.
+            function onDarkChanged() { tail.requestPaint() }
         }
     }
     Rectangle {
@@ -75,8 +80,8 @@ Window {
         y: bubble.belowAnchor ? 10 : 0
         height: bubble.height - 10
         radius: 14
-        color: "#263246"
-        border.color: "#718298"
+        color: bubble.surfaceColor
+        border.color: bubble.edgeColor
     }
     Image {
         id: customImage
@@ -104,7 +109,7 @@ Window {
             maximumLineCount: 5
             elide: Text.ElideRight
             font.pixelSize: 13
-            color: "#edf2f8"
+            color: bubble.customSkin || bubble.dark ? "#edf2f8" : "#273344"
         }
     }
     Rectangle {
