@@ -24,6 +24,10 @@ QtObject {
     readonly property int mainNavigationHeight: 56
     readonly property int navigationIconSize: 24
     readonly property int textNavigation: 18
+    readonly property int mainMenuIconSize: 32
+    readonly property int textGroupTitle: 16
+    readonly property int navigationTextWeight: Font.DemiBold
+    readonly property int groupTitleWeight: Font.DemiBold
     readonly property int selectionFadeDuration: 140
     readonly property int confirmationContentWidth: 640
     readonly property int confirmationContentHeight: 480

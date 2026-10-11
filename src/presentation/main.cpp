@@ -343,6 +343,32 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
         && destination->property("text").toString() == text;
 }
 
+// 아이콘과 글씨 길이에 관계없이 메뉴 글씨 중심이 버튼 전체 중심과 일치하는지 검사하는 함수.
+static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
+    auto* home = root->findChild<QQuickItem*>(QStringLiteral("compactHome"));
+    if (!home) return false;
+    // Repeater의 대리 항목을 포함한 실제 화면 트리에서 이름으로 찾는 함수.
+    const auto find = [](auto&& self, QQuickItem* item, const QString& name) -> QQuickItem* {
+        if (item->objectName() == name) return item;
+        for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    for (const int page : {7, 1, 4, 8}) {
+        auto* button = find(find, home, QStringLiteral("homeNavigation%1").arg(page));
+        auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
+        auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;
+        if (!button || !label || !icon) return false;
+        const auto center = label->mapToItem(button, QPointF(label->width() / 2, label->height() / 2));
+        const auto iconOrigin = icon->mapToItem(button, QPointF());
+        if (std::abs(center.x() - button->width() / 2) > 1
+            || std::abs(center.y() - button->height() / 2) > 1
+            || std::abs(iconOrigin.x() - metrics->property("controlPadding").toInt()) > 1
+            || icon->width() != metrics->property("mainMenuIconSize").toInt()
+            || button->height() != metrics->property("mainNavigationHeight").toInt()) return false;
+    }
+    return true;
+}
+
 // 무파일 작업으로 검사·되돌리기 표시가 서브창에 속하고 제목 이동은 잠기지 않는지 검사하는 함수.
 static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
     auto* popup = root->findChild<QObject*>(QStringLiteral("operationProgressPopup"));
@@ -962,6 +988,7 @@ int main(int argc, char* argv[]) {
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
                 checkLayout(verifyExtensionInteraction(window, extension, uiMetrics), "page content and real close clicks");
+                checkLayout(verifyHomeMenuAlignment(window, uiMetrics), "centered home menu text and left icons");
                 checkLayout(verifyBusyPresentation(window, extension, backgroundTasks), "subwindow busy overlay and unlocked window movement");
             }
         }

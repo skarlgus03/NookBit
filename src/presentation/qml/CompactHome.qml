@@ -62,33 +62,14 @@ Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
                         spacing: UiMetrics.spaceControl
-                        Label { visible: modelData.section.length > 0; text: modelData.section; color: home.dark ? "#aab6c7" : "#748091"; font.pixelSize: UiMetrics.textCaption }
-                        AppButton {
-                            id: navigation
+                        Label { visible: modelData.section.length > 0; text: modelData.section; color: home.dark ? "#aab6c7" : "#748091"; font.pixelSize: UiMetrics.textGroupTitle; font.weight: UiMetrics.groupTitleWeight }
+                        HomeMenuButton {
                             objectName: "homeNavigation" + modelData.page
-                            readonly property bool selected: home.selectedPage === modelData.page
+                            selected: home.selectedPage === modelData.page
+                            dark: home.dark
+                            iconKind: modelData.icon
                             Layout.fillWidth: true
-                            implicitHeight: UiMetrics.mainNavigationHeight
                             text: modelData.label
-                            Accessible.name: text
-                            Accessible.description: selected ? qsTr("현재 페이지") : ""
-                            contentItem: RowLayout {
-                                spacing: UiMetrics.spaceGroup
-                                NavigationIcon {
-                                    kind: modelData.icon
-                                    Layout.preferredWidth: UiMetrics.navigationIconSize
-                                    Layout.preferredHeight: UiMetrics.navigationIconSize
-                                    strokeColor: home.foreground
-                                }
-                                Label { Layout.fillWidth: true; text: navigation.text; color: home.foreground; font.pixelSize: UiMetrics.textNavigation; font.weight: navigation.selected ? Font.DemiBold : Font.Normal }
-                            }
-                            background: Rectangle {
-                                radius: UiMetrics.radiusControl
-                                color: navigation.selected ? (home.dark ? "#2d3d55" : "#e6eef7") : "transparent"
-                                border.width: UiMetrics.borderNormal
-                                border.color: navigation.hovered || navigation.visualFocus ? "#7898bb" : home.dark ? "#3d4757" : "#d7dfe9"
-                                Behavior on color { ColorAnimation { duration: UiMetrics.selectionFadeDuration } }
-                            }
                             // 작업 기록은 조회 후 열고 나머지는 해당 페이지로 이동하는 함수.
                             onClicked: modelData.page === 4 ? home.historyRequested() : home.pageRequested(modelData.page)
                         }
