@@ -55,7 +55,7 @@ QtObject {
     readonly property var extensionDefaults: [
         null,
         {width: 1100, height: 760, minWidth: 860, minHeight: 680},
-        {width: 860, height: 680, minWidth: 720, minHeight: 540},
+        null, // 예전 독립 미리보기 페이지 번호는 재사용하지 않는다.
         {width: 720, height: 640, minWidth: 640, minHeight: 500},
         {width: 960, height: 700, minWidth: 860, minHeight: 540},
         {width: 720, height: 640, minWidth: 640, minHeight: 500},

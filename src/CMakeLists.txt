@@ -158,6 +158,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/AppSpinBox.qml
         presentation/qml/CompactHome.qml
         presentation/qml/FileSortPage.qml
+        presentation/qml/FileSortPreview.qml
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
         presentation/qml/CharacterWindow.qml

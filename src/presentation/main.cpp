@@ -138,7 +138,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 2, 3, 4, 5, 6, 7, 8, 9}) {
+    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         if (page == 1) {
@@ -240,6 +240,45 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
     return true;
 }
 
+// 파일 정리의 임시 미리보기가 창·입력 상태를 보존하며 돌아가기와 Esc로 닫히는지 검사하는 함수.
+static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
+    auto* button = page->findChild<QObject*>(QStringLiteral("compactPreviewButton"));
+    auto* preview = page->findChild<QQuickItem*>(QStringLiteral("fileSortPreview"));
+    auto* back = page->findChild<QQuickItem*>(QStringLiteral("filePreviewBackButton"));
+    auto* destination = page->findChild<QObject*>(QStringLiteral("compactDestinationField"));
+    if (!button || !preview || !back || !destination) return false;
+    const auto size = window->size();
+    const auto position = window->position();
+    const auto windows = QGuiApplication::allWindows().size();
+    const auto text = destination->property("text").toString();
+    QMetaObject::invokeMethod(button, "clicked");
+    QEventLoop layout;
+    QTimer::singleShot(40, &layout, &QEventLoop::quit);
+    layout.exec();
+    if (!preview->isVisible() || preview->window() != window || window->size() != size
+        || window->position() != position || QGuiApplication::allWindows().size() != windows
+        || window->transientParent()->property("currentPage").toInt() != 7) return false;
+    const auto point = back->mapToScene(QPointF(back->width() / 2, back->height() / 2));
+    const QPointF global = window->mapToGlobal(point.toPoint());
+    QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &press);
+    QCoreApplication::sendEvent(window, &release);
+    if (page->property("previewOpen").toBool() || destination->property("text").toString() != text) return false;
+    QMetaObject::invokeMethod(button, "clicked");
+    window->requestActivate();
+    QTimer::singleShot(40, &layout, &QEventLoop::quit);
+    layout.exec();
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QKeyEvent escapeRelease(QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(window, &escape);
+    QCoreApplication::sendEvent(window, &escapeRelease);
+    auto* controller = preview->property("controller").value<QObject*>();
+    if (controller) QMetaObject::invokeMethod(controller, "clear");
+    return !page->property("previewOpen").toBool() && window->size() == size
+        && destination->property("text").toString() == text;
+}
+
 // 상단 안내 밖의 드롭·중복·폴더 거절·아이콘 로딩이 원본을 바꾸지 않는지 검사하는 함수.
 static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::PendingFilesModel& pending) {
     QTemporaryDir directory;
@@ -314,6 +353,10 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
     check.start(10);
     deadline.start(3000);
     images.exec();
+    if (!verifyInlineFilePreview(window, page)) {
+        QTextStream(stderr) << "Inline file preview navigation failed." << Qt::endl;
+        return false;
+    }
     pending.removeAt(0);
     return loaded && pending.count() == 0 && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
 }

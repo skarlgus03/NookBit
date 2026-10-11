@@ -104,6 +104,8 @@ ApplicationWindow {
     readonly property int homeWidth: 380
     // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
+        // 예전 독립 미리보기 번호는 파일 정리로 돌려 빈 페이지를 만들지 않는다.
+        if (currentPage === 2) { currentPage = 7; return }
         if (currentPage !== 3) watchDialog.close()
         if (currentPage !== 4) historyDialog.close()
         if (currentPage !== 5) characterSettingsDialog.close()
@@ -417,7 +419,7 @@ ApplicationWindow {
         anchors.fill: parent
         visible: root.currentPage === 7
         dark: root.editorDark
-        // 파일 정리에서 요청한 규칙·결과 페이지를 연결 창에 표시하는 함수.
+        // 파일 정리에서 요청한 규칙 편집 페이지를 연결 창에 표시하는 함수.
         onPageRequested: function(page) { root.currentPage = page }
         onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
     }
@@ -452,7 +454,7 @@ ApplicationWindow {
         anchors.rightMargin: 28
         anchors.topMargin: 10
         anchors.bottomMargin: 28
-        visible: root.currentPage === 2 || root.currentPage === 9
+        visible: root.currentPage === 9
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff

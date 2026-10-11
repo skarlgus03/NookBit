@@ -46,7 +46,6 @@ private:
     static QString pageKey(int page) {
         switch (page) {
         case 1: return QStringLiteral("windows/ruleEditor/size");
-        case 2: return QStringLiteral("windows/preview/size");
         case 3: return QStringLiteral("windows/watchSettings/size");
         case 4: return QStringLiteral("windows/history/size");
         case 5: return QStringLiteral("windows/characterSettings/size");

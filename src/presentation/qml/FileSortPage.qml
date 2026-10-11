@@ -8,6 +8,9 @@ Rectangle {
     id: home
     objectName: "fileSortPage"
     property bool dark: false
+    property bool previewOpen: false
+    // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
+    onVisibleChanged: if (!visible) previewOpen = false
     signal pageRequested(int page)
     signal recoveryRequested()
     readonly property color foreground: dark ? "#edf2f8" : "#273344"
@@ -40,6 +43,8 @@ Rectangle {
     }
     ScrollView {
         id: homeScroll
+        objectName: "fileSortScroll"
+        enabled: !home.previewOpen
         anchors.fill: parent
         anchors.margins: UiMetrics.pageInset
         contentWidth: availableWidth
@@ -136,7 +141,8 @@ Rectangle {
                     text: qsTr("결과 미리보기")
                     contentItem: Text { text: parent.text; color: home.foreground; font.pixelSize: UiMetrics.textEmphasis; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0
-                    onClicked: { previewController.createPreview(destination.text); home.pageRequested(2) }
+                    // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
+                    onClicked: { previewController.createPreview(destination.text); home.previewOpen = true }
                 }
                 FlatButton {
                     objectName: "compactSortButton"
@@ -170,7 +176,7 @@ Rectangle {
         objectName: "fileSortPageDropArea"
         anchors.fill: parent
         z: 10
-        enabled: home.visible && home.enabled
+        enabled: home.visible && home.enabled && !home.previewOpen
         // 외부 파일 드래그만 받아 목록 등록에 복사 응답을 사용하는 함수.
         onEntered: function(drag) {
             if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
@@ -209,5 +215,21 @@ Rectangle {
                 }
             }
         }
+    }
+    FileSortPreview {
+        anchors.fill: parent
+        z: 20
+        visible: home.previewOpen
+        controller: previewController
+        dark: home.dark
+        onBackRequested: home.previewOpen = false
+        // 확인한 미리보기를 기존 준비·승인 절차로 전달하는 함수.
+        onSortRequested: previewController.prepareSort()
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: home.visible && home.previewOpen && !backgroundTasks.busy && !previewController.awaitingConfirmation
+        // Esc는 확장 창을 접지 않고 임시 미리보기만 닫는 함수.
+        onActivated: home.previewOpen = false
     }
 }
