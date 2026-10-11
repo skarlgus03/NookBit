@@ -41,7 +41,7 @@ ApplicationWindow {
     }
     Popup {
         parent: Overlay.overlay
-        visible: backgroundTasks.busy && !(root.currentPage === 7 && fileSortPane.workflowStep === 2)
+        visible: backgroundTasks.busy && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
         modal: true
         dim: false
         focus: true
@@ -101,6 +101,9 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
+    readonly property bool inlineSortConfirmation: currentPage === 7 && fileSortPane.manualSortRequested
+    // 확인을 인라인 화면으로 넘길 때 기존 대화상자를 닫되 승인 대기는 취소하지 않는 함수.
+    onInlineSortConfirmationChanged: if (inlineSortConfirmation && sortConfirmation.visible) sortConfirmation.close()
     readonly property int homeWidth: 380
     // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
@@ -256,6 +259,8 @@ ApplicationWindow {
 
     CompactHome {
         id: compactHome
+        enabled: !previewController.awaitingConfirmation
+        currentPage: root.currentPage
         width: root.homeWidth
         anchors.left: parent.left
         anchors.top: parent.top
@@ -328,7 +333,7 @@ ApplicationWindow {
         x: dockX
         y: root.y
         visible: root.currentPage !== 0 && root.visible && root.visibility !== Window.Minimized
-        contentItem.enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
+        contentItem.enabled: !backgroundTasks.busy && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
         onClosing: function(event) { event.accepted = false; root.currentPage = 0 }
     }
@@ -394,7 +399,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Shift+D"
         context: Qt.ApplicationShortcut
-        enabled: !backgroundTasks.busy
+        enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
         onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
     }
@@ -884,7 +889,7 @@ ApplicationWindow {
         target: previewController
         // 목록·규칙·설정 변경으로 확인이 무효화되면 창도 닫는 함수.
         function onPreviewChanged() {
-            if (previewController.awaitingConfirmation && !sortConfirmation.visible)
+            if (previewController.awaitingConfirmation && !root.inlineSortConfirmation && !sortConfirmation.visible)
                 sortConfirmation.open()
             else if (!previewController.awaitingConfirmation && sortConfirmation.visible)
                 sortConfirmation.close()
@@ -959,12 +964,13 @@ ApplicationWindow {
 
     Dialog {
         id: sortConfirmation
+        objectName: "legacySortConfirmation"
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 760)
         height: Math.min(root.height - 32, 520)
         modal: true
         title: qsTr("파일 이동 최종 확인")
-        onClosed: previewController.cancelSort()
+        onClosed: if (!root.inlineSortConfirmation) previewController.cancelSort()
 
         ColumnLayout {
             anchors.fill: parent

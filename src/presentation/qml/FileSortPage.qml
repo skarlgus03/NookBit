@@ -12,6 +12,7 @@ Rectangle {
     property int departingStep: 0
     property real transitionProgress: 1
     property bool manualSortRequested: false
+    property int confirmationReturnStep: 0
     property bool manualSession: false
     property bool sortSuccess: false
     property string resultMessage: ""
@@ -47,9 +48,17 @@ Rectangle {
     function paneVisible(step) { return workflowStep === step || (transitioning && departingStep === step) }
     // 화면에서 요청한 정리만 표시 대상으로 기억하고 기존 확인 준비를 호출하는 함수.
     function requestSort() {
-        manualSortRequested = false
+        confirmationReturnStep = workflowStep
+        manualSortRequested = true
         previewController.prepareSort()
         manualSortRequested = backgroundTasks.busy || previewController.awaitingConfirmation
+        if (previewController.awaitingConfirmation) showStep(2)
+    }
+    // 최종 확인을 취소하고 준비 전 입력 또는 미리보기로 돌아가는 함수.
+    function cancelConfirmation() {
+        manualSortRequested = false
+        previewController.cancelSort()
+        showStep(confirmationReturnStep)
     }
     Connections {
         target: previewController
@@ -58,7 +67,7 @@ Rectangle {
             if (!home.manualSortRequested || !home.visible) return
             home.manualSession = true
             home.manualSortRequested = false
-            home.showStep(2)
+            home.showStep(3)
         }
         // 결과 반영이 끝난 알림에서 성공·실패를 구분해 완료 화면으로 연결하는 함수.
         function onSortExecutionFinished(success, message) {
@@ -66,19 +75,26 @@ Rectangle {
             home.manualSession = false
             home.sortSuccess = success
             home.resultMessage = message
-            home.showStep(3)
+            home.showStep(4)
         }
         // 최종 확인을 취소한 요청은 나중의 다른 작업에 연결되지 않도록 해제하는 함수.
         function onPreviewChanged() {
             // 작업 시작 알림과 결과 반영이 끝난 뒤 취소·준비 실패 여부를 확인하는 함수.
             Qt.callLater(function() {
-                if (!backgroundTasks.busy && !previewController.awaitingConfirmation && home.workflowStep < 2)
+                if (previewController.awaitingConfirmation && home.manualSortRequested && home.visible)
+                    home.showStep(2)
+                else if (!backgroundTasks.busy && !previewController.awaitingConfirmation && home.workflowStep < 3) {
+                    if (home.workflowStep === 2) home.showStep(home.confirmationReturnStep)
                     home.manualSortRequested = false
+                }
             })
         }
     }
     // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
-    onVisibleChanged: if (!visible && workflowStep < 2) { manualSortRequested = false; showStep(0) }
+    onVisibleChanged: {
+        if (!visible && workflowStep === 2) cancelConfirmation()
+        if (!visible && workflowStep < 3) { manualSortRequested = false; showStep(0) }
+    }
     signal pageRequested(int page)
     signal recoveryRequested()
     readonly property color foreground: dark ? "#edf2f8" : "#273344"
@@ -293,17 +309,29 @@ Rectangle {
         // 확인한 미리보기를 기존 준비·승인 절차로 전달하는 함수.
         onSortRequested: home.requestSort()
     }
+    FileSortConfirmation {
+        x: home.paneX(2)
+        width: home.width
+        height: home.height
+        visible: home.paneVisible(2)
+        enabled: home.workflowStep === 2 && !home.transitioning
+        controller: previewController
+        dark: home.dark
+        onCancelRequested: home.cancelConfirmation()
+        // 확인 버튼만 기존 승인·실행 계약을 호출하는 함수.
+        onConfirmRequested: previewController.confirmSort()
+    }
     Repeater {
-        model: [2, 3]
+        model: [3, 4]
         delegate: FileSortStatus {
             required property int modelData
-            objectName: modelData === 2 ? "fileSortProgress" : "fileSortComplete"
+            objectName: modelData === 3 ? "fileSortProgress" : "fileSortComplete"
             x: home.paneX(modelData)
             width: home.width
             height: home.height
             visible: home.paneVisible(modelData)
             enabled: home.workflowStep === modelData && !home.transitioning
-            completed: modelData === 3
+            completed: modelData === 4
             success: home.sortSuccess
             resultMessage: home.resultMessage
             controller: previewController
@@ -314,8 +342,8 @@ Rectangle {
     }
     Shortcut {
         sequence: "Escape"
-        enabled: home.visible && (home.workflowStep === 1 || home.workflowStep === 3) && !backgroundTasks.busy && !previewController.awaitingConfirmation
+        enabled: home.visible && [1, 2, 4].includes(home.workflowStep) && !backgroundTasks.busy
         // Esc는 확장 창을 접지 않고 임시 미리보기만 닫는 함수.
-        onActivated: home.showStep(0)
+        onActivated: home.workflowStep === 2 ? home.cancelConfirmation() : home.showStep(0)
     }
 }

@@ -13,25 +13,32 @@ Rectangle {
     property bool dark: false
     signal backRequested()
     color: dark ? "#161a22" : "#ffffff"
-    ColumnLayout {
-        anchors.fill: parent
+    BackButton {
+        objectName: status.completed ? "fileCompleteBackButton" : "fileProgressBackButton"
+        visible: status.completed
+        anchors.left: parent.left; anchors.top: parent.top
         anchors.margins: UiMetrics.pageInset
+        onClicked: status.backRequested()
+    }
+    ColumnLayout {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top; anchors.bottom: parent.bottom
+        anchors.margins: UiMetrics.pageInset
+        width: Math.min(parent.width - UiMetrics.pageInset * 2, UiMetrics.confirmationContentWidth)
         spacing: UiMetrics.spaceGroup
-        BackButton {
-            objectName: status.completed ? "fileCompleteBackButton" : "fileProgressBackButton"
-            visible: status.completed
-            onClicked: status.backRequested()
-        }
+        Item { Layout.fillHeight: true }
+        NavigationIcon { visible: !status.completed; Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: UiMetrics.filePreviewSize; Layout.preferredHeight: UiMetrics.filePreviewSize; kind: "folder"; strokeColor: status.dark ? "#edf2f8" : "#405e80" }
         Label {
             Layout.fillWidth: true
             text: status.completed ? (status.success ? qsTr("정리를 마쳤어요") : qsTr("정리를 완료하지 못했어요")) : qsTr("파일을 정리하고 있어요")
             font.pixelSize: UiMetrics.textSectionTitle
             font.bold: true
+            horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
         }
-        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.stageLabel; wrapMode: Text.Wrap }
-        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.currentFileName; elide: Text.ElideMiddle }
-        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.filePosition; wrapMode: Text.Wrap }
+        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.stageLabel; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
+        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.currentFileName; font.pixelSize: UiMetrics.textEmphasis; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideMiddle }
+        Label { Layout.fillWidth: true; visible: !status.completed; text: status.progress.filePosition; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap }
         ProgressBar {
             Layout.fillWidth: true
             visible: !status.completed

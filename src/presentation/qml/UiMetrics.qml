@@ -21,6 +21,12 @@ QtObject {
     readonly property int textDropHint: 20
     readonly property real dropOverlayOpacity: 0.28
     readonly property int navigationHeight: 48
+    readonly property int mainNavigationHeight: 56
+    readonly property int navigationIconSize: 24
+    readonly property int textNavigation: 18
+    readonly property int selectionFadeDuration: 140
+    readonly property int confirmationContentWidth: 640
+    readonly property int confirmationContentHeight: 480
     readonly property int windowButtonSize: 32
     readonly property int iconButtonSize: 32
     readonly property int buttonMinWidth: 80

@@ -142,6 +142,9 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
     for (const int page : {1, 3, 4, 5, 6, 7, 8, 9}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
+        auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
+        const int expectedMenu = (page == 3 || page == 5 || page == 6 || page == 8 || page == 9) ? 8 : page;
+        if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
             auto* ruleTestButton = rules->findChild<QQuickItem*>(QStringLiteral("ruleTestButton"));
             auto* testPanel = rules->findChild<QObject*>(QStringLiteral("ruleTestPanel"));
@@ -286,7 +289,7 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     if (page->property("workflowStep").toInt() != 0) return false;
     page->setProperty("manualSortRequested", true);
     QMetaObject::invokeMethod(controller, "sortExecutionStarted");
-    if (page->property("workflowStep").toInt() != 2) return false;
+    if (page->property("workflowStep").toInt() != 3) return false;
     QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
     QQuickItem* progress = nullptr;
@@ -299,7 +302,7 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     QMetaObject::invokeMethod(controller, "sortExecutionFinished", Q_ARG(bool, false), Q_ARG(QString, QString("test failure")));
     QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
-    if (page->property("workflowStep").toInt() != 3 || !complete->isVisible()
+    if (page->property("workflowStep").toInt() != 4 || !complete->isVisible()
         || complete->property("success").toBool() || progress->isVisible()) return false;
     auto* doneBack = complete->findChild<QObject*>(QStringLiteral("fileCompleteBackButton"));
     if (!doneBack || doneBack->property("text").toString().length() != 0) return false;
@@ -307,6 +310,29 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
     if (controller) QMetaObject::invokeMethod(controller, "clear");
+    QTimer::singleShot(40, &layout, &QEventLoop::quit);
+    layout.exec();
+    // 확인 화면 자체는 이동 권한을 만들지 않고 취소하면 직전 미리보기로 복귀하는지 검사한다.
+    page->setProperty("confirmationReturnStep", 1);
+    page->setProperty("manualSortRequested", true);
+    QMetaObject::invokeMethod(page, "showStep", Q_ARG(QVariant, QVariant(2)));
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
+    auto* confirmation = page->findChild<QQuickItem*>(QStringLiteral("fileSortConfirmation"));
+    auto* confirmButton = page->findChild<QQuickItem*>(QStringLiteral("fileConfirmationExecuteButton"));
+    auto* confirmBack = page->findChild<QObject*>(QStringLiteral("fileConfirmationBackButton"));
+    auto* oldDialog = window->transientParent()->findChild<QObject*>(QStringLiteral("legacySortConfirmation"));
+    if (!confirmation || !confirmation->isVisible() || confirmation->window() != window
+        || !confirmButton || confirmButton->isEnabled() || !confirmBack || !oldDialog
+        || oldDialog->property("visible").toBool() || window->size() != size) return false;
+    QMetaObject::invokeMethod(confirmBack, "clicked");
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
+    if (page->property("workflowStep").toInt() != 1 || !preview->isVisible()) return false;
+    QCoreApplication::sendEvent(window, &escape);
+    QCoreApplication::sendEvent(window, &escapeRelease);
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
     return !page->property("previewOpen").toBool() && window->size() == size
         && input->isVisible() && !preview->isVisible() && !page->property("transitioning").toBool()
         && destination->property("text").toString() == text;
