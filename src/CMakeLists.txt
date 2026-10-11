@@ -130,6 +130,14 @@ if(NOOKBIT_BUILD_QT_APP)
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)
+    if(WIN32)
+      enable_language(RC)
+      configure_file(
+        "${PROJECT_SOURCE_DIR}/resources/icons/nookbit.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/nookbit.rc"
+        @ONLY)
+      target_sources(nookbit PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/nookbit.rc")
+    endif()
     set_property(TARGET nookbit APPEND PROPERTY LINK_DEPENDS
       "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/imagepack.json"
       "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/images/test-character.png")

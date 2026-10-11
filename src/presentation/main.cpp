@@ -45,7 +45,7 @@
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
-#include <QPainter>
+#include <QIcon>
 #include "presentation/app_lifecycle_controller.hpp"
 #include <QMetaObject>
 #include <QQmlApplicationEngine>
@@ -105,20 +105,9 @@ static bool verifyBundledHistorySchema(const QString& migrationPath) {
     return ready;
 }
 
-// 추가 이미지 팩에 의존하지 않는 작은 앱 식별 아이콘을 만드는 함수.
+// 실행 파일에 내장된 여러 해상도의 공통 앱 아이콘을 읽는 함수.
 static QIcon applicationIcon() {
-    QPixmap image(32, 32);
-    image.fill(Qt::transparent);
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(QStringLiteral("#263246")));
-    painter.drawRoundedRect(QRectF(1, 1, 30, 30), 8, 8);
-    QFont font; font.setPixelSize(22); font.setBold(true);
-    painter.setFont(font); painter.setPen(QColor(QStringLiteral("#b6d8c5")));
-    painter.drawText(image.rect(), Qt::AlignCenter, QStringLiteral("N"));
-    painter.end();
-    return QIcon(image);
+    return QIcon(QStringLiteral(":/nookbit/icons/nookbit.ico"));
 }
 
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
@@ -489,6 +478,18 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
     const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
     application.setWindowIcon(applicationIcon());
+    if (verifyUi) {
+        // 내장 아이콘의 모든 크기가 읽히고 바깥 모서리의 투명도가 유지되는지 검사한다.
+        const auto icon = application.windowIcon();
+        for (const int size : {16, 24, 32, 48, 64, 128, 256}) {
+            const auto image = icon.pixmap(QSize(size, size)).toImage();
+            if (!icon.availableSizes().contains(QSize(size, size)) || image.isNull() ||
+                !image.hasAlphaChannel() || image.pixelColor(0, 0).alpha() != 0) {
+                QTextStream(stderr) << "Bundled application icon failed at size " << size << Qt::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
     // 숨긴 메인 창과 도구 창의 개수로 프로세스 수명을 결정하지 않는다.
     application.setQuitOnLastWindowClosed(false);
     nookbit::AppLifecycleController appLifecycle;

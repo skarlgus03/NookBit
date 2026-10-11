@@ -1,0 +1,2 @@
+// Windows Explorer에서 실행 파일 자체의 아이콘을 표시하는 내장 리소스.
+IDI_NOOKBIT ICON "@PROJECT_SOURCE_DIR@/resources/icons/nookbit.ico"

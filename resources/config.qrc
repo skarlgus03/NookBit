@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/nookbit">
+    <file alias="icons/nookbit.ico">icons/nookbit.ico</file>
     <file alias="character.presentation.json">character/default.presentation.json</file>
     <file alias="sprites/test-character.png">character/sprites/test-character.png</file>
     <file alias="character-presentation.schema.json">../schemas/character-presentation.schema.json</file>
