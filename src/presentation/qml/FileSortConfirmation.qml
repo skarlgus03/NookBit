@@ -39,11 +39,12 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: UiMetrics.spaceGroup
-            AppButton { Layout.fillWidth: true; text: qsTr("취소"); onClicked: confirmation.cancelRequested() }
-            AppButton {
+            LargeActionButton { objectName: "fileConfirmationCancelButton"; Layout.fillWidth: true; Layout.preferredWidth: 1; text: qsTr("취소"); onClicked: confirmation.cancelRequested() }
+            LargeActionButton {
                 objectName: "fileConfirmationExecuteButton"
                 Layout.fillWidth: true
-                implicitHeight: UiMetrics.largeActionHeight
+                Layout.preferredWidth: 1
+                primary: true
                 text: qsTr("확인하고 이동")
                 enabled: confirmation.controller.awaitingConfirmation
                 onClicked: confirmation.confirmRequested()

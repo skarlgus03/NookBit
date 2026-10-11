@@ -8,6 +8,7 @@ Rectangle {
     id: home
     objectName: "compactHome"
     property bool dark: false
+    property bool navigationEnabled: true
     property int currentPage: 0
     readonly property int selectedPage: [3, 5, 6, 8, 9].includes(currentPage) ? 8 : currentPage
     signal pageRequested(int page)
@@ -29,6 +30,7 @@ Rectangle {
                 Layout.fillWidth: true; implicitHeight: UiMetrics.controlHeight
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "NookBit"; font.pixelSize: UiMetrics.textAppTitle; font.bold: true; color: home.foreground }
                 MouseArea {
+                    objectName: "homeWindowDragArea"
                     anchors.fill: parent; cursorShape: Qt.SizeAllCursor
                     // 제목 영역에서 본체 창 이동을 요청하는 함수.
                     onPressed: home.moveRequested()
@@ -39,6 +41,8 @@ Rectangle {
         }
         ScrollView {
             id: menuScroll
+            objectName: "homeNavigationMenu"
+            enabled: home.navigationEnabled
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -82,7 +86,7 @@ Rectangle {
                                 radius: UiMetrics.radiusControl
                                 color: navigation.selected ? (home.dark ? "#2d3d55" : "#e6eef7") : "transparent"
                                 border.width: UiMetrics.borderNormal
-                                border.color: navigation.hovered || navigation.visualFocus ? "#7898bb" : "transparent"
+                                border.color: navigation.hovered || navigation.visualFocus ? "#7898bb" : home.dark ? "#3d4757" : "#d7dfe9"
                                 Behavior on color { ColorAnimation { duration: UiMetrics.selectionFadeDuration } }
                             }
                             // 작업 기록은 조회 후 열고 나머지는 해당 페이지로 이동하는 함수.

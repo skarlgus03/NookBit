@@ -76,6 +76,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QTemporaryDir>
+#include <QSemaphore>
 #include <QJSValue>
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
@@ -320,10 +321,14 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     layout.exec();
     auto* confirmation = page->findChild<QQuickItem*>(QStringLiteral("fileSortConfirmation"));
     auto* confirmButton = page->findChild<QQuickItem*>(QStringLiteral("fileConfirmationExecuteButton"));
+    auto* cancelButton = page->findChild<QQuickItem*>(QStringLiteral("fileConfirmationCancelButton"));
+    auto* previewButton = page->findChild<QQuickItem*>(QStringLiteral("compactPreviewButton"));
     auto* confirmBack = page->findChild<QObject*>(QStringLiteral("fileConfirmationBackButton"));
     auto* oldDialog = window->transientParent()->findChild<QObject*>(QStringLiteral("legacySortConfirmation"));
     if (!confirmation || !confirmation->isVisible() || confirmation->window() != window
-        || !confirmButton || confirmButton->isEnabled() || !confirmBack || !oldDialog
+        || !confirmButton || !cancelButton || !previewButton || confirmButton->isEnabled() || !confirmBack || !oldDialog
+        || confirmButton->height() != cancelButton->height() || confirmButton->height() != previewButton->height()
+        || std::abs(confirmButton->width() - cancelButton->width()) > 1
         || oldDialog->property("visible").toBool() || window->size() != size) return false;
     QMetaObject::invokeMethod(confirmBack, "clicked");
     QTimer::singleShot(250, &layout, &QEventLoop::quit);
@@ -336,6 +341,36 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     return !page->property("previewOpen").toBool() && window->size() == size
         && input->isVisible() && !preview->isVisible() && !page->property("transitioning").toBool()
         && destination->property("text").toString() == text;
+}
+
+// 무파일 작업으로 검사·되돌리기 표시가 서브창에 속하고 제목 이동은 잠기지 않는지 검사하는 함수.
+static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
+    auto* popup = root->findChild<QObject*>(QStringLiteral("operationProgressPopup"));
+    auto* drag = root->findChild<QQuickItem*>(QStringLiteral("homeWindowDragArea"));
+    auto* menu = root->findChild<QQuickItem*>(QStringLiteral("homeNavigationMenu"));
+    if (!popup || !drag || !menu) return false;
+    for (const int page : {7, 4, 0}) {
+        root->setProperty("currentPage", page);
+        QCoreApplication::processEvents();
+        const auto gate = std::make_shared<QSemaphore>();
+        const auto finished = std::make_shared<bool>(false);
+        // 화면 상태 검사를 기다리기만 하고 파일에 접근하지 않는 함수.
+        if (!runner.submit(root, [gate] { gate->acquire(); return nookbit::Result<void>::success(); },
+                [finished](const auto&) { *finished = true; }, page == 7 ? nookbit::BackgroundTaskRunner::TaskKind::Inspection : nookbit::BackgroundTaskRunner::TaskKind::FileWork)) return false;
+        QEventLoop frame;
+        QTimer::singleShot(40, &frame, &QEventLoop::quit);
+        frame.exec();
+        auto* content = qobject_cast<QQuickItem*>(popup->property("contentItem").value<QObject*>());
+        const bool valid = drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
+            && !popup->property("modal").toBool()
+            && popup->property("visible").toBool() == (page != 0)
+            && (page == 0 || (content && content->window() == extension));
+        gate->release();
+        QTimer::singleShot(150, &frame, &QEventLoop::quit);
+        frame.exec();
+        if (!valid || !*finished || runner.busy()) return false;
+    }
+    return true;
 }
 
 // 상단 안내 밖의 드롭·중복·폴더 거절·아이콘 로딩이 원본을 바꾸지 않는지 검사하는 함수.
@@ -927,6 +962,7 @@ int main(int argc, char* argv[]) {
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
                 checkLayout(verifyExtensionInteraction(window, extension, uiMetrics), "page content and real close clicks");
+                checkLayout(verifyBusyPresentation(window, extension, backgroundTasks), "subwindow busy overlay and unlocked window movement");
             }
         }
         bool closeToTray = false;

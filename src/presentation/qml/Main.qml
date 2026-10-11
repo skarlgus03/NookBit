@@ -17,7 +17,6 @@ ApplicationWindow {
         extensionWindow.commitSize()
         appLifecycle.closeWindow()
     }
-    contentItem.enabled: !backgroundTasks.busy
     CharacterWindow {
         id: desktopPet
         placement: characterWindow
@@ -40,16 +39,17 @@ ApplicationWindow {
         }
     }
     Popup {
-        parent: Overlay.overlay
-        visible: backgroundTasks.busy && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
-        modal: true
+        objectName: "operationProgressPopup"
+        parent: extensionWindow.contentItem
+        visible: backgroundTasks.busy && extensionWindow.visible && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
+        modal: false
         dim: false
-        focus: true
+        focus: false
         closePolicy: Popup.NoAutoClose
         x: (parent.width - width) / 2
         y: parent.height - height - 24
-        width: Math.min(440, root.width - 32)
-        height: 174
+        width: Math.min(UiMetrics.operationPopupWidth, parent.width - UiMetrics.pageInset * 2)
+        height: UiMetrics.operationPopupHeight
         padding: UiMetrics.spaceCompact
         background: Rectangle {
             radius: UiMetrics.radiusCard
@@ -259,7 +259,7 @@ ApplicationWindow {
 
     CompactHome {
         id: compactHome
-        enabled: !previewController.awaitingConfirmation
+        navigationEnabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         currentPage: root.currentPage
         width: root.homeWidth
         anchors.left: parent.left
@@ -333,7 +333,6 @@ ApplicationWindow {
         x: dockX
         y: root.y
         visible: root.currentPage !== 0 && root.visible && root.visibility !== Window.Minimized
-        contentItem.enabled: !backgroundTasks.busy && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
         onClosing: function(event) { event.accepted = false; root.currentPage = 0 }
     }
@@ -383,12 +382,13 @@ ApplicationWindow {
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
-            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
         }
     }
     Item {
         id: extensionHost
+        enabled: (!backgroundTasks.busy || (root.currentPage === 7 && fileSortPane.workflowStep === 3)) && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
         parent: extensionWindow.contentItem
         anchors.fill: parent
         anchors.topMargin: 58
@@ -963,6 +963,7 @@ ApplicationWindow {
     }
 
     Dialog {
+        enabled: !backgroundTasks.busy
         id: sortConfirmation
         objectName: "legacySortConfirmation"
         anchors.centerIn: parent
@@ -1014,6 +1015,7 @@ ApplicationWindow {
     }
 
     Dialog {
+        enabled: !backgroundTasks.busy
         id: ruleDialog
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 820)
@@ -1474,6 +1476,7 @@ ApplicationWindow {
     }
 
     Dialog {
+        enabled: !backgroundTasks.busy
         id: watchProposalDialog
         anchors.centerIn: parent
         width: Math.min(root.width - 32, 700)
@@ -1649,6 +1652,7 @@ ApplicationWindow {
     }
 
     Dialog {
+        enabled: !backgroundTasks.busy
         id: undoHistoryDialog
         anchors.centerIn: parent
         width: Math.min(root.width - 80, 480)
@@ -1667,6 +1671,7 @@ ApplicationWindow {
     }
 
     Dialog {
+        enabled: !backgroundTasks.busy
         id: recoveryDialog
         objectName: "recoveryDialog"
         anchors.centerIn: parent
@@ -1803,6 +1808,7 @@ ApplicationWindow {
         }
     }
     Dialog {
+        enabled: !backgroundTasks.busy
         id: recoveryConfirmDialog
         objectName: "recoveryConfirmDialog"
         anchors.centerIn: parent

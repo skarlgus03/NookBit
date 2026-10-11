@@ -27,6 +27,8 @@ QtObject {
     readonly property int selectionFadeDuration: 140
     readonly property int confirmationContentWidth: 640
     readonly property int confirmationContentHeight: 480
+    readonly property int operationPopupWidth: 440
+    readonly property int operationPopupHeight: 200
     readonly property int windowButtonSize: 32
     readonly property int iconButtonSize: 32
     readonly property int buttonMinWidth: 80

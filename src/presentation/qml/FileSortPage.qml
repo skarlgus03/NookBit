@@ -214,26 +214,22 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: UiMetrics.spaceGroup
-                FlatButton {
+                LargeActionButton {
                     objectName: "compactPreviewButton"
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
-                    implicitHeight: UiMetrics.largeActionHeight
                     text: qsTr("결과 미리보기")
-                    contentItem: Text { text: parent.text; color: home.foreground; font.pixelSize: UiMetrics.textEmphasis; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0
                     // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
                     onClicked: { previewController.createPreview(destination.text); home.showStep(1) }
                 }
-                FlatButton {
+                LargeActionButton {
                     objectName: "compactSortButton"
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
-                    implicitHeight: UiMetrics.largeActionHeight
+                    primary: true
                     text: qsTr("정리하기")
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0 && !previewController.awaitingConfirmation
-                    contentItem: Text { text: parent.text; color: parent.enabled ? "#ffffff" : home.muted; font.pixelSize: UiMetrics.textEmphasis; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle { radius: UiMetrics.radiusCard; color: parent.enabled ? "#405e80" : home.surface; border.color: parent.hovered || parent.visualFocus ? "#88a8c9" : home.edge; border.width: parent.hovered || parent.visualFocus ? UiMetrics.borderActive : UiMetrics.borderNormal }
                     // 미리보기·준비 후 기존 최종 확인을 거쳐야만 실제 파일 이동을 시작하는 함수.
                     onClicked: {
                         previewController.createPreview(destination.text)

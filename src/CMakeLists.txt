@@ -152,6 +152,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/Main.qml
         presentation/qml/UiMetrics.qml
         presentation/qml/AppButton.qml
+        presentation/qml/LargeActionButton.qml
         presentation/qml/BackButton.qml
         presentation/qml/NavigationIcon.qml
         presentation/qml/AppComboBox.qml

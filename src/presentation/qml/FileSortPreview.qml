@@ -69,10 +69,10 @@ Rectangle {
             wrapMode: Text.Wrap
             color: preview.foreground
         }
-        AppButton {
+        LargeActionButton {
             objectName: "filePreviewSortButton"
             Layout.fillWidth: true
-            implicitHeight: UiMetrics.largeActionHeight
+            primary: true
             text: qsTr("정리하기")
             enabled: preview.controller.hasPreview && preview.controller.hasMovableSteps && !preview.controller.awaitingConfirmation
             onClicked: preview.sortRequested()
