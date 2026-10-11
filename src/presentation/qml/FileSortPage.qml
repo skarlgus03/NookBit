@@ -9,6 +9,13 @@ Rectangle {
     objectName: "fileSortPage"
     property bool dark: false
     property bool previewOpen: false
+    property real slideProgress: previewOpen ? 1 : 0
+    readonly property bool transitioning: slideAnimation.running
+    clip: true
+    Behavior on slideProgress {
+        enabled: home.visible
+        NumberAnimation { id: slideAnimation; duration: UiMetrics.pageSlideDuration; easing.type: Easing.OutCubic }
+    }
     // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
     onVisibleChanged: if (!visible) previewOpen = false
     signal pageRequested(int page)
@@ -44,9 +51,12 @@ Rectangle {
     ScrollView {
         id: homeScroll
         objectName: "fileSortScroll"
-        enabled: !home.previewOpen
-        anchors.fill: parent
-        anchors.margins: UiMetrics.pageInset
+        enabled: !home.previewOpen && !home.transitioning
+        visible: home.slideProgress < 1
+        x: UiMetrics.pageInset - home.width * home.slideProgress
+        y: UiMetrics.pageInset
+        width: home.width - UiMetrics.pageInset * 2
+        height: home.height - UiMetrics.pageInset * 2
         contentWidth: availableWidth
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -176,7 +186,7 @@ Rectangle {
         objectName: "fileSortPageDropArea"
         anchors.fill: parent
         z: 10
-        enabled: home.visible && home.enabled && !home.previewOpen
+        enabled: home.visible && home.enabled && !home.previewOpen && !home.transitioning
         // 외부 파일 드래그만 받아 목록 등록에 복사 응답을 사용하는 함수.
         onEntered: function(drag) {
             if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
@@ -217,9 +227,11 @@ Rectangle {
         }
     }
     FileSortPreview {
-        anchors.fill: parent
-        z: 20
-        visible: home.previewOpen
+        x: home.width * (1 - home.slideProgress)
+        width: home.width
+        height: home.height
+        visible: home.previewOpen || home.slideProgress > 0
+        enabled: home.previewOpen && !home.transitioning
         controller: previewController
         dark: home.dark
         onBackRequested: home.previewOpen = false

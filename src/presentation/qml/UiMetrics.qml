@@ -3,6 +3,9 @@ import QtQuick
 
 // 화면 부품의 역할별 공통 규격. 캔버스 좌표·창 배치·캐릭터 팩 데이터는 포함하지 않는다.
 QtObject {
+    readonly property string fontFamily: "Noto Sans KR"
+    readonly property string fontFallback: "Malgun Gothic"
+    readonly property int pageSlideDuration: 180
     readonly property int textBody: 14
     readonly property int textCaption: 14
     readonly property int textCompact: 11

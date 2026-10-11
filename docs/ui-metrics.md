@@ -2,6 +2,8 @@
 
 The source of truth is `src/presentation/qml/UiMetrics.qml`, a presentation-only QML singleton. Core services and use cases must not depend on it. The native application font also reads `textBody` from this singleton.
 
+`fontFamily` prefers installed Noto Sans KR; `fontFallback` is Malgun Gothic, followed by the platform's original default. No font files are bundled or downloaded. The application font is inherited by ordinary QML text and native menus/dialogs. `--verify-ui` reports the resolved family so a missing font is not mistaken for a successful substitution.
+
 ## Roles
 
 | Role | Token | Initial value |
@@ -44,7 +46,7 @@ After changing metrics, run both tests and visually check long labels, light/dar
 
 `extensionDefaults` defines initial/minimum width and height for each page. The rule editor starts wider than simple settings pages. Drag the extension window's right/bottom edge or bottom-right corner to resize; the top-left position continues to follow the main window.
 
-Result preview is not an independent page or window. `FileSortPreview` is an inline overlay owned by `FileSortPage`, using the same window size and position. The back button or Escape dismisses it without recreating the pending list, destination field, or scrolling content. Its sort button enters the existing preparation/approval flow. While open, underlying file controls and file dropping are disabled; Escape does not dismiss an active job or its confirmation dialog. Page ID 2 is retired, and old preview size preferences are ignored without deleting them.
+Result preview is not an independent page or window. `FileSortPreview` and the file input view are side-by-side panes owned by `FileSortPage`. Opening preview slides input left and preview in from the right; back/Escape reverses the movement. The viewport clips both panes and retains the same window size and position. `pageSlideDuration` sets the short transition (180 ms; set to 0 for instant changes). Input is disabled during transitions to avoid accidental double actions. The back button or Escape returns without recreating the pending list, destination field, or scrolling content. Its sort button enters the existing preparation/approval flow. While preview is open, file controls and dropping are disabled; Escape does not dismiss an active job or its confirmation dialog. Page ID 2 is retired, and old preview size preferences are ignored without deleting them. Progress/completion flow screens are separate future work, not implemented by this transition.
 
 `UiSettingsController` stores each page's last size under a stable `windows/<page-name>/size` QSettings key, separate from rule JSON. Resizing is debounced by 300 ms; page changes, closing the extension, hiding the main window, and tray exit immediately commit pending changes. Reopening a page restores its own size, independent of the main window's height. Defaults and restored sizes are bounded by the current screen's available dimensions where compatible with the page's minimum size; docking positions are not clamped to a single monitor.
 

@@ -37,6 +37,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QFontInfo>
 #include <QApplication>
 #include <QQuickStyle>
 #include <QPalette>
@@ -253,11 +254,14 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     const auto text = destination->property("text").toString();
     QMetaObject::invokeMethod(button, "clicked");
     QEventLoop layout;
-    QTimer::singleShot(40, &layout, &QEventLoop::quit);
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
+    auto* input = page->findChild<QQuickItem*>(QStringLiteral("fileSortScroll"));
     if (!preview->isVisible() || preview->window() != window || window->size() != size
         || window->position() != position || QGuiApplication::allWindows().size() != windows
-        || window->transientParent()->property("currentPage").toInt() != 7) return false;
+        || window->transientParent()->property("currentPage").toInt() != 7
+        || !input || input->isVisible() || std::abs(preview->x()) > 1
+        || page->property("transitioning").toBool()) return false;
     const auto point = back->mapToScene(QPointF(back->width() / 2, back->height() / 2));
     const QPointF global = window->mapToGlobal(point.toPoint());
     QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -267,15 +271,18 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     if (page->property("previewOpen").toBool() || destination->property("text").toString() != text) return false;
     QMetaObject::invokeMethod(button, "clicked");
     window->requestActivate();
-    QTimer::singleShot(40, &layout, &QEventLoop::quit);
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
     QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
     QKeyEvent escapeRelease(QEvent::KeyRelease, Qt::Key_Escape, Qt::NoModifier);
     QCoreApplication::sendEvent(window, &escape);
     QCoreApplication::sendEvent(window, &escapeRelease);
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
     auto* controller = preview->property("controller").value<QObject*>();
     if (controller) QMetaObject::invokeMethod(controller, "clear");
     return !page->property("previewOpen").toBool() && window->size() == size
+        && input->isVisible() && !preview->isVisible() && !page->property("transitioning").toBool()
         && destination->property("text").toString() == text;
 }
 
@@ -694,8 +701,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     QFont baseFont = application.font();
+    const auto previousFont = QFontInfo(baseFont).family();
+    baseFont.setFamilies({uiMetrics->property("fontFamily").toString(),
+        uiMetrics->property("fontFallback").toString(), baseFont.family()});
     baseFont.setPixelSize(uiMetrics->property("textBody").toInt());
     application.setFont(baseFont);
+    if (verifyUi) QTextStream(stdout) << "UI font: " << previousFont << " -> " << QFontInfo(baseFont).family() << Qt::endl;
     engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
     engine.rootContext()->setContextProperty(QStringLiteral("backgroundTasks"), &backgroundTasks);
     engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
