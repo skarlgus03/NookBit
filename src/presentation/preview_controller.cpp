@@ -333,6 +333,7 @@ void PreviewController::confirmSortInBackground() {
     const auto plan = *draft_;
     auto elapsedMs = std::make_shared<qint64>(-1);
     message_ = QStringLiteral("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
+    emit sortExecutionStarted();
     dispatchOperation(runner_, this,
         [workflow = sortWorkflow_, plan, selected, settings, elapsedMs] {
             QElapsedTimer timer; timer.start();
@@ -458,6 +459,7 @@ void PreviewController::moveApprovedFile() {
     const auto movedSteps = loaded.value().steps;
     message_ = QStringLiteral("파일을 정리하고 있어요. 작업이 끝날 때까지 앱을 닫지 마세요.");
     emit previewChanged();
+    emit sortExecutionStarted();
     dispatchOperation(runner_, this,
         [operations = &operations_, plan = loaded.value(), approval = *approval_, selectedFiles, settings] {
             return operations->executeApproved(plan, approval, selectedFiles, settings);
@@ -485,6 +487,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
         message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
                        .arg(QString::fromStdString(result.error().message));
         emit previewChanged();
+        emit sortExecutionFinished(false, message_);
         return;
     }
     for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
@@ -501,6 +504,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
                        return step.status == StepStatus::Planned;
                    }));
     emit previewChanged();
+    emit sortExecutionFinished(true, message_);
 }
 
 // 마지막으로 이동한 계획의 파일들을 안전하게 되돌리는 함수.

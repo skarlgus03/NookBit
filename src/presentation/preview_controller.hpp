@@ -136,6 +136,9 @@ public:
     Q_INVOKABLE void clear();
 
 signals:
+    /// 실제 정리 실행의 시작과 결과만 알리고 어떤 화면을 열지는 결정하지 않는다.
+    void sortExecutionStarted();
+    void sortExecutionFinished(bool success, const QString& message);
     void previewChanged();
     void activeRuleChanged();
     void collisionPolicyChanged();

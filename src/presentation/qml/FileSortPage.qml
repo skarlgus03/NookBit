@@ -8,16 +8,77 @@ Rectangle {
     id: home
     objectName: "fileSortPage"
     property bool dark: false
-    property bool previewOpen: false
-    property real slideProgress: previewOpen ? 1 : 0
+    property int workflowStep: 0
+    property int departingStep: 0
+    property real transitionProgress: 1
+    property bool manualSortRequested: false
+    property bool manualSession: false
+    property bool sortSuccess: false
+    property string resultMessage: ""
+    readonly property bool previewOpen: workflowStep === 1
     readonly property bool transitioning: slideAnimation.running
     clip: true
-    Behavior on slideProgress {
-        enabled: home.visible
-        NumberAnimation { id: slideAnimation; duration: UiMetrics.pageSlideDuration; easing.type: Easing.OutCubic }
+    NumberAnimation {
+        id: slideAnimation
+        target: home
+        property: "transitionProgress"
+        from: 0; to: 1
+        duration: UiMetrics.pageSlideDuration
+        easing.type: Easing.OutCubic
+    }
+    // 출발·도착 화면만 옆으로 움직여 중간 화면을 지나치지 않게 하는 함수.
+    function showStep(step) {
+        if (workflowStep === step) return
+        slideAnimation.stop()
+        departingStep = workflowStep
+        workflowStep = step
+        transitionProgress = 0
+        if (visible) slideAnimation.restart()
+        else transitionProgress = 1
+    }
+    // 현재 전환 방향에 맞는 화면의 가로 위치를 반환하는 함수.
+    function paneX(step) {
+        const direction = workflowStep > departingStep ? 1 : -1
+        if (step === workflowStep) return width * direction * (1 - transitionProgress)
+        if (step === departingStep) return -width * direction * transitionProgress
+        return width
+    }
+    // 현재 화면과 전환 중인 직전 화면만 표시하는 함수.
+    function paneVisible(step) { return workflowStep === step || (transitioning && departingStep === step) }
+    // 화면에서 요청한 정리만 표시 대상으로 기억하고 기존 확인 준비를 호출하는 함수.
+    function requestSort() {
+        manualSortRequested = false
+        previewController.prepareSort()
+        manualSortRequested = backgroundTasks.busy || previewController.awaitingConfirmation
+    }
+    Connections {
+        target: previewController
+        // 이 페이지에서 요청한 수동 정리만 진행 화면으로 연결하는 함수.
+        function onSortExecutionStarted() {
+            if (!home.manualSortRequested || !home.visible) return
+            home.manualSession = true
+            home.manualSortRequested = false
+            home.showStep(2)
+        }
+        // 결과 반영이 끝난 알림에서 성공·실패를 구분해 완료 화면으로 연결하는 함수.
+        function onSortExecutionFinished(success, message) {
+            if (!home.manualSession) return
+            home.manualSession = false
+            home.sortSuccess = success
+            home.resultMessage = message
+            home.showStep(3)
+        }
+        // 최종 확인을 취소한 요청은 나중의 다른 작업에 연결되지 않도록 해제하는 함수.
+        function onPreviewChanged() {
+            // 작업 시작 알림과 결과 반영이 끝난 뒤 취소·준비 실패 여부를 확인하는 함수.
+            Qt.callLater(function() {
+                if (!backgroundTasks.busy && !previewController.awaitingConfirmation && home.workflowStep < 2)
+                    home.manualSortRequested = false
+            })
+        }
     }
     // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
-    onVisibleChanged: if (!visible) previewOpen = false
+    onVisibleChanged: if (!visible && workflowStep < 2) { manualSortRequested = false; showStep(0) }
     signal pageRequested(int page)
     signal recoveryRequested()
     readonly property color foreground: dark ? "#edf2f8" : "#273344"
@@ -25,8 +86,6 @@ Rectangle {
     readonly property color surface: dark ? "#242d3b" : "#ffffff"
     readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
     color: dark ? "#161a22" : "#ffffff"
-    radius: UiMetrics.radiusControl
-    border.color: edge
 
     component FlatButton: T.Button {
         id: control
@@ -51,9 +110,9 @@ Rectangle {
     ScrollView {
         id: homeScroll
         objectName: "fileSortScroll"
-        enabled: !home.previewOpen && !home.transitioning
-        visible: home.slideProgress < 1
-        x: UiMetrics.pageInset - home.width * home.slideProgress
+        enabled: home.workflowStep === 0 && !home.transitioning
+        visible: home.paneVisible(0)
+        x: UiMetrics.pageInset + home.paneX(0)
         y: UiMetrics.pageInset
         width: home.width - UiMetrics.pageInset * 2
         height: home.height - UiMetrics.pageInset * 2
@@ -63,13 +122,9 @@ Rectangle {
         ColumnLayout {
             width: homeScroll.availableWidth
             spacing: UiMetrics.spaceControl
-            Rectangle {
+            Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 92
-                radius: 14
-                color: pageDrop.containsDrag ? (home.dark ? "#304457" : "#eaf1f9") : home.surface
-                border.color: pageDrop.containsDrag ? "#7898bb" : home.edge
-                border.width: pageDrop.containsDrag ? UiMetrics.borderActive : UiMetrics.borderNormal
                 Column {
                     anchors.centerIn: parent
                     spacing: UiMetrics.spaceSmall
@@ -152,7 +207,7 @@ Rectangle {
                     contentItem: Text { text: parent.text; color: home.foreground; font.pixelSize: UiMetrics.textEmphasis; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0
                     // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
-                    onClicked: { previewController.createPreview(destination.text); home.previewOpen = true }
+                    onClicked: { previewController.createPreview(destination.text); home.showStep(1) }
                 }
                 FlatButton {
                     objectName: "compactSortButton"
@@ -166,7 +221,7 @@ Rectangle {
                     // 미리보기·준비 후 기존 최종 확인을 거쳐야만 실제 파일 이동을 시작하는 함수.
                     onClicked: {
                         previewController.createPreview(destination.text)
-                        if (previewController.hasPreview && previewController.hasMovableSteps) previewController.prepareSort()
+                        if (previewController.hasPreview && previewController.hasMovableSteps) home.requestSort()
                     }
                 }
             }
@@ -186,7 +241,7 @@ Rectangle {
         objectName: "fileSortPageDropArea"
         anchors.fill: parent
         z: 10
-        enabled: home.visible && home.enabled && !home.previewOpen && !home.transitioning
+        enabled: home.visible && home.enabled && home.workflowStep === 0 && !home.transitioning
         // 외부 파일 드래그만 받아 목록 등록에 복사 응답을 사용하는 함수.
         onEntered: function(drag) {
             if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
@@ -227,21 +282,40 @@ Rectangle {
         }
     }
     FileSortPreview {
-        x: home.width * (1 - home.slideProgress)
+        x: home.paneX(1)
         width: home.width
         height: home.height
-        visible: home.previewOpen || home.slideProgress > 0
+        visible: home.paneVisible(1)
         enabled: home.previewOpen && !home.transitioning
         controller: previewController
         dark: home.dark
-        onBackRequested: home.previewOpen = false
+        onBackRequested: home.showStep(0)
         // 확인한 미리보기를 기존 준비·승인 절차로 전달하는 함수.
-        onSortRequested: previewController.prepareSort()
+        onSortRequested: home.requestSort()
+    }
+    Repeater {
+        model: [2, 3]
+        delegate: FileSortStatus {
+            required property int modelData
+            objectName: modelData === 2 ? "fileSortProgress" : "fileSortComplete"
+            x: home.paneX(modelData)
+            width: home.width
+            height: home.height
+            visible: home.paneVisible(modelData)
+            enabled: home.workflowStep === modelData && !home.transitioning
+            completed: modelData === 3
+            success: home.sortSuccess
+            resultMessage: home.resultMessage
+            controller: previewController
+            progress: backgroundTasks
+            dark: home.dark
+            onBackRequested: home.showStep(0)
+        }
     }
     Shortcut {
         sequence: "Escape"
-        enabled: home.visible && home.previewOpen && !backgroundTasks.busy && !previewController.awaitingConfirmation
+        enabled: home.visible && (home.workflowStep === 1 || home.workflowStep === 3) && !backgroundTasks.busy && !previewController.awaitingConfirmation
         // Esc는 확장 창을 접지 않고 임시 미리보기만 닫는 함수.
-        onActivated: home.previewOpen = false
+        onActivated: home.showStep(0)
     }
 }

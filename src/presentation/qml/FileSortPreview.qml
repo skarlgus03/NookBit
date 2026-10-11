@@ -14,14 +14,12 @@ Rectangle {
     readonly property color muted: dark ? "#aab6c7" : "#748091"
     readonly property color surface: dark ? "#242d3b" : "#f5f7fa"
     color: dark ? "#161a22" : "#ffffff"
-    radius: UiMetrics.radiusControl
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.pageInset
         spacing: UiMetrics.spaceGroup
-        AppButton {
+        BackButton {
             objectName: "filePreviewBackButton"
-            text: qsTr("← 파일 정리로 돌아가기")
             onClicked: preview.backRequested()
         }
         Label { text: qsTr("결과 미리보기"); font.pixelSize: UiMetrics.textSectionTitle; font.bold: true; color: preview.foreground }

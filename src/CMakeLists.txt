@@ -152,6 +152,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/Main.qml
         presentation/qml/UiMetrics.qml
         presentation/qml/AppButton.qml
+        presentation/qml/BackButton.qml
         presentation/qml/AppComboBox.qml
         presentation/qml/DropdownIndicator.qml
         presentation/qml/AppTextField.qml
@@ -159,6 +160,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CompactHome.qml
         presentation/qml/FileSortPage.qml
         presentation/qml/FileSortPreview.qml
+        presentation/qml/FileSortStatus.qml
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
         presentation/qml/CharacterWindow.qml

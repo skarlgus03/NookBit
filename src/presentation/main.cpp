@@ -280,6 +280,32 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
     QTimer::singleShot(250, &layout, &QEventLoop::quit);
     layout.exec();
     auto* controller = preview->property("controller").value<QObject*>();
+    if (!controller) return false;
+    // 백그라운드 알림만으로는 화면이 바뀌지 않고 수동 요청에서만 단계가 전환되는지 검사한다.
+    QMetaObject::invokeMethod(controller, "sortExecutionStarted");
+    if (page->property("workflowStep").toInt() != 0) return false;
+    page->setProperty("manualSortRequested", true);
+    QMetaObject::invokeMethod(controller, "sortExecutionStarted");
+    if (page->property("workflowStep").toInt() != 2) return false;
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
+    QQuickItem* progress = nullptr;
+    QQuickItem* complete = nullptr;
+    for (auto* item : page->childItems()) {
+        if (item->objectName() == QStringLiteral("fileSortProgress")) progress = item;
+        if (item->objectName() == QStringLiteral("fileSortComplete")) complete = item;
+    }
+    if (!progress || !complete || !progress->isVisible() || input->isVisible() || preview->isVisible()) return false;
+    QMetaObject::invokeMethod(controller, "sortExecutionFinished", Q_ARG(bool, false), Q_ARG(QString, QString("test failure")));
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
+    if (page->property("workflowStep").toInt() != 3 || !complete->isVisible()
+        || complete->property("success").toBool() || progress->isVisible()) return false;
+    auto* doneBack = complete->findChild<QObject*>(QStringLiteral("fileCompleteBackButton"));
+    if (!doneBack || doneBack->property("text").toString().length() != 0) return false;
+    QMetaObject::invokeMethod(doneBack, "clicked");
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
     if (controller) QMetaObject::invokeMethod(controller, "clear");
     return !page->property("previewOpen").toBool() && window->size() == size
         && input->isVisible() && !preview->isVisible() && !page->property("transitioning").toBool()

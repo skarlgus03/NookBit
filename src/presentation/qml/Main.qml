@@ -41,7 +41,7 @@ ApplicationWindow {
     }
     Popup {
         parent: Overlay.overlay
-        visible: backgroundTasks.busy
+        visible: backgroundTasks.busy && !(root.currentPage === 7 && fileSortPane.workflowStep === 2)
         modal: true
         dim: false
         focus: true
@@ -378,7 +378,7 @@ ApplicationWindow {
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            NavigationButton { text: qsTr("설정 ‹"); visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            BackButton { description: qsTr("설정으로 돌아가기"); visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); onClicked: root.currentPage = 0 }
         }
     }
@@ -415,6 +415,7 @@ ApplicationWindow {
     }
 
     FileSortPage {
+        id: fileSortPane
         parent: extensionHost
         anchors.fill: parent
         visible: root.currentPage === 7

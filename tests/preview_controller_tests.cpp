@@ -259,6 +259,15 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
         [&] { progressEvents.push_back(runner.progress()); });
     nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
         workflow.approveUseCase, workflow.history, operations, rules, schema, home);
+    int sortStarts = 0, sortFinishes = 0;
+    bool finishedAfterState = false;
+    // 준비 검사와 구분된 실제 정리 시작 알림을 세는 함수.
+    QObject::connect(&preview, &nookbit::PreviewController::sortExecutionStarted, &preview, [&] { ++sortStarts; });
+    // 완료 알림보다 대기 목록과 되돌리기 상태가 먼저 반영되는지 검사하는 함수.
+    QObject::connect(&preview, &nookbit::PreviewController::sortExecutionFinished, &preview, [&](bool success, const QString& message) {
+        ++sortFinishes;
+        finishedAfterState = success && pending.count() == 0 && preview.canUndo() && !message.isEmpty();
+    });
     nookbit::HistoryController history(workflow.history, operations);
     nookbit::RecoveryController recovery(workflow.history, nullptr, &workflow.journal, &operations);
     preview.setTaskRunner(&runner); history.setTaskRunner(&runner); recovery.setTaskRunner(&runner);
@@ -286,10 +295,12 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     prepareTiming.close();
     for (const auto& source : sources) expect(QFile::exists(source), "preparation must not move files");
     preview.cancelSort(); expect(!preview.awaitingConfirmation() && !runner.busy(), "cancel preparation confirmation without movement");
+    expect(sortStarts == 0 && sortFinishes == 0, "preparation and cancellation must not publish execution lifecycle");
     preview.prepareSort(); expect(waitForBackground(runner) && preview.awaitingConfirmation(), "frozen plan recheck in background");
     preview.confirmSort(); expect(runner.busy(), "sort must return before background completion");
     preview.confirmSort(); preview.undoLastMove();
     expect(waitForBackground(runner) && pending.count() == 0 && preview.canUndo(), "background movement updates queue and undo on UI thread");
+    expect(sortStarts == 1 && sortFinishes == 1 && finishedAfterState, "execution lifecycle follows final movement state");
     expect(runner.progress().completedFiles == 2 && runner.progress().fileCount == 2 &&
         runner.progress().phase == nookbit::OperationPhase::Completed, "actual file completion counted only after recorded movement");
     const bool copied = std::any_of(progressEvents.begin(), progressEvents.end(), [](const auto& value) { return value.byteProgressKnown; });
