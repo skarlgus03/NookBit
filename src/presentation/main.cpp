@@ -1009,6 +1009,17 @@ int main(int argc, char* argv[]) {
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
         QObject* editorPage = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
+        // 규칙을 다시 불러오면 자동 전체 보기 대신 100% 배율로 돌아오는지 검사한다.
+        bool defaultRuleZoom = false;
+        if (editorPage) {
+            editorPage->setProperty("zoom", 0.5);
+            if (QMetaObject::invokeMethod(editorPage, "loadGraphFromDraft")) {
+                QEventLoop reloadFrame;
+                QTimer::singleShot(40, &reloadFrame, &QEventLoop::quit);
+                reloadFrame.exec();
+                defaultRuleZoom = qFuzzyCompare(editorPage->property("zoom").toDouble(), 1.0);
+            }
+        }
         QObject* ruleTestPanel = editorPage
             ? editorPage->findChild<QObject*>(QStringLiteral("ruleTestPanel")) : nullptr;
         QObject* watchSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
@@ -1027,7 +1038,7 @@ int main(int argc, char* argv[]) {
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
         auto* characterBubble = desktopCharacter
             ? desktopCharacter->findChild<QQuickWindow*>(QStringLiteral("characterBubbleWindow")) : nullptr;
-        const bool ready = compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
+        const bool ready = defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&

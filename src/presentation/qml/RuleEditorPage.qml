@@ -182,7 +182,8 @@ Item {
                      ? qsTr("기존 규칙에 종착점 없는 가지가 %1개 있어요. 목적지나 정리 제외를 연결해 주세요.").arg(restored.incompleteLeaves)
                      : qsTr("저장된 규칙을 노드 화면에 불러왔어요.")
         lineCanvas.requestPaint()
-        Qt.callLater(function() { page.fitAllNodes() })
+        // 레이아웃이 준비된 다음 기본 배율과 파일 입력 노드 위치를 맞추는 함수.
+        Qt.callLater(function() { page.resetDefaultView() })
     }
 
     // 현재 그래프를 저장하지 않은 채 입력 파일의 분류 결과와 선택 경로를 시험하는 함수.
@@ -344,6 +345,18 @@ Item {
         zoom = nextZoom
         panX = viewportX - worldX * nextZoom
         panY = viewportY - worldY * nextZoom
+    }
+
+    // 규칙을 불러왔을 때 100% 배율로 파일 입력 노드부터 보여주는 함수.
+    function resetDefaultView() {
+        zoom = 1.0
+        const start = blocks.find(block => block.type === "start") || blocks[0]
+        if (!start || canvasViewport.width <= 0 || canvasViewport.height <= 0)
+            return
+        const pos = positionFor(start)
+        panX = 80 - pos.x
+        panY = (canvasViewport.height - blockHeight) / 2 - pos.y
+        lineCanvas.requestPaint()
     }
 
     // 모든 노드가 보이도록 화면 위치와 확대율만 맞추는 함수.
