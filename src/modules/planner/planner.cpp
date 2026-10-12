@@ -132,15 +132,17 @@ Result<OperationPlan> Planner::buildPlan(
                                             chosen.matchedRuleId, PreviewDisposition::Excluded});
             continue;
         }
-        if (!isSafeRelativeDestination(chosen.destinationRelativePath)) {
+        if (chosen.absoluteDestination ? !chosen.destinationRelativePath.is_absolute()
+                                       : !isSafeRelativeDestination(chosen.destinationRelativePath)) {
             return Result<OperationPlan>::failure({
                 "plan.unsafe_destination", "A classification rule returned an unsafe destination.",
             });
         }
-        const auto requestedDestination =
-            settings.homeRoot / chosen.destinationRelativePath / file.absolutePath.filename();
+        const auto requestedDestination = (chosen.absoluteDestination
+            ? chosen.destinationRelativePath : settings.homeRoot / chosen.destinationRelativePath)
+            / file.absolutePath.filename();
         auto safety = PathSafetyValidator::validateMove(
-            file.absolutePath, requestedDestination, selectedFiles, settings.homeRoot, appDataRoot_);
+            file.absolutePath, requestedDestination, selectedFiles, settings.homeRoot, appDataRoot_, settings.allowedDestinationRoots);
         if (!safety) return Result<OperationPlan>::failure(safety.error());
         // 통합 백엔드만 초안을 허용하며 실제 이동 방식은 후속 볼륨 계약 준비가 결정한다.
         if (crossVolumeDrafts_ == CrossVolumeDrafts::Reject &&
@@ -176,7 +178,7 @@ Result<OperationPlan> Planner::buildPlan(
         step.status = resolved ? StepStatus::Planned : StepStatus::Skipped;
         if (resolved) {
             auto finalSafety = PathSafetyValidator::validateMove(
-                step.source, step.destination, selectedFiles, settings.homeRoot, appDataRoot_);
+                step.source, step.destination, selectedFiles, settings.homeRoot, appDataRoot_, settings.allowedDestinationRoots);
             if (!finalSafety) return Result<OperationPlan>::failure(finalSafety.error());
             reservedDestinations.insert(pathKey(step.destination));
         }

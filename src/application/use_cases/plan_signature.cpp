@@ -75,6 +75,7 @@ void appendAtomicCondition(std::string& output, const AtomicRuleCondition& condi
 void appendDestination(std::string& output, const RuleDestination& destination) {
     appendPath(output, destination.relativePath);
     appendOptionalNumber(output, destination.collisionPolicy);
+    if (destination.absolute) append(output, "absolute-destination");
 }
 
 // 트리 노드와 자식을 화면 순서대로 서명 문자열에 추가하는 함수.
@@ -202,6 +203,11 @@ std::string PlanSignature::settings(const UserSettings& settings) {
     appendNumber(output, settings.multiMatchPolicy);
     appendNumber(output, settings.unmatchedPolicy);
     appendNumber(output, settings.recursiveScan);
+    if (!settings.allowedDestinationRoots.empty()) {
+        append(output, "allowed-destinations");
+        appendNumber(output, settings.allowedDestinationRoots.size());
+        for (const auto& root : settings.allowedDestinationRoots) appendPath(output, root);
+    }
     return output;
 }
 

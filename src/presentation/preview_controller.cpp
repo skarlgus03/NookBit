@@ -145,6 +145,7 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     CreatePreviewRequest request;
     request.destinationRoot = std::filesystem::path(homeInfo.absoluteFilePath().toStdWString());
     request.defaultCollisionPolicy = collisionPolicy_;
+    request.allowedDestinationRoots = allowedDestinationRoots_;
     const auto paths = pendingFiles_.filePaths();
     request.selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
     for (const auto& path : paths) {
@@ -153,6 +154,10 @@ void PreviewController::createPreview(const QString& destinationRoot) {
 
     const auto result = createPreview_.execute(request);
     if (!result) {
+        if (result.error().code == "path.destination_outside_home") {
+            showError(QStringLiteral("외부 목적지가 아직 허용되지 않았어요. 규칙 편집기의 목적지 설정에서 해당 폴더를 허용해 주세요."));
+            return;
+        }
         if (result.error().code == "collision.abort") {
             showError(QStringLiteral("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
             return;
@@ -293,6 +298,7 @@ void PreviewController::confirmSort() {
 // 파일 검사·해시 계산·저장을 작업 스레드로 보내 확인 결과만 화면에 반영하는 함수.
 void PreviewController::prepareSortInBackground() {
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selected;
@@ -326,6 +332,7 @@ void PreviewController::prepareSortInBackground() {
 void PreviewController::confirmSortInBackground() {
     if (!draft_ || !hasFrozenPlan_) return;
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selected;
@@ -358,6 +365,7 @@ void PreviewController::freezePreview() {
         return;
     }
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selectedFiles;
@@ -386,6 +394,7 @@ bool PreviewController::verifySavedPlan() {
         return false;
     }
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     std::vector<std::filesystem::path> selectedFiles;
@@ -415,6 +424,7 @@ void PreviewController::approvePlan() {
         return;
     }
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     const auto paths = pendingFiles_.filePaths();
@@ -453,6 +463,7 @@ void PreviewController::moveApprovedFile() {
         return;
     }
     UserSettings settings;
+    settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
     const auto movedPlanId = draft_->id;

@@ -241,6 +241,44 @@ struct PreviewWorkflow {
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
 
+// 외부 목적지 허용 뒤 실제 이동·되돌리기와 허용 해제를 검사하는 함수.
+void testExternalDestinationWorkflow() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "external workflow fixture exists"); return; }
+    const auto source = directory.filePath("photo.jpg");
+    QFile file(source);
+    expect(file.open(QIODevice::WriteOnly), "external workflow source opens");
+    file.write("external folder content"); file.close();
+    const auto home = directory.filePath("home");
+    const auto external = directory.filePath("external");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto active = directory.filePath("rules.json");
+    PreviewWorkflow workflow(active, schema, std::filesystem::path(directory.filePath("appdata").toStdWString()));
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    auto rules = defaults.load();
+    if (!rules) { expect(false, "external workflow rules load"); return; }
+    rules.value().nodes[0].destination = nookbit::RuleDestination{std::filesystem::path(external.toStdWString()), std::nullopt, true};
+    expect(workflow.rules.save(rules.value()).hasValue(), "external workflow rules save");
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase,
+        workflow.verifyUseCase, workflow.approveUseCase, workflow.history, workflow.operations, active, schema, home);
+    pending.addUrl(QUrl::fromLocalFile(source));
+    controller.createPreview(home);
+    expect(!controller.hasPreview() && QFile::exists(source), "external preview blocked before permission");
+    controller.setAllowedDestinationRoots({std::filesystem::path(external.toStdWString())});
+    controller.createPreview(home);
+    expect(controller.hasPreview() && controller.steps().size() == 1, "external permission reaches preview request");
+    expect(controller.prepareSort(), "external destination prepares explicit approval");
+    controller.confirmSort();
+    expect(!QFile::exists(source) && QFile::exists(external + "/photo.jpg"), "approved external move succeeds");
+    controller.undoLastMove();
+    expect(QFile::exists(source) && !QFile::exists(external + "/photo.jpg"), "external move can be undone");
+    controller.setAllowedDestinationRoots({});
+    pending.addUrl(QUrl::fromLocalFile(source));
+    controller.createPreview(home);
+    expect(!controller.hasPreview(), "revoked permission blocks future preview");
+}
+
 // 독립 DB 연결로 이동·두 종류 되돌리기·중단 재개를 비동기 검사하는 함수.
 void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot, bool copyOnly = false) {
 #ifdef _WIN32
@@ -1832,6 +1870,7 @@ int main(int argc, char* argv[]) {
     if (nativeSameVolume.isValid()) testNativeControllerCase(nativeSameVolume.path(), nativeSameVolume.path(), 0);
     else expect(false, "native v2 same-volume UI fixture");
     testCommonCollisionPolicyWorkflow();
+    testExternalDestinationWorkflow();
     testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();

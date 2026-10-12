@@ -95,6 +95,11 @@ public:
 
     /// 저장된 규칙을 다시 읽어 적용 중인 규칙 표시와 낡은 미리보기를 갱신하는 함수.
     void refreshActiveRules();
+    /// 사용자 설정의 외부 목적지 허용 목록을 반영하고 이전 미리보기를 무효화하는 함수.
+    void setAllowedDestinationRoots(std::vector<std::filesystem::path> roots) {
+        allowedDestinationRoots_ = std::move(roots);
+        clear();
+    }
 
     /// 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
     Q_INVOKABLE void createPreview(const QString& destinationRoot);
@@ -169,6 +174,7 @@ private:
     QString activeRuleLabel_;
     CollisionPolicy collisionPolicy_{CollisionPolicy::Rename};
     QString previewHomeRoot_;
+    std::vector<std::filesystem::path> allowedDestinationRoots_;
     std::optional<OperationPlan> draft_;
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;

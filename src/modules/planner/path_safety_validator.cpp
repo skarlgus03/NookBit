@@ -80,7 +80,8 @@ Result<void> PathSafetyValidator::validateMove(
     const std::filesystem::path& destination,
     const std::vector<std::filesystem::path>& selectedFiles,
     const std::filesystem::path& homeRoot,
-    const std::filesystem::path& appDataRoot) {
+    const std::filesystem::path& appDataRoot,
+    const std::vector<std::filesystem::path>& allowedDestinationRoots) {
     if (source.empty() || destination.empty() || homeRoot.empty()) {
         return Result<void>::failure({
             "path.empty",
@@ -107,10 +108,15 @@ Result<void> PathSafetyValidator::validateMove(
         });
     }
 
-    if (!isWithin(destination, homeRoot)) {
+    // 외부 목적지는 드라이브 루트가 아닌 명시적으로 허용한 폴더 안에서만 사용한다.
+    const bool externalAllowed = std::any_of(allowedDestinationRoots.begin(), allowedDestinationRoots.end(),
+        [&destination](const auto& root) {
+            return root.is_absolute() && !isDriveRoot(root) && isWithin(destination, root);
+        });
+    if (!isWithin(destination, homeRoot) && !externalAllowed) {
         return Result<void>::failure({
             "path.destination_outside_home",
-            "The destination is outside the configured organizer home.",
+            "The destination is outside the organizer home and user-approved folders.",
         });
     }
 

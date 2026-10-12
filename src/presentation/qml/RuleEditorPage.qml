@@ -11,6 +11,8 @@ Item {
     signal editorDraftReplaced()
 
     property bool oldEditorFormDirty: false
+    property int folderTargetId: -1
+    property string externalFolder: ""
     property int fontPresetIndex: 1
     readonly property int nodeFontSize: UiMetrics.nodeTextSizes[fontPresetIndex]
     readonly property int blockWidth: UiMetrics.nodeWidths[fontPresetIndex]
@@ -226,6 +228,42 @@ Item {
     }
 
     Component.onCompleted: loadGraphFromDraft()
+
+    FolderDialog {
+        id: destinationFolderDialog
+        title: qsTr("목적지 폴더 선택")
+        onAccepted: page.chooseDestinationFolder(destinationSettings.folderPath(selectedFolder))
+    }
+    Dialog {
+        id: externalDestinationConfirm
+        parent: page
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("별도 목적지 사용")
+        width: Math.min(page.width - UiMetrics.spaceSection * 2, UiMetrics.operationPopupWidth)
+        contentItem: ColumnLayout {
+            spacing: UiMetrics.spaceGroup
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("이 폴더와 하위 폴더를 정리 목적지로 허용할까요? 규칙을 불러오는 것만으로는 허용되지 않아요.\n%1").arg(page.externalFolder)
+                wrapMode: Text.WrapAnywhere
+            }
+            RowLayout {
+                ThemeButton { text: qsTr("취소"); onClicked: externalDestinationConfirm.close() }
+                ThemeButton {
+                    text: qsTr("허용하고 지정")
+                    onClicked: {
+                        if (destinationSettings.allowFolder(page.externalFolder)) {
+                            page.setDestination(page.folderTargetId, page.externalFolder, false)
+                            externalDestinationConfirm.close()
+                        } else {
+                            page.statusText = qsTr("드라이브 루트나 변수가 아닌 전체 폴더 경로를 지정해 주세요.")
+                        }
+                    }
+                }
+            }
+        }
+    }
     onBlocksChanged: {
         graphDirty = true
         stagedGraph = false
@@ -595,6 +633,26 @@ Item {
                             : ["atLeast", "lessThan"]
             return choices.indexOf(value) >= 0 ? Object.assign({}, block, { comparison: value }) : block
         })
+    }
+
+    // 목적지의 기준과 입력 경로를 함께 갱신하는 함수.
+    function setDestination(id, value, homeRelative) {
+        blocks = blocks.map(block => block.id === id
+                            ? Object.assign({}, block, { value: value, homeRelative: homeRelative }) : block)
+        if (selectedId === id) inspectorValue.text = value
+    }
+
+    // 선택한 폴더를 홈 상대 경로로 표시하거나 외부 사용 확인을 요청하는 함수.
+    function chooseDestinationFolder(path) {
+        const target = blockForId(folderTargetId)
+        if (!target) return
+        const relative = destinationSettings.relativeToHome(path)
+        if (target.homeRelative !== false && relative !== "") {
+            setDestination(folderTargetId, relative, true)
+        } else {
+            externalFolder = path
+            externalDestinationConfirm.open()
+        }
     }
 
     // 선택한 표시 단위를 적용하고 기존 바이트·MiB 규칙도 유지하는 함수.
@@ -1553,7 +1611,7 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("표시 값")
+                        text: page.selectedBlock && page.selectedBlock.type === "destination" ? qsTr("목적지 경로") : qsTr("표시 값")
                         visible: page.selectedBlock !== null &&
                                  page.selectedBlock.type !== "start" &&
                                  page.selectedBlock.type !== "otherwise" &&
@@ -1567,7 +1625,8 @@ Item {
                                  page.selectedBlock.type !== "otherwise" &&
                                  page.selectedBlock.type !== "exclude"
                         enabled: visible
-                        placeholderText: qsTr("예시 값")
+                        placeholderText: page.selectedBlock && page.selectedBlock.type === "destination"
+                            ? (page.selectedBlock.homeRelative !== false ? qsTr("사진/여행") : qsTr("D:/중요자료")) : qsTr("예시 값")
                         color: page.primaryText
                         placeholderTextColor: page.mutedText
                         background: Rectangle {
@@ -1578,6 +1637,49 @@ Item {
                         onEditingFinished: {
                             if (page.selectedBlock)
                                 page.updateValue(page.selectedBlock.id, text)
+                        }
+                    }
+                    CheckBox {
+                        objectName: "destinationHomeCheck"
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "destination"
+                        text: qsTr("기본 정리 폴더 기준")
+                        checked: page.selectedBlock !== null && page.selectedBlock.homeRelative !== false
+                        onClicked: {
+                            const block = page.selectedBlock
+                            const relative = destinationSettings.relativeToHome(block.value)
+                            page.setDestination(block.id, checked ? (relative || block.value)
+                                : destinationSettings.resolvedPath(block.value, true), checked)
+                        }
+                    }
+                    ThemeButton {
+                        objectName: "destinationFolderButton"
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "destination"
+                        text: qsTr("폴더 선택…")
+                        onClicked: {
+                            page.folderTargetId = page.selectedBlock.id
+                            destinationFolderDialog.open()
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "destination"
+                        text: visible ? qsTr("실제 경로: %1").arg(destinationSettings.resolvedPath(
+                            page.selectedBlock.value, page.selectedBlock.homeRelative !== false)) : ""
+                        color: page.mutedText
+                        wrapMode: Text.WrapAnywhere
+                    }
+                    ThemeButton {
+                        Layout.fillWidth: true
+                        visible: page.selectedBlock !== null && page.selectedBlock.type === "destination" &&
+                                 page.selectedBlock.homeRelative === false
+                        text: qsTr("이 외부 폴더 허용…")
+                        onClicked: {
+                            page.updateValue(page.selectedBlock.id, inspectorValue.text)
+                            page.folderTargetId = page.selectedBlock.id
+                            page.externalFolder = page.selectedBlock.value.trim()
+                            externalDestinationConfirm.open()
                         }
                     }
                     AppComboBox {

@@ -126,6 +126,27 @@ void testPathContainment() {
     std::filesystem::remove_all(sandbox, ignored);
 }
 
+// 외부 목적지의 명시 허용·범위 제한·앱 데이터 보호를 검사하는 함수.
+void testExternalDestinationPermission() {
+    const auto sandbox = std::filesystem::temp_directory_path() / "nookbit-external-permission";
+    const auto home = sandbox / "home";
+    const auto external = sandbox / "external";
+    const auto source = sandbox / "input.txt";
+    const auto appData = sandbox / "app-data";
+    const auto denied = nookbit::PathSafetyValidator::validateMove(source, external / "input.txt", {source}, home, appData);
+    expect(!denied, "external destination denied by default");
+    expect(nookbit::PathSafetyValidator::validateMove(source, external / "child/input.txt", {source}, home, appData, {external}).hasValue(),
+           "explicit external folder permits its children");
+    expect(!nookbit::PathSafetyValidator::validateMove(source, sandbox / "external-sibling/input.txt", {source}, home, appData, {external}),
+           "permission must not cover similarly named siblings");
+    expect(!nookbit::PathSafetyValidator::validateMove(source, external / "../escaped.txt", {source}, home, appData, {external}),
+           "permission must not cover traversal escape");
+    expect(!nookbit::PathSafetyValidator::validateMove(source, appData / "input.txt", {source}, home, appData, {appData}),
+           "allow list must not bypass app data protection");
+    expect(!nookbit::PathSafetyValidator::validateMove(source, external / "input.txt", {source}, home, appData, {sandbox.root_path()}),
+           "drive root cannot authorize every destination");
+}
+
 } // namespace
 
 int main() {
@@ -133,6 +154,7 @@ int main() {
     testCollisionRename();
     testCollisionSkipAndAbort();
     testPathContainment();
+    testExternalDestinationPermission();
 
     if (failures == 0) {
         std::cout << "All core safety tests passed.\n";

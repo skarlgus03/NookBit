@@ -78,6 +78,7 @@ struct RuleDecision {
     std::string reason;
     std::optional<CollisionPolicy> collisionPolicy;
     bool excluded{false};
+    bool absoluteDestination{false};
 };
 
 /// 규칙 시험 결과와 실제로 선택된 노드 ID의 순서를 표현한다.
@@ -146,6 +147,7 @@ using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredica
 struct RuleDestination {
     std::filesystem::path relativePath;
     std::optional<CollisionPolicy> collisionPolicy;
+    bool absolute{false};
 };
 
 /// 순서 있는 조건 가지와 같은 높이의 else 가지를 표현한다.
@@ -253,6 +255,8 @@ struct UserSettings {
     MultiMatchPolicy multiMatchPolicy{MultiMatchPolicy::FirstMatch};
     UnmatchedPolicy unmatchedPolicy{UnmatchedPolicy::LeaveInPlace};
     bool recursiveScan{false};
+    // 규칙 파일과 별개로 사용자가 직접 허용한 추가 목적지 폴더.
+    std::vector<std::filesystem::path> allowedDestinationRoots;
 };
 
 struct SafetyInvariants final {

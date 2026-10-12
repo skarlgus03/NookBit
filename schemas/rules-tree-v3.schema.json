@@ -46,10 +46,25 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "collisionPolicy"],
+      "oneOf": [
+        {
+          "properties": {
+            "base": { "const": "home" },
+            "path": { "not": { "pattern": "(^[A-Za-z]:)|(^[/\\\\])|(^|[/\\\\])\\.\\.([/\\\\]|$)" } }
+          }
+        },
+        {
+          "required": ["base"],
+          "properties": {
+            "base": { "const": "absolute" },
+            "path": { "pattern": "(^[A-Za-z]:[/\\\\])|(^/)", "not": { "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)" } }
+          }
+        }
+      ],
       "properties": {
+        "base": { "enum": ["home", "absolute"] },
         "path": {
-          "type": "string", "minLength": 1,
-          "not": { "pattern": "(^[A-Za-z]:)|(^[/\\\\])|(^|[/\\\\])\\.\\.([/\\\\]|$)" }
+          "type": "string", "minLength": 1
         },
         "collisionPolicy": { "enum": ["inherit", "rename", "skip", "abort"] }
       }

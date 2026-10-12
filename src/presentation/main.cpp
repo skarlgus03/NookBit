@@ -42,6 +42,7 @@
 #include <QQuickStyle>
 #include <QPalette>
 #include "presentation/ui_settings_controller.hpp"
+#include "presentation/destination_settings_controller.hpp"
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
@@ -598,6 +599,7 @@ int main(int argc, char* argv[]) {
     nookbit::UserSettings currentSettings;
     currentSettings.homeRoot = std::filesystem::path(defaultDestination.toStdWString());
     nookbit::RuntimeSettingsRepository recoverySettings(currentSettings);
+    nookbit::DestinationSettingsController destinationSettings(uiPreferences, defaultDestination, !verifyUi);
     nookbit::ThreadLocalOperations fileOperations(databasePath, migrationPath, rulesPath, treeSchema, legacyTreeSchema,
         std::filesystem::path(appData.toStdWString()), recoverySettings);
     nookbit::BackgroundTaskRunner backgroundTasks;
@@ -641,6 +643,18 @@ int main(int argc, char* argv[]) {
         [&recoverySettings](const QString& root) { recoverySettings.setHomeRoot(std::filesystem::path(root.toStdWString())); });
     QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged, &application,
         [&recoverySettings, &currentPolicy] { recoverySettings.setCollisionPolicy(currentPolicy()); });
+    // 사용자 허용 목록을 실행·복구의 설정 스냅샷에 함께 반영하는 함수.
+    const auto applyDestinationPermissions = [&destinationSettings, &recoverySettings, &previewController] {
+        std::vector<std::filesystem::path> roots;
+        for (const auto& path : destinationSettings.allowedRoots()) roots.emplace_back(path.toStdWString());
+        recoverySettings.setAllowedDestinationRoots(roots);
+        previewController.setAllowedDestinationRoots(std::move(roots));
+    };
+    applyDestinationPermissions();
+    QObject::connect(&destinationSettings, &nookbit::DestinationSettingsController::allowedRootsChanged,
+                     &application, applyDestinationPermissions);
+    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted,
+                     &destinationSettings, &nookbit::DestinationSettingsController::setHomeRoot);
     nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &fileOperations);
     nookbit::HistoryController historyController(history, fileOperations);
     previewController.setTaskRunner(&backgroundTasks);
@@ -832,6 +846,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
+    engine.rootContext()->setContextProperty(QStringLiteral("destinationSettings"), &destinationSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     QObject::connect(
         &engine,

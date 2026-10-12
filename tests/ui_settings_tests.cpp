@@ -1,4 +1,5 @@
 #include "presentation/ui_settings_controller.hpp"
+#include "presentation/destination_settings_controller.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <iostream>
@@ -42,6 +43,22 @@ int main(int argc, char** argv) {
     dryRun.rememberExtensionSize(1, 900, 700);
     if (dryRun.extensionSize(1, fallback) != QSize(900, 700)
         || reopened.value("windows/ruleEditor/size").value<QSize>() != QSize(1200, 800)) return 1;
-    std::cout << "UI theme and page size persistence passed\n";
+    // 외부 허용의 재실행 복원·해제와 검사 모드의 무저장을 확인한다.
+    const auto home = directory.filePath("home");
+    const auto external = directory.filePath("external");
+    nookbit::DestinationSettingsController destinations(settings, home, true);
+    if (!destinations.allowedRoots().isEmpty() || destinations.allowFolder("relative") ||
+        destinations.allowFolder(QDir::rootPath()) || !destinations.allowFolder(external)) return 1;
+    nookbit::DestinationSettingsController remembered(reopened, home, true);
+    if (remembered.allowedRoots() != QStringList{external} ||
+        remembered.relativeToHome(home + "/Pictures") != "Pictures" ||
+        !remembered.relativeToHome(external).isEmpty()) return 1;
+    nookbit::DestinationSettingsController memoryOnly(settings, home, false);
+    if (!memoryOnly.allowedRoots().isEmpty() || !memoryOnly.allowFolder(directory.filePath("dry"))) return 1;
+    if (settings.value("destinations/allowedRoots").toStringList() != QStringList{external}) return 1;
+    remembered.revokeFolder(external);
+    nookbit::DestinationSettingsController revoked(settings, home, true);
+    if (!revoked.allowedRoots().isEmpty()) return 1;
+    std::cout << "UI and destination permission persistence passed\n";
     return 0;
 }

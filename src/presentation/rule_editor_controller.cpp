@@ -270,13 +270,15 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                     } else {
                         const auto path = terminal.value(QStringLiteral("value")).toString().trimmed();
                         const std::filesystem::path relative{path.toStdWString()};
+                        const bool absolute = !terminal.value(QStringLiteral("homeRelative"), true).toBool();
                         auto unsupportedTokens = path;
                         unsupportedTokens.replace(QStringLiteral("{yyyy}"), QString());
                         unsupportedTokens.replace(QStringLiteral("{MM}"), QString());
-                        if (path.isEmpty() || relative.is_absolute() || relative.has_root_name() ||
-                            relative.has_root_directory() || unsupportedTokens.contains(QLatin1Char('{')) ||
+                        if (path.isEmpty() || (absolute ? !relative.is_absolute() : relative.has_root_path()) ||
+                            unsupportedTokens.contains(QLatin1Char('{')) ||
                             unsupportedTokens.contains(QLatin1Char('}'))) {
-                            return graphError(terminalId, QStringLiteral("정리 기준 폴더 안의 상대 경로를 입력해 주세요."));
+                            return graphError(terminalId, absolute ? QStringLiteral("별도 목적지는 전체 경로로 입력해 주세요.")
+                                : QStringLiteral("정리 기준 폴더 안의 상대 경로를 입력해 주세요."));
                         }
                         for (const auto& part : relative) {
                             if (part == L"..")
@@ -290,7 +292,7 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                         else if (policyName == QStringLiteral("abort")) policy = CollisionPolicy::Abort;
                         else if (policyName != QStringLiteral("inherit"))
                             return graphError(terminalId, QStringLiteral("파일 이름 충돌 설정이 올바르지 않아요."));
-                        node.destination = RuleDestination{relative, policy};
+                        node.destination = RuleDestination{relative, policy, absolute};
                     }
                 }
             }
@@ -441,6 +443,7 @@ QVariantMap graphForRules(const RuleSet& rules,
                         : QString::fromStdWString(node.destination->relativePath.wstring())},
                     {QStringLiteral("collisionPolicy"), node.destination
                         ? policyName(node.destination->collisionPolicy) : QStringLiteral("inherit")},
+                    {QStringLiteral("homeRelative"), !node.destination || !node.destination->absolute},
                     {QStringLiteral("x"), terminalPosition.x()},
                     {QStringLiteral("y"), terminalPosition.y()}};
                 blocks.append(terminal);
@@ -653,7 +656,8 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
     if (destination.trimmed().isEmpty()) node->destination.reset();
     else node->destination = RuleDestination{
         std::filesystem::path(destination.trimmed().toStdWString()),
-        node->destination ? node->destination->collisionPolicy : std::nullopt};
+        node->destination ? node->destination->collisionPolicy : std::nullopt,
+        node->destination && node->destination->absolute};
     dirty_ = true;
     message_ = QStringLiteral("초안만 바뀌었어요. 저장해야 실제 분류에 적용됩니다.");
     emit changed();

@@ -122,7 +122,7 @@ Result<void> SafeExecutor::execute(
         }
         auto safety = PathSafetyValidator::validateMove(
             step->source, step->destination, selectedFiles,
-            settings.value().homeRoot, appDataRoot_);
+            settings.value().homeRoot, appDataRoot_, settings.value().allowedDestinationRoots);
         if (!safety) return safety;
         auto fingerprint = scanFingerprint(scanner_, step->source, sourceContentAtCopyOpen ? nullptr : &hasher_);
         if (!fingerprint) return Result<void>::failure(fingerprint.error());
@@ -155,7 +155,7 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
         const auto intent = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::IntentRecorded});
         if (!intent) { const auto marked = markNeedsRecovery(plan.id); return marked ? intent : marked; }
         OperationProgressScope::phase(OperationPhase::CheckingSource);
-        auto result = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.homeRoot, appDataRoot_);
+        auto result = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.homeRoot, appDataRoot_, settings.allowedDestinationRoots);
         if (result) result = verifyMovement(plan, &step);
         if (result) {
             OperationProgressScope::phase(OperationPhase::Moving);
@@ -360,7 +360,7 @@ Result<void> SafeExecutor::verifyRecoverySupport(const OperationPlan& plan, Reco
         if (step.status == StepStatus::Skipped) continue;
         if (!step.source.is_absolute() || !step.destination.is_absolute() || !appDataRoot_.is_absolute())
             return Result<void>::failure({"recovery.path_invalid", "Recovery paths and application data root must be absolute."});
-        const auto safety = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.value().homeRoot, appDataRoot_);
+        const auto safety = PathSafetyValidator::validateMove(step.source, step.destination, selected, settings.value().homeRoot, appDataRoot_, settings.value().allowedDestinationRoots);
         if (!safety) return safety;
     }
     return Result<void>::success();

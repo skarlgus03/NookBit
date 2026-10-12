@@ -3,6 +3,8 @@
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "modules/rules/rule_engine.hpp"
+#include "modules/planner/planner.hpp"
+#include "application/use_cases/plan_signature.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -573,6 +575,63 @@ void testSizeUnits() {
     invalid[1] = tooLarge;
     expect(!editor.importGraph(invalid, edges), "oversized GB conversion rejected before multiplication");
 }
+// 외부 목적지의 그래프·JSON 왕복과 실행 계획의 사용자 허용 검사를 확인하는 함수.
+void testExternalDestinations() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"), schema);
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    if (!initial) { expect(false, "default rule fixture loads"); return; }
+    expect(active.save(initial.value()).hasValue(), "external test fixture initializes");
+    nookbit::RuleEditorController editor(active, active);
+    const auto external = directory.filePath("External");
+    QVariantList blocks{
+        QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "extension"}, {"value", "txt"}},
+        QVariantMap{{"id", 3}, {"type", "destination"}, {"value", external}, {"homeRelative", false}}
+    };
+    QVariantList edges{QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 3}}};
+    expect(editor.importGraph(blocks, edges), "absolute destination graph imports");
+    expect(editor.save(), "absolute destination JSON saves");
+    const auto loaded = active.load();
+    expect(loaded && loaded.value().nodes[0].destination->absolute, "absolute base survives JSON load");
+    if (!loaded) return;
+    const auto exported = editor.graph().value("blocks").toList();
+    bool foundAbsolute = false;
+    for (const auto& block : exported) {
+        const auto value = block.toMap();
+        if (value.value("type").toString() == "destination")
+            foundAbsolute = !value.value("homeRelative").toBool() && value.value("value").toString() == external;
+    }
+    expect(foundAbsolute, "graph export preserves absolute checkbox and path");
+    nookbit::FileFact file;
+    file.absolutePath = std::filesystem::path(directory.filePath("input.txt").toStdWString());
+    file.extension = "txt";
+    nookbit::ScanSnapshot snapshot;
+    snapshot.files.push_back(file);
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, std::filesystem::path(directory.filePath("appdata").toStdWString()));
+    nookbit::UserSettings settings;
+    settings.homeRoot = std::filesystem::path(directory.filePath("Home").toStdWString());
+    const auto denied = planner.buildPlan(snapshot, settings, loaded.value());
+    expect(!denied && denied.error().code == "path.destination_outside_home", "JSON never grants external permission");
+    const auto oldSignature = nookbit::PlanSignature::settings(settings);
+    settings.allowedDestinationRoots = {std::filesystem::path(external.toStdWString())};
+    const auto allowed = planner.buildPlan(snapshot, settings, loaded.value());
+    expect(allowed && allowed.value().steps[0].destination == settings.allowedDestinationRoots[0] / "input.txt",
+           "explicit permission plans the absolute destination without prefixing home");
+    expect(oldSignature != nookbit::PlanSignature::settings(settings), "permission changes affect approval signature");
+    settings.allowedDestinationRoots.clear();
+    expect(!planner.buildPlan(snapshot, settings, loaded.value()), "revoked external permission is rejected");
+    auto invalid = blocks[2].toMap();
+    invalid["homeRelative"] = true;
+    blocks[2] = invalid;
+    expect(!editor.importGraph(blocks, edges), "absolute path cannot masquerade as home-relative");
+    invalid["homeRelative"] = false; invalid["value"] = "relative/folder";
+    blocks[2] = invalid;
+    expect(!editor.importGraph(blocks, edges), "absolute mode rejects relative paths");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -587,5 +646,6 @@ int main(int argc, char* argv[]) {
     testGraphImport();
     testGraphRoundTripAndLayout();
     testSizeUnits();
+    testExternalDestinations();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

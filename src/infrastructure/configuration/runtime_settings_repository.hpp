@@ -16,6 +16,10 @@ public:
     void setHomeRoot(std::filesystem::path root) { std::lock_guard lock(mutex_); value_.homeRoot = std::move(root); }
     /// 앱에서 바꾼 공통 충돌 정책을 현재 설정에 반영하는 함수.
     void setCollisionPolicy(CollisionPolicy policy) { std::lock_guard lock(mutex_); value_.defaultCollisionPolicy = policy; }
+    /// 사용자가 허용한 외부 목적지를 현재 실행·복구 안전 검사에도 반영하는 함수.
+    void setAllowedDestinationRoots(std::vector<std::filesystem::path> roots) {
+        std::lock_guard lock(mutex_); value_.allowedDestinationRoots = std::move(roots);
+    }
 private:
     mutable std::mutex mutex_;
     UserSettings value_;

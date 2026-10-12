@@ -96,6 +96,7 @@ RuleDestination convertDestination(const QJsonObject& object) {
     RuleDestination destination;
     destination.relativePath = std::filesystem::path(
         object.value(QStringLiteral("path")).toString().toStdWString());
+    destination.absolute = object.value(QStringLiteral("base")).toString() == QStringLiteral("absolute");
     const auto policy = object.value(QStringLiteral("collisionPolicy")).toString();
     if (policy == QStringLiteral("rename")) destination.collisionPolicy = CollisionPolicy::Rename;
     if (policy == QStringLiteral("skip")) destination.collisionPolicy = CollisionPolicy::Skip;
@@ -322,9 +323,9 @@ Result<std::vector<RuleNode>> convertNodes(const QJsonArray& array, std::set<std
 // 리프 목적지를 상대 경로와 충돌 정책이 있는 JSON으로 변환하는 함수.
 Result<QJsonObject> destinationObject(const RuleDestination& destination) {
     const auto& path = destination.relativePath;
-    if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+    if (path.empty() || (destination.absolute ? !path.is_absolute() : path.has_root_path())) {
         return Result<QJsonObject>::failure({
-            "rules.destination_invalid", "Destination must be a relative path.",
+            "rules.destination_invalid", "Destination path does not match its declared base.",
         });
     }
     for (const auto& part : path) {
@@ -338,10 +339,12 @@ Result<QJsonObject> destinationObject(const RuleDestination& destination) {
     if (destination.collisionPolicy == CollisionPolicy::Rename) policy = QStringLiteral("rename");
     if (destination.collisionPolicy == CollisionPolicy::Skip) policy = QStringLiteral("skip");
     if (destination.collisionPolicy == CollisionPolicy::Abort) policy = QStringLiteral("abort");
-    return Result<QJsonObject>::success(QJsonObject{
+    QJsonObject object{
         {QStringLiteral("path"), QString::fromStdWString(path.wstring())},
         {QStringLiteral("collisionPolicy"), policy},
-    });
+    };
+    if (destination.absolute) object.insert(QStringLiteral("base"), QStringLiteral("absolute"));
+    return Result<QJsonObject>::success(object);
 }
 
 // 파일 조건의 정밀도와 범위를 확인하며 JSON으로 변환하는 함수.

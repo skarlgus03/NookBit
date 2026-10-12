@@ -14,7 +14,8 @@ public:
         const std::filesystem::path& destination,
         const std::vector<std::filesystem::path>& selectedFiles,
         const std::filesystem::path& homeRoot,
-        const std::filesystem::path& appDataRoot);
+        const std::filesystem::path& appDataRoot,
+        const std::vector<std::filesystem::path>& allowedDestinationRoots = {});
 
     [[nodiscard]] static bool isWithin(
         const std::filesystem::path& child,

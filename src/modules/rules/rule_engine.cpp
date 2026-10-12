@@ -144,7 +144,7 @@ void replaceToken(std::wstring& destination, const std::wstring& token,
 
 // 규칙 목적지를 펼치고 상위 경로 탈출 여부를 검사하는 함수.
 Result<std::filesystem::path> destinationFor(const std::filesystem::path& relativePath,
-                                              const FileFact& file) {
+                                              const FileFact& file, bool absolute = false) {
     using namespace std::chrono;
     const sys_time<milliseconds> modified{milliseconds{file.fingerprint.modifiedUtcMs}};
     const year_month_day date{floor<days>(modified)};
@@ -166,9 +166,9 @@ Result<std::filesystem::path> destinationFor(const std::filesystem::path& relati
         });
     }
     const std::filesystem::path path{destination};
-    if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory()) {
+    if (path.empty() || (absolute ? !path.is_absolute() : path.has_root_path())) {
         return Result<std::filesystem::path>::failure({
-            "rules.unsafe_destination", "Destination must be a relative path.",
+            "rules.unsafe_destination", "Destination path does not match its declared base.",
         });
     }
     for (const auto& component : path) {
@@ -221,11 +221,11 @@ Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const Rul
         matchedId = "global-otherwise";
     }
     if (!target) return Result<std::optional<RuleDecision>>::success(std::nullopt);
-    auto destination = destinationFor(target->relativePath, file);
+    auto destination = destinationFor(target->relativePath, file, target->absolute);
     if (!destination) return Result<std::optional<RuleDecision>>::failure(destination.error());
     return Result<std::optional<RuleDecision>>::success(RuleDecision{
         matchedId, std::move(destination.value()),
-        "Matched classification rule: " + matchedId, target->collisionPolicy,
+        "Matched classification rule: " + matchedId, target->collisionPolicy, false, target->absolute,
     });
 }
 
