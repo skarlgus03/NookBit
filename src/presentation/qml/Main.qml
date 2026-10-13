@@ -929,6 +929,14 @@ ApplicationWindow {
         onAccepted: characterSettings.importFolder(selectedFolder)
     }
 
+    UserGuideDialog {
+        id: characterUserGuide
+        objectName: "characterUserGuide"
+        parent: extensionHost
+        guideKey: "character"
+        dark: root.editorDark
+    }
+
     EmbeddedPage {
         id: characterSettingsDialog
         objectName: "characterSettingsDialog"
@@ -940,6 +948,11 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: UiMetrics.spaceGroup
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
+            AppButton {
+                objectName: "characterUserGuideButton"
+                text: qsTr("사용·제작 가이드")
+                onClicked: characterUserGuide.open()
+            }
             CheckBox {
                 text: qsTr("캐릭터를 앱 밖에 표시")
                 checked: characterWindow.shown

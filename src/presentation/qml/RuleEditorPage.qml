@@ -244,6 +244,14 @@ Item {
 
     Component.onCompleted: loadGraphFromDraft()
 
+    UserGuideDialog {
+        id: rulesUserGuide
+        objectName: "rulesUserGuide"
+        parent: page
+        guideKey: "rules"
+        dark: page.darkMode
+    }
+
     FolderDialog {
         id: destinationFolderDialog
         title: qsTr("목적지 폴더 선택")
@@ -971,6 +979,11 @@ Item {
                 text: qsTr("규칙 테스트")
                 objectName: "ruleTestButton"
                 onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
+            }
+            ThemeButton {
+                objectName: "rulesUserGuideButton"
+                text: qsTr("사용 가이드")
+                onClicked: rulesUserGuide.open()
             }
             ThemeButton {
                 id: jsonFileButton

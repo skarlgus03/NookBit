@@ -2,8 +2,10 @@
 
 Status: the JSON loader, common resolved frame data and pivot-aware renderer are
 implemented. The default test character now loads a complete ImagePack beside
-the executable. Importing, pack selection and user adjustment UI remain subsequent
-tasks. Do not pass ImagePack manifests to the older `character.presentation.json`
+the executable. Folder importing, pack selection, personal scale adjustment,
+desktop rendering and default/custom bubble support are implemented.
+The in-app Korean user guide is `docs/user/character-pack-guide.ko.md`.
+Do not pass ImagePack manifests to the older `character.presentation.json`
 loader; older custom profiles remain supported separately.
 
 ## Scope and layout
@@ -144,7 +146,7 @@ animation and anchor; it does not execute jobs or manage companions. Basic packs
 need no companion information. v1 does not claim to implement conditional bindings
 or synchronized paired animations.
 
-## Validation at future import
+## Validation at import
 
 JSON Schema checks shape and field types. The importer must additionally check:
 

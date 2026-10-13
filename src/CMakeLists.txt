@@ -114,6 +114,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp
       presentation/destination_settings_controller.hpp
+      presentation/user_guide_controller.hpp
       presentation/file_icon_provider.hpp
       presentation/file_preview_provider.hpp
       presentation/pending_files_model.hpp
@@ -160,6 +161,7 @@ if(NOOKBIT_BUILD_QT_APP)
       QML_FILES
         presentation/qml/Main.qml
         presentation/qml/UiMetrics.qml
+        presentation/qml/UserGuideDialog.qml
         presentation/qml/AppButton.qml
         presentation/qml/LargeActionButton.qml
         presentation/qml/BackButton.qml

@@ -17,6 +17,8 @@ QtObject {
     readonly property int textPageTitle: 28
     readonly property int controlHeight: 40
     readonly property int nodeAddMenuWidth: 224
+    readonly property int guideWidth: 720
+    readonly property int guideHeight: 640
     readonly property int primaryActionHeight: 46
     readonly property int largeActionHeight: 60
     readonly property int textDropHint: 20

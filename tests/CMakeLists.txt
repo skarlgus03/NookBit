@@ -136,6 +136,17 @@ if(TARGET nookbit_json_config)
   add_executable(nookbit_ui_settings_tests ui_settings_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/ui_settings_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/destination_settings_controller.hpp)
+  add_executable(nookbit_user_guide_tests user_guide_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/user_guide_controller.hpp
+    ${PROJECT_SOURCE_DIR}/resources/config.qrc)
+  set_target_properties(nookbit_user_guide_tests PROPERTIES AUTOMOC ON AUTORCC ON)
+  target_include_directories(nookbit_user_guide_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_user_guide_tests PRIVATE nookbit_json_config Qt6::Gui)
+  add_test(NAME nookbit_user_guide_tests COMMAND nookbit_user_guide_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_user_guide_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   set_target_properties(nookbit_ui_settings_tests PROPERTIES AUTOMOC ON)
   target_include_directories(nookbit_ui_settings_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_link_libraries(nookbit_ui_settings_tests PRIVATE Qt6::Core)
