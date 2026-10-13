@@ -139,6 +139,9 @@ if(NOOKBIT_BUILD_QT_APP)
         "${CMAKE_CURRENT_BINARY_DIR}/nookbit.rc"
         @ONLY)
       target_sources(nookbit PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/nookbit.rc")
+      # 아이콘 교체만으로도 실행 파일의 Windows 리소스를 다시 컴파일한다.
+      set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/nookbit.rc" PROPERTIES
+        OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/resources/icons/nookbit.ico")
     endif()
     set_property(TARGET nookbit APPEND PROPERTY LINK_DEPENDS
       "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/imagepack.json"
