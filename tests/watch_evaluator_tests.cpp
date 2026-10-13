@@ -228,6 +228,21 @@ void testStableWatchUseCase() {
            "switching watched folders must reset observations");
 }
 
+// 선택 단위의 정확한 바이트 경계와 이전 MiB 계산을 검사하는 함수.
+void testSizeUnits() {
+    for (const auto* unit : {"KB", "MB", "GB", "MiB"}) {
+        nookbit::WatchSettings settings;
+        settings.conditions = {{nookbit::WatchConditionType::TotalSize, 2, unit}};
+        const auto threshold = 2 * nookbit::watchSizeUnitBytes(unit);
+        const auto below = nookbit::WatchEvaluator::evaluate(settings, {fact(threshold - 1, 0)}, 0);
+        const auto exact = nookbit::WatchEvaluator::evaluate(settings, {fact(threshold, 0)}, 0);
+        expect(below && !below.value().shouldOffer, "size unit: threshold minus one must not match");
+        expect(exact && exact.value().shouldOffer, "size unit: exact threshold must match");
+    }
+    nookbit::WatchSettings invalid;
+    invalid.conditions = {{nookbit::WatchConditionType::TotalSize, 1, "unknown"}};
+    expect(!nookbit::WatchEvaluator::evaluate(invalid, {fact(100, 0)}, 0), "unknown size unit is rejected");
+}
 } // namespace
 
 // 감시 조건 판단 테스트를 실행하는 함수.
@@ -236,6 +251,7 @@ int main() {
     testWatchUseCase();
     testFileReadiness();
     testStableWatchUseCase();
+    testSizeUnits();
     if (failures == 0) {
         std::cout << "All watch evaluator tests passed.\n";
         return 0;

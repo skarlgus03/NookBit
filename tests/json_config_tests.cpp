@@ -486,6 +486,26 @@ void testWatchSettingsRoundTrip() {
            "invalid saved watch threshold should be rejected");
 }
 
+// 전체 크기 단위의 저장·복원과 구형 MiB 설정 호환을 검사하는 함수.
+void testWatchSizeUnits() {
+    QTemporaryDir directory;
+    nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
+    nookbit::WatchSettings settings;
+    settings.folder = std::filesystem::path(directory.path().toStdWString());
+    for (const auto* unit : {"KB", "MB", "GB", "MiB"}) {
+        settings.conditions = {{nookbit::WatchConditionType::TotalSize, 37, unit}};
+        expect(repository.save(settings).hasValue(), "size units save");
+        const auto loaded = repository.load();
+        expect(loaded && loaded.value().conditions[0].threshold == 37 && loaded.value().conditions[0].sizeUnit == unit,
+               "size number and unit survive reload without rounding");
+        const auto saved = readExample(directory.filePath("watch.json")).value("conditions").toArray().first().toObject();
+        expect(saved.value("type").toString() == (QString::fromUtf8(unit) == "MiB" ? "total_size_mib" : "total_size"),
+               "legacy MiB storage remains compatible");
+    }
+    settings.conditions[0].sizeUnit = "invalid";
+    expect(!repository.save(settings), "unknown size units never save");
+    expect(repository.load().hasValue(), "rejected unit leaves saved settings intact");
+}
 } // namespace
 
 // JSON 설정과 규칙 로더 테스트를 실행하는 함수.
@@ -499,6 +519,7 @@ int main() {
     testSafeV2Migration();
     testMissingAndMalformedFiles();
     testWatchSettingsRoundTrip();
+    testWatchSizeUnits();
     if (failures == 0) {
         std::cout << "All JSON configuration tests passed.\n";
         return 0;

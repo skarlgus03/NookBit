@@ -7,6 +7,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace nookbit {
@@ -96,7 +97,22 @@ bool WatchController::sizeEnabled() const noexcept {
 }
 // 전체 크기 조건의 MiB 기준값을 반환하는 함수.
 int WatchController::minimumTotalMiB() const noexcept {
-    return std::max(1, thresholdFor(settings_, WatchConditionType::TotalSizeMiB));
+    for (const auto& condition : settings_.conditions) {
+        if (condition.type != WatchConditionType::TotalSize) continue;
+        const auto bytes = static_cast<std::uint64_t>(std::max(1, condition.threshold)) * watchSizeUnitBytes(condition.sizeUnit);
+        return static_cast<int>(std::min<std::uint64_t>((bytes + 1048575ULL) / 1048576ULL, std::numeric_limits<int>::max()));
+    }
+    return 1;
+}
+// 단위와 함께 표시할 전체 크기의 숫자를 반환하는 함수.
+int WatchController::minimumTotalSize() const noexcept {
+    return sizeEnabled() ? thresholdFor(settings_, WatchConditionType::TotalSize) : 100;
+}
+// 저장된 크기 단위를 반환하고 새 조건은 MB를 기본으로 사용하는 함수.
+QString WatchController::totalSizeUnit() const {
+    for (const auto& condition : settings_.conditions)
+        if (condition.type == WatchConditionType::TotalSize) return QString::fromStdString(condition.sizeUnit);
+    return QStringLiteral("MB");
 }
 // 가장 오래된 파일의 경과 시간 조건 사용 여부를 반환하는 함수.
 bool WatchController::ageEnabled() const noexcept {
@@ -204,7 +220,8 @@ void WatchController::saveSettings(const QString& folder,
                                    int minimumTotalMiB,
                                    bool ageEnabled,
                                    int minimumAgeMinutes,
-                                   const QString& excludePatterns) {
+                                   const QString& excludePatterns,
+                                   const QString& sizeUnit) {
     WatchSettings proposed;
     proposed.folder = std::filesystem::path(folder.trimmed().toStdWString());
     proposed.enabled = enabled;
@@ -212,7 +229,7 @@ void WatchController::saveSettings(const QString& folder,
     proposed.rescanIntervalMinutes = intervalMinutes;
     proposed.combination = combineAll ? WatchCombination::All : WatchCombination::Any;
     if (countEnabled) proposed.conditions.push_back({WatchConditionType::FileCount, minimumFileCount});
-    if (sizeEnabled) proposed.conditions.push_back({WatchConditionType::TotalSizeMiB, minimumTotalMiB});
+    if (sizeEnabled) proposed.conditions.push_back({WatchConditionType::TotalSize, minimumTotalMiB, sizeUnit.toStdString()});
     if (ageEnabled) proposed.conditions.push_back({WatchConditionType::OldestAgeMinutes, minimumAgeMinutes});
     for (const auto& raw : excludePatterns.split(',', Qt::SkipEmptyParts)) {
         const auto pattern = raw.trimmed();

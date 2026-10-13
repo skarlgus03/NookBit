@@ -16,6 +16,8 @@ QtObject {
     readonly property int textAppTitle: 25
     readonly property int textPageTitle: 28
     readonly property int controlHeight: 40
+    readonly property int numericInputWidth: 180
+    readonly property int numericStepSize: 28
     readonly property int nodeAddMenuWidth: 224
     readonly property int primaryActionHeight: 46
     readonly property int largeActionHeight: 60

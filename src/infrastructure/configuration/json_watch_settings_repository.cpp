@@ -26,7 +26,7 @@ QString conditionName(WatchConditionType type) {
 
 // JSON의 조건 종류를 코어 값으로 복원하는 함수.
 WatchConditionType parseCondition(const QString& name) {
-    if (name == QStringLiteral("total_size_mib")) return WatchConditionType::TotalSizeMiB;
+    if (name == QStringLiteral("total_size_mib") || name == QStringLiteral("total_size")) return WatchConditionType::TotalSize;
     if (name == QStringLiteral("oldest_age_minutes")) return WatchConditionType::OldestAgeMinutes;
     return WatchConditionType::FileCount;
 }
@@ -43,7 +43,8 @@ Result<void> validateSettings(const WatchSettings& settings) {
     std::set<WatchConditionType> seen;
     for (const auto& condition : settings.conditions) {
         if (condition.threshold < 1 || condition.threshold > 1000000 ||
-            !seen.insert(condition.type).second) {
+            !seen.insert(condition.type).second ||
+            (condition.type == WatchConditionType::TotalSize && !watchSizeUnitBytes(condition.sizeUnit))) {
             return Result<void>::failure({
                 "watch.condition_invalid", "Watch conditions must be unique and between 1 and 1000000.",
             });
@@ -83,6 +84,7 @@ Result<WatchSettings> JsonWatchSettingsRepository::load() const {
         settings.conditions.push_back({
             parseCondition(condition.value(QStringLiteral("type")).toString()),
             condition.value(QStringLiteral("threshold")).toInt(),
+            condition.value(QStringLiteral("unit")).toString(QStringLiteral("MiB")).toStdString(),
         });
     }
     for (const auto& pattern : object.value(QStringLiteral("excludePatterns")).toArray()) {
@@ -113,10 +115,15 @@ Result<void> JsonWatchSettingsRepository::save(const WatchSettings& settings) co
                   settings.combination == WatchCombination::All ? QStringLiteral("all") : QStringLiteral("any"));
     QJsonArray conditions;
     for (const auto& condition : settings.conditions) {
-        conditions.append(QJsonObject{
+        QJsonObject entry{
             {QStringLiteral("type"), conditionName(condition.type)},
             {QStringLiteral("threshold"), condition.threshold},
-        });
+        };
+        if (condition.type == WatchConditionType::TotalSize && condition.sizeUnit != "MiB") {
+            entry.insert(QStringLiteral("type"), QStringLiteral("total_size"));
+            entry.insert(QStringLiteral("unit"), QString::fromStdString(condition.sizeUnit));
+        }
+        conditions.append(entry);
     }
     object.insert(QStringLiteral("conditions"), conditions);
     QJsonArray patterns;

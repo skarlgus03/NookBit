@@ -24,6 +24,8 @@ class WatchController final : public QObject {
     Q_PROPERTY(int minimumFileCount READ minimumFileCount NOTIFY settingsChanged)
     Q_PROPERTY(bool sizeEnabled READ sizeEnabled NOTIFY settingsChanged)
     Q_PROPERTY(int minimumTotalMiB READ minimumTotalMiB NOTIFY settingsChanged)
+    Q_PROPERTY(int minimumTotalSize READ minimumTotalSize NOTIFY settingsChanged)
+    Q_PROPERTY(QString totalSizeUnit READ totalSizeUnit NOTIFY settingsChanged)
     Q_PROPERTY(bool ageEnabled READ ageEnabled NOTIFY settingsChanged)
     Q_PROPERTY(int minimumAgeMinutes READ minimumAgeMinutes NOTIFY settingsChanged)
     Q_PROPERTY(QString excludePatterns READ excludePatterns NOTIFY settingsChanged)
@@ -58,6 +60,10 @@ public:
     [[nodiscard]] bool sizeEnabled() const noexcept;
     /// 전체 크기 조건의 MiB 기준값을 반환하는 함수.
     [[nodiscard]] int minimumTotalMiB() const noexcept;
+    /// 단위 선택과 함께 표시할 전체 크기 숫자를 반환하는 함수.
+    [[nodiscard]] int minimumTotalSize() const noexcept;
+    /// 저장된 크기 단위를 반환하며 이전 MiB 설정은 그대로 유지하는 함수.
+    [[nodiscard]] QString totalSizeUnit() const;
     /// 가장 오래된 파일의 경과 시간 조건 사용 여부를 반환하는 함수.
     [[nodiscard]] bool ageEnabled() const noexcept;
     /// 경과 시간 조건의 분 기준값을 반환하는 함수.
@@ -89,7 +95,8 @@ public:
                                   int minimumTotalMiB,
                                   bool ageEnabled,
                                   int minimumAgeMinutes,
-                                  const QString& excludePatterns);
+                                  const QString& excludePatterns,
+                                  const QString& sizeUnit = QStringLiteral("MiB"));
 
     /// 저장된 조건으로 감시 폴더를 즉시 읽어 제안 여부를 판단하는 함수.
     Q_INVOKABLE void checkNow();

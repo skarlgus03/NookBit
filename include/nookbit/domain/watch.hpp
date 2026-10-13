@@ -9,13 +9,23 @@
 
 namespace nookbit {
 
-enum class WatchConditionType { FileCount, TotalSizeMiB, OldestAgeMinutes };
+enum class WatchConditionType { FileCount, TotalSizeMiB, OldestAgeMinutes, TotalSize = TotalSizeMiB };
 enum class WatchCombination { All, Any };
 
 struct WatchCondition {
     WatchConditionType type{WatchConditionType::FileCount};
     int threshold{1};
+    std::string sizeUnit{"MiB"}; // 기존 설정은 단위 필드 없이 MiB로 해석한다.
 };
+
+// 지원하는 전체 크기 단위의 바이트 배수를 반환하고 잘못된 단위는 거부하는 함수.
+inline std::uint64_t watchSizeUnitBytes(const std::string& unit) {
+    if (unit == "KB") return 1000ULL;
+    if (unit == "MB") return 1000000ULL;
+    if (unit == "GB") return 1000000000ULL;
+    if (unit == "MiB") return 1048576ULL;
+    return 0;
+}
 
 struct WatchSettings {
     std::filesystem::path folder;

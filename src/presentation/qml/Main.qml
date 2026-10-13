@@ -147,7 +147,8 @@ ApplicationWindow {
         watchCountCheck.checked = watchController.countEnabled
         watchCountSpin.value = watchController.minimumFileCount
         watchSizeCheck.checked = watchController.sizeEnabled
-        watchSizeSpin.value = watchController.minimumTotalMiB
+        watchSizeSpin.value = watchController.minimumTotalSize
+        watchSizeUnit.currentIndex = watchSizeUnit.indexOfValue(watchController.totalSizeUnit)
         watchAgeCheck.checked = watchController.ageEnabled
         watchAgeSpin.value = watchController.minimumAgeMinutes
         watchExcludeField.text = watchController.excludePatterns
@@ -1421,7 +1422,7 @@ ApplicationWindow {
                             id: watchIntervalSpin
                             objectName: "watchIntervalSpin"
                             editable: true
-                            Layout.preferredWidth: 180
+                            Layout.preferredWidth: UiMetrics.numericInputWidth
                             from: 1
                             to: 1440
                             value: 30
@@ -1444,7 +1445,7 @@ ApplicationWindow {
                             id: watchCountSpin
                             objectName: "watchCountSpin"
                             editable: true
-                            Layout.preferredWidth: 180
+                            Layout.preferredWidth: UiMetrics.numericInputWidth
                             from: 1
                             to: 1000000
                             value: 20
@@ -1461,13 +1462,27 @@ ApplicationWindow {
                             id: watchSizeSpin
                             objectName: "watchSizeSpin"
                             editable: true
-                            Layout.preferredWidth: 180
+                            Layout.preferredWidth: UiMetrics.numericInputWidth
                             from: 1
                             to: 1000000
                             value: 100
                             enabled: watchSizeCheck.checked
                         }
-                        Label { text: qsTr("MiB 이상") }
+                        AppComboBox {
+                            id: watchSizeUnit
+                            objectName: "watchSizeUnitCombo"
+                            enabled: watchSizeCheck.checked
+                            model: [
+                                { text: "KB", value: "KB" },
+                                { text: "MB", value: "MB" },
+                                { text: "GB", value: "GB" },
+                                { text: "MiB", value: "MiB" }
+                            ]
+                            textRole: "text"
+                            valueRole: "value"
+                            currentIndex: 1
+                        }
+                        Label { text: qsTr("이상") }
                     }
                     RowLayout {
                         CheckBox {
@@ -1478,7 +1493,7 @@ ApplicationWindow {
                             id: watchAgeSpin
                             objectName: "watchAgeSpin"
                             editable: true
-                            Layout.preferredWidth: 180
+                            Layout.preferredWidth: UiMetrics.numericInputWidth
                             from: 1
                             to: 1000000
                             value: 60
@@ -1510,7 +1525,7 @@ ApplicationWindow {
                         watchCountCheck.checked, watchCountSpin.value,
                         watchSizeCheck.checked, watchSizeSpin.value,
                         watchAgeCheck.checked, watchAgeSpin.value,
-                        watchExcludeField.text)
+                        watchExcludeField.text, watchSizeUnit.currentValue)
                 }
                 AppButton {
                     text: qsTr("저장된 조건 지금 검사")

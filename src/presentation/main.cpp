@@ -245,8 +245,18 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                         << " value=" << spin->property("value").toInt() << Qt::endl;
                     return false;
                 }
+                // 둥근 증감 버튼을 실제로 눌러 키보드 입력과 같은 값을 조절하는지 검사한다.
+                auto* increase = spin->findChild<QQuickItem*>(QStringLiteral("spinIncreaseIndicator"));
+                auto* decrease = spin->findChild<QQuickItem*>(QStringLiteral("spinDecreaseIndicator"));
+                if (!increase || !decrease || increase->width() != metrics->property("numericStepSize").toInt()) return false;
+                click(increase);
+                if (spin->property("value").toInt() != 38) return false;
+                click(decrease);
+                if (spin->property("value").toInt() != 37) return false;
                 spin->setEnabled(wasEnabled);
             }
+            auto* sizeUnit = mainWindow->findChild<QObject*>(QStringLiteral("watchSizeUnitCombo"));
+            if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {

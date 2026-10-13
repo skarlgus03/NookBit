@@ -285,6 +285,23 @@ void testSnoozeAndCurrentCandidates() {
            "switching watched folders must cancel the old folder snooze");
 }
 
+// 화면에서 고른 크기 숫자·단위를 저장하고 다시 열어도 같은 값인지 검사하는 함수.
+void testSizeUnitSettings() {
+    QTemporaryDir directory;
+    nookbit::PendingFilesModel pending;
+    nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
+    nookbit::WatchController controller(pending, repository, evaluate, directory.path());
+    for (const auto* unit : {"KB", "MB", "GB", "MiB"}) {
+        controller.saveSettings(directory.path(), false, false, 10, false, false, 1, true, 37, false, 1, {}, QString::fromUtf8(unit));
+        nookbit::WatchController restored(pending, repository, evaluate, directory.path());
+        expect(restored.sizeEnabled() && restored.minimumTotalSize() == 37 && restored.totalSizeUnit() == QString::fromUtf8(unit),
+               "controller restores exact size number and selected unit");
+    }
+}
 } // namespace
 
 // 폴더 감시 컨트롤러 테스트를 실행하는 함수.
@@ -293,6 +310,7 @@ int main(int argc, char* argv[]) {
     testProposalAndPendingOnly();
     testReadinessRetryAndAcceptance();
     testSnoozeAndCurrentCandidates();
+    testSizeUnitSettings();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;

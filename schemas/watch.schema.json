@@ -18,8 +18,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["type", "threshold"],
+        "oneOf": [
+          { "properties": { "type": { "enum": ["file_count", "total_size_mib", "oldest_age_minutes"] } },
+            "not": { "required": ["unit"] } },
+          { "required": ["unit"], "properties": { "type": { "const": "total_size" } } }
+        ],
         "properties": {
-          "type": { "enum": ["file_count", "total_size_mib", "oldest_age_minutes"] },
+          "type": { "enum": ["file_count", "total_size_mib", "oldest_age_minutes", "total_size"] },
+          "unit": { "enum": ["KB", "MB", "GB", "MiB"] },
           "threshold": { "type": "integer", "minimum": 1, "maximum": 1000000 }
         }
       }

@@ -18,7 +18,8 @@ Result<WatchEvaluation> WatchEvaluator::evaluate(
     }
     std::set<WatchConditionType> seen;
     for (const auto& condition : settings.conditions) {
-        if (condition.threshold < 1 || !seen.insert(condition.type).second) {
+        if (condition.threshold < 1 || !seen.insert(condition.type).second ||
+            (condition.type == WatchConditionType::TotalSize && !watchSizeUnitBytes(condition.sizeUnit))) {
             return Result<WatchEvaluation>::failure({
                 "watch.condition_invalid", "Watch conditions must be positive and unique.",
             });
@@ -56,7 +57,7 @@ Result<WatchEvaluation> WatchEvaluator::evaluate(
             break;
         case WatchConditionType::TotalSizeMiB:
             conditionMet = evaluation.totalBytes >=
-                static_cast<std::uint64_t>(condition.threshold) * 1024ULL * 1024ULL;
+                static_cast<std::uint64_t>(condition.threshold) * watchSizeUnitBytes(condition.sizeUnit);
             break;
         case WatchConditionType::OldestAgeMinutes:
             conditionMet = evaluation.oldestAgeMinutes >= condition.threshold;
