@@ -42,7 +42,8 @@ ApplicationWindow {
         id: operationProgressPopup
         objectName: "operationProgressPopup"
         parent: extensionWindow.contentItem
-        visible: backgroundTasks.busy && extensionWindow.visible && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
+        visible: backgroundTasks.busy && extensionWindow.visible && !root.inlineRecoveryInspection
+                 && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
         modal: false
         dim: false
         focus: false
@@ -102,6 +103,8 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
+    // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
+    readonly property bool inlineRecoveryInspection: currentPage === 10 && backgroundTasks.busy && !backgroundTasks.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && fileSortPane.manualSortRequested
     // 확인을 인라인 화면으로 넘길 때 기존 대화상자를 닫되 승인 대기는 취소하지 않는 함수.
     onInlineSortConfirmationChanged: if (inlineSortConfirmation && sortConfirmation.visible) sortConfirmation.close()
@@ -439,7 +442,7 @@ ApplicationWindow {
         dark: root.editorDark
         // 파일 정리에서 요청한 규칙 편집 페이지를 연결 창에 표시하는 함수.
         onPageRequested: function(page) { root.currentPage = page }
-        onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
+        onRecoveryRequested: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() }
     }
     ScrollView {
         id: settingsScroll
@@ -474,7 +477,7 @@ ApplicationWindow {
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() } }
+                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() } }
             }
             SettingsSection {
                 Layout.fillWidth: true
@@ -564,8 +567,8 @@ ApplicationWindow {
                 visible: recoveryController.recoveryCases.length > 0
                 text: qsTr("중단 작업 확인")
                 onClicked: {
-                    recoveryController.refreshRecoveryCases()
                     recoveryDialog.open()
+                    recoveryController.refreshRecoveryCases()
                 }
             }
 
@@ -1790,8 +1793,26 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 text: recoveryController.recoveryMessage
+                visible: !root.inlineRecoveryInspection
                 wrapMode: Text.WordWrap
                 color: root.editorDark ? "#e5bf85" : "#9b5c23"
+            }
+            RowLayout {
+                objectName: "recoveryInspectionIndicator"
+                Layout.fillWidth: true
+                visible: root.inlineRecoveryInspection
+                spacing: UiMetrics.spaceControl
+                BusyIndicator {
+                    running: root.inlineRecoveryInspection
+                    Layout.preferredWidth: UiMetrics.iconSize
+                    Layout.preferredHeight: UiMetrics.iconSize
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("중단 작업 목록 확인 중… 파일은 변경하지 않아요.")
+                    color: root.mutedText
+                    wrapMode: Text.WordWrap
+                }
             }
             ScrollView {
                 id: recoveryScroll

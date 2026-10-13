@@ -48,6 +48,9 @@ centered in the extension content, and apply `operationVeilOpacity` to the white
 `inspectionVeil` theme role. The title area remains available for window movement.
 Recovery is extension page 10 with its own saved window size; its explicit action
 confirmation also belongs to that extension window, not the main window.
+Read-only recovery-list refresh uses an inline indicator instead of the shared
+white veil. Open the page before dispatching the inspection to avoid briefly
+activating the previous page's progress popup. Resume/rollback retain the popup.
 
 History row width/height use `historyListWidth` / `historyRowHeight`. Date headings
 use `textSectionTitle` / `groupTitleWeight`. The controller adds `dateGroup` and

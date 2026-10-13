@@ -438,26 +438,36 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
 static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
     auto* popup = root->findChild<QObject*>(QStringLiteral("operationProgressPopup"));
     auto* veil = root->findChild<QQuickItem*>(QStringLiteral("operationProgressVeil"));
+    auto* recoveryIndicator = root->findChild<QQuickItem*>(QStringLiteral("recoveryInspectionIndicator"));
     auto* drag = root->findChild<QQuickItem*>(QStringLiteral("homeWindowDragArea"));
     auto* menu = root->findChild<QQuickItem*>(QStringLiteral("homeNavigationMenu"));
-    if (!popup || !veil || !drag || !menu) return false;
-    for (const int page : {7, 4, 10, 0}) {
+    if (!popup || !veil || !recoveryIndicator || !drag || !menu) return false;
+    using Kind = nookbit::BackgroundTaskRunner::TaskKind;
+    struct BusyCase { int page; Kind kind; };
+    const BusyCase cases[] = {{7, Kind::Inspection}, {4, Kind::FileWork},
+        {10, Kind::Inspection}, {10, Kind::FileWork}, {0, Kind::FileWork}};
+    for (const auto& test : cases) {
+        const int page = test.page;
+        const bool inlineInspection = page == 10 && test.kind == Kind::Inspection;
+        const bool showPopup = page != 0 && !inlineInspection;
         root->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         const auto gate = std::make_shared<QSemaphore>();
         const auto finished = std::make_shared<bool>(false);
         // 화면 상태 검사를 기다리기만 하고 파일에 접근하지 않는 함수.
         if (!runner.submit(root, [gate] { gate->acquire(); return nookbit::Result<void>::success(); },
-                [finished](const auto&) { *finished = true; }, page == 7 ? nookbit::BackgroundTaskRunner::TaskKind::Inspection : nookbit::BackgroundTaskRunner::TaskKind::FileWork)) return false;
+                [finished](const auto&) { *finished = true; }, test.kind)) return false;
         QEventLoop frame;
         QTimer::singleShot(40, &frame, &QEventLoop::quit);
         frame.exec();
         auto* content = qobject_cast<QQuickItem*>(popup->property("contentItem").value<QObject*>());
         const bool valid = drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
             && !popup->property("modal").toBool()
-            && popup->property("visible").toBool() == (page != 0)
-            && veil->isVisible() == (page != 0)
-            && (page == 0 || (content && content->window() == extension && veil->window() == extension
+            && popup->property("visible").toBool() == showPopup
+            && veil->isVisible() == showPopup
+            && recoveryIndicator->isVisible() == inlineInspection
+            && (!inlineInspection || recoveryIndicator->window() == extension)
+            && (!showPopup || (content && content->window() == extension && veil->window() == extension
                 && veil->property("color").value<QColor>() == QColor(Qt::white)
                 && std::abs(popup->property("x").toDouble() + popup->property("width").toDouble() / 2 - extension->width() / 2.0) < 1
                 && std::abs(popup->property("y").toDouble() + popup->property("height").toDouble() / 2
@@ -465,7 +475,7 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
         gate->release();
         QTimer::singleShot(150, &frame, &QEventLoop::quit);
         frame.exec();
-        if (!valid || !*finished || runner.busy() || veil->isVisible()) return false;
+        if (!valid || !*finished || runner.busy() || veil->isVisible() || recoveryIndicator->isVisible()) return false;
     }
     return true;
 }

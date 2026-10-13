@@ -8,6 +8,11 @@ The main window and desktop are not dimmed or blocked by this panel. Both the
 white color and veil opacity use shared theme/metrics tokens. Manual sorting's
 execution phase retains its inline progress page instead of showing two panels.
 
+Read-only recovery-list inspection is an exception: open the recovery page first,
+then refresh its list and show a small inline spinner/message. Neither the shared
+panel nor white veil is shown for that inspection. Explicit resume/rollback still
+uses the shared file-work progress display; approval and inspection are unchanged.
+
 ## Backend contract and lifetime
 
 `include/nookbit/application/operation_progress.hpp` contains a Qt-independent phase enum and value snapshot. `OperationProgressScope` connects a sink for exactly one worker request, restoring any outer scope on destruction. Its active pointer is thread-local request context, not a shared file/DB manager or a global operation result. Without an active observer, backend reports are no-ops. Other threads cannot publish into that request. Future consumers such as a character renderer can receive the same snapshots without being referenced by the file/approval engine.
