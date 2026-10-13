@@ -38,6 +38,9 @@ QtObject {
     readonly property int confirmationContentHeight: 480
     readonly property int operationPopupWidth: 440
     readonly property int operationPopupHeight: 200
+    readonly property real operationVeilOpacity: 0.72
+    readonly property int historyListWidth: 300
+    readonly property int historyRowHeight: 112
     readonly property int windowButtonSize: 32
     readonly property int iconButtonSize: 32
     readonly property int buttonMinWidth: 80
@@ -82,7 +85,8 @@ QtObject {
         {width: 520, height: 360, minWidth: 460, minHeight: 280},
         {width: 720, height: 680, minWidth: 640, minHeight: 580},
         {width: 560, height: 520, minWidth: 500, minHeight: 520},
-        {width: 960, height: 760, minWidth: 860, minHeight: 680}
+        {width: 960, height: 760, minWidth: 860, minHeight: 680},
+        {width: 860, height: 700, minWidth: 720, minHeight: 540}
     ]
 
     // 규칙 캔버스의 글씨·블록 크기는 독립적인 표시 프리셋으로 관리한다.

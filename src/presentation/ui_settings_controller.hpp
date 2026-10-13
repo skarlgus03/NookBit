@@ -53,6 +53,7 @@ private:
         case 7: return QStringLiteral("windows/fileSort/size");
         case 8: return QStringLiteral("windows/settings/size");
         case 9: return QStringLiteral("windows/developerTools/size");
+        case 10: return QStringLiteral("windows/recovery/size");
         default: return {};
         }
     }

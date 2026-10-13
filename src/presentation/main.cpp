@@ -131,11 +131,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9}) {
+    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
-        const int expectedMenu = (page == 3 || page == 5 || page == 6 || page == 8 || page == 9) ? 8 : page;
+        const int expectedMenu = (page == 3 || page == 5 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
             auto* ruleTestButton = rules->findChild<QQuickItem*>(QStringLiteral("ruleTestButton"));
@@ -209,6 +209,32 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             QMetaObject::invokeMethod(unit, "activated", Q_ARG(int, 2));
             const auto selected = rules->property("selectedBlock").value<QJSValue>();
             if (selected.property("comparison").toString() != "atLeast" || selected.property("unit").toString() != "GB") return false;
+        }
+        if (page == 4) {
+            auto* list = mainWindow->findChild<QQuickItem*>(QStringLiteral("historyList"));
+            if (!list) return false;
+            const auto originalModel = list->property("model");
+            QVariantList entries;
+            for (int row = 0; row < 3; ++row) {
+                entries.append(QVariantMap{{"planId", QString::number(row)}, {"time", "12:00"},
+                    {"status", QStringLiteral("이동 완료")}, {"fileCount", 1}, {"appliedCount", 1},
+                    {"dateGroup", row < 2 ? QStringLiteral("오늘") : QStringLiteral("어제")},
+                    {"startsDateGroup", row != 1}});
+            }
+            list->setProperty("model", entries);
+            QEventLoop historyFrame;
+            QTimer::singleShot(40, &historyFrame, &QEventLoop::quit);
+            historyFrame.exec();
+            QStringList headings;
+            // 화면 트리에서 같은 날짜의 중복 제목 없이 실제 표시된 제목을 찾는 함수.
+            const auto collectHeadings = [&headings](auto&& self, QQuickItem* item) -> void {
+                if (item->objectName() == QStringLiteral("historyDateHeading") && item->isVisible())
+                    headings.append(item->property("text").toString());
+                for (auto* child : item->childItems()) self(self, child);
+            };
+            collectHeadings(collectHeadings, list);
+            list->setProperty("model", originalModel);
+            if (headings != QStringList{QStringLiteral("오늘"), QStringLiteral("어제")}) return false;
         }
         if (page == 8) {
             auto* themeSwitch = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalDarkModeSwitch"));
@@ -411,10 +437,11 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
 // 무파일 작업으로 검사·되돌리기 표시가 서브창에 속하고 제목 이동은 잠기지 않는지 검사하는 함수.
 static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
     auto* popup = root->findChild<QObject*>(QStringLiteral("operationProgressPopup"));
+    auto* veil = root->findChild<QQuickItem*>(QStringLiteral("operationProgressVeil"));
     auto* drag = root->findChild<QQuickItem*>(QStringLiteral("homeWindowDragArea"));
     auto* menu = root->findChild<QQuickItem*>(QStringLiteral("homeNavigationMenu"));
-    if (!popup || !drag || !menu) return false;
-    for (const int page : {7, 4, 0}) {
+    if (!popup || !veil || !drag || !menu) return false;
+    for (const int page : {7, 4, 10, 0}) {
         root->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         const auto gate = std::make_shared<QSemaphore>();
@@ -429,11 +456,16 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
         const bool valid = drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
             && !popup->property("modal").toBool()
             && popup->property("visible").toBool() == (page != 0)
-            && (page == 0 || (content && content->window() == extension));
+            && veil->isVisible() == (page != 0)
+            && (page == 0 || (content && content->window() == extension && veil->window() == extension
+                && veil->property("color").value<QColor>() == QColor(Qt::white)
+                && std::abs(popup->property("x").toDouble() + popup->property("width").toDouble() / 2 - extension->width() / 2.0) < 1
+                && std::abs(popup->property("y").toDouble() + popup->property("height").toDouble() / 2
+                    - (veil->mapToScene(QPointF()).y() + veil->height() / 2)) < 1));
         gate->release();
         QTimer::singleShot(150, &frame, &QEventLoop::quit);
         frame.exec();
-        if (!valid || !*finished || runner.busy()) return false;
+        if (!valid || !*finished || runner.busy() || veil->isVisible()) return false;
     }
     return true;
 }
@@ -1038,6 +1070,32 @@ int main(int argc, char* argv[]) {
                 QCoreApplication::processEvents();
                 auto* filePage = window->findChild<QQuickItem*>(QStringLiteral("fileSortPage"));
                 checkLayout(filePage && filePage->isVisible() && filePage->window() == extension, "file sorting is a separate page");
+                // 파일 정리의 중단 작업 요청이 서브창 본문과 그 창의 확인 대화상자로 이어지는지 검사한다.
+                QMetaObject::invokeMethod(filePage, "recoveryRequested");
+                QCoreApplication::processEvents();
+                // 읽기 전용 중단 검사 완료를 기다린 뒤 다른 화면 입력을 시험하는 함수.
+                QEventLoop recoveryInspection;
+                QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged, &recoveryInspection,
+                    [&] { if (!backgroundTasks.busy()) recoveryInspection.quit(); });
+                QTimer::singleShot(5000, &recoveryInspection, &QEventLoop::quit);
+                if (backgroundTasks.busy()) recoveryInspection.exec();
+                checkLayout(!backgroundTasks.busy(), "read-only recovery inspection completed");
+                auto* recoveryPage = window->findChild<QQuickItem*>(QStringLiteral("recoveryDialog"));
+                auto* recoveryConfirm = window->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
+                checkLayout(window->property("currentPage").toInt() == 10 && recoveryPage
+                    && recoveryPage->isVisible() && recoveryPage->window() == extension, "recovery is a subwindow page");
+                if (recoveryConfirm) {
+                    QMetaObject::invokeMethod(recoveryConfirm, "open");
+                    QCoreApplication::processEvents();
+                    auto* content = qobject_cast<QQuickItem*>(recoveryConfirm->property("contentItem").value<QObject*>());
+                    checkLayout(content && content->window() == extension, "recovery confirmation belongs to subwindow");
+                    QMetaObject::invokeMethod(recoveryConfirm, "close");
+                } else checkLayout(false, "recovery confirmation exists");
+                window->setProperty("currentPage", 7);
+                // 복원된 창 크기에 맞춰 드롭 영역의 실제 레이아웃 프레임을 갱신한다.
+                QEventLoop restoredLayout;
+                QTimer::singleShot(40, &restoredLayout, &QEventLoop::quit);
+                restoredLayout.exec();
                 checkLayout(verifyPageFileDrop(extension, filePage, pendingFiles), "whole-page drop and file icon");
                 auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
                 checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");

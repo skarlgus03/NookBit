@@ -39,6 +39,7 @@ ApplicationWindow {
         }
     }
     Popup {
+        id: operationProgressPopup
         objectName: "operationProgressPopup"
         parent: extensionWindow.contentItem
         visible: backgroundTasks.busy && extensionWindow.visible && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
@@ -47,14 +48,14 @@ ApplicationWindow {
         focus: false
         closePolicy: Popup.NoAutoClose
         x: (parent.width - width) / 2
-        y: parent.height - height - 24
+        y: extensionHost.y + (extensionHost.height - height) / 2
         width: Math.min(UiMetrics.operationPopupWidth, parent.width - UiMetrics.pageInset * 2)
         height: UiMetrics.operationPopupHeight
         padding: UiMetrics.spaceCompact
         background: Rectangle {
             radius: UiMetrics.radiusCard
-            color: root.editorDark ? "#243044" : "#edf4ef"
-            border.color: root.editorDark ? "#617a9c" : "#739b83"
+            color: root.theme.surface
+            border.color: root.theme.border
         }
         contentItem: ColumnLayout {
             spacing: UiMetrics.spaceSmall
@@ -110,8 +111,10 @@ ApplicationWindow {
         // 예전 독립 미리보기 번호는 파일 정리로 돌려 빈 페이지를 만들지 않는다.
         if (currentPage === 2) { currentPage = 7; return }
         if (currentPage !== 3) watchDialog.close()
-        if (currentPage !== 4) historyDialog.close()
+        if (currentPage !== 4) { historyDialog.close(); undoHistoryDialog.close() }
         if (currentPage !== 5) characterSettingsDialog.close()
+        if (currentPage !== 10 && recoveryController.awaitingRecoveryConfirmation)
+            recoveryController.cancelRecoveryChoice()
     }
     property string selectedRulePath: ""
     property var selectedRuleDetail: ({})
@@ -377,11 +380,11 @@ ApplicationWindow {
             anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
-                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("캐릭터 설정"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정")][root.currentPage] || qsTr("개발 도구")
+                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("캐릭터 설정"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인")][root.currentPage]
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 5, 6].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 5, 6, 10].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
         }
     }
@@ -394,6 +397,16 @@ ApplicationWindow {
         visible: root.currentPage !== 0
         clip: true
         z: 1
+    }
+    // 검사·되돌리기 진행 표시는 서브창 본문만 밝게 덮고 창 이동 영역은 남긴다.
+    Rectangle {
+        objectName: "operationProgressVeil"
+        parent: extensionWindow.contentItem
+        anchors.fill: extensionHost
+        visible: operationProgressPopup.visible
+        color: root.theme.inspectionVeil
+        opacity: UiMetrics.operationVeilOpacity
+        z: 90
     }
     Shortcut {
         sequence: "Ctrl+Shift+D"
@@ -1622,38 +1635,52 @@ ApplicationWindow {
 
                 ListView {
                     id: historyList
-                    Layout.preferredWidth: 280
+                    objectName: "historyList"
+                    Layout.preferredWidth: UiMetrics.historyListWidth
                     Layout.fillHeight: true
                     clip: true
                     spacing: UiMetrics.spaceSmall
                     model: historyController.historyEntries
-                    delegate: Rectangle {
+                    delegate: Column {
                         required property var modelData
                         width: historyList.width
-                        height: 100
-                        radius: UiMetrics.radiusControl
-                        color: modelData.planId === historyController.selectedHistoryPlanId
-                               ? (root.editorDark ? "#304438" : "#e8f4e5") : (root.editorDark ? "#242d3b" : "#f7f9f6")
-                        border.color: root.borderColor
+                        spacing: UiMetrics.spaceControl
+                        Label {
+                            objectName: "historyDateHeading"
+                            visible: modelData.startsDateGroup
+                            height: visible ? implicitHeight : 0
+                            text: modelData.dateGroup
+                            color: root.primaryText
+                            font.pixelSize: UiMetrics.textSectionTitle
+                            font.weight: UiMetrics.groupTitleWeight
+                        }
+                        Rectangle {
+                            width: parent.width
+                            height: UiMetrics.historyRowHeight
+                            radius: UiMetrics.radiusControl
+                            color: modelData.planId === historyController.selectedHistoryPlanId
+                                   ? root.theme.menuSelected : root.theme.alternate
+                            border.color: root.borderColor
 
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 9
-                            spacing: UiMetrics.spaceTiny
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.time + " · " + modelData.status
-                                font.bold: true
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                text: qsTr("대상 %1개 · 현재 이동됨 %2개")
-                                      .arg(modelData.fileCount).arg(modelData.appliedCount)
-                                color: root.mutedText
-                            }
-                            AppButton {
-                                text: qsTr("파일 보기")
-                                onClicked: historyController.selectHistoryPlan(modelData.planId)
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: UiMetrics.spaceCompact
+                                spacing: UiMetrics.spaceTiny
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.time + " · " + modelData.status
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    text: qsTr("대상 %1개 · 현재 이동됨 %2개")
+                                          .arg(modelData.fileCount).arg(modelData.appliedCount)
+                                    color: root.mutedText
+                                }
+                                AppButton {
+                                    text: qsTr("파일 보기")
+                                    onClicked: historyController.selectHistoryPlan(modelData.planId)
+                                }
                             }
                         }
                     }
@@ -1721,8 +1748,9 @@ ApplicationWindow {
     Dialog {
         enabled: !backgroundTasks.busy
         id: undoHistoryDialog
+        parent: extensionWindow.contentItem
         anchors.centerIn: parent
-        width: Math.min(root.width - 80, 480)
+        width: Math.min(parent.width - UiMetrics.pageInset * 2, UiMetrics.confirmationContentWidth)
         modal: true
         title: qsTr("선택한 작업 되돌리기")
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -1737,16 +1765,13 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
-        enabled: !backgroundTasks.busy
+    EmbeddedPage {
         id: recoveryDialog
         objectName: "recoveryDialog"
-        anchors.centerIn: parent
-        width: Math.min(root.width - 32, 760)
-        height: Math.min(root.height - 32, 560)
-        modal: true
-        title: qsTr("중단 작업 확인")
-        standardButtons: Dialog.Close
+        parent: extensionHost
+        pageIndex: 10
+        anchors.fill: parent
+        anchors.margins: UiMetrics.pageInset
 
         ColumnLayout {
             anchors.fill: parent
@@ -1878,8 +1903,9 @@ ApplicationWindow {
         enabled: !backgroundTasks.busy
         id: recoveryConfirmDialog
         objectName: "recoveryConfirmDialog"
+        parent: extensionWindow.contentItem
         anchors.centerIn: parent
-        width: Math.min(root.width - 32, 560)
+        width: Math.min(parent.width - UiMetrics.pageInset * 2, UiMetrics.confirmationContentWidth)
         modal: true
         title: qsTr("중단 작업 실행 확인")
         standardButtons: Dialog.Ok | Dialog.Cancel

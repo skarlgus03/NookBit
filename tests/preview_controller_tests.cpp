@@ -2,6 +2,7 @@
 #include "presentation/preview_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "presentation/history_controller.hpp"
+#include "presentation/history_date_group.hpp"
 #include "presentation/recovery_controller.hpp"
 #include "presentation/watch_controller.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
@@ -1305,6 +1306,28 @@ void testMultipleFilesCanBeMoved() {
            "multi-file undo should restore both files");
 }
 
+// 현지 자정·월요일·연도 경계에서도 기록 날짜 분류가 일관적인지 검사하는 함수.
+void testHistoryDateGroups() {
+    const QDate today(2026, 10, 15);
+    // 사용자 현지 날짜로 만든 시각을 UTC 저장 형식으로 전달하는 함수.
+    const auto group = [](const QDate& date, const QDate& reference) {
+        return nookbit::historyDateGroup(QDateTime(date, QTime(12, 0)).toUTC(), reference);
+    };
+    expect(group(today, today) == QStringLiteral("오늘"), "local today");
+    expect(group(today.addDays(-1), today) == QStringLiteral("어제"), "local yesterday");
+    expect(group(QDate(2026, 10, 12), today) == QStringLiteral("이번 주"), "Monday belongs to this week");
+    expect(group(QDate(2026, 10, 11), today) == QStringLiteral("지난주"), "Sunday belongs to last week");
+    expect(group(QDate(2026, 10, 5), today) == QStringLiteral("지난주"), "previous Monday belongs to last week");
+    expect(group(QDate(2026, 10, 4), today) == QStringLiteral("이전 기록"), "older records");
+    expect(group(QDate(2026, 10, 11), QDate(2026, 10, 12)) == QStringLiteral("어제"), "yesterday wins across week boundary");
+    expect(group(QDate(2025, 12, 29), QDate(2026, 1, 1)) == QStringLiteral("이번 주"), "week spans year boundary");
+    expect(group(QDate(2025, 12, 28), QDate(2026, 1, 1)) == QStringLiteral("지난주"), "last week spans year boundary");
+    expect(nookbit::historyDateGroup(QDateTime(today, QTime(0, 15)).toUTC(), today) == QStringLiteral("오늘"), "UTC storage keeps local midnight");
+    expect(nookbit::historyDateGroup(QDateTime(today.addDays(-1), QTime(23, 45)).toUTC(), today) == QStringLiteral("어제"), "UTC storage keeps previous local night");
+    expect(group(today.addDays(1), today) == QStringLiteral("날짜 확인 필요"), "future timestamps are not today's records");
+    expect(nookbit::historyDateGroup({}, today) == QStringLiteral("날짜 정보 없음"), "invalid timestamp has explicit group");
+}
+
 // 기록에서 마지막 이동을 되돌리면 계획 화면의 되돌리기 버튼도 꺼지는지 검사하는 함수.
 void testHistoryUndoUpdatesLastMove() {
 #ifdef _WIN32
@@ -1337,6 +1360,9 @@ void testHistoryUndoUpdatesLastMove() {
     expect(preview.canUndo(), "last move should offer undo before history rollback");
     history.refreshHistory();
     if (history.historyEntries().isEmpty()) return;
+    const auto row = history.historyEntries().front().toMap();
+    expect(row.value("dateGroup").toString() == QStringLiteral("오늘") && row.value("startsDateGroup").toBool(),
+           "controller keeps plan rows and attaches date heading metadata");
     history.selectHistoryPlan(history.historyEntries().front().toMap()
                                   .value(QStringLiteral("planId")).toString());
     history.undoSelectedHistory();
@@ -1885,6 +1911,7 @@ int main(int argc, char* argv[]) {
     testSingleFileApproveMoveUndo();
     testMultipleFilesCanBeMoved();
     testHistoryUndoUpdatesLastMove();
+    testHistoryDateGroups();
     testHistoryUndoAfterRestart();
     testRecoveryCasesInController();
     testV2StartupRecoveryNotice();

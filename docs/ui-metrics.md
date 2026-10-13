@@ -41,6 +41,22 @@ Pending rows use `filePreviewSize` (48 px), with a `fileRowHeight` of 64 px. The
 
 The underlying icon provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, without reading real-file content. It caches at most 128 file types and falls back to a generic document icon. Core file classification and movement are not involved. Dragging files over the page shows a translucent white veil and a readable centered instruction; it does not alter the ordinary button hover style.
 
+## Progress, recovery and history pages
+
+Inspection/undo panels use `operationPopupWidth` / `operationPopupHeight`, are
+centered in the extension content, and apply `operationVeilOpacity` to the white
+`inspectionVeil` theme role. The title area remains available for window movement.
+Recovery is extension page 10 with its own saved window size; its explicit action
+confirmation also belongs to that extension window, not the main window.
+
+History row width/height use `historyListWidth` / `historyRowHeight`. Date headings
+use `textSectionTitle` / `groupTitleWeight`. The controller adds `dateGroup` and
+`startsDateGroup` to existing plan rows; it does not insert fake records or change
+database schemas, plan IDs, selection or undo contracts. Grouping uses the last
+activity timestamp converted to local time: today, yesterday, this calendar week,
+last calendar week (Monday start), then older records. Invalid/future dates have
+explicit fallback labels. Refresh recalculates the headings, including after undo.
+
 ## Deliberate exceptions
 
 Not every number is a design token. Window positioning and sizes, canvas coordinates, hit testing, image crop rectangles, animation timing, and ImagePack pivots/scales are feature geometry or data, not shared control metrics. Do not mechanically replace these with unrelated spacing tokens. Character drawing proportions also remain local.

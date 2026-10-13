@@ -1,4 +1,5 @@
 #include "presentation/history_controller.hpp"
+#include "presentation/history_date_group.hpp"
 
 
 #include <QDateTime>
@@ -90,10 +91,16 @@ void HistoryController::refreshHistory() {
         emit historyChanged();
         return;
     }
+    const auto today = QDate::currentDate();
+    QString previousGroup;
     for (const auto& entry : result.value()) {
         const auto utc = QDateTime::fromString(
             QString::fromStdString(entry.lastActivityUtc), Qt::ISODateWithMs);
         QVariantMap row;
+        const auto group = historyDateGroup(utc, today);
+        row.insert(QStringLiteral("dateGroup"), group);
+        row.insert(QStringLiteral("startsDateGroup"), group != previousGroup);
+        previousGroup = group;
         row.insert(QStringLiteral("planId"), QString::fromStdString(entry.id));
         row.insert(QStringLiteral("time"), utc.isValid()
             ? utc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd hh:mm"))

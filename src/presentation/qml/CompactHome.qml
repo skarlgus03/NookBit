@@ -10,7 +10,7 @@ Rectangle {
     property bool dark: false
     property bool navigationEnabled: true
     property int currentPage: 0
-    readonly property int selectedPage: [3, 5, 6, 8, 9].includes(currentPage) ? 8 : currentPage
+    readonly property int selectedPage: [3, 5, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
     signal pageRequested(int page)
     signal historyRequested()
     signal moveRequested()

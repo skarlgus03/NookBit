@@ -1,6 +1,12 @@
 # Operation progress
 
-The background operation panel now shows the current processing phase, current filename, file position/count, durably completed file count, and current-file copy bytes/percentage. The rest of the application remains input-disabled during file operations and closing is still prevented while work is active. No cancel button or estimated time remaining was added.
+The background operation panel shows the current processing phase, current filename, file position/count, durably completed file count, and current-file copy bytes/percentage. Navigation and conflicting operations remain input-disabled while work is active, but the window title area stays movable. No cancel button or estimated time remaining was added.
+
+Preparation and undo use a non-modal panel centered over the extension window's
+content area, with a translucent white veil confined to that content area.
+The main window and desktop are not dimmed or blocked by this panel. Both the
+white color and veil opacity use shared theme/metrics tokens. Manual sorting's
+execution phase retains its inline progress page instead of showing two panels.
 
 ## Backend contract and lifetime
 
