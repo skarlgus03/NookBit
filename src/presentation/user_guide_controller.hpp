@@ -3,9 +3,11 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QUrl>
+#include <QDir>
+#include <QStandardPaths>
 
 namespace nookbit {
-/// 사용자 안내 문서를 내장 리소스에서 읽고 사용자가 선택한 파일로 저장하는 표시 창구.
+/// 규칙 AI 작성 계약과 캐릭터 제작 규격을 내장 리소스에서 내보내는 표시 창구.
 class UserGuideController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
@@ -14,9 +16,16 @@ public:
     explicit UserGuideController(QObject* parent = nullptr) : QObject(parent) {}
     /// 최근 문서 저장 오류를 반환하는 함수.
     QString error() const { return error_; }
+    /// 저장 창에 제안할 문서 이름과 기본 폴더를 반환하는 함수.
+    Q_INVOKABLE QUrl suggestedFile(const QString& kind) const {
+        const auto name = kind == "rules" ? QStringLiteral("NookBit-Rules-AI.md") : QStringLiteral("NookBit-CharacterPack-Guide.md");
+        return QUrl::fromLocalFile(QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(name));
+    }
     /// 지정한 사용자 가이드의 Markdown 본문을 반환하는 함수.
     Q_INVOKABLE QString text(const QString& kind) const {
-        QFile file(resourcePath(kind));
+        const auto path = resourcePath(kind);
+        if (path.isEmpty()) return {};
+        QFile file(path);
         return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
     }
     /// 사용자가 저장 창에서 지정한 로컬 파일에 문서를 안전하게 저장하는 함수.
@@ -39,7 +48,7 @@ signals:
 private:
     /// 임의 파일 접근 없이 두 사용자 가이드만 읽도록 리소스 경로를 고르는 함수.
     static QString resourcePath(const QString& kind) {
-        if (kind == "rules") return QStringLiteral(":/nookbit/guides/rules.ko.md");
+        if (kind == "rules") return QStringLiteral(":/nookbit/guides/rules-ai.md");
         if (kind == "character") return QStringLiteral(":/nookbit/guides/character.ko.md");
         return {};
     }

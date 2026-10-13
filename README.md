@@ -1,8 +1,9 @@
 # NookBit
 
-사용자 안내: [분류 규칙 사용 가이드](docs/user/rules-guide.ko.md) ·
-[캐릭터팩 사용·제작 가이드](docs/user/character-pack-guide.ko.md).
-앱의 규칙 편집기와 캐릭터 설정에서도 바로 읽고 Markdown 문서로 저장할 수 있다.
+제작 문서: [AI용 분류 규칙 작성 계약](docs/ai-rule-authoring-v3.md) ·
+[캐릭터팩 제작 가이드](docs/user/character-pack-guide.ko.md).
+앱의 규칙 편집기와 캐릭터 설정에서 각각 Markdown 파일로 바로 저장할 수 있다.
+일반 규칙 조작 안내는 [분류 규칙 사용 가이드](docs/user/rules-guide.ko.md)에 별도로 보관한다.
 
 NookBit은 사용자가 끌어놓은 파일을 규칙에 따라 정리하는 Windows 데스크톱 앱이다. 파일을 대기 목록에 넣고, 분류 결과를 미리 본 뒤, 계획을 저장·승인해야 실제 이동이 시작된다. 폴더 감시는 조건이 맞을 때 정리를 **제안**하며 자동으로 파일을 옮기지 않는다.
 

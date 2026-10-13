@@ -929,12 +929,11 @@ ApplicationWindow {
         onAccepted: characterSettings.importFolder(selectedFolder)
     }
 
-    UserGuideDialog {
-        id: characterUserGuide
-        objectName: "characterUserGuide"
+    GuideDownload {
+        id: characterGuideDownload
+        objectName: "characterGuideDownload"
         parent: extensionHost
         guideKey: "character"
-        dark: root.editorDark
     }
 
     EmbeddedPage {
@@ -950,8 +949,14 @@ ApplicationWindow {
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
             AppButton {
                 objectName: "characterUserGuideButton"
-                text: qsTr("사용·제작 가이드")
-                onClicked: characterUserGuide.open()
+                text: qsTr("제작 가이드 저장…")
+                onClicked: characterGuideDownload.saveDocument()
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: characterGuideDownload.status !== ""
+                text: characterGuideDownload.status
+                wrapMode: Text.Wrap
             }
             CheckBox {
                 text: qsTr("캐릭터를 앱 밖에 표시")

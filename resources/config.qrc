@@ -1,7 +1,7 @@
 <RCC>
   <qresource prefix="/nookbit">
     <file alias="icons/nookbit.ico">icons/nookbit.ico</file>
-    <file alias="guides/rules.ko.md">../docs/user/rules-guide.ko.md</file>
+    <file alias="guides/rules-ai.md">../docs/ai-rule-authoring-v3.md</file>
     <file alias="guides/character.ko.md">../docs/user/character-pack-guide.ko.md</file>
     <file alias="character.presentation.json">character/default.presentation.json</file>
     <file alias="sprites/test-character.png">character/sprites/test-character.png</file>

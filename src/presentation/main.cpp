@@ -150,13 +150,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 return false;
             }
             QMetaObject::invokeMethod(testPanel, "close");
-            // 규칙 가이드 버튼으로 실제 읽기 창이 열리고 닫히는지 검사한다.
+            // 규칙 문서 버튼이 읽기 창 대신 직접 저장 창구에 연결되는지 검사한다.
             auto* guideButton = rules->findChild<QQuickItem*>(QStringLiteral("rulesUserGuideButton"));
-            auto* guide = rules->findChild<QObject*>(QStringLiteral("rulesUserGuide"));
-            if (!guideButton || !guide) return false;
-            click(guideButton);
-            if (!guide->property("opened").toBool()) return false;
-            QMetaObject::invokeMethod(guide, "close");
+            auto* guide = rules->findChild<QObject*>(QStringLiteral("rulesGuideDownload"));
+            if (!guideButton || !guide || guide->property("guideKey").toString() != "rules" ||
+                !guide->findChild<QObject*>(QStringLiteral("guideSaveDialog"))) return false;
             // 추가 메뉴가 조건·분기·종착점을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
             const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
             if (groups.size() != 3) return false;
@@ -1079,12 +1077,12 @@ int main(int argc, char* argv[]) {
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
         auto* characterBubble = desktopCharacter
             ? desktopCharacter->findChild<QQuickWindow*>(QStringLiteral("characterBubbleWindow")) : nullptr;
-        // 인터넷 없이 캐릭터 안내 문서를 표시하는 창의 열기·닫기를 검사한다.
+        // 인터넷 없이 두 제작 문서를 읽고 직접 저장 창구로 제공하는지 검사한다.
         auto* characterGuide = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterUserGuide"));
+            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterGuideDownload"));
         const bool guideReady = !userGuides.text("rules").isEmpty() && !userGuides.text("character").isEmpty() &&
-            characterGuide && QMetaObject::invokeMethod(characterGuide, "open") &&
-            characterGuide->property("opened").toBool() && QMetaObject::invokeMethod(characterGuide, "close");
+            characterGuide && characterGuide->property("guideKey").toString() == "character" &&
+            characterGuide->findChild<QObject*>(QStringLiteral("guideSaveDialog"));
         const bool ready = guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&

@@ -161,7 +161,7 @@ if(NOOKBIT_BUILD_QT_APP)
       QML_FILES
         presentation/qml/Main.qml
         presentation/qml/UiMetrics.qml
-        presentation/qml/UserGuideDialog.qml
+        presentation/qml/GuideDownload.qml
         presentation/qml/AppButton.qml
         presentation/qml/LargeActionButton.qml
         presentation/qml/BackButton.qml

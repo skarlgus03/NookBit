@@ -244,12 +244,11 @@ Item {
 
     Component.onCompleted: loadGraphFromDraft()
 
-    UserGuideDialog {
-        id: rulesUserGuide
-        objectName: "rulesUserGuide"
+    GuideDownload {
+        id: rulesGuideDownload
+        objectName: "rulesGuideDownload"
         parent: page
         guideKey: "rules"
-        dark: page.darkMode
     }
 
     FolderDialog {
@@ -982,8 +981,8 @@ Item {
             }
             ThemeButton {
                 objectName: "rulesUserGuideButton"
-                text: qsTr("사용 가이드")
-                onClicked: rulesUserGuide.open()
+                text: qsTr("AI용 작성 문서 저장…")
+                onClicked: rulesGuideDownload.saveDocument()
             }
             ThemeButton {
                 id: jsonFileButton
@@ -1013,6 +1012,13 @@ Item {
             Layout.fillWidth: true
             text: qsTr("캔버스에서 우클릭해 블록을 추가하고, 오른쪽 점에서 다음 블록의 왼쪽 점으로 선을 연결하세요.")
             color: page.mutedText
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: rulesGuideDownload.status !== ""
+            text: rulesGuideDownload.status
+            color: page.mutedText
+            wrapMode: Text.Wrap
         }
 
         Rectangle {
