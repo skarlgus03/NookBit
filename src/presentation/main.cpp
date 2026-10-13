@@ -216,6 +216,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!themeSwitch) return false;
             click(themeSwitch);
             if (mainWindow->property("editorDark").toBool() == initial || rules->property("darkMode").toBool() == initial) return false;
+            // 네이티브 메뉴와 QML 창이 같은 테마 색상표를 사용하는지 검사한다.
+            const auto themeColors = mainWindow->property("theme").value<QJSValue>().toVariant().toMap();
+            if (QGuiApplication::palette().color(QPalette::Window) != QColor(themeColors.value("window").toString()) ||
+                QGuiApplication::palette().color(QPalette::Text) != QColor(themeColors.value("text").toString())) return false;
             click(themeSwitch);
             if (mainWindow->property("editorDark").toBool() != initial) return false;
         }
@@ -547,26 +551,6 @@ int main(int argc, char* argv[]) {
     const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
     QSettings uiPreferences;
     nookbit::UiSettingsController uiSettings(uiPreferences, !verifyUi);
-    // 네이티브 트레이 메뉴도 앱의 밝기 선택을 따르도록 기본 팔레트를 갱신하는 함수.
-    const auto lightWidgetPalette = application.palette();
-    const auto applyWidgetTheme = [&application, &uiSettings, lightWidgetPalette] {
-        QPalette palette = lightWidgetPalette;
-        if (uiSettings.darkMode()) {
-            palette.setColor(QPalette::Window, QColor("#161a22"));
-            palette.setColor(QPalette::Base, QColor("#202633"));
-            palette.setColor(QPalette::AlternateBase, QColor("#242d3b"));
-            palette.setColor(QPalette::Button, QColor("#2b3546"));
-            for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
-                palette.setColor(role, QColor("#edf2f8"));
-                palette.setColor(QPalette::Disabled, role, QColor("#aab6c7"));
-            }
-            palette.setColor(QPalette::Highlight, QColor("#405e80"));
-            palette.setColor(QPalette::HighlightedText, Qt::white);
-        }
-        application.setPalette(palette);
-    };
-    QObject::connect(&uiSettings, &nookbit::UiSettingsController::darkModeChanged, &application, applyWidgetTheme);
-    applyWidgetTheme();
     const auto rememberedDestination = verifyUi
         ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
     const auto developmentDestination = QString::fromUtf8(NOOKBIT_DEV_DESTINATION_ROOT);
@@ -866,6 +850,31 @@ int main(int argc, char* argv[]) {
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;
+    auto* uiTheme = engine.singletonInstance<QObject*>("NookBit", "UiTheme");
+    if (!uiTheme) {
+        QTextStream(stderr) << "Cannot load shared UI theme." << Qt::endl;
+        return EXIT_FAILURE;
+    }
+    const auto lightWidgetPalette = application.palette();
+    // 네이티브 메뉴도 QML 공통 색상표에서 읽어 같은 테마를 적용하는 함수.
+    const auto applyWidgetTheme = [&application, &uiSettings, uiTheme, lightWidgetPalette] {
+        const auto colors = uiTheme->property(uiSettings.darkMode() ? "dark" : "light").value<QJSValue>().toVariant().toMap();
+        QPalette palette = lightWidgetPalette;
+        palette.setColor(QPalette::Window, QColor(colors.value("window").toString()));
+        palette.setColor(QPalette::Base, QColor(colors.value("surface").toString()));
+        palette.setColor(QPalette::AlternateBase, QColor(colors.value("alternate").toString()));
+        palette.setColor(QPalette::Button, QColor(colors.value("button").toString()));
+        palette.setColor(QPalette::Mid, QColor(colors.value("border").toString()));
+        for (const auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
+            palette.setColor(role, QColor(colors.value("text").toString()));
+            palette.setColor(QPalette::Disabled, role, QColor(colors.value("muted").toString()));
+        }
+        palette.setColor(QPalette::Highlight, QColor(colors.value("accent").toString()));
+        palette.setColor(QPalette::HighlightedText, QColor(colors.value("accentText").toString()));
+        application.setPalette(palette);
+    };
+    applyWidgetTheme();
+    QObject::connect(&uiSettings, &nookbit::UiSettingsController::darkModeChanged, &application, applyWidgetTheme);
     engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
     engine.addImageProvider(QStringLiteral("filepreviews"), new nookbit::FilePreviewProvider);
     // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.

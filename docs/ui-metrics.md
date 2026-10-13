@@ -2,6 +2,15 @@
 
 The source of truth is `src/presentation/qml/UiMetrics.qml`, a presentation-only QML singleton. Core services and use cases must not depend on it. The native application font also reads `textBody` from this singleton.
 
+Shared colors live separately in `UiTheme.qml`, with light/dark role maps for window,
+surface, text, muted text, borders, navigation and primary actions. Main's palette,
+settings sections, compact home/menu controls, primary buttons and native menus read
+these maps rather than defining their own hex values. App input controls inherit
+the common palette. Theme is presentation-only; no backend dependency is introduced.
+The contract test forbids inline hex colors in the migrated shared components.
+Specialized rule-node, character and legacy page/status colors are not yet fully
+migrated; this is intentionally not a claim that every visual color is centralized.
+
 `fontFamily` prefers installed Noto Sans KR; `fontFallback` is Malgun Gothic, followed by the platform's original default. No font files are bundled or downloaded. The application font is inherited by ordinary QML text and native menus/dialogs. `--verify-ui` reports the resolved family so a missing font is not mistaken for a successful substitution.
 
 ## Roles

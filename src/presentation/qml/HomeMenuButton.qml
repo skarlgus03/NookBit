@@ -7,7 +7,8 @@ AppButton {
     property bool dark: false
     property bool selected: false
     property string iconKind: "folder"
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
+    readonly property var theme: UiTheme.colors(dark)
+    readonly property color foreground: theme.text
     implicitHeight: UiMetrics.mainNavigationHeight
     leftPadding: UiMetrics.controlPadding
     rightPadding: UiMetrics.controlPadding
@@ -41,9 +42,9 @@ AppButton {
     }
     background: Rectangle {
         radius: UiMetrics.radiusControl
-        color: control.selected ? (control.dark ? "#2d3d55" : "#e6eef7") : "transparent"
+        color: control.selected ? control.theme.menuSelected : "transparent"
         border.width: UiMetrics.borderNormal
-        border.color: control.hovered || control.visualFocus ? "#7898bb" : control.dark ? "#3d4757" : "#d7dfe9"
+        border.color: control.hovered || control.visualFocus ? control.theme.menuFocus : control.theme.menuBorder
         Behavior on color { ColorAnimation { duration: UiMetrics.selectionFadeDuration } }
     }
 }

@@ -16,13 +16,13 @@ ColumnLayout {
             text: section.title
             font.pixelSize: UiMetrics.textSectionTitle
             font.weight: UiMetrics.groupTitleWeight
-            color: section.dark ? "#edf2f8" : "#27352b"
+            color: UiTheme.colors(section.dark).contentText
         },
         Rectangle {
             objectName: "settingsSectionDivider"
             Layout.fillWidth: true
             implicitHeight: UiMetrics.borderNormal
-            color: section.dark ? "#3d4757" : "#d9dfd8"
+            color: UiTheme.colors(section.dark).sectionBorder
         },
         ColumnLayout {
             id: body

@@ -16,10 +16,11 @@ Rectangle {
     signal moveRequested()
     signal minimizeRequested()
     signal closeRequested()
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
-    color: dark ? "#1b2230" : "#f5f7fa"
+    readonly property var theme: UiTheme.colors(dark)
+    readonly property color foreground: theme.text
+    color: theme.home
     radius: UiMetrics.radiusControl
-    border.color: dark ? "#3d4757" : "#e1e6ed"
+    border.color: theme.border
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.homeInset
@@ -62,7 +63,7 @@ Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
                         spacing: UiMetrics.spaceControl
-                        Label { visible: modelData.section.length > 0; text: modelData.section; color: home.dark ? "#aab6c7" : "#748091"; font.pixelSize: UiMetrics.textGroupTitle; font.weight: UiMetrics.groupTitleWeight }
+                        Label { visible: modelData.section.length > 0; text: modelData.section; color: home.theme.homeMuted; font.pixelSize: UiMetrics.textGroupTitle; font.weight: UiMetrics.groupTitleWeight }
                         HomeMenuButton {
                             objectName: "homeNavigation" + modelData.page
                             selected: home.selectedPage === modelData.page

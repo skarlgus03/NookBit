@@ -119,20 +119,21 @@ ApplicationWindow {
     property bool ruleFormDirty: false
     property bool globalFormDirty: false
     readonly property bool editorDark: uiSettings.darkMode
-    readonly property color primaryText: editorDark ? "#edf2f8" : "#273344"
-    readonly property color mutedText: editorDark ? "#aab6c7" : "#687586"
-    readonly property color surfaceColor: editorDark ? "#202633" : "#ffffff"
-    readonly property color borderColor: editorDark ? "#3d4757" : "#e1e6ed"
-    palette.window: editorDark ? "#161a22" : "#f5f7fa"
+    readonly property var theme: UiTheme.colors(editorDark)
+    readonly property color primaryText: theme.text
+    readonly property color mutedText: theme.muted
+    readonly property color surfaceColor: theme.surface
+    readonly property color borderColor: theme.border
+    palette.window: theme.window
     palette.windowText: primaryText
     palette.text: primaryText
     palette.buttonText: primaryText
-    palette.button: editorDark ? "#2b3546" : "#edf1f6"
+    palette.button: theme.button
     palette.base: surfaceColor
-    palette.alternateBase: editorDark ? "#242d3b" : "#f5f7fa"
+    palette.alternateBase: theme.alternate
     palette.mid: borderColor
-    palette.highlight: "#405e80"
-    palette.highlightedText: "#ffffff"
+    palette.highlight: theme.accent
+    palette.highlightedText: theme.accentText
     palette.disabled.text: mutedText
     palette.disabled.buttonText: mutedText
 
@@ -176,19 +177,16 @@ ApplicationWindow {
         contentItem: Text {
             text: navButton.text
             font: navButton.font
-            color: root.editorDark ? "#edf2f8" : "#253428"
+            color: root.theme.navigationText
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
             radius: UiMetrics.radiusControl
-            color: root.editorDark
-                   ? (navButton.highlighted ? "#3e5270" : "#2b3546")
-                   : (navButton.highlighted ? "#dce9db" : "#f3f5f1")
+            color: navButton.highlighted ? root.theme.navigationSelected : root.theme.navigationButton
             border.color: navButton.hovered || navButton.visualFocus || navButton.down
-                          ? (root.editorDark ? "#86aad6" : "#7da58a")
-                          : (root.editorDark ? "#3d4757" : "#d9dfd4")
-            border.width: navButton.hovered || navButton.visualFocus || navButton.down ? 2 : 1
+                          ? root.theme.navigationFocus : root.theme.navigationBorder
+            border.width: navButton.hovered || navButton.visualFocus || navButton.down ? UiMetrics.borderActive : UiMetrics.borderNormal
         }
     }
 

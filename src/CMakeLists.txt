@@ -155,12 +155,14 @@ if(NOOKBIT_BUILD_QT_APP)
       NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
 
     set_source_files_properties(presentation/qml/UiMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+    set_source_files_properties(presentation/qml/UiTheme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
     qt_add_qml_module(nookbit
       URI NookBit
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
         presentation/qml/UiMetrics.qml
+        presentation/qml/UiTheme.qml
         presentation/qml/GuideDownload.qml
         presentation/qml/AppButton.qml
         presentation/qml/LargeActionButton.qml

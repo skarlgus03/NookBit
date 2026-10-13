@@ -14,15 +14,15 @@ AppButton {
     contentItem: Text {
         text: control.text
         font: control.font
-        color: !control.enabled ? control.palette.disabled.buttonText : control.primary ? "#ffffff" : control.palette.buttonText
+        color: !control.enabled ? control.palette.disabled.buttonText : control.primary ? UiTheme.light.accentText : control.palette.buttonText
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }
     background: Rectangle {
         radius: UiMetrics.radiusCard
-        color: control.primary && control.enabled ? "#405e80" : control.palette.button
-        border.color: control.hovered || control.visualFocus ? "#88a8c9" : control.palette.mid
+        color: control.primary && control.enabled ? UiTheme.light.accent : control.palette.button
+        border.color: control.hovered || control.visualFocus ? UiTheme.light.primaryFocus : control.palette.mid
         border.width: control.hovered || control.visualFocus ? UiMetrics.borderActive : UiMetrics.borderNormal
     }
 }
