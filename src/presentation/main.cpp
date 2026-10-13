@@ -149,6 +149,22 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 return false;
             }
             QMetaObject::invokeMethod(testPanel, "close");
+            // 추가 메뉴가 조건·분기·종착점을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
+            const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
+            if (groups.size() != 3) return false;
+            const QStringList expectedTypes{"extension", "size", "name", "age", "otherwise", "destination", "exclude"};
+            QStringList actualTypes;
+            for (const auto& group : groups) {
+                for (const auto& node : group.toMap().value("nodes").toList())
+                    actualTypes.append(node.toMap().value("type").toString());
+            }
+            if (actualTypes != expectedTypes || !QMetaObject::invokeMethod(rules, "openAddMenu",
+                    Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(100)))) return false;
+            QCoreApplication::processEvents();
+            auto* addMenu = rules->findChild<QObject*>(QStringLiteral("addNodeMenu"));
+            if (!addMenu || !addMenu->property("opened").toBool() || addMenu->property("height").toDouble() <= 0 ||
+                addMenu->property("width").toInt() != metrics->property("nodeAddMenuWidth").toInt()) return false;
+            QMetaObject::invokeMethod(addMenu, "close");
             // 새 크기 블록의 선택 목록이 초안을 직접 갱신하는지 검사한다.
             if (!QMetaObject::invokeMethod(rules, "addBlock", Q_ARG(QVariant, QVariant("size")),
                     Q_ARG(QVariant, QVariant(350)), Q_ARG(QVariant, QVariant(220)))) return false;

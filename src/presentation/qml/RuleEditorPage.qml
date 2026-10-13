@@ -13,6 +13,21 @@ Item {
     property bool oldEditorFormDirty: false
     property int folderTargetId: -1
     property string externalFolder: ""
+    readonly property var nodeAddGroups: [
+        { title: qsTr("조건 검사"), hint: qsTr("조건이 맞으면 다음 노드로 진행해요."), nodes: [
+            { type: "extension", title: qsTr("확장자") },
+            { type: "size", title: qsTr("크기") },
+            { type: "name", title: qsTr("이름 포함") },
+            { type: "age", title: qsTr("수정 경과일") }
+        ] },
+        { title: qsTr("분기"), hint: qsTr("같은 부모의 다른 조건이 모두 맞지 않을 때 진행해요."), nodes: [
+            { type: "otherwise", title: qsTr("그 외") }
+        ] },
+        { title: qsTr("종착점"), hint: qsTr("여기서 분류가 끝나요. 자식 노드를 연결할 수 없어요."), nodes: [
+            { type: "destination", title: qsTr("목적지") },
+            { type: "exclude", title: qsTr("정리 제외") }
+        ] }
+    ]
     property int fontPresetIndex: 1
     readonly property int nodeFontSize: UiMetrics.nodeTextSizes[fontPresetIndex]
     readonly property int blockWidth: UiMetrics.nodeWidths[fontPresetIndex]
@@ -1762,8 +1777,11 @@ Item {
 
     Popup {
         id: addNodeMenu
+        objectName: "addNodeMenu"
         parent: canvasViewport
-        width: 208
+        width: UiMetrics.nodeAddMenuWidth
+        height: Math.min(nodeAddColumn.implicitHeight + topPadding + bottomPadding,
+                         Math.max(UiMetrics.controlHeight, canvasViewport.height - UiMetrics.spaceControl * 2))
         padding: UiMetrics.buttonPadding
         modal: false
         focus: true
@@ -1773,34 +1791,48 @@ Item {
             color: page.surfaceColor
             border.color: page.borderColor
         }
-        contentItem: Column {
-            spacing: UiMetrics.spaceExtraSmall
-            Label {
-                width: parent.width
-                leftPadding: UiMetrics.spaceControl
-                bottomPadding: UiMetrics.spaceSmall
-                text: qsTr("블록 추가")
-                font.bold: true
-                color: page.primaryText
-            }
-            Repeater {
-                model: [
-                    { type: "extension", title: qsTr("확장자") },
-                    { type: "size", title: qsTr("크기") },
-                    { type: "name", title: qsTr("이름 포함") },
-                    { type: "age", title: qsTr("수정 경과일") },
-                    { type: "otherwise", title: qsTr("그 외") },
-                    { type: "destination", title: qsTr("목적지") },
-                    { type: "exclude", title: qsTr("정리 제외") }
-                ]
-                delegate: ThemeButton {
-                    required property var modelData
-                    width: addNodeMenu.width - addNodeMenu.leftPadding - addNodeMenu.rightPadding
-                    text: "+ " + modelData.title
-                    onClicked: {
-                        page.addBlock(modelData.type, page.addMenuWorldX, page.addMenuWorldY)
-                        addNodeMenu.close()
-                        canvasViewport.forceActiveFocus()
+        contentItem: ScrollView {
+            id: nodeAddScroll
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            Column {
+                id: nodeAddColumn
+                width: nodeAddScroll.availableWidth
+                spacing: UiMetrics.spaceGroup
+                Repeater {
+                    model: page.nodeAddGroups
+                    delegate: Column {
+                        id: nodeGroup
+                        required property var modelData
+                        width: nodeAddColumn.width
+                        spacing: UiMetrics.spaceExtraSmall
+                        Label {
+                            objectName: "nodeAddGroupHeading"
+                            width: parent.width
+                            leftPadding: UiMetrics.spaceControl
+                            text: nodeGroup.modelData.title
+                            font.pixelSize: UiMetrics.textCaption
+                            font.bold: true
+                            color: page.mutedText
+                        }
+                        Repeater {
+                            model: nodeGroup.modelData.nodes
+                            delegate: ThemeButton {
+                                required property var modelData
+                                objectName: "addNode_" + modelData.type
+                                width: nodeGroup.width
+                                text: "+ " + modelData.title
+                                hoverEnabled: true
+                                ToolTip.visible: hovered
+                                ToolTip.text: nodeGroup.modelData.hint
+                                onClicked: {
+                                    page.addBlock(modelData.type, page.addMenuWorldX, page.addMenuWorldY)
+                                    addNodeMenu.close()
+                                    canvasViewport.forceActiveFocus()
+                                }
+                            }
+                        }
                     }
                 }
             }
