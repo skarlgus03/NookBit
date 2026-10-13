@@ -430,54 +430,63 @@ ApplicationWindow {
         onPageRequested: function(page) { root.currentPage = page }
         onRecoveryRequested: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() }
     }
-    ColumnLayout {
+    ScrollView {
+        id: settingsScroll
         objectName: "settingsPage"
         parent: extensionHost
         anchors.fill: parent
         anchors.margins: UiMetrics.editorInset
         visible: root.currentPage === 8
-        spacing: UiMetrics.spaceSection
-        Label { text: qsTr("화면"); color: root.primaryText; font.bold: true }
-        Switch {
-            objectName: "globalDarkModeSwitch"
-            text: qsTr("앱 전체 다크모드")
-            checked: uiSettings.darkMode
-            onToggled: uiSettings.darkMode = checked
-        }
-        Label { text: qsTr("기능 설정"); color: root.primaryText; font.bold: true }
-        NavigationButton { text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
-        NavigationButton { text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
-        NavigationButton { text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
-        Label { text: qsTr("허용한 외부 목적지"); color: root.primaryText; font.bold: true }
-        Label {
-            Layout.fillWidth: true
-            visible: destinationSettings.allowedRoots.length === 0
-            text: qsTr("없음 · 규칙 편집기의 목적지 설정에서 폴더를 허용할 수 있어요.")
-            color: root.mutedText
-            wrapMode: Text.Wrap
-        }
-        ScrollView {
-            Layout.fillWidth: true
-            Layout.preferredHeight: UiMetrics.largeActionHeight * 2
-            visible: destinationSettings.allowedRoots.length > 0
-            contentWidth: availableWidth
-            clip: true
-            ColumnLayout {
-                width: parent.width
+        contentWidth: availableWidth
+        clip: true
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ColumnLayout {
+            width: settingsScroll.availableWidth
+            spacing: UiMetrics.settingsSectionSpacing
+            SettingsSection {
+                Layout.fillWidth: true
+                title: qsTr("화면")
+                dark: root.editorDark
+                Switch {
+                    objectName: "globalDarkModeSwitch"
+                    text: qsTr("앱 전체 다크모드")
+                    font.weight: UiMetrics.settingsLabelWeight
+                    checked: uiSettings.darkMode
+                    onToggled: uiSettings.darkMode = checked
+                }
+                Label { Layout.fillWidth: true; text: qsTr("테마는 자동 저장돼요."); wrapMode: Text.Wrap; color: root.mutedText }
+            }
+            SettingsSection {
+                Layout.fillWidth: true
+                title: qsTr("기능 설정")
+                dark: root.editorDark
+                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
+                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
+                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
+                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() } }
+            }
+            SettingsSection {
+                Layout.fillWidth: true
+                title: qsTr("허용한 외부 목적지")
+                dark: root.editorDark
+                Label {
+                    Layout.fillWidth: true
+                    visible: destinationSettings.allowedRoots.length === 0
+                    text: qsTr("없음 · 규칙 편집기의 목적지 설정에서 폴더를 허용할 수 있어요.")
+                    color: root.mutedText
+                    wrapMode: Text.Wrap
+                }
                 Repeater {
                     model: destinationSettings.allowedRoots
                     RowLayout {
                         required property string modelData
                         Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; text: modelData; elide: Text.ElideMiddle; color: root.primaryText }
-                        AppButton { text: qsTr("허용 해제"); onClicked: destinationSettings.revokeFolder(modelData) }
+                        Label { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: modelData; elide: Text.ElideMiddle; color: root.primaryText }
+                        AppButton { font.weight: UiMetrics.settingsLabelWeight; text: qsTr("허용 해제"); onClicked: destinationSettings.revokeFolder(modelData) }
                     }
                 }
             }
         }
-        NavigationButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryController.refreshRecoveryCases(); recoveryDialog.open() } }
-        Label { Layout.fillWidth: true; text: qsTr("테마는 자동 저장돼요. 각 기능의 설정은 해당 페이지에서 변경할 수 있어요."); wrapMode: Text.Wrap; color: root.mutedText }
-        Item { Layout.fillHeight: true }
     }
 
     ScrollView {

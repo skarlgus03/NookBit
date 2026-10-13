@@ -31,6 +31,8 @@ QtObject {
     readonly property int textGroupTitle: 16
     readonly property int navigationTextWeight: Font.DemiBold
     readonly property int groupTitleWeight: Font.DemiBold
+    readonly property int settingsLabelWeight: Font.Medium
+    readonly property int settingsSectionSpacing: 28
     readonly property int selectionFadeDuration: 140
     readonly property int confirmationContentWidth: 640
     readonly property int confirmationContentHeight: 480

@@ -258,6 +258,19 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             auto* sizeUnit = mainWindow->findChild<QObject*>(QStringLiteral("watchSizeUnitCombo"));
             if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
+        if (page == 8) {
+            // 설정 제목과 구분선이 세 그룹에 같은 규격으로 배치되는지 검사한다.
+            const auto titles = mainWindow->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
+            const auto dividers = mainWindow->findChildren<QQuickItem*>(QStringLiteral("settingsSectionDivider"));
+            if (titles.size() != 3 || dividers.size() != 3) return false;
+            for (auto* title : titles) {
+                if (title->property("font").value<QFont>().pixelSize() != metrics->property("textSectionTitle").toInt() ||
+                    !title->isVisible() || title->height() <= 0) return false;
+            }
+            for (auto* divider : dividers) {
+                if (!divider->isVisible() || divider->height() != metrics->property("borderNormal").toInt() || divider->width() <= 0) return false;
+            }
+        }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
             QTextStream(stderr) << "Extension close click blocked on page " << page << Qt::endl;

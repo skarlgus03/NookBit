@@ -167,6 +167,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/BackButton.qml
         presentation/qml/NavigationIcon.qml
         presentation/qml/HomeMenuButton.qml
+        presentation/qml/SettingsSection.qml
         presentation/qml/AppComboBox.qml
         presentation/qml/DropdownIndicator.qml
         presentation/qml/AppTextField.qml
