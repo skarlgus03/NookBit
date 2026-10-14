@@ -11,12 +11,21 @@ if(NOT EXISTS "${NOOKBIT_TEST_PACK}/imagepack.json" OR NOT EXISTS "${NOOKBIT_TES
 endif()
 file(COPY_FILE "${NOOKBIT_EXECUTABLE}" "${NOOKBIT_PACKAGE_DIR}/nookbit.exe" ONLY_IF_DIFFERENT)
 file(COPY "${NOOKBIT_TEST_PACK}/" DESTINATION "${NOOKBIT_PACKAGE_DIR}/imagepacks/test")
+set(deploy_options)
+if(NOOKBIT_COMPACT_PACKAGE)
+  list(APPEND deploy_options --skip-plugin-types qmltooling
+    --exclude-plugins qsqlibase,qsqlmimer,qsqloci,qsqlodbc,qsqlpsql)
+endif()
 execute_process(
   COMMAND "${NOOKBIT_DEPLOY_TOOL}" --release --no-translations
+    ${deploy_options}
     --include-plugins qoffscreen
     --qmldir "${NOOKBIT_QML_DIR}" "${NOOKBIT_PACKAGE_DIR}/nookbit.exe"
   RESULT_VARIABLE deploy_result)
 if(NOT deploy_result EQUAL 0)
   message(FATAL_ERROR "Qt runtime deployment failed: ${deploy_result}")
+endif()
+if(NOOKBIT_COMPACT_PACKAGE)
+  include("${CMAKE_CURRENT_LIST_DIR}/prune_windows_package.cmake")
 endif()
 message(STATUS "NookBit package: ${NOOKBIT_PACKAGE_DIR}")

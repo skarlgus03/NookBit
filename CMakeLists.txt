@@ -9,6 +9,7 @@ project(
 
 option(NOOKBIT_BUILD_TESTS "Build core tests" ON)
 option(NOOKBIT_BUILD_QT_APP "Build the Qt/QML desktop shell when Qt is available" ON)
+option(NOOKBIT_COMPACT_PACKAGE "Exclude unused styles and development plugins from Windows packages" ON)
 set(NOOKBIT_DEV_DESTINATION_ROOT "" CACHE PATH "Optional fixed destination for this local development build")
 
 set(CMAKE_CXX_STANDARD 20)

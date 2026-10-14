@@ -46,6 +46,8 @@ Qt Creator에서는 저장소 루트의 `CMakeLists.txt`를 열고 MSVC x64 Qt K
 
 ### Release 빌드와 실행 폴더
 
+배포 시 사용하지 않는 화면 스타일·QML 개발 도구·SQLite 외 DB 드라이버를 제외한다. 캐릭터 표시용 Qt Quick·이미지 로더와 그래픽 호환 부품은 유지한다. 제외 목록과 전체 구성 복원 방법은 [Windows 배포 구성](docs/windows-package.md)을 참고한다.
+
 같은 x64 개발자 터미널에서 배포용 최적화 빌드와 테스트를 실행한다.
 
 ```powershell

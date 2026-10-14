@@ -216,6 +216,7 @@ if(NOOKBIT_BUILD_QT_APP)
           "-DNOOKBIT_QML_DIR=${CMAKE_CURRENT_SOURCE_DIR}/presentation/qml"
           "-DNOOKBIT_PACKAGE_DIR=${PROJECT_SOURCE_DIR}/out/package/NookBit-$<CONFIG>"
           "-DNOOKBIT_BUILD_CONFIG=$<CONFIG>"
+          "-DNOOKBIT_COMPACT_PACKAGE=${NOOKBIT_COMPACT_PACKAGE}"
           "-DNOOKBIT_TEST_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
           -P "${PROJECT_SOURCE_DIR}/cmake/package_windows.cmake"
         DEPENDS nookbit
