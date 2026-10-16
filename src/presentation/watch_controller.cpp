@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <utility>
 
 namespace nookbit {
@@ -53,7 +54,7 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
     debounceTimer_.setSingleShot(true);
     debounceTimer_.setInterval(1500);
     connect(&directoryWatcher_, &QFileSystemWatcher::directoryChanged,
-            this, [this] { debounceTimer_.start(); });
+            this, [this] { ++generation_; debounceTimer_.start(); });
     connect(&debounceTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     connect(&rescanTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     readinessTimer_.setSingleShot(true);
@@ -63,6 +64,7 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
     connect(&snoozeTimer_, &QTimer::timeout, this, &WatchController::checkNow);
     // 대기 목록이 바뀌면 이전 제안을 닫고 최신 목록으로 조건을 다시 검사하는 함수.
     connect(&pendingFiles_, &PendingFilesModel::countChanged, this, [this] {
+        ++generation_;
         const bool recheck = settings_.enabled || proposalVisible_;
         lastOfferedSignature_.clear();
         clearProposal();
@@ -144,6 +146,8 @@ qint64 WatchController::snoozedUntilUtcMs() const noexcept { return snoozedUntil
 
 // 저장된 제안 대기 시각을 복원하고 재검사 타이머를 준비하는 함수.
 void WatchController::restoreSnoozeUntil(qint64 deadlineUtcMs) {
+    ++generation_;
+    acceptingFiles_.clear();
     snoozeTimer_.stop();
     const auto now = QDateTime::currentMSecsSinceEpoch();
     snoozedUntilUtcMs_ = deadlineUtcMs > now ? std::min(deadlineUtcMs, now + proposalSnoozeMs) : 0;
@@ -248,6 +252,8 @@ void WatchController::saveSettings(const QString& folder,
         return;
     }
     const bool folderChanged = settings_.folder.lexically_normal() != proposed.folder.lexically_normal();
+    ++generation_;
+    acceptingFiles_.clear();
     settings_ = std::move(proposed);
     if (folderChanged || !settings_.enabled) restoreSnoozeUntil(0);
     lastOfferedSignature_.clear();
@@ -262,6 +268,7 @@ void WatchController::saveSettings(const QString& folder,
 
 // 저장된 조건으로 감시 폴더를 즉시 읽어 제안 여부를 판단하는 함수.
 void WatchController::checkNow() {
+    if (checking_) { recheckRequested_ = true; return; }
     readinessTimer_.stop();
     const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
     if (snoozedUntilUtcMs_ > nowUtcMs) {
@@ -284,7 +291,50 @@ void WatchController::checkNow() {
     }
     std::vector<std::filesystem::path> pendingPaths;
     for (const auto& path : pendingFiles_.filePaths()) pendingPaths.emplace_back(path.toStdWString());
-    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths);
+    if (runner_) {
+        const auto generation = generation_;
+        auto result = std::make_shared<Result<WatchProposal>>(Result<WatchProposal>::failure(
+            {"watch.incomplete", "Watch inspection did not complete."}));
+        checking_ = true;
+        recheckRequested_ = false;
+        statusMessage_ = QStringLiteral("폴더를 확인하고 있어요. 다른 화면도 계속 사용할 수 있어요.");
+        emit watchChanged();
+        const bool accepted = runner_->submit(this,
+            [worker = &evaluateWatchFolder_, settings = settings_, nowUtcMs, pendingPaths, result] {
+                *result = worker->execute(settings, nowUtcMs, pendingPaths);
+                return *result ? Result<void>::success() : Result<void>::failure(result->error());
+            }, [this, generation, result](const Result<void>& outcome) {
+                checking_ = false;
+                const bool stale = generation != generation_;
+                const bool recheck = recheckRequested_ || (stale && settings_.enabled);
+                recheckRequested_ = false;
+                if (stale) {
+                    acceptingFiles_.clear();
+                    clearProposal();
+                    statusMessage_ = QStringLiteral("검사 중 목록이나 조건이 바뀌어 이전 결과를 적용하지 않았어요.");
+                    emit watchChanged();
+                } else {
+                    if (!outcome) *result = Result<WatchProposal>::failure(outcome.error());
+                    applyEvaluation(*result);
+                    finishAcceptance();
+                }
+                if (recheck) debounceTimer_.start();
+            });
+        if (!accepted) {
+            checking_ = false;
+            acceptingFiles_.clear();
+            recheckRequested_ = true;
+            debounceTimer_.start();
+            emit watchChanged();
+        }
+        return;
+    }
+    applyEvaluation(evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths));
+    finishAcceptance();
+}
+
+// 폴더를 읽는 작업과 분리해 화면 스레드에서만 제안·재검사 타이머를 바꾸는 함수.
+void WatchController::applyEvaluation(const Result<WatchProposal>& result) {
     if (!result) {
         clearProposal();
         statusMessage_ = QStringLiteral("감시 폴더를 평가하지 못했어요: %1")
@@ -332,11 +382,22 @@ void WatchController::checkNow() {
 
 // 현재 제안의 파일들을 이동 없이 대기 목록에 등록하는 함수.
 void WatchController::addProposalToPending() {
-    if (!proposalVisible_) return;
-    const auto files = proposedFiles_;
+    if (!proposalVisible_ || checking_ || (fileTasks_ && fileTasks_->busy())) return;
+    acceptingFiles_ = proposedFiles_;
     // 수락 직전에도 다시 검사해 전송이 재개된 파일이나 바뀐 제안을 등록하지 않는다.
     checkNow();
+}
+
+// 수락 요청 이후 완료된 검사에서 동일한 파일 목록만 등록하는 함수.
+void WatchController::finishAcceptance() {
+    const auto files = std::exchange(acceptingFiles_, {});
+    if (files.isEmpty()) return;
     if (!proposalVisible_) return;
+    if (fileTasks_ && fileTasks_->busy()) {
+        statusMessage_ = QStringLiteral("파일 작업이 끝난 뒤 제안을 다시 확인해 주세요.");
+        emit watchChanged();
+        return;
+    }
     if (proposedFiles_ != files) {
         statusMessage_ = QStringLiteral("제안 파일이 바뀌었어요. 새 제안을 확인해 주세요.");
         emit watchChanged();
@@ -350,10 +411,13 @@ void WatchController::addProposalToPending() {
     statusMessage_ = QStringLiteral("파일 %1개를 대기 목록에만 담았어요. 이동하려면 미리보기와 승인이 필요해요.")
                          .arg(added);
     emit watchChanged();
+    emit proposalAccepted(added);
 }
 
 // 현재 제안을 닫고 같은 파일 상태에서는 다시 묻지 않는 함수.
 void WatchController::dismissProposal() {
+    ++generation_;
+    acceptingFiles_.clear();
     clearProposal();
     statusMessage_ = QStringLiteral("이번 제안을 닫았어요. 파일 상태가 바뀌면 다시 검사해요.");
     emit watchChanged();
@@ -367,6 +431,8 @@ void WatchController::snoozeProposal() {
 
 // 바뀐 분류 규칙으로 감시 제안을 다시 계산하는 함수.
 void WatchController::rulesChanged() {
+    ++generation_;
+    acceptingFiles_.clear();
     clearProposal();
     lastOfferedSignature_.clear();
     if (settings_.enabled) checkNow();

@@ -62,6 +62,14 @@ add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progres
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Qml Quick)
+  add_executable(nookbit_application_storage_tests application_storage_tests.cpp)
+  target_include_directories(nookbit_application_storage_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_application_storage_tests PRIVATE Qt6::Core)
+  add_test(NAME nookbit_application_storage_tests COMMAND nookbit_application_storage_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_application_storage_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_plan_contract_tests plan_contract_tests.cpp)
   target_link_libraries(nookbit_plan_contract_tests PRIVATE nookbit_history Qt6::Core Qt6::Sql)
   target_include_directories(nookbit_plan_contract_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -228,6 +236,7 @@ if(TARGET nookbit_json_config)
 
   add_executable(nookbit_watch_controller_tests
     watch_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.hpp
@@ -349,7 +358,7 @@ if(TARGET nookbit_json_config)
   if(WIN32)
     set_tests_properties(nookbit_qml_smoke PROPERTIES
       ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms;QT_QUICK_BACKEND=set:software")
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM=set:offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms;QT_QUICK_BACKEND=set:software;QT_QPA_FONTDIR=set:$ENV{WINDIR}/Fonts;QT_FORCE_STDERR_LOGGING=set:1")
   else()
     set_tests_properties(nookbit_qml_smoke PROPERTIES
       ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")

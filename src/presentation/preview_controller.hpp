@@ -36,12 +36,17 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
     Q_PROPERTY(QString activeRuleLabel READ activeRuleLabel NOTIFY activeRuleChanged)
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
+    Q_PROPERTY(bool previewBusy READ previewBusy NOTIFY previewBusyChanged)
 
 public:
     /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
     void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
     /// 확인 전후의 무거운 검사를 화면 밖으로 전달하는 계약을 받는 함수.
     void setSortWorkflow(ISortWorkflow* workflow) { sortWorkflow_ = workflow; }
+    /// 작업 스레드 안에서 자체 의존성을 만드는 미리보기 계약을 받는 함수.
+    void setBackgroundPreview(ICreatePreviewUseCase* worker) { backgroundPreview_ = worker; }
+    /// 이동 없는 미리보기 검사 진행 여부를 반환하는 함수.
+    bool previewBusy() const { return previewBusy_; }
     /// 화면 모델·계획 작업·파일 실행 계약과 기본 목적지를 받는 생성자.
     PreviewController(PendingFilesModel& pendingFiles,
                       ICreatePreviewUseCase& createPreview,
@@ -141,6 +146,8 @@ public:
     Q_INVOKABLE void clear();
 
 signals:
+    void previewBusyChanged();
+    void previewFinished(bool success);
     /// 실제 정리 실행의 시작과 결과만 알리고 어떤 화면을 열지는 결정하지 않는다.
     void sortExecutionStarted();
     void sortExecutionFinished(bool success, const QString& message);
@@ -151,6 +158,11 @@ signals:
     void recoveryReconcileRequested();
 
 private:
+    /// 화면 스레드에서만 완성된 미리보기 결과와 안내를 반영하는 함수.
+    void finishPreview(const Result<OperationPlan>& result, const QString& destinationRoot);
+    ICreatePreviewUseCase* backgroundPreview_{nullptr};
+    quint64 previewGeneration_{0};
+    bool previewBusy_{false};
     ISortWorkflow* sortWorkflow_{nullptr};
     /// 선택 경로와 현재 설정을 값으로 고정해 비동기 확인 준비를 요청하는 함수.
     void prepareSortInBackground();

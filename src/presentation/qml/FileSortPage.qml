@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Templates as T
+import QtQuick.Dialogs
 
 // 파일 대기 목록·정리 위치·정리 요청은 홈과 분리된 페이지에서만 표시한다.
 Rectangle {
@@ -16,6 +17,7 @@ Rectangle {
     property bool manualSession: false
     property bool sortSuccess: false
     property string resultMessage: ""
+    property int previewAction: 0
     readonly property bool previewOpen: workflowStep === 1
     readonly property bool transitioning: slideAnimation.running
     clip: true
@@ -62,6 +64,14 @@ Rectangle {
     }
     Connections {
         target: previewController
+        // 완료된 검사만 요청 당시의 미리보기 또는 최종 확인 준비로 연결하는 함수.
+        function onPreviewFinished(success) {
+            const action = home.previewAction
+            home.previewAction = 0
+            if (!success || !home.visible) return
+            if (action === 1) home.showStep(1)
+            if (action === 2 && previewController.hasMovableSteps) home.requestSort()
+        }
         // 이 페이지에서 요청한 수동 정리만 진행 화면으로 연결하는 함수.
         function onSortExecutionStarted() {
             if (!home.manualSortRequested || !home.visible) return
@@ -92,16 +102,33 @@ Rectangle {
     }
     // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
     onVisibleChanged: {
+        if (!visible) previewAction = 0
         if (!visible && workflowStep === 2) cancelConfirmation()
         if (!visible && workflowStep < 3) { manualSortRequested = false; showStep(0) }
     }
     signal pageRequested(int page)
     signal recoveryRequested()
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
-    readonly property color muted: dark ? "#aab6c7" : "#748091"
-    readonly property color surface: dark ? "#242d3b" : "#ffffff"
-    readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
-    color: dark ? "#161a22" : "#ffffff"
+    readonly property var theme: UiTheme.colors(dark)
+    readonly property color foreground: theme.text
+    readonly property color muted: theme.muted
+    readonly property color surface: theme.surface
+    readonly property color edge: theme.border
+    color: theme.surface
+
+    FileDialog {
+        id: addFilesDialog
+        title: qsTr("정리할 파일 선택")
+        fileMode: FileDialog.OpenFiles
+        onAccepted: { for (const url of selectedFiles) pendingFiles.addUrl(url) }
+    }
+    FolderDialog {
+        id: destinationDialog
+        title: qsTr("정리할 폴더 선택")
+        onAccepted: {
+            destination.text = destinationSettings.folderPath(selectedFolder)
+            previewController.clear()
+        }
+    }
 
     component FlatButton: T.Button {
         id: control
@@ -118,7 +145,7 @@ Rectangle {
         background: Rectangle {
             radius: UiMetrics.radiusControl
             color: home.surface
-            border.color: control.hovered || control.visualFocus ? "#7898bb" : home.edge
+            border.color: control.hovered || control.visualFocus ? home.theme.menuFocus : home.edge
             border.width: control.hovered || control.visualFocus ? 2 : 1
             opacity: control.enabled ? 1 : 0.6
         }
@@ -138,26 +165,31 @@ Rectangle {
         ColumnLayout {
             width: homeScroll.availableWidth
             spacing: UiMetrics.spaceControl
-            Item {
+            ColumnLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 92
-                Column {
-                    anchors.centerIn: parent
-                    spacing: UiMetrics.spaceSmall
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 이 페이지 어디든 파일을 놓으세요"); font.bold: true; font.pixelSize: UiMetrics.textEmphasis; color: home.foreground }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("대기 목록에만 추가돼요. 원본은 그대로 있어요"); font.pixelSize: UiMetrics.textBody; color: home.muted }
-                }
+                spacing: UiMetrics.spaceSmall
+                Label { text: qsTr("파일 정리"); font.pixelSize: UiMetrics.textPageTitle; font.bold: true; color: home.foreground }
+                Label { Layout.fillWidth: true; text: qsTr("파일을 담고, 결과를 확인한 뒤 원하는 위치로 정리하세요."); wrapMode: Text.Wrap; color: home.muted }
             }
             RowLayout {
+                Layout.fillWidth: true
                 Label { text: qsTr("대기 목록"); color: home.foreground; font.bold: true }
+                StatusBadge { text: qsTr("%1개").arg(pendingFiles.count); dark: home.dark }
                 Item { Layout.fillWidth: true }
-                Label { text: qsTr("%1개").arg(pendingFiles.count); color: home.muted }
+                FlatButton { objectName: "addPendingFilesButton"; text: qsTr("＋ 파일 추가"); onClicked: addFilesDialog.open() }
             }
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(160, Math.min(240, home.height - 485))
                 color: home.surface; radius: UiMetrics.radiusCard; border.color: home.edge
-                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: UiMetrics.textBody }
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    width: parent.width - UiMetrics.editorInset * 2
+                    visible: pendingFiles.count === 0
+                    spacing: UiMetrics.spaceSmall
+                    Label { Layout.fillWidth: true; text: qsTr("이곳에 파일을 놓아주세요"); font.pixelSize: UiMetrics.textEmphasis; font.bold: true; horizontalAlignment: Text.AlignHCenter; color: home.foreground }
+                    Label { Layout.fillWidth: true; text: qsTr("위의 파일 추가 버튼으로도 선택할 수 있어요.\n최종 확인 전까지 원본은 그대로 유지돼요."); horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: home.muted }
+                }
                 ListView {
                     id: files
                     anchors.fill: parent; anchors.margins: UiMetrics.spaceControl
@@ -184,7 +216,7 @@ Rectangle {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: UiMetrics.spaceTiny
-                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: UiMetrics.textBody }
+                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : home.theme.danger; font.pixelSize: UiMetrics.textBody }
                                 Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: UiMetrics.textBody }
                             }
                             FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
@@ -192,7 +224,8 @@ Rectangle {
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; text: pendingFiles.lastMessage; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted }
             Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: UiMetrics.textBody }
             FlatButton {
                 Layout.fillWidth: true
@@ -201,7 +234,10 @@ Rectangle {
                 onClicked: home.pageRequested(1)
             }
             Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: UiMetrics.textBody }
-            AppTextField {
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: UiMetrics.spaceControl
+                AppTextField {
                 id: destination
                 objectName: "compactDestinationField"
                 Layout.fillWidth: true
@@ -210,6 +246,9 @@ Rectangle {
                 font.pixelSize: UiMetrics.textBody
                 color: home.foreground
                 onTextEdited: previewController.clear()
+                Accessible.name: qsTr("정리할 폴더 경로")
+                }
+                FlatButton { objectName: "chooseDestinationButton"; text: qsTr("폴더 선택"); onClicked: destinationDialog.open() }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -221,7 +260,7 @@ Rectangle {
                     text: qsTr("결과 미리보기")
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0
                     // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
-                    onClicked: { previewController.createPreview(destination.text); home.showStep(1) }
+                    onClicked: { home.previewAction = 1; previewController.createPreview(destination.text) }
                 }
                 LargeActionButton {
                     objectName: "compactSortButton"
@@ -232,8 +271,8 @@ Rectangle {
                     enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0 && !previewController.awaitingConfirmation
                     // 미리보기·준비 후 기존 최종 확인을 거쳐야만 실제 파일 이동을 시작하는 함수.
                     onClicked: {
+                        home.previewAction = 2
                         previewController.createPreview(destination.text)
-                        if (previewController.hasPreview && previewController.hasMovableSteps) home.requestSort()
                     }
                 }
             }
@@ -244,7 +283,7 @@ Rectangle {
                 onClicked: previewController.undoLastMove()
             }
             Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
-            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
             FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
         }
     }

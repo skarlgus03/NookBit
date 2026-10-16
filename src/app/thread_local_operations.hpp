@@ -15,6 +15,7 @@
 #include "modules/rules/rule_engine.hpp"
 #include "modules/planner/planner.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
+#include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/approve_plan_use_case.hpp"
 #include "application/use_cases/plan_signature.hpp"
@@ -26,7 +27,7 @@
 
 namespace nookbit {
 /// 요청을 실행하는 스레드 안에서 모든 파일/DB 포트를 생성·해제하는 조립부.
-class ThreadLocalOperations final : public IFileOperations, public IInterruptedOperations, public ISortWorkflow {
+class ThreadLocalOperations final : public IFileOperations, public IInterruptedOperations, public ISortWorkflow, public ICreatePreviewUseCase {
     QString database_, migration_, rules_, schema_, legacy_;
     std::filesystem::path appData_;
     ISettingsRepository& settings_;
@@ -65,6 +66,13 @@ class ThreadLocalOperations final : public IFileOperations, public IInterruptedO
               recover(inspector, history, owner.settings_, rules, hasher, runner, &resolver), interrupted(inspector, history, recover) {}
     };
 public:
+    /// 미리보기의 저장소·스캐너·계획기를 요청한 스레드에서 생성하고 해제하는 함수.
+    Result<OperationPlan> execute(const CreatePreviewRequest& request) override {
+        Session session(*this);
+        CreatePreviewUseCase preview(session.rules, session.scanner, session.planner,
+            &session.hasher, &session.copy);
+        return preview.execute(request);
+    }
     /// 작업 스레드 전용 연결로 고정·검사를 끝내고 확인할 계획을 반환하는 함수.
     Result<OperationPlan> prepare(const OperationPlan& plan, bool frozen,
         const std::vector<std::filesystem::path>& selected, const UserSettings& settings) override {

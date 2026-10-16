@@ -73,10 +73,18 @@ else()
 endif()
 
 if(NOOKBIT_BUILD_QT_APP)
-  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Widgets Qml Quick QuickControls2 QuickDialogs2 Sql)
+  if(NOOKBIT_REQUIRE_QT_APP)
+    set(nookbit_qt_requirement REQUIRED)
+  else()
+    set(nookbit_qt_requirement QUIET)
+  endif()
+  find_package(Qt6 6.5 ${nookbit_qt_requirement} COMPONENTS Core Gui Widgets Qml Quick QuickControls2 QuickDialogs2 Sql)
 
   if(Qt6_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
+    if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8")
+      qt_policy(SET QTP0004 NEW)
+    endif()
 
     add_library(nookbit_json_config STATIC
       infrastructure/configuration/json_document_loader.cpp
@@ -105,6 +113,7 @@ if(NOOKBIT_BUILD_QT_APP)
 
     qt_add_executable(nookbit
       presentation/main.cpp
+      presentation/ui_verification.cpp
       presentation/background_task_runner.hpp
       presentation/character_controller.hpp
       presentation/character_controller.cpp
@@ -173,6 +182,9 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/NavigationIcon.qml
         presentation/qml/HomeMenuButton.qml
         presentation/qml/SettingsSection.qml
+        presentation/qml/SettingsPage.qml
+        presentation/qml/SettingsNavigation.qml
+        presentation/qml/StatusBadge.qml
         presentation/qml/AppComboBox.qml
         presentation/qml/DropdownIndicator.qml
         presentation/qml/AppTextField.qml

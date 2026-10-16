@@ -40,7 +40,7 @@ ctest --preset dev
 .\out\build\dev\src\nookbit.exe
 ```
 
-`dev` 프리셋은 Debug 빌드·테스트를 `out/build/dev`에 만든다. Qt를 찾지 못하면 C++ 코어만 빌드되고 `nookbit.exe`는 생성되지 않는다. 그때는 CMake 구성 메시지와 `CMAKE_PREFIX_PATH`를 확인한다. 실행 시 Qt DLL이 없다는 오류가 나면 먼저 위 명령으로 **재빌드**한다. Windows에서는 빌드 후 `windeployqt`가 발견되면 실행 파일 옆에 Qt 런타임과 QML 모듈을 배치한다. 발견되지 않으면 Qt 설치의 `bin` 디렉터리를 PATH에 추가하거나 `windeployqt`를 실행해야 한다.
+`dev` 프리셋은 Debug 빌드·테스트를 `out/build/dev`에 만든다. Qt를 찾지 못하면 `dev`·`release` 구성은 실패한다. `CMAKE_PREFIX_PATH`를 확인한다. 앱 없이 코어만 시험하려면 `cmake --preset core`, `cmake --build --preset core`, `ctest --preset core`를 사용한다. 실행 시 Qt DLL이 없다는 오류가 나면 먼저 위 명령으로 **재빌드**한다. Windows에서는 빌드 후 `windeployqt`가 발견되면 실행 파일 옆에 Qt 런타임과 QML 모듈을 배치한다. 발견되지 않으면 Qt 설치의 `bin` 디렉터리를 PATH에 추가하거나 `windeployqt`를 실행해야 한다.
 
 Qt Creator에서는 저장소 루트의 `CMakeLists.txt`를 열고 MSVC x64 Qt Kit를 선택한 뒤 `nookbit`을 빌드·실행할 수 있다. Visual Studio에서도 **폴더 열기**로 CMake 프로젝트를 열 수 있으며, 같은 Qt 경로를 CMake 구성에 지정해야 한다. 일반적인 `.sln` 프로젝트가 아니라 CMake 프로젝트다.
 
@@ -82,6 +82,8 @@ Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교
 감시 후보는 처음 발견한 뒤 크기·수정 시각·파일 식별자가 30초 이상 그대로이고 재검사에서도 같은 경우에만 제안 조건에 포함한다. 변경되면 대기 시간을 다시 시작하며, 기다리는 후보가 있을 때만 추가 재검사를 예약한다. `.crdownload`, `.partial`, `.part`, `.download` 파일은 설정한 제외 패턴과 별개로 후보에서 제외한다. 앱 재시작이나 감시 폴더 변경 시에는 새로 관찰한다. 제안 수락 직전에도 재검사한다. 이 메타데이터 관찰은 다운로드 프로그램의 완료 신호가 아니므로 일시 정지가 긴 전송까지 확정적으로 구분하지는 않는다. 직접 드롭하는 대기 등록과 파일 이동 검사는 기존 흐름을 사용한다.
 
 정리 제안의 **30분 뒤 다시 알림**을 누르면 해당 감시 폴더의 제안을 30분 동안 쉬며, 새 파일·규칙·대기 목록 변경으로도 즉시 다시 제안하지 않는다. 대기 종료 시 감시가 켜져 있으면 현재 파일과 조건으로 재검사한다. 대기 종료 시각은 사용자 설정에 저장해 같은 폴더에서는 앱 재시작 후에도 남은 시간을 유지한다. 자동 감시를 끄거나 감시 폴더를 바꾸면 대기를 해제한다. 제안 대기 중에는 폴더 스캔을 생략한다.
+
+파일 선택·목적지 폴더 선택, 비동기 검사, 격리된 UI 검사와 Windows CI는 [데스크톱 검증과 UI 개선](docs/desktop-validation.md)을 참고한다.
 
 ## 프로젝트 지도
 

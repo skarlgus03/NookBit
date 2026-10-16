@@ -9,6 +9,10 @@ project(
 
 option(NOOKBIT_BUILD_TESTS "Build core tests" ON)
 option(NOOKBIT_BUILD_QT_APP "Build the Qt/QML desktop shell when Qt is available" ON)
+option(NOOKBIT_REQUIRE_QT_APP "Fail configuration unless the complete Qt desktop app can be built" OFF)
+if(NOOKBIT_REQUIRE_QT_APP AND NOT NOOKBIT_BUILD_QT_APP)
+  message(FATAL_ERROR "NOOKBIT_REQUIRE_QT_APP requires NOOKBIT_BUILD_QT_APP=ON. Use the core preset for a core-only build.")
+endif()
 option(NOOKBIT_COMPACT_PACKAGE "Exclude unused styles and development plugins from Windows packages" ON)
 set(NOOKBIT_DEV_DESTINATION_ROOT "" CACHE PATH "Optional fixed destination for this local development build")
 

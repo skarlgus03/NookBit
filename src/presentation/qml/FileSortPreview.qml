@@ -10,10 +10,11 @@ Rectangle {
     property bool dark: false
     signal backRequested()
     signal sortRequested()
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
-    readonly property color muted: dark ? "#aab6c7" : "#748091"
-    readonly property color surface: dark ? "#242d3b" : "#f5f7fa"
-    color: dark ? "#161a22" : "#ffffff"
+    readonly property var theme: UiTheme.colors(dark)
+    readonly property color foreground: theme.text
+    readonly property color muted: theme.muted
+    readonly property color surface: theme.alternate
+    color: theme.surface
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.pageInset
@@ -24,6 +25,25 @@ Rectangle {
         }
         Label { text: qsTr("결과 미리보기"); font.pixelSize: UiMetrics.textSectionTitle; font.bold: true; color: preview.foreground }
         Label { Layout.fillWidth: true; text: qsTr("아직 파일은 이동하지 않았어요. 결과를 확인한 뒤 정리할 수 있어요."); wrapMode: Text.Wrap; color: preview.muted }
+        Flow {
+            Layout.fillWidth: true
+            Layout.preferredHeight: childrenRect.height
+            spacing: UiMetrics.spaceControl
+            Repeater {
+                model: [
+                    { key: "planned", label: qsTr("이동 예정"), tone: "success" },
+                    { key: "skipped", label: qsTr("건너뜀"), tone: "warning" },
+                    { key: "unmatched", label: qsTr("미분류"), tone: "warning" },
+                    { key: "excluded", label: qsTr("제외"), tone: "info" }
+                ]
+                StatusBadge {
+                    required property var modelData
+                    dark: preview.dark
+                    tone: modelData.tone
+                    text: modelData.label + " " + preview.controller.outcomes.filter(function(row) { return row.statusKey === modelData.key }).length
+                }
+            }
+        }
         Label {
             Layout.fillWidth: true
             visible: text.length > 0
@@ -53,7 +73,7 @@ Rectangle {
                     RowLayout {
                         Layout.fillWidth: true
                         Label { Layout.fillWidth: true; text: modelData.fileName; font.bold: true; elide: Text.ElideMiddle; color: preview.foreground }
-                        Label { text: modelData.status; font.bold: true; color: preview.foreground }
+                        StatusBadge { text: modelData.status; dark: preview.dark; tone: modelData.statusKey === "planned" ? "success" : modelData.statusKey === "excluded" ? "info" : "warning" }
                     }
                     Label { Layout.fillWidth: true; text: modelData.reason; wrapMode: Text.Wrap; color: preview.foreground }
                     Label { Layout.fillWidth: true; text: qsTr("원본: %1").arg(modelData.source); elide: Text.ElideMiddle; color: preview.muted }

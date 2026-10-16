@@ -14,7 +14,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "NOOKBIT_BUILD_TESTS": "ON",
-        "NOOKBIT_BUILD_QT_APP": "ON"
+        "NOOKBIT_BUILD_QT_APP": "ON",
+        "NOOKBIT_REQUIRE_QT_APP": "ON"
       }
     },
     {
@@ -25,11 +26,23 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "NOOKBIT_BUILD_TESTS": "ON",
-        "NOOKBIT_BUILD_QT_APP": "ON"
+        "NOOKBIT_BUILD_QT_APP": "ON",
+        "NOOKBIT_REQUIRE_QT_APP": "ON"
+      }
+    },
+    {
+      "name": "core",
+      "inherits": "dev",
+      "displayName": "Core without Qt",
+      "binaryDir": "${sourceDir}/out/build/core",
+      "cacheVariables": {
+        "NOOKBIT_BUILD_QT_APP": "OFF",
+        "NOOKBIT_REQUIRE_QT_APP": "OFF"
       }
     }
   ],
   "buildPresets": [
+    { "name": "core", "configurePreset": "core" },
     {
       "name": "dev",
       "configurePreset": "dev"
@@ -45,6 +58,7 @@
     }
   ],
   "testPresets": [
+    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } },
     {
       "name": "release",
       "configurePreset": "release",

@@ -242,6 +242,57 @@ struct PreviewWorkflow {
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
 
+// 느린 검사를 재현하되 실제 파일 읽기와 분류 결과를 반환하는 테스트 일꾼.
+class DelayedPreview final : public nookbit::ICreatePreviewUseCase {
+public:
+    nookbit::ICreatePreviewUseCase& inner;
+    QSemaphore gate;
+    std::atomic<bool> usedWorker{false};
+    QThread* screen{QThread::currentThread()};
+    explicit DelayedPreview(nookbit::ICreatePreviewUseCase& worker) : inner(worker) {}
+    nookbit::Result<nookbit::OperationPlan> execute(const nookbit::CreatePreviewRequest& request) override {
+        usedWorker = QThread::currentThread() != screen;
+        if (!gate.tryAcquire(1, 5000)) return nookbit::Result<nookbit::OperationPlan>::failure({"test.timeout", "Test worker timed out."});
+        return inner.execute(request);
+    }
+};
+
+// 화면 반응과 검사 중 목록 변경에 대한 낡은 결과 차단을 검사하는 함수.
+void testBackgroundPreview() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "preview fixture exists");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath("photo.jpg");
+    QFile file(source); expect(file.open(QIODevice::WriteOnly), "preview source opens");
+    file.write("unchanged"); file.close();
+    const auto home = directory.filePath("organized");
+    PreviewWorkflow workflow(std::filesystem::path(directory.filePath("app-data").toStdWString()));
+    DelayedPreview worker(workflow.useCase);
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::PendingFilesModel pending;
+    nookbit::PreviewController preview(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, workflow.operations,
+        projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"), home);
+    preview.setTaskRunner(&runner); preview.setBackgroundPreview(&worker);
+    pending.addUrl(QUrl::fromLocalFile(source));
+    int completions = 0; bool success = true, heartbeat = false;
+    QObject::connect(&preview, &nookbit::PreviewController::previewFinished, &preview,
+        [&](bool value) { ++completions; success = value; });
+    preview.createPreview(home);
+    expect(preview.previewBusy() && runner.busy() && !preview.hasPreview(), "preview returns before scanning completes");
+    QTimer::singleShot(0, &preview, [&] { heartbeat = true; pending.removeAt(0); worker.gate.release(); });
+    expect(waitForBackground(runner) && heartbeat && worker.usedWorker && !preview.previewBusy() &&
+        !preview.hasPreview() && completions == 1 && !success, "changed selection discards worker result while UI stays responsive");
+    pending.addUrl(QUrl::fromLocalFile(source));
+    preview.createPreview(home);
+    preview.createPreview(home);
+    QTimer::singleShot(0, &preview, [&] { worker.gate.release(); });
+    expect(waitForBackground(runner) && preview.hasPreview() && !preview.hasFrozenPlan() &&
+        completions == 2 && success, "unchanged request produces one read-only preview and ignores duplicate clicks");
+    expect(file.open(QIODevice::ReadOnly) && file.readAll() == "unchanged" && !QFileInfo::exists(home),
+        "background preview must not move files or create destination folders");
+}
+
 // 외부 목적지 허용 뒤 실제 이동·되돌리기와 허용 해제를 검사하는 함수.
 void testExternalDestinationWorkflow() {
     QTemporaryDir directory;
@@ -1888,6 +1939,7 @@ int main(int argc, char* argv[]) {
     if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
     if (application.arguments().size() > 1) return 2;
     testBackgroundRunner();
+    testBackgroundPreview();
     testBackgroundProgress();
     testBackgroundApprovalSafety();
     QTemporaryDir backgroundSameVolume;

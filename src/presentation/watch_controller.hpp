@@ -1,6 +1,7 @@
 #pragma once
 
 #include "presentation/pending_files_model.hpp"
+#include "presentation/background_task_runner.hpp"
 
 #include <nookbit/application/ports.hpp>
 
@@ -33,8 +34,15 @@ class WatchController final : public QObject {
     Q_PROPERTY(bool proposalVisible READ proposalVisible NOTIFY watchChanged)
     Q_PROPERTY(QString proposalText READ proposalText NOTIFY watchChanged)
     Q_PROPERTY(QStringList proposalFiles READ proposalFiles NOTIFY watchChanged)
+    Q_PROPERTY(bool checking READ checking NOTIFY watchChanged)
 
 public:
+    /// 감시 전용 실행기와 파일 작업 실행 상태를 앱 조립부에서 받는 함수.
+    void setTaskRunner(BackgroundTaskRunner* runner, BackgroundTaskRunner* fileTasks = nullptr) {
+        runner_ = runner; fileTasks_ = fileTasks;
+    }
+    /// 감시 폴더의 백그라운드 검사 여부를 반환하는 함수.
+    bool checking() const { return checking_; }
     /// 대기 목록과 감시 설정·제안 계약을 연결하는 생성자.
     WatchController(PendingFilesModel& pendingFiles,
                     IWatchSettingsRepository& repository,
@@ -110,11 +118,22 @@ public:
     void rulesChanged();
 
 signals:
+    void proposalAccepted(int added);
     void settingsChanged();
     void watchChanged();
     void snoozeDeadlineChanged(qint64 deadlineUtcMs);
 
 private:
+    /// 검사 결과를 화면 상태로 반영하는 함수.
+    void applyEvaluation(const Result<WatchProposal>& result);
+    /// 재검사한 목록이 사용자가 수락한 목록과 같을 때만 대기에 등록하는 함수.
+    void finishAcceptance();
+    BackgroundTaskRunner* runner_{nullptr};
+    BackgroundTaskRunner* fileTasks_{nullptr};
+    quint64 generation_{0};
+    bool checking_{false};
+    bool recheckRequested_{false};
+    QStringList acceptingFiles_;
     /// 저장된 조건을 불러오고 기본값을 준비하는 함수.
     void loadSettings(const QString& defaultFolder);
     /// 설정에 맞게 폴더 변경 감지와 정기 검사를 다시 시작하는 함수.

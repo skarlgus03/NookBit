@@ -125,20 +125,24 @@ void PreviewController::refreshActiveRules() {
 // 대기 파일에 대해 실제 이동 없이 분류 미리보기를 만드는 함수.
 void PreviewController::createPreview(const QString& destinationRoot) {
     if (runner_ && runner_->busy()) return;
-    refreshActiveRules();
-    pendingFiles_.refreshAvailability();
-    if (pendingFiles_.unavailableCount() > 0) {
+    clear();
+    const bool asynchronous = runner_ && backgroundPreview_;
+    if (!asynchronous) pendingFiles_.refreshAvailability();
+    if (!asynchronous && pendingFiles_.unavailableCount() > 0) {
         showError(QStringLiteral("찾을 수 없는 파일 %1개가 있어요. 대기 목록에서 해당 항목을 빼고 다시 미리보기를 만들어 주세요.")
                       .arg(pendingFiles_.unavailableCount()));
+        emit previewFinished(false);
         return;
     }
     if (pendingFiles_.count() == 0) {
         showError(QStringLiteral("먼저 파일을 대기 목록에 추가해 주세요."));
+        emit previewFinished(false);
         return;
     }
     const QFileInfo homeInfo(destinationRoot.trimmed());
     if (!homeInfo.isAbsolute() || QDir(homeInfo.absoluteFilePath()).isRoot()) {
         showError(QStringLiteral("정리할 위치는 드라이브 루트가 아닌 절대 경로로 지정해 주세요."));
+        emit previewFinished(false);
         return;
     }
 
@@ -152,22 +156,62 @@ void PreviewController::createPreview(const QString& destinationRoot) {
         request.selectedFiles.emplace_back(path.toStdWString());
     }
 
-    const auto result = createPreview_.execute(request);
+    if (asynchronous) {
+        const auto generation = previewGeneration_;
+        const auto destination = homeInfo.absoluteFilePath();
+        auto result = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure(
+            {"preview.incomplete", "Preview did not complete."}));
+        previewBusy_ = true;
+        message_ = QStringLiteral("파일과 분류 규칙을 확인하고 있어요. 파일은 이동하지 않아요.");
+        emit previewBusyChanged();
+        emit previewChanged();
+        const bool accepted = runner_->submit(this,
+            [worker = backgroundPreview_, request, result] {
+                OperationProgressScope::begin(OperationPhase::Preparing);
+                *result = worker->execute(request);
+                return *result ? Result<void>::success() : Result<void>::failure(result->error());
+            }, [this, generation, paths, destination, result](const Result<void>& outcome) {
+                previewBusy_ = false;
+                emit previewBusyChanged();
+                if (generation != previewGeneration_ || paths != pendingFiles_.filePaths()) {
+                    showError(QStringLiteral("검사 중 대기 목록이나 설정이 바뀌었어요. 다시 미리보기를 만들어 주세요."));
+                    emit previewFinished(false);
+                    return;
+                }
+                if (!outcome) *result = Result<OperationPlan>::failure(outcome.error());
+                finishPreview(*result, destination);
+            });
+        if (!accepted) {
+            previewBusy_ = false;
+            emit previewBusyChanged();
+            showError(QStringLiteral("진행 중인 작업이 끝난 뒤 다시 시도해 주세요."));
+            emit previewFinished(false);
+        }
+        return;
+    }
+    finishPreview(createPreview_.execute(request), homeInfo.absoluteFilePath());
+}
+
+// 백그라운드 검사 결과를 화면 모델로 바꾸고 요청한 화면에 완료를 알리는 함수.
+void PreviewController::finishPreview(const Result<OperationPlan>& result, const QString& destinationRoot) {
     if (!result) {
         if (result.error().code == "path.destination_outside_home") {
             showError(QStringLiteral("외부 목적지가 아직 허용되지 않았어요. 규칙 편집기의 목적지 설정에서 해당 폴더를 허용해 주세요."));
+            emit previewFinished(false);
             return;
         }
         if (result.error().code == "collision.abort") {
             showError(QStringLiteral("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
+            emit previewFinished(false);
             return;
         }
         showError(QStringLiteral("미리보기를 만들지 못했어요: %1")
                       .arg(QString::fromStdString(result.error().message)));
+        emit previewFinished(false);
         return;
     }
     draft_ = result.value();
-    previewHomeRoot_ = homeInfo.absoluteFilePath();
+    previewHomeRoot_ = destinationRoot;
 
     for (const auto& step : result.value().steps) {
         QVariantMap row;
@@ -230,6 +274,7 @@ void PreviewController::createPreview(const QString& destinationRoot) {
                    .arg(excludedCount).arg(warnings_.size());
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
+    emit previewFinished(true);
 }
 
 // 사용자의 최종 확인을 기다리는지 반환하는 함수.
@@ -559,6 +604,7 @@ void PreviewController::refreshLastUndoAfterHistoryRollback(const QString& planI
 
 // 대기 목록이 바뀌었을 때 낡은 미리보기를 지우는 함수.
 void PreviewController::clear() {
+    ++previewGeneration_;
     if (runner_ && runner_->busy()) return;
     if (steps_.isEmpty() && outcomes_.isEmpty() && warnings_.isEmpty() && message_.isEmpty() &&
         !hasPreview_ && !hasFrozenPlan_ && !draft_ && !approval_) return;

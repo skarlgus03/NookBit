@@ -1,5 +1,9 @@
 #include "presentation/pending_files_model.hpp"
 #include "presentation/watch_controller.hpp"
+#include <QEventLoop>
+#include <QSemaphore>
+#include <QTimer>
+#include <atomic>
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
@@ -302,6 +306,75 @@ void testSizeUnitSettings() {
                "controller restores exact size number and selected unit");
     }
 }
+// 실제 감시 검사를 지연시켜 설정 변경과 수락 취소 경쟁을 재현하는 일꾼.
+class DelayedWatch final : public nookbit::IWatchProposalUseCase {
+public:
+    nookbit::IWatchProposalUseCase& inner;
+    QSemaphore gate;
+    QThread* screen{QThread::currentThread()};
+    std::atomic<bool> usedWorker{false};
+    explicit DelayedWatch(nookbit::IWatchProposalUseCase& worker) : inner(worker) {}
+    nookbit::Result<nookbit::WatchProposal> execute(const nookbit::WatchSettings& settings, std::int64_t now,
+        const std::vector<std::filesystem::path>& paths = {}) override {
+        usedWorker = QThread::currentThread() != screen;
+        if (!gate.tryAcquire(1, 5000)) return nookbit::Result<nookbit::WatchProposal>::failure({"test.timeout", "Test watch timed out."});
+        return inner.execute(settings, now, paths);
+    }
+};
+
+// 감시 완료를 기다리면서 화면 이벤트를 계속 처리하는 함수.
+bool waitWatch(nookbit::BackgroundTaskRunner& runner) {
+    if (!runner.busy()) return true;
+    QEventLoop loop;
+    QTimer deadline; deadline.setSingleShot(true);
+    QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&runner, &nookbit::BackgroundTaskRunner::busyChanged, &loop, [&] {
+        if (!runner.busy()) QTimer::singleShot(0, &loop, &QEventLoop::quit);
+    });
+    deadline.start(10000); loop.exec(); return !runner.busy();
+}
+
+// 비동기 검사의 낡은 제안 차단과 재검사 후 등록을 확인하는 함수.
+void testBackgroundWatch() {
+    QTemporaryDir directory;
+    expect(directory.isValid(), "background watch fixture exists");
+    if (!directory.isValid()) return;
+    const auto source = directory.filePath("photo.jpg");
+    expect(writeFile(source), "background watch source exists");
+    nookbit::PendingFilesModel pending;
+    nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
+    nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
+    DelayedWatch worker(evaluate);
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::WatchController controller(pending, repository, worker, directory.path());
+    controller.setTaskRunner(&runner);
+    const auto save = [&](int count) { controller.saveSettings(directory.path(), false, false, 10, false,
+        true, count, false, 1, false, 1, {}); };
+    save(1);
+    controller.checkNow();
+    bool heartbeat = false;
+    QTimer::singleShot(0, &controller, [&] { heartbeat = true; save(2); worker.gate.release(); });
+    expect(waitWatch(runner) && worker.usedWorker && heartbeat && !controller.checking() && !controller.proposalVisible(),
+        "changed settings discard a background proposal without blocking the UI");
+    save(1);
+    controller.checkNow(); worker.gate.release();
+    expect(waitWatch(runner) && controller.proposalVisible() && pending.count() == 0,
+        "background watch proposes without automatically queueing");
+    controller.addProposalToPending();
+    expect(controller.checking() && pending.count() == 0, "acceptance waits for a fresh scan");
+    controller.dismissProposal(); worker.gate.release();
+    expect(waitWatch(runner) && pending.count() == 0, "dismissed in-flight acceptance must not queue files");
+    controller.rulesChanged(); controller.checkNow(); worker.gate.release();
+    expect(waitWatch(runner) && controller.proposalVisible(), "fresh request can propose after cancellation");
+    int accepted = 0;
+    QObject::connect(&controller, &nookbit::WatchController::proposalAccepted, &controller, [&](int count) { accepted += count; });
+    controller.addProposalToPending(); worker.gate.release();
+    expect(waitWatch(runner) && pending.count() == 1 && accepted == 1 && QFile::exists(source),
+        "successful revalidation registers once and preserves the original");
+}
 } // namespace
 
 // 폴더 감시 컨트롤러 테스트를 실행하는 함수.
@@ -311,6 +384,7 @@ int main(int argc, char* argv[]) {
     testReadinessRetryAndAcceptance();
     testSnoozeAndCurrentCandidates();
     testSizeUnitSettings();
+    testBackgroundWatch();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;

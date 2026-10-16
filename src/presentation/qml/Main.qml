@@ -94,7 +94,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
             Label {
-                text: "복사 후 검증·확정까지 마쳐야 완료돼요."
+                text: backgroundTasks.fileWorkActive
+                      ? qsTr("파일 작업과 검증이 끝나면 결과를 알려드려요.")
+                      : qsTr("파일은 이동하지 않고 정리할 내용을 확인하고 있어요.")
                 wrapMode: Text.WordWrap
                 color: root.editorDark ? "#b7c6dc" : "#4b6153"
                 font.pixelSize: UiMetrics.textBody
@@ -444,63 +446,17 @@ ApplicationWindow {
         onPageRequested: function(page) { root.currentPage = page }
         onRecoveryRequested: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() }
     }
-    ScrollView {
+    SettingsPage {
         id: settingsScroll
-        objectName: "settingsPage"
         parent: extensionHost
         anchors.fill: parent
         anchors.margins: UiMetrics.editorInset
         visible: root.currentPage === 8
-        contentWidth: availableWidth
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ColumnLayout {
-            width: settingsScroll.availableWidth
-            spacing: UiMetrics.settingsSectionSpacing
-            SettingsSection {
-                Layout.fillWidth: true
-                title: qsTr("화면")
-                dark: root.editorDark
-                Switch {
-                    objectName: "globalDarkModeSwitch"
-                    text: qsTr("앱 전체 다크모드")
-                    font.weight: UiMetrics.settingsLabelWeight
-                    checked: uiSettings.darkMode
-                    onToggled: uiSettings.darkMode = checked
-                }
-                Label { Layout.fillWidth: true; text: qsTr("테마는 자동 저장돼요."); wrapMode: Text.Wrap; color: root.mutedText }
-            }
-            SettingsSection {
-                Layout.fillWidth: true
-                title: qsTr("기능 설정")
-                dark: root.editorDark
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() } }
-            }
-            SettingsSection {
-                Layout.fillWidth: true
-                title: qsTr("허용한 외부 목적지")
-                dark: root.editorDark
-                Label {
-                    Layout.fillWidth: true
-                    visible: destinationSettings.allowedRoots.length === 0
-                    text: qsTr("없음 · 규칙 편집기의 목적지 설정에서 폴더를 허용할 수 있어요.")
-                    color: root.mutedText
-                    wrapMode: Text.Wrap
-                }
-                Repeater {
-                    model: destinationSettings.allowedRoots
-                    RowLayout {
-                        required property string modelData
-                        Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: modelData; elide: Text.ElideMiddle; color: root.primaryText }
-                        AppButton { font.weight: UiMetrics.settingsLabelWeight; text: qsTr("허용 해제"); onClicked: destinationSettings.revokeFolder(modelData) }
-                    }
-                }
-            }
-        }
+        dark: root.editorDark
+        onWatchRequested: root.openWatchSettings()
+        onCharacterRequested: root.openCharacterSettings()
+        onCollisionRequested: root.currentPage = 6
+        onRecoveryRequested: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() }
     }
 
     ScrollView {
@@ -1551,9 +1507,21 @@ ApplicationWindow {
                         watchExcludeField.text, watchSizeUnit.currentValue)
                 }
                 AppButton {
-                    text: qsTr("저장된 조건 지금 검사")
+                    text: watchController.checking ? qsTr("폴더 검사 중…") : qsTr("저장된 조건 지금 검사")
+                    enabled: !watchController.checking
                     onClicked: watchController.checkNow()
                 }
+            }
+        }
+    }
+
+    Connections {
+        target: watchController
+        // 재검사와 등록이 끝난 뒤에만 파일 정리 화면으로 이동하는 함수.
+        function onProposalAccepted(added) {
+            if (added > 0) {
+                watchProposalDialog.close()
+                root.currentPage = 7
             }
         }
     }
@@ -1591,11 +1559,9 @@ ApplicationWindow {
             RowLayout {
                 AppButton {
                     text: qsTr("대기 목록에 담기")
-                    enabled: watchController.proposalVisible
+                    enabled: watchController.proposalVisible && !watchController.checking
                     onClicked: {
                         watchController.addProposalToPending()
-                        watchProposalDialog.close()
-                        root.currentPage = 0
                     }
                 }
                 AppButton {

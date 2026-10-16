@@ -5,6 +5,7 @@
 #include <QUrl>
 #include <QDir>
 #include <QStandardPaths>
+#include <utility>
 
 namespace nookbit {
 /// 규칙 AI 작성 계약과 캐릭터 제작 규격을 내장 리소스에서 내보내는 표시 창구.
@@ -12,14 +13,16 @@ class UserGuideController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
 public:
-    /// 문서 창구의 부모 객체를 받는 생성자.
-    explicit UserGuideController(QObject* parent = nullptr) : QObject(parent) {}
+    /// 문서 창구의 부모 객체와 현재 실행에서 허용한 기본 문서 폴더를 받는 생성자.
+    explicit UserGuideController(QObject* parent = nullptr,
+        QString documentsDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+        : QObject(parent), documentsDirectory_(std::move(documentsDirectory)) {}
     /// 최근 문서 저장 오류를 반환하는 함수.
     QString error() const { return error_; }
     /// 저장 창에 제안할 문서 이름과 기본 폴더를 반환하는 함수.
     Q_INVOKABLE QUrl suggestedFile(const QString& kind) const {
         const auto name = kind == "rules" ? QStringLiteral("NookBit-Rules-AI.md") : QStringLiteral("NookBit-CharacterPack-Guide.md");
-        return QUrl::fromLocalFile(QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(name));
+        return QUrl::fromLocalFile(QDir(documentsDirectory_).filePath(name));
     }
     /// 지정한 사용자 가이드의 Markdown 본문을 반환하는 함수.
     Q_INVOKABLE QString text(const QString& kind) const {
@@ -52,6 +55,7 @@ private:
         if (kind == "character") return QStringLiteral(":/nookbit/guides/character.ko.md");
         return {};
     }
+    QString documentsDirectory_;
     QString error_;
 };
 }

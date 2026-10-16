@@ -307,7 +307,7 @@ void testAiAuthoringExample() {
     expect(guide.open(QIODevice::ReadOnly) && example.open(QIODevice::ReadOnly),
            "AI guide and example should be readable");
     if (!guide.isOpen() || !example.isOpen()) return;
-    const auto text = guide.readAll();
+    const auto text = guide.readAll().replace("\r\n", "\n");
     const auto start = text.indexOf("```json\n");
     const auto end = text.indexOf("\n```", start + 8);
     expect(start >= 0 && end > start, "AI guide should contain one complete JSON example");
