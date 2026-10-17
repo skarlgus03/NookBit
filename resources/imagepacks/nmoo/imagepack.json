@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "packType": "imagepack",
+  "id": "nookbit.nmoo",
+  "name": "Nmoo - Standing",
+  "version": "0.1.0",
+  "display": {
+    "referenceSize": { "width": 256, "height": 256 },
+    "pixelsPerUnit": 4,
+    "pivot": { "x": 128, "y": 250 },
+    "filtering": "linear"
+  },
+  "bubble": {
+    "attachment": { "x": 50, "y": -190 },
+    "pivot": { "x": 0.1, "y": 1 },
+    "skin": { "kind": "default" }
+  },
+  "sources": [
+    { "id": "eyes-open", "kind": "image", "file": "images/eyes-open.png" },
+    { "id": "eyes-closed", "kind": "image", "file": "images/eyes-closed.png" }
+  ],
+  "frames": [
+    { "id": "eyes-open", "sourceId": "eyes-open", "region": { "type": "image" } },
+    { "id": "eyes-closed", "sourceId": "eyes-closed", "region": { "type": "image" } }
+  ],
+  "animations": [
+    {
+      "id": "standing",
+      "loop": true,
+      "steps": [
+        { "frameId": "eyes-open", "durationMs": 3000 },
+        { "frameId": "eyes-closed", "durationMs": 150 }
+      ]
+    }
+  ],
+  "bindings": [
+    { "cueId": "resting", "animationId": "standing" },
+    { "cueId": "calling", "animationId": "standing" },
+    { "cueId": "working", "animationId": "standing" }
+  ]
+}
