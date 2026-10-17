@@ -7,6 +7,7 @@ Item {
     property bool playing: true
     property int sequenceIndex: 0
     property bool finished: false
+    property var retainedStep: ({})
     property real userScale: 0.5
     property point userPivotOffset: Qt.point(0, 0)
     property point anchor: Qt.point(width / 2, height * 0.75)
@@ -22,7 +23,9 @@ Item {
         && currentStep.pixelsPerUnit > 0 && isFinite(currentStep.pixelsPerUnit) && currentStep.durationMs >= 16
     readonly property int currentFrame: currentStep.frameNumber !== undefined ? currentStep.frameNumber : sequenceIndex
     readonly property string currentFrameId: currentStep.frameId || ""
-    readonly property real pixelScale: metadataValid ? userScale / currentStep.pixelsPerUnit : 0
+    readonly property bool retainingFrame: atlas.status === Image.Loading && retainedStep.source !== undefined
+    readonly property var renderedStep: retainingFrame ? retainedStep : currentStep
+    readonly property real pixelScale: metadataValid ? userScale / renderedStep.pixelsPerUnit : 0
     readonly property bool geometryValid: isFinite(userScale) && userScale > 0
         && isFinite(userPivotOffset.x) && isFinite(userPivotOffset.y)
         && isFinite(anchor.x) && isFinite(anchor.y)
@@ -57,12 +60,15 @@ Item {
 
     // 새 재생 설정을 받으면 첫 프레임과 미완료 상태로 돌아가는 함수.
     function restart() {
+        retainedStep = ({})
         sequenceIndex = 0
         finished = false
     }
     // 지정된 순서로 다음 프레임을 선택하고 일회 재생은 마지막 프레임에 멈추는 함수.
     function advanceFrame() {
         if (!ready || finished) return
+        // 다음 PNG를 읽는 동안 이전 이미지의 영역과 피벗도 함께 유지한다.
+        retainedStep = currentStep
         if (sequenceIndex + 1 < steps.length) sequenceIndex++
         else if (descriptor.loop) sequenceIndex = 0
         else finished = true
@@ -72,21 +78,22 @@ Item {
     Item {
         id: crop
         objectName: "characterFrameRegion"
-        x: sprite.metadataValid ? sprite.anchor.x - (sprite.currentStep.pivot.x + sprite.userPivotOffset.x) * sprite.userScale : 0
-        y: sprite.metadataValid ? sprite.anchor.y - (sprite.currentStep.pivot.y + sprite.userPivotOffset.y) * sprite.userScale : 0
-        width: sprite.metadataValid ? sprite.currentStep.region.width * sprite.pixelScale : 0
-        height: sprite.metadataValid ? sprite.currentStep.region.height * sprite.pixelScale : 0
-        visible: sprite.ready
+        x: sprite.metadataValid ? sprite.anchor.x - (sprite.renderedStep.pivot.x + sprite.userPivotOffset.x) * sprite.userScale : 0
+        y: sprite.metadataValid ? sprite.anchor.y - (sprite.renderedStep.pivot.y + sprite.userPivotOffset.y) * sprite.userScale : 0
+        width: sprite.metadataValid ? sprite.renderedStep.region.width * sprite.pixelScale : 0
+        height: sprite.metadataValid ? sprite.renderedStep.region.height * sprite.pixelScale : 0
+        visible: sprite.ready || (sprite.metadataValid && sprite.geometryValid && sprite.retainingFrame)
         clip: true
         Image {
             id: atlas
             objectName: "characterAtlas"
             source: sprite.metadataValid ? sprite.currentStep.source : ""
-            width: sprite.metadataValid ? sprite.currentStep.imageWidth * sprite.pixelScale : 0
-            height: sprite.metadataValid ? sprite.currentStep.imageHeight * sprite.pixelScale : 0
-            x: sprite.metadataValid ? -sprite.currentStep.region.x * sprite.pixelScale : 0
-            y: sprite.metadataValid ? -sprite.currentStep.region.y * sprite.pixelScale : 0
+            width: sprite.metadataValid ? sprite.renderedStep.imageWidth * sprite.pixelScale : 0
+            height: sprite.metadataValid ? sprite.renderedStep.imageHeight * sprite.pixelScale : 0
+            x: sprite.metadataValid ? -sprite.renderedStep.region.x * sprite.pixelScale : 0
+            y: sprite.metadataValid ? -sprite.renderedStep.region.y * sprite.pixelScale : 0
             asynchronous: true
+            retainWhileLoading: true
             smooth: sprite.descriptor.filtering === "linear"
             cache: true
         }

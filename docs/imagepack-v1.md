@@ -203,8 +203,10 @@ The sidebar starts at scale 0.5 and offset (0, 0). The character settings dialog
 allows selection, folder import and personal scale adjustment (10–200%). The
 nominal widget rectangle does
 not auto-fit or clip a wider pose. The actual app window still bounds rendering.
-New PNGs may pause playback during their first asynchronous decode; the current
-test pack uses one cached atlas.
+New PNGs may pause playback during asynchronous decode. Within an animation,
+the previous image and its crop/pivot geometry remain visible until the next
+image is ready; the next step's duration then starts. Decode errors still stop
+playback and report an error. The current test pack uses one cached atlas.
 
 ## Folder import and selection
 

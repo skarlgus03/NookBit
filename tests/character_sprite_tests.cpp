@@ -196,6 +196,14 @@ void testImagePackPlayback() {
     expect(region->property("x").toDouble() == 36 && region->property("y").toDouble() == 88 &&
         region->property("width").toDouble() == 128, "high-resolution PNG must use logical density rather than viewport fitting");
     QMetaObject::invokeMethod(sprite.get(), "advanceFrame");
+    expect(region->property("visible").toBool(), "PNG switch must keep the previous character visible while loading");
+    auto* imageItem = sprite->findChild<QObject*>("characterAtlas");
+    expect(imageItem->property("retainWhileLoading").toBool(), "image pixels must be retained during asynchronous loading");
+    if (sprite->property("retainingFrame").toBool()) {
+        expect(region->property("x").toDouble() == 36 && region->property("y").toDouble() == 88 &&
+            region->property("width").toDouble() == 128,
+            "pending trimmed PNG must not change the previous frame geometry");
+    }
     expect(waitFor([&] { return sprite->property("ready").toBool(); }), "cropped PNG should load");
     expect(region->property("x").toDouble() == 68 && region->property("y").toDouble() == 104 &&
         region->property("width").toDouble() == 96 && region->property("height").toDouble() == 112,
