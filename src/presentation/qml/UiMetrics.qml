@@ -102,4 +102,9 @@ QtObject {
     readonly property int characterAnchorHeight: 560
     readonly property int characterAnchorHandle: 22
     readonly property int companionSettingsWidth: 320
+    readonly property int bubbleTextSize: 16
+    readonly property int bubbleMaximumWidth: 320
+    readonly property int bubbleMaximumLines: 4
+    readonly property int bubblePadding: 14
+    readonly property int bubbleScreenMargin: 8
 }

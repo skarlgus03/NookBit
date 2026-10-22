@@ -187,6 +187,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CharacterAnchorEditor.qml
         presentation/qml/CharacterWindow.qml
         presentation/qml/CharacterBubble.qml
+        presentation/qml/CharacterBubbleView.qml
         presentation/qml/RuleEditorPage.qml
     )
 

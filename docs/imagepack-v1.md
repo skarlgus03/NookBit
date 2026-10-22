@@ -277,6 +277,10 @@ automatic restart are not included.
 
 ## Speech-bubble configuration
 
+Current shared rendering sizes and supported skin formats are documented in
+[bubble-display.md](bubble-display.md). The companion page can preview the actual
+renderer with a test message without triggering file work.
+
 ImagePack v1 now accepts an optional top-level `bubble` visual module. Existing
 v1 packs that omit it still load unchanged and use the app-provided skin.
 This does not introduce dialogue or feature execution into the pack; a future

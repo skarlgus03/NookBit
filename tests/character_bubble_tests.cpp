@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlEngine>
 #include <QQmlComponent>
+#include <QQmlContext>
 #include <QQuickWindow>
 #include <QPointF>
 #include <QRectF>
@@ -33,6 +34,11 @@ void checkArea(QQuickWindow& bubble, QRectF screen, QPointF anchor, bool left, b
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     QQmlEngine engine;
+    // 독립 QML 검사에도 앱에서 사용하는 실제 공통 규격을 제공하는 함수 흐름.
+    QQmlComponent metricsComponent(&engine, QUrl::fromLocalFile(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/presentation/qml/UiMetrics.qml"));
+    std::unique_ptr<QObject> metrics(metricsComponent.create());
+    if (!metrics) { std::cerr << metricsComponent.errorString().toStdString(); return 1; }
+    engine.rootContext()->setContextProperty(QStringLiteral("UiMetrics"), metrics.get());
     QQmlComponent component(&engine, QUrl::fromLocalFile(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/presentation/qml/CharacterBubble.qml"));
     std::unique_ptr<QObject> object(component.createWithInitialProperties({
         {"screenArea", QRectF(0, 0, 800, 600)}, {"anchorPoint", QPointF(200, 300)},
@@ -80,5 +86,10 @@ int main(int argc, char** argv) {
     expect(area.value("x").toDouble() == 12 && area.value("y").toDouble() == 20, "custom action area mirrored without flipping text");
     bubble->setProperty("configuration", QVariantMap{});
     expect(!bubble->property("customSkin").toBool(), "switching to default resets custom visual");
+    bubble->setProperty("message", QString(3000, QChar(0xAC00)));
+    QCoreApplication::processEvents();
+    expect(bubble->width() <= 320 && bubble->height() <= 168, "long messages keep bounded default bubble size");
+    auto* body = bubble->findChild<QObject*>(QStringLiteral("characterBubbleText"));
+    expect(body && body->property("maximumLineCount").toInt() == 4, "shared body limits long text to four lines");
     return failures ? 1 : 0;
 }

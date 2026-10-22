@@ -996,6 +996,20 @@ ApplicationWindow {
                     userScale: firstStep.region ? Math.min((width * 0.7) / (firstStep.region.width / firstStep.pixelsPerUnit), (height * 0.65) / (firstStep.region.height / firstStep.pixelsPerUnit)) : 0.5
                     anchor: firstStep.pivot ? Qt.point((width - firstStep.region.width / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.x * userScale, (height - firstStep.region.height / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.y * userScale) : Qt.point(width / 2, height / 2)
                 }
+                CharacterBubbleView {
+                    id: companionBubblePreview
+                    objectName: "companionBubblePreview"
+                    visible: previewBubbleToggle.checked && root.currentPage === 5
+                    configuration: characterController.bubble
+                    dark: root.editorDark
+                    message: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
+                    screenArea: Qt.rect(0, UiMetrics.spaceSection * 3, parent.width, Math.max(100, parent.height - UiMetrics.spaceSection * 5))
+                    readonly property var attachment: configuration.attachment || ({x: 0, y: -120})
+                    anchorPoint: Qt.point(companionPreview.anchor.x + (attachment.x + characterSettings.bubbleOffset.x) * companionPreview.userScale,
+                        companionPreview.anchor.y + (attachment.y + characterSettings.bubbleOffset.y) * companionPreview.userScale)
+                    x: placementX
+                    y: placementY
+                }
                 Label {
                     anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottomMargin: UiMetrics.spaceSection
@@ -1015,6 +1029,7 @@ ApplicationWindow {
                 width: companionControls.availableWidth
             spacing: UiMetrics.spaceGroup
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
+            CheckBox { id: previewBubbleToggle; text: qsTr("미리보기 말풍선 표시"); checked: true }
             AppButton {
                 objectName: "characterUserGuideButton"
                 text: qsTr("제작 가이드 저장…")
