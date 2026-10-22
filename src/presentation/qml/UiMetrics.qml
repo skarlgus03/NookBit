@@ -81,7 +81,7 @@ QtObject {
         null, // 예전 독립 미리보기 페이지 번호는 재사용하지 않는다.
         {width: 720, height: 640, minWidth: 640, minHeight: 500},
         {width: 960, height: 700, minWidth: 860, minHeight: 540},
-        {width: 720, height: 640, minWidth: 640, minHeight: 500},
+        {width: 960, height: 700, minWidth: 820, minHeight: 560},
         {width: 520, height: 360, minWidth: 460, minHeight: 280},
         {width: 720, height: 680, minWidth: 640, minHeight: 580},
         {width: 560, height: 520, minWidth: 500, minHeight: 520},
@@ -101,4 +101,5 @@ QtObject {
     readonly property int characterAnchorWidth: 640
     readonly property int characterAnchorHeight: 560
     readonly property int characterAnchorHandle: 22
+    readonly property int companionSettingsWidth: 320
 }

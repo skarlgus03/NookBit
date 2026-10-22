@@ -135,7 +135,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
-        const int expectedMenu = (page == 3 || page == 5 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
+        const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
             auto* ruleTestButton = rules->findChild<QQuickItem*>(QStringLiteral("ruleTestButton"));
@@ -418,7 +418,7 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
         for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
         return nullptr;
     };
-    for (const int page : {7, 1, 4, 8}) {
+    for (const int page : {7, 1, 4, 5, 8}) {
         auto* button = find(find, home, QStringLiteral("homeNavigation%1").arg(page));
         auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
         auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;

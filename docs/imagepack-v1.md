@@ -210,6 +210,13 @@ playback and report an error. The current test pack uses one cached atlas.
 
 ## Folder import and selection
 
+The main menu's Companion page opens in the shared extension window, independently
+of general app settings. Its left-hand preview plays the selected pack without
+moving the desktop companion; the scrollable right-hand controls retain pack import,
+selection, personal scale and placement editing. Preview scale fits the available
+space and is not the personal desktop scale. Desktop right-click opens the same
+page. This UI separation does not introduce a module/plugin lifecycle.
+
 Choose a local folder containing `imagepack.json` and its declared PNG assets.
 `IImagePackLibrary` separates storage from playback. `DirectoryImagePackLibrary`
 validates the source, copies only the manifest and declared sources to an owned

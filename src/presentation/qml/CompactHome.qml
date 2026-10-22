@@ -10,7 +10,7 @@ Rectangle {
     property bool dark: false
     property bool navigationEnabled: true
     property int currentPage: 0
-    readonly property int selectedPage: [3, 5, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
+    readonly property int selectedPage: [3, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
     signal pageRequested(int page)
     signal historyRequested()
     signal moveRequested()
@@ -57,6 +57,7 @@ Rectangle {
                         {label: qsTr("파일 정리"), page: 7, icon: "folder", section: qsTr("파일 관리")},
                         {label: qsTr("분류 규칙"), page: 1, icon: "rules", section: ""},
                         {label: qsTr("작업 기록"), page: 4, icon: "history", section: ""},
+                        {label: qsTr("컴패니언"), page: 5, icon: "companion", section: qsTr("컴패니언")},
                         {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱")}
                     ]
                     delegate: ColumnLayout {

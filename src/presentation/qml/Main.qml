@@ -117,7 +117,7 @@ ApplicationWindow {
         if (currentPage === 2) { currentPage = 7; return }
         if (currentPage !== 3) watchDialog.close()
         if (currentPage !== 4) { historyDialog.close(); undoHistoryDialog.close() }
-        if (currentPage !== 5) characterSettingsDialog.close()
+        if (currentPage !== 5) { characterSettingsDialog.close(); characterAnchorDialog.close() }
         if (currentPage !== 10 && recoveryController.awaitingRecoveryConfirmation)
             recoveryController.cancelRecoveryChoice()
     }
@@ -385,11 +385,11 @@ ApplicationWindow {
             anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
-                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("캐릭터 설정"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인")][root.currentPage]
+                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("컴패니언"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인")][root.currentPage]
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 5, 6, 10].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 6, 10].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
         }
     }
@@ -477,7 +477,6 @@ ApplicationWindow {
                 title: qsTr("기능 설정")
                 dark: root.editorDark
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("폴더 감시 설정  ›"); onClicked: root.openWatchSettings() }
-                NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("캐릭터 설정  ›"); onClicked: root.openCharacterSettings() }
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("파일 이름 충돌 처리  ›"); onClicked: root.currentPage = 6 }
                 NavigationButton { Layout.fillWidth: true; font.weight: UiMetrics.settingsLabelWeight; text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() } }
             }
@@ -969,8 +968,51 @@ ApplicationWindow {
         pageIndex: 5
         anchors.fill: parent
         anchors.margins: UiMetrics.spaceSection
-        ColumnLayout {
+        RowLayout {
             anchors.fill: parent
+            spacing: UiMetrics.spaceSection
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: root.theme.alternate
+                radius: UiMetrics.radiusPanel
+                border.color: root.theme.border
+                clip: true
+                Label {
+                    anchors.top: parent.top; anchors.left: parent.left
+                    anchors.margins: UiMetrics.spaceSection
+                    text: qsTr("컴패니언 미리보기")
+                    color: root.theme.text
+                    font.pixelSize: UiMetrics.textSectionTitle
+                    font.bold: true
+                }
+                CharacterSprite {
+                    id: companionPreview
+                    objectName: "companionPagePreview"
+                    anchors.fill: parent
+                    descriptor: characterController.animation
+                    playing: root.currentPage === 5
+                    readonly property var firstStep: steps.length ? steps[0] : ({})
+                    userScale: firstStep.region ? Math.min((width * 0.7) / (firstStep.region.width / firstStep.pixelsPerUnit), (height * 0.65) / (firstStep.region.height / firstStep.pixelsPerUnit)) : 0.5
+                    anchor: firstStep.pivot ? Qt.point((width - firstStep.region.width / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.x * userScale, (height - firstStep.region.height / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.y * userScale) : Qt.point(width / 2, height / 2)
+                }
+                Label {
+                    anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottomMargin: UiMetrics.spaceSection
+                    text: qsTr("미리보기 크기는 공간에 맞춰 표시해요.")
+                    color: root.theme.muted
+                    font.pixelSize: UiMetrics.textBody
+                }
+            }
+            ScrollView {
+                id: companionControls
+                Layout.preferredWidth: UiMetrics.companionSettingsWidth
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ColumnLayout {
+                width: companionControls.availableWidth
             spacing: UiMetrics.spaceGroup
             Label { text: qsTr("캐릭터 팩"); font.bold: true }
             AppButton {
@@ -985,11 +1027,11 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
             }
             CheckBox {
-                text: qsTr("캐릭터를 앱 밖에 표시")
+                text: qsTr("컴패니언을 바탕화면에 표시")
                 checked: characterWindow.shown
                 onToggled: characterWindow.setShown(checked)
             }
-            AppButton { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
+            AppButton { text: qsTr("바탕화면 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
             Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정"); font.pixelSize: UiMetrics.textBody }
             AppComboBox {
                 id: characterPackChoice
@@ -1030,6 +1072,8 @@ ApplicationWindow {
                 text: qsTr("선택과 크기는 자동 저장돼요. 팩 원본은 변경하지 않아요.")
                 wrapMode: Text.Wrap
                 font.pixelSize: UiMetrics.textBody
+            }
+                }
             }
         }
     }

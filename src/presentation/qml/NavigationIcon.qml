@@ -25,6 +25,11 @@ Canvas {
             ctx.rect(2, 9, 6, 6); ctx.rect(16, 2, 6, 6); ctx.rect(16, 16, 6, 6)
             ctx.moveTo(8, 12); ctx.lineTo(12, 12); ctx.lineTo(12, 5); ctx.lineTo(16, 5)
             ctx.moveTo(12, 12); ctx.lineTo(12, 19); ctx.lineTo(16, 19)
+        } else if (kind === "companion") {
+            ctx.arc(12, 12, 9, 0, Math.PI * 2)
+            ctx.moveTo(8, 9); ctx.lineTo(8, 11)
+            ctx.moveTo(16, 9); ctx.lineTo(16, 11)
+            ctx.moveTo(8, 15); ctx.quadraticCurveTo(12, 19, 16, 15)
         } else if (kind === "history") {
             ctx.arc(12, 12, 9, 0, Math.PI * 2)
             ctx.moveTo(12, 6); ctx.lineTo(12, 12); ctx.lineTo(16, 15)
