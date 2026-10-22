@@ -823,6 +823,24 @@ int main(int argc, char* argv[]) {
             uiPreferences.sync();
         });
     // 화면의 작업 표시줄을 제외한 사용 가능 영역을 수집하는 함수.
+    // 팩별 개인 좌표를 복원하며 다른 팩의 보정값을 가져오지 않는 함수.
+    const auto restoreCharacterPlacement = [&uiPreferences, &characterSettings, verifyUi] {
+        const auto prefix = QStringLiteral("character/placement/") + characterSettings.selectedKey();
+        characterSettings.setPlacement(verifyUi ? QPointF() : uiPreferences.value(prefix + "/pivot", QPointF()).toPointF(),
+            verifyUi ? QPointF() : uiPreferences.value(prefix + "/bubble", QPointF()).toPointF());
+    };
+    restoreCharacterPlacement();
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &application,
+        restoreCharacterPlacement);
+    // 적용한 좌표만 개인 설정에 저장하고 팩 파일은 보존하는 함수.
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::placementChanged, &application,
+        [&uiPreferences, &characterSettings, verifyUi] {
+            if (verifyUi || characterSettings.selectedKey().isEmpty()) return;
+            const auto prefix = QStringLiteral("character/placement/") + characterSettings.selectedKey();
+            uiPreferences.setValue(prefix + "/pivot", characterSettings.pivotOffset());
+            uiPreferences.setValue(prefix + "/bubble", characterSettings.bubbleOffset());
+            uiPreferences.sync();
+        });
     const auto characterScreens = [] {
         QList<QRect> areas;
         for (const auto* screen : QGuiApplication::screens()) areas.append(screen->availableGeometry());
@@ -1187,6 +1205,9 @@ int main(int argc, char* argv[]) {
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
+                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")) != nullptr &&
+                           QMetaObject::invokeMethod(engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "open") &&
+                           QMetaObject::invokeMethod(engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "close") &&
                            QMetaObject::invokeMethod(engine.rootObjects().first(), "openCharacterSettings") &&
                            QMetaObject::invokeMethod(characterSettingsDialog, "open") &&
                            characterSettingsDialog->property("opened").toBool() &&

@@ -184,6 +184,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/FileSortConfirmation.qml
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
+        presentation/qml/CharacterAnchorEditor.qml
         presentation/qml/CharacterWindow.qml
         presentation/qml/CharacterBubble.qml
         presentation/qml/RuleEditorPage.qml

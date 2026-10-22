@@ -4,6 +4,14 @@
 #include <memory>
 
 namespace nookbit {
+// 잘못된 개인 좌표를 거부하고 두 기준점 보정을 한 번에 적용하는 함수.
+void CharacterSettingsController::setPlacement(QPointF pivot, QPointF bubble) {
+    for (double value : {pivot.x(), pivot.y(), bubble.x(), bubble.y()})
+        if (!std::isfinite(value) || std::abs(value) > 1024) return;
+    if (pivot == pivotOffset_ && bubble == bubbleOffset_) return;
+    pivotOffset_ = pivot; bubbleOffset_ = bubble;
+    emit placementChanged();
+}
 // 생성 대신 주입받은 보관소와 적용 창구를 보관하는 생성자.
 CharacterSettingsController::CharacterSettingsController(IImagePackLibrary& library, Apply apply, BackgroundTaskRunner& runner, QObject* parent)
     : QObject(parent), library_(library), apply_(std::move(apply)), runner_(runner) {

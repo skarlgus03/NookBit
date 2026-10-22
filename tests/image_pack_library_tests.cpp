@@ -119,6 +119,15 @@ int main(int argc, char** argv) {
     controller.setUserScale(std::numeric_limits<double>::quiet_NaN());
     controller.setUserScale(0);
     expect(controller.userScale() == 1.25, "invalid scales ignored");
+    controller.setPlacement(QPointF(3, -7), QPointF(25, -40));
+    expect(controller.pivotOffset() == QPointF(3, -7) && controller.bubbleOffset() == QPointF(25, -40),
+        "personal pivot and bubble offsets apply independently");
+    controller.setPlacement(QPointF(std::numeric_limits<double>::quiet_NaN(), 0), QPointF());
+    controller.setPlacement(QPointF(), QPointF(1025, 0));
+    expect(controller.pivotOffset() == QPointF(3, -7) && controller.bubbleOffset() == QPointF(25, -40),
+        "invalid placement rejects the complete update");
+    controller.setPlacement(QPointF(), QPointF());
+    expect(controller.pivotOffset().isNull() && controller.bubbleOffset().isNull(), "reset restores pack defaults");
     controller.importFolder(QUrl("https://example.invalid/pack"));
     expect(!controller.busy() && controller.selectedKey() == key, "remote import refused");
     controller.importFolder(QUrl::fromLocalFile(source));

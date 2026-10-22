@@ -3,6 +3,8 @@ import QtQuick
 
 // 공통 화면·설정·버튼과 네이티브 메뉴가 공유하는 역할별 테마 색상표.
 QtObject {
+    readonly property color characterPivotGuide: "#3985df"
+    readonly property color characterBubbleGuide: "#da8c32"
     readonly property var light: ({
         window: "#f5f7fa", surface: "#ffffff", alternate: "#f5f7fa", inspectionVeil: "#ffffff",
         text: "#273344", contentText: "#27352b", muted: "#687586", homeMuted: "#748091",

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QVariantList>
 #include <QUrl>
+#include <QPointF>
 #include <functional>
 
 namespace nookbit {
@@ -15,6 +16,8 @@ class CharacterSettingsController final : public QObject {
     Q_PROPERTY(double userScale READ userScale NOTIFY scaleChanged)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
+    Q_PROPERTY(QPointF pivotOffset READ pivotOffset NOTIFY placementChanged)
+    Q_PROPERTY(QPointF bubbleOffset READ bubbleOffset NOTIFY placementChanged)
 public:
     using Apply = std::function<Result<void>(ImagePack)>;
     /// 보관소·팩 적용 창구·임포트 실행기를 주입하는 생성자.
@@ -25,6 +28,12 @@ public:
     QString selectedKey() const { return selectedKey_; }
     /// 팩과 분리된 사용자 표시 배율을 반환하는 함수.
     double userScale() const { return scale_; }
+    /// 프레임별 기준점에 더하는 개인 보정값을 반환하는 함수.
+    QPointF pivotOffset() const { return pivotOffset_; }
+    /// 팩 말풍선 부착점에 더하는 개인 보정값을 반환하는 함수.
+    QPointF bubbleOffset() const { return bubbleOffset_; }
+    /// 유한하고 제한된 두 좌표를 함께 적용하는 함수.
+    Q_INVOKABLE void setPlacement(QPointF pivot, QPointF bubble);
     /// 가져오기 결과 및 오류 안내를 반환하는 함수.
     QString status() const { return status_; }
     /// 임포트 작업 중인지 반환하는 함수.
@@ -40,6 +49,7 @@ public:
 signals:
     void changed();
     void scaleChanged();
+    void placementChanged();
     void selected(const QString& key);
 private:
     IImagePackLibrary& library_;
@@ -48,5 +58,6 @@ private:
     QVariantList packs_;
     QString selectedKey_, status_;
     double scale_{0.5};
+    QPointF pivotOffset_, bubbleOffset_;
 };
 }

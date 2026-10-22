@@ -25,6 +25,8 @@ ApplicationWindow {
         dark: root.editorDark
         message: characterController.message
         userScale: characterSettings.userScale
+        userPivotOffset: characterSettings.pivotOffset
+        userBubbleOffset: characterSettings.bubbleOffset
         actionAvailable: watchController.proposalVisible && !backgroundTasks.busy
         onActionRequested: {
             if (!watchController.proposalVisible || backgroundTasks.busy) return
@@ -1016,6 +1018,7 @@ ApplicationWindow {
                 value: characterSettings.userScale
                 onMoved: characterSettings.setUserScale(value)
             }
+            AppButton { text: qsTr("기준점 조정…"); onClicked: characterAnchorDialog.open() }
             AppButton { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
             Label {
                 Layout.fillWidth: true
@@ -1029,6 +1032,14 @@ ApplicationWindow {
                 font.pixelSize: UiMetrics.textBody
             }
         }
+    }
+
+    CharacterAnchorEditor {
+        id: characterAnchorDialog
+        parent: extensionHost
+        settings: characterSettings
+        descriptor: characterController.animation
+        bubble: characterController.bubble
     }
 
     Dialog {

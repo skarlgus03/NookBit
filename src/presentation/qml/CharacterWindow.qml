@@ -9,6 +9,8 @@ Window {
     required property var descriptor
     required property string message
     property real userScale: 0.5
+    property point userPivotOffset: Qt.point(0, 0)
+    property point userBubbleOffset: Qt.point(0, 0)
     property bool dark: true
     property var bubbleSettings: ({})
     // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
@@ -48,8 +50,8 @@ Window {
         transientParent: pet
         visible: pet.visible && message.length > 0
         screenArea: pet.placement.screenArea
-        anchorPoint: Qt.point(pet.x + sprite.anchor.x + pet.bubbleOffset.x * pet.userScale,
-                              pet.y + sprite.anchor.y + pet.bubbleOffset.y * pet.userScale)
+        anchorPoint: Qt.point(pet.x + sprite.anchor.x + (pet.bubbleOffset.x + pet.userBubbleOffset.x - pet.userPivotOffset.x) * pet.userScale,
+                              pet.y + sprite.anchor.y + (pet.bubbleOffset.y + pet.userBubbleOffset.y - pet.userPivotOffset.y) * pet.userScale)
         message: pet.testingBubble ? qsTr("말풍선 위치 테스트예요. 캐릭터를 화면 가장자리로 옮겨보세요!") : pet.message
         actionAvailable: pet.testingBubble || pet.actionAvailable
         actionText: pet.testingBubble ? qsTr("닫기") : qsTr("확인")
@@ -69,7 +71,7 @@ Window {
         for (let i = 0; i < steps.length; ++i) {
             const step = steps[i]
             if (!step.region || !step.pivot || !(step.pixelsPerUnit > 0)) continue
-            const l = -step.pivot.x * userScale, t = -step.pivot.y * userScale
+            const l = -(step.pivot.x + userPivotOffset.x) * userScale, t = -(step.pivot.y + userPivotOffset.y) * userScale
             const r = l + step.region.width * userScale / step.pixelsPerUnit
             const b = t + step.region.height * userScale / step.pixelsPerUnit
             if (!isFinite(l) || !isFinite(t) || !isFinite(r) || !isFinite(b)) continue
@@ -87,6 +89,7 @@ Window {
         anchors.fill: parent
         descriptor: pet.descriptor
         userScale: pet.userScale
+        userPivotOffset: pet.userPivotOffset
         anchor: Qt.point((pet.width - (pet.bounds.right - pet.bounds.left)) / 2 - pet.bounds.left,
                          32 - pet.bounds.top)
         playing: pet.visible

@@ -98,4 +98,7 @@ QtObject {
     readonly property int nodeHeadingOffset: 3
     readonly property int nodeSymbolOffset: 5
     readonly property int nodeBadgeOffset: 1
+    readonly property int characterAnchorWidth: 640
+    readonly property int characterAnchorHeight: 560
+    readonly property int characterAnchorHandle: 22
 }
