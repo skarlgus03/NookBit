@@ -990,7 +990,7 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             AppButton { text: qsTr("캐릭터 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
-            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정 · ×: 숨기기"); font.pixelSize: UiMetrics.textBody }
+            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정"); font.pixelSize: UiMetrics.textBody }
             AppComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true
