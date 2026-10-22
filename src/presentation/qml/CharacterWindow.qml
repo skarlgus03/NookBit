@@ -28,16 +28,19 @@ Window {
     readonly property var bounds: frameBounds()
     width: Math.max(180, Math.ceil(bounds.right - bounds.left) + 32)
     height: Math.max(100, Math.ceil(bounds.bottom - bounds.top) + 76)
-    x: placement.anchorX - sprite.anchor.x
-    y: placement.anchorY - sprite.anchor.y
+    x: Math.round(placement.anchorX - sprite.anchor.x)
+    y: Math.round(placement.anchorY - sprite.anchor.y)
     // 닫기 명령은 앱 종료가 아니라 캐릭터 숨기기로 처리하는 함수.
     onClosing: function(event) { event.accepted = false; placement.setShown(false) }
     onXChanged: positionCommit.restart()
     onYChanged: positionCommit.restart()
 
-    // 마지막 이동 결과를 화면 피벗 좌표로 확정하는 함수.
+    // 정수 창 좌표의 반올림 오차는 버리고 실제 창 이동량만 저장하는 함수.
     function commitPosition() {
-        placement.moveAnchor(Math.round(x + sprite.anchor.x), Math.round(y + sprite.anchor.y))
+        const dx = x - Math.round(placement.anchorX - sprite.anchor.x)
+        const dy = y - Math.round(placement.anchorY - sprite.anchor.y)
+        if (dx !== 0 || dy !== 0)
+            placement.moveAnchor(placement.anchorX + dx, placement.anchorY + dy)
     }
     // 정리 제안이나 캐릭터 상태를 바꾸지 않고 말풍선 배치만 시험하는 함수.
     function testBubble() {

@@ -562,7 +562,28 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
     return loaded && pending.count() == 0 && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
 }
 
-// 이전 중단 작업을 확인하고 대기 목록·미리보기 화면을 시작하는 함수.
+// 소수 기준점의 반복 위치 저장이 바탕화면 좌표를 밀어내지 않는지 검사하는 함수.
+static bool verifyCharacterAnchorStability(QQuickWindow* window, nookbit::CharacterSettingsController& settings,
+    nookbit::CharacterWindowController& placement) {
+    if (!window) return false;
+    const QPoint original(placement.anchorX(), placement.anchorY());
+    const auto savedPivot = settings.pivotOffset();
+    const auto savedBubble = settings.bubbleOffset();
+    bool stable = true;
+    for (const auto offset : {QPointF(0.5, 1.0), QPointF(-7.25, 12.5), QPointF(19.5, -8.25)}) {
+        settings.setPlacement(offset, savedBubble);
+        QCoreApplication::processEvents();
+        for (int i = 0; i < 8; ++i) {
+            QMetaObject::invokeMethod(window, "commitPosition");
+            QCoreApplication::processEvents();
+        }
+        stable = stable && QPoint(placement.anchorX(), placement.anchorY()) == original;
+    }
+    settings.setPlacement(savedPivot, savedBubble);
+    return stable;
+}
+
+// 응용 프로그램과 의존성을 조립하고 이벤트 루프를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
@@ -1214,6 +1235,7 @@ int main(int argc, char* argv[]) {
                            QMetaObject::invokeMethod(characterSettingsDialog, "close") &&
                            characterSettings.selectedKey() == QStringLiteral("builtin") &&
                            desktopCharacter != nullptr && desktopSprite != nullptr &&
+                           verifyCharacterAnchorStability(desktopCharacter, characterSettings, characterWindow) &&
                            characterBubble != nullptr && characterBubble->color().alpha() == 0 &&
                            QMetaObject::invokeMethod(desktopCharacter, "testBubble") &&
                            desktopCharacter->property("testingBubble").toBool() &&
