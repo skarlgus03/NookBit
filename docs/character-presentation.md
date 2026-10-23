@@ -77,3 +77,14 @@ Frame timers stop when the sprite is hidden, the application is hidden or minimi
 the image is invalid, playback has finished, or the animation contains one frame.
 Text-only changes do not restart playback. Production character artwork, audio,
 an expression editor and Explorer window integration remain future work.
+
+## 컴패니언 관리 화면의 구성 시안
+
+관리 페이지의 미리보기는 팩에서 제공하는 애니메이션을 선택하고 재생·정지할 수 있다.
+하단 타임라인에서 프레임을 선택하면 해당 프레임에서 정지한다.
+`편집`을 켜면 캐릭터 기준점(파랑)과 말풍선 부착점(주황)을 드래그하여 배치를 확인한다.
+현재 조정값은 프레임 ID별 메모리 초안으로만 유지하며, 팩 교체나 앱 종료 시 사라진다.
+원본 팩, 개인 설정, 바탕화면 컴패니언의 상태에는 적용하지 않는다.
+기존 `전체 기준점 보정…`은 별도 기능이며 기존 방식으로 개인 설정을 저장한다.
+
+프레임별 영구 저장·적용·취소, 상속 설정, 팩 내보내기는 후속 설계 대상이다.

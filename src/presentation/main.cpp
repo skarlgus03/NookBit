@@ -1222,7 +1222,24 @@ int main(int argc, char* argv[]) {
         const bool guideReady = !userGuides.text("rules").isEmpty() && !userGuides.text("character").isEmpty() &&
             characterGuide && characterGuide->property("guideKey").toString() == "character" &&
             characterGuide->findChild<QObject*>(QStringLiteral("guideSaveDialog"));
-        const bool ready = guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
+        // 프레임 선택과 임시 편집이 같은 재생 공간에서 동작하는지 검사한다.
+        auto* workspace = characterSettingsDialog
+            ? characterSettingsDialog->findChild<QObject*>(QStringLiteral("companionPreviewWorkspace")) : nullptr;
+        auto* previewSprite = workspace
+            ? workspace->findChild<QObject*>(QStringLiteral("companionPagePreview")) : nullptr;
+        bool workspaceReady = workspace && previewSprite &&
+            QMetaObject::invokeMethod(workspace, "selectFrame", Q_ARG(QVariant, QVariant(1))) &&
+            !workspace->property("running").toBool() && previewSprite->property("sequenceIndex").toInt() == 1;
+        if (workspaceReady) {
+            workspace->setProperty("editing", true);
+            workspaceReady = QMetaObject::invokeMethod(workspace, "movePoint", Q_ARG(QVariant, QVariant(0)),
+                Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(110)));
+            const auto draft = workspace->property("draft").toMap().value("pivot").toMap();
+            workspaceReady = workspaceReady && draft.value("x").toDouble() == 100 && draft.value("y").toDouble() == 110;
+            workspace->setProperty("drafts", QVariantMap{});
+            workspace->setProperty("editing", false);
+        }
+        const bool ready = workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&

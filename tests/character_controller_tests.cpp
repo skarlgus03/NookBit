@@ -139,6 +139,19 @@ void testPresentationConfiguration() {
     nookbit::CharacterController character;
     expect(character.setPresentation(sample.value()).hasValue() && character.animationId() == "idle",
            "resting should select the configured sprite animation");
+    expect(character.setPresentation(sample.value(), QUrl("file:///preview/")).hasValue(),
+           "preview fixture should have an independent image base");
+    const auto previewState = character.animationId();
+    const auto previews = character.previewAnimations();
+    expect(previews.size() == static_cast<qsizetype>(sample.value().animations.size()),
+           "preview must expose every authored animation");
+    for (const auto& preview : previews) {
+        const auto entry = preview.toMap();
+        expect(!entry.value("descriptor").toMap().isEmpty() && !entry.value("label").toString().isEmpty(),
+               "preview entries must include labels and playable descriptors");
+    }
+    expect(character.animationId() == previewState && character.stateKey() == "resting",
+           "reading preview choices must not change the desktop companion state");
     auto custom = sample.value();
     custom.cues.push_back({"other.feature.offer", "별도 기능의 안내", "call"});
     expect(character.setPresentation(custom).hasValue(), "new situations should be configurable without state code changes");

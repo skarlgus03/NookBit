@@ -20,6 +20,7 @@ class CharacterController final : public QObject, public ICharacterChannel {
     Q_PROPERTY(QString animationId READ animationId NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap animation READ animation NOTIFY animationChanged)
     Q_PROPERTY(QVariantMap bubble READ bubble NOTIFY animationChanged)
+    Q_PROPERTY(QVariantList previewAnimations READ previewAnimations NOTIFY previewAnimationsChanged)
 public:
     enum class State { Resting, Calling, Working };
     Q_ENUM(State)
@@ -37,6 +38,8 @@ public:
     [[nodiscard]] QString animationId() const;
     /// 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
     [[nodiscard]] QVariantMap animation() const;
+    /// 실제 활동 상태를 바꾸지 않고 미리보기용 애니메이션 목록을 반환하는 함수.
+    [[nodiscard]] QVariantList previewAnimations() const;
     /// 말풍선의 부착점·피벗·선택적 배경을 값으로 전달하는 함수.
     [[nodiscard]] QVariantMap bubble() const;
     /// 검증한 표현 설정을 교체하고 현재 상황을 다시 선택하는 함수.
@@ -50,7 +53,10 @@ public:
 signals:
     void stateChanged();
     void animationChanged();
+    void previewAnimationsChanged();
 private:
+    /// 지정한 애니메이션을 독립적인 재생 데이터로 변환하는 함수.
+    [[nodiscard]] QVariantMap animationFor(const QString& id) const;
     /// 작업 중을 우선하고 남은 제안 여부로 다음 상태를 고르는 함수.
     void refreshState();
     using EntryKey = std::pair<std::string, std::string>;

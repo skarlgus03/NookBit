@@ -44,8 +44,27 @@ QString CharacterController::cueId() const { return cueId_; }
 QString CharacterController::animationId() const { return animationId_; }
 // 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
 QVariantMap CharacterController::animation() const {
+    auto result = animationFor(animationId_);
+    if (!result.isEmpty()) result.insert("cueId", cueId_);
+    return result;
+}
+// 팩의 모든 애니메이션을 화면에서 독립적으로 선택할 수 있게 반환하는 함수.
+QVariantList CharacterController::previewAnimations() const {
+    QVariantList result;
+    const auto append = [&](const QString& id) {
+        result.append(QVariantMap{{"label", id}, {"descriptor", animationFor(id)}});
+    };
     if (imagePack_) {
-        const auto selected = imagePack_->animations.find(animationId_.toStdString());
+        for (const auto& [id, value] : imagePack_->animations) append(QString::fromStdString(id));
+    } else {
+        for (const auto& value : presentation_.animations) append(QString::fromStdString(value.id));
+    }
+    return result;
+}
+// 선택한 애니메이션의 프레임을 값으로 변환하며 실제 캐릭터 상태는 유지하는 함수.
+QVariantMap CharacterController::animationFor(const QString& id) const {
+    if (imagePack_) {
+        const auto selected = imagePack_->animations.find(id.toStdString());
         if (selected == imagePack_->animations.end()) return {};
         QVariantList steps;
         for (const auto& step : selected->second.steps) {
@@ -58,18 +77,18 @@ QVariantMap CharacterController::animation() const {
                 {"pivot", QVariantMap{{"x", frame.pivot.x}, {"y", frame.pivot.y}}},
                 {"pixelsPerUnit", frame.pixelsPerUnit}, {"durationMs", step.durationMs}});
         }
-        return {{"id", animationId_}, {"cueId", cueId_}, {"steps", steps}, {"loop", selected->second.loop},
+        return {{"id", id}, {"steps", steps}, {"loop", selected->second.loop},
             {"filtering", imagePack_->filtering == ImagePackFiltering::Linear ? "linear" : "nearest"}};
     }
     const auto selected = std::find_if(presentation_.animations.begin(), presentation_.animations.end(),
-        [this](const CharacterAnimation& value) { return QString::fromStdString(value.id) == animationId_; });
+        [&id](const CharacterAnimation& value) { return QString::fromStdString(value.id) == id; });
     if (selected == presentation_.animations.end() || imageBaseUrl_.isEmpty()) return {};
     const auto sheet = std::find_if(presentation_.sheets.begin(), presentation_.sheets.end(),
         [&selected](const CharacterSpriteSheet& value) { return value.id == selected->sheetId; });
     if (sheet == presentation_.sheets.end()) return {};
     QVariantList frames;
     for (const auto frame : selected->frames) frames.append(frame);
-    return {{"id", animationId_}, {"cueId", cueId_}, {"source", imageBaseUrl_.resolved(QUrl(QString::fromStdString(sheet->image)))},
+    return {{"id", id}, {"source", imageBaseUrl_.resolved(QUrl(QString::fromStdString(sheet->image)))},
         {"frameWidth", sheet->frameWidth}, {"frameHeight", sheet->frameHeight},
         {"columns", sheet->columns}, {"rows", sheet->rows}, {"frames", frames},
         {"frameDurationMs", selected->frameDurationMs}, {"loop", selected->loop}};
@@ -89,6 +108,7 @@ Result<void> CharacterController::setPresentation(CharacterPresentation presenta
     imagePack_.reset();
     refreshState();
     if (previousAnimationId == animationId_ && previousCueId == cueId_) emit animationChanged();
+    emit previewAnimationsChanged();
     return Result<void>::success();
 }
 // 검증된 ImagePack의 프레임과 상황 연결을 재생 데이터로 적용하는 함수.
@@ -102,6 +122,7 @@ Result<void> CharacterController::setImagePack(ImagePack pack) {
     imagePack_ = std::move(pack);
     refreshState();
     if (previousAnimation == animationId_ && previousCue == cueId_) emit animationChanged();
+    emit previewAnimationsChanged();
     return Result<void>::success();
 }
 // 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.

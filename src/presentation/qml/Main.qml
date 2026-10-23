@@ -971,52 +971,15 @@ ApplicationWindow {
         RowLayout {
             anchors.fill: parent
             spacing: UiMetrics.spaceSection
-            Rectangle {
+            CompanionPreview {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: root.theme.alternate
-                radius: UiMetrics.radiusPanel
-                border.color: root.theme.border
-                clip: true
-                Label {
-                    anchors.top: parent.top; anchors.left: parent.left
-                    anchors.margins: UiMetrics.spaceSection
-                    text: qsTr("컴패니언 미리보기")
-                    color: root.theme.text
-                    font.pixelSize: UiMetrics.textSectionTitle
-                    font.bold: true
-                }
-                CharacterSprite {
-                    id: companionPreview
-                    objectName: "companionPagePreview"
-                    anchors.fill: parent
-                    descriptor: characterController.animation
-                    playing: root.currentPage === 5
-                    readonly property var firstStep: steps.length ? steps[0] : ({})
-                    userScale: firstStep.region ? Math.min((width * 0.7) / (firstStep.region.width / firstStep.pixelsPerUnit), (height * 0.65) / (firstStep.region.height / firstStep.pixelsPerUnit)) : 0.5
-                    anchor: firstStep.pivot ? Qt.point((width - firstStep.region.width / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.x * userScale, (height - firstStep.region.height / firstStep.pixelsPerUnit * userScale) / 2 + firstStep.pivot.y * userScale) : Qt.point(width / 2, height / 2)
-                }
-                CharacterBubbleView {
-                    id: companionBubblePreview
-                    objectName: "companionBubblePreview"
-                    visible: previewBubbleToggle.checked && root.currentPage === 5
-                    configuration: characterController.bubble
-                    dark: root.editorDark
-                    message: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
-                    screenArea: Qt.rect(0, UiMetrics.spaceSection * 3, parent.width, Math.max(100, parent.height - UiMetrics.spaceSection * 5))
-                    readonly property var attachment: configuration.attachment || ({x: 0, y: -120})
-                    anchorPoint: Qt.point(companionPreview.anchor.x + (attachment.x + characterSettings.bubbleOffset.x) * companionPreview.userScale,
-                        companionPreview.anchor.y + (attachment.y + characterSettings.bubbleOffset.y) * companionPreview.userScale)
-                    x: placementX
-                    y: placementY
-                }
-                Label {
-                    anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottomMargin: UiMetrics.spaceSection
-                    text: qsTr("미리보기 크기는 공간에 맞춰 표시해요.")
-                    color: root.theme.muted
-                    font.pixelSize: UiMetrics.textBody
-                }
+                animations: characterController.previewAnimations
+                bubble: characterController.bubble
+                theme: root.theme
+                dark: root.editorDark
+                active: root.currentPage === 5
+                showBubble: previewBubbleToggle.checked
             }
             ScrollView {
                 id: companionControls
@@ -1075,7 +1038,7 @@ ApplicationWindow {
                 value: characterSettings.userScale
                 onMoved: characterSettings.setUserScale(value)
             }
-            AppButton { text: qsTr("기준점 조정…"); onClicked: characterAnchorDialog.open() }
+            AppButton { text: qsTr("전체 기준점 보정…"); onClicked: characterAnchorDialog.open() }
             AppButton { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
             Label {
                 Layout.fillWidth: true
