@@ -13,8 +13,9 @@ Rectangle {
     readonly property real pixelsPerMs: UiMetrics.companionTimelinePixelsPerSecond / 1000
     readonly property var entries: buildEntries(steps)
     readonly property real durationMs: entries.length ? entries[entries.length - 1].endMs : 0
-    readonly property real currentTimeMs: entries.length && currentIndex >= 0 && currentIndex < entries.length ? entries[currentIndex].startMs : 0
-    signal frameSelected(int index)
+    property real positionMs: 0
+    readonly property real currentTimeMs: Math.max(0, Math.min(durationMs, positionMs))
+    signal timeSelected(real timeMs)
     color: theme.surface
     radius: UiMetrics.radiusControl
     border.color: theme.border
@@ -27,7 +28,7 @@ Rectangle {
         if (position < track.contentX || position > track.contentX + track.width - UiMetrics.spaceSection)
             track.contentX = Math.max(0, Math.min(track.contentWidth - track.width, position - track.width / 2))
     }
-    onCurrentIndexChanged: followCurrentFrame()
+    onCurrentTimeMsChanged: followCurrentFrame()
 
     // 각 프레임의 시작 시간과 종료 시간을 누적하여 반환하는 함수.
     function buildEntries(values) {
@@ -38,15 +39,10 @@ Rectangle {
             return {step: step, index: index, startMs: start, endMs: elapsed}
         })
     }
-    // 지정한 시간에 해당하는 프레임을 선택하는 함수.
+    // 트랙의 선택 시각을 재생 길이 안으로 제한해서 전달하는 함수.
     function selectTime(timeMs) {
-        if (!entries.length) return
-        for (let i = 0; i < entries.length; ++i) {
-            if (timeMs < entries[i].endMs || i === entries.length - 1) {
-                frameSelected(i)
-                return
-            }
-        }
+        if (!entries.length || !isFinite(timeMs)) return
+        timeSelected(Math.max(0, Math.min(durationMs, timeMs)))
     }
     Flickable {
         id: track
@@ -116,13 +112,22 @@ Rectangle {
             }
         }
         Rectangle {
+            objectName: "companionPlayhead"
             x: timeline.currentTimeMs * timeline.pixelsPerMs
             width: UiMetrics.borderActive
             height: track.height - UiMetrics.spaceControl
             color: timeline.theme.primaryFocus
+            Rectangle {
+                width: UiMetrics.companionTimelineKeySize
+                height: width
+                x: (parent.width - width) / 2
+                rotation: 45
+                color: timeline.theme.primaryFocus
+            }
         }
         MouseArea {
             width: track.contentWidth; height: track.height
+            cursorShape: Qt.SizeHorCursor
             // 시간 눈금 위를 누르거나 끌어서 해당 프레임으로 이동하는 함수.
             function seek(mouse) { timeline.selectTime(Math.max(0, mouse.x / timeline.pixelsPerMs)) }
             onPressed: function(mouse) { seek(mouse) }

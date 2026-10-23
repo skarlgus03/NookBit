@@ -24,7 +24,7 @@ Rectangle {
     readonly property var draft: drafts[frameKey] || ({})
     readonly property var pivot: draft.pivot || step.pivot || ({x: 0, y: 0})
     readonly property var attachment: draft.attachment || bubble.attachment || ({x: 0, y: -120})
-    readonly property bool playbackActive: active && running && !sprite.finished && sprite.steps.length > 0
+    readonly property bool playbackActive: active && running && !clock.finished && sprite.steps.length > 0
     color: theme.alternate
     radius: UiMetrics.radiusPanel
     border.color: theme.border
@@ -34,14 +34,14 @@ Rectangle {
     function selectFrame(index) {
         if (!sprite.steps.length) return
         running = false
-        sprite.retainedStep = ({})
-        sprite.sequenceIndex = Math.max(0, Math.min(index, sprite.steps.length - 1))
-        sprite.finished = false
+        clock.seekFrame(Math.max(0, Math.min(index, sprite.steps.length - 1)))
     }
+    // 재생 막대를 옮긴 정확한 시각에서 멈추는 함수.
+    function seekTime(timeMs) { running = false; clock.seek(timeMs) }
     // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
     function togglePlayback() {
         const resume = !playbackActive
-        if (sprite.finished) sprite.restart()
+        if (clock.finished) clock.seek(0)
         running = resume
     }
     // 선택한 프레임의 기준점을 임시 조정값으로 보관하는 함수.
@@ -57,6 +57,16 @@ Rectangle {
     onAnimationsChanged: { drafts = ({}); choice.currentIndex = animations && animations.length ? 0 : -1; running = true }
     onEditingChanged: if (editing) running = false
     onActiveChanged: if (!active) running = false
+
+    CompanionPlaybackClock {
+        id: clock
+        objectName: "companionPlaybackClock"
+        steps: sprite.steps
+        playing: pane.active && pane.running
+        ready: sprite.ready
+        loop: !!pane.descriptor.loop
+        onFrameChanging: sprite.retainedStep = sprite.currentStep
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -107,7 +117,9 @@ Rectangle {
                 objectName: "companionPagePreview"
                 anchors.fill: parent
                 descriptor: pane.descriptor
-                playing: pane.active && pane.running
+                playing: false
+                externallyDriven: true
+                sequenceIndex: clock.currentIndex
                 userScale: stage.zoom
                 anchor: pane.step.pivot ? Qt.point(stage.origin.x + pane.step.pivot.x * userScale, stage.origin.y + pane.step.pivot.y * userScale) : Qt.point(0, 0)
             }
@@ -165,10 +177,12 @@ Rectangle {
             theme: pane.theme
             filtering: pane.descriptor.filtering || "nearest"
             playing: pane.playbackActive
-            finished: sprite.finished
+            finished: clock.finished
+            positionMs: clock.positionMs
             currentIndex: sprite.sequenceIndex
             onFrameSelected: function(index) { pane.selectFrame(index) }
             onToggleRequested: pane.togglePlayback()
+            onTimeSelected: function(timeMs) { pane.seekTime(timeMs) }
         }
     }
 }

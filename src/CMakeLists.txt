@@ -188,6 +188,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CompanionPreview.qml
         presentation/qml/CompanionTimeline.qml
         presentation/qml/CompanionPlayback.qml
+        presentation/qml/CompanionPlaybackClock.qml
         presentation/qml/PlaybackIconButton.qml
         presentation/qml/CharacterWindow.qml
         presentation/qml/CharacterBubble.qml

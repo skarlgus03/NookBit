@@ -214,6 +214,50 @@ void testImagePackPlayback() {
     expect(waitFor([&] { return sprite->property("ready").toBool(); }) &&
         sprite->property("currentFrameId").toString() == "work-0", "atlas playback must work after individual PNG steps");
 }
+// 프레임 내부 탐색·경과 시간·반복·일회 완료·로딩 대기를 검사하는 함수.
+void testPreviewClock() {
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(projectPath("src/presentation/qml/CompanionPlaybackClock.qml")));
+    std::unique_ptr<QObject> clock(component.create());
+    expect(clock != nullptr, "preview clock must instantiate independently");
+    if (!clock) { std::cerr << component.errorString().toStdString(); return; }
+    clock->setProperty("steps", QVariantList{QVariantMap{{"durationMs", 3000}}, QVariantMap{{"durationMs", 150}}});
+    // 시각을 받는 QML 재생기 함수를 호출하는 함수.
+    const auto call = [&](const char* method, double value) {
+        expect(QMetaObject::invokeMethod(clock.get(), method, Q_ARG(QVariant, QVariant(value))), "clock operation should be callable");
+    };
+    call("advance", 500);
+    expect(clock->property("positionMs").toDouble() == 500 && clock->property("currentIndex").toInt() == 0,
+        "playhead must move while a held image remains on the same frame");
+    call("seek", 3075);
+    expect(clock->property("currentIndex").toInt() == 1, "scrubbing inside a short frame must preserve the exact time");
+    call("advance", 50);
+    expect(clock->property("positionMs").toDouble() == 3125, "resuming must retain the selected within-frame offset");
+    call("advance", 50);
+    expect(clock->property("positionMs").toDouble() == 25 && clock->property("currentIndex").toInt() == 0,
+        "looping must carry excess time into the next cycle");
+    clock->setProperty("loop", false);
+    call("seek", 3100);
+    call("advance", 100);
+    expect(clock->property("positionMs").toDouble() == 3150 && clock->property("finished").toBool(),
+        "one-shot playback must finish exactly at the animation end");
+    call("seek", 1000);
+    expect(!clock->property("finished").toBool(), "seeking back from the end must allow playback again");
+    clock->setProperty("ready", false);
+    clock->setProperty("playing", true);
+    QElapsedTimer waiting;
+    waiting.start();
+    waitFor([&] { return waiting.elapsed() >= 50; }, 100);
+    expect(clock->property("positionMs").toDouble() == 1000, "loading must suspend the playhead clock");
+    clock->setProperty("ready", true);
+    expect(waitFor([&] { return clock->property("positionMs").toDouble() > 1000; }, 300),
+        "ready playback must advance without changing the image every tick");
+    clock->setProperty("playing", false);
+    const auto paused = clock->property("positionMs").toDouble();
+    waiting.restart();
+    waitFor([&] { return waiting.elapsed() >= 50; }, 100);
+    expect(clock->property("positionMs").toDouble() == paused, "pause must hold the exact playhead time");
+}
 } // namespace
 
 // 화면을 띄우지 않고 캐릭터 스프라이트 재생 검사를 실행하는 함수.
@@ -221,5 +265,6 @@ int main(int argc, char* argv[]) {
     QGuiApplication application(argc, argv);
     testPlayback();
     testImagePackPlayback();
+    testPreviewClock();
     return failures == 0 ? 0 : 1;
 }

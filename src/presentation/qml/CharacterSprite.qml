@@ -5,6 +5,7 @@ Item {
     id: sprite
     property var descriptor: ({})
     property bool playing: true
+    property bool externallyDriven: false
     property int sequenceIndex: 0
     property bool finished: false
     property var retainedStep: ({})
@@ -73,7 +74,7 @@ Item {
         else if (descriptor.loop) sequenceIndex = 0
         else finished = true
     }
-    onDescriptorChanged: restart()
+    onDescriptorChanged: if (!externallyDriven) restart()
 
     Item {
         id: crop

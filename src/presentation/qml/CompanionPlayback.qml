@@ -11,10 +11,12 @@ Rectangle {
     property int currentIndex: 0
     property bool playing: false
     property bool finished: false
+    property real positionMs: 0
     readonly property real durationMs: timeline.durationMs
     readonly property real currentTimeMs: timeline.currentTimeMs
     signal toggleRequested()
     signal frameSelected(int index)
+    signal timeSelected(real timeMs)
     color: theme.surface
     border.color: theme.border
     radius: UiMetrics.radiusPanel
@@ -77,7 +79,8 @@ Rectangle {
             filtering: playback.filtering
             currentIndex: playback.currentIndex
             followPlayback: playback.playing
-            onFrameSelected: function(index) { playback.frameSelected(index) }
+            positionMs: playback.positionMs
+            onTimeSelected: function(timeMs) { playback.timeSelected(timeMs) }
         }
     }
 }
