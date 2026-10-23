@@ -17,8 +17,10 @@ Rectangle {
     property bool allowEditing: true
     property string previewMessage: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
     property var drafts: ({})
-    readonly property var descriptor: animations && animations.length && choice.currentIndex >= 0 && choice.currentIndex < animations.length
+    property var durationDrafts: ({})
+    readonly property var authoredDescriptor: animations && animations.length && choice.currentIndex >= 0 && choice.currentIndex < animations.length
         ? animations[choice.currentIndex].descriptor : ({})
+    readonly property var descriptor: withDurationDrafts(authoredDescriptor)
     readonly property var step: sprite.currentStep
     readonly property string frameKey: step.frameId || ""
     readonly property var draft: drafts[frameKey] || ({})
@@ -38,6 +40,29 @@ Rectangle {
     }
     // 재생 막대를 옮긴 정확한 시각에서 멈추는 함수.
     function seekTime(timeMs) { running = false; clock.seek(timeMs) }
+    // 애니메이션의 각 등장 순서에 저장한 임시 지속시간을 재생 데이터에 반영하는 함수.
+    function withDurationDrafts(authored) {
+        const changes = durationDrafts[authored.id]
+        if (!changes) return authored
+        const steps = sprite.resolveSteps(authored).map(function(step, index) {
+            return changes[index] === undefined ? step : Object.assign({}, step, {durationMs: changes[index]})
+        })
+        return Object.assign({}, authored, {steps: steps})
+    }
+    // 프레임 길이를 변경하되 현재 시간 위치는 보존하는 함수.
+    function resizeFrame(index, durationMs) {
+        if (!editing || !Number.isInteger(index) || index < 0 || index >= sprite.steps.length || !isFinite(durationMs)) return
+        running = false
+        const position = clock.positionMs
+        const all = Object.assign({}, durationDrafts)
+        const changes = Object.assign({}, all[authoredDescriptor.id] || {})
+        changes[index] = Math.max(16, Math.min(60000, Math.round(durationMs)))
+        all[authoredDescriptor.id] = changes
+        durationDrafts = all
+        clock.seek(position)
+    }
+    // 기준점과 지속시간 초안을 함께 초기화하는 함수.
+    function resetEdits() { drafts = ({}); durationDrafts = ({}) }
     // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
     function togglePlayback() {
         const resume = !playbackActive
@@ -54,7 +79,7 @@ Rectangle {
         values[frameKey] = value
         drafts = values
     }
-    onAnimationsChanged: { drafts = ({}); choice.currentIndex = animations && animations.length ? 0 : -1; running = true }
+    onAnimationsChanged: { resetEdits(); choice.currentIndex = animations && animations.length ? 0 : -1; running = true }
     onEditingChanged: if (editing) running = false
     onActiveChanged: if (!active) running = false
 
@@ -92,7 +117,7 @@ Rectangle {
             AppButton {
                 visible: pane.editing
                 text: qsTr("조정 초기화")
-                onClicked: pane.drafts = ({})
+                onClicked: pane.resetEdits()
             }
         }
         Rectangle {
@@ -165,7 +190,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             visible: pane.editing
-            text: qsTr("파랑: 캐릭터 기준점 · 주황: 말풍선 부착점\n화면 구성 확인용이에요. 조정값은 아직 저장되지 않아요.")
+            text: qsTr("파랑: 캐릭터 기준점 · 주황: 말풍선 부착점\n아래 프레임 오른쪽 끝을 끌면 지속시간이 바뀌어요. 변경값은 아직 저장되지 않아요.")
             color: pane.theme.muted
             wrapMode: Text.Wrap
             font.pixelSize: UiMetrics.textBody
@@ -179,10 +204,13 @@ Rectangle {
             playing: pane.playbackActive
             finished: clock.finished
             positionMs: clock.positionMs
+            editable: pane.editing
             currentIndex: sprite.sequenceIndex
             onFrameSelected: function(index) { pane.selectFrame(index) }
             onToggleRequested: pane.togglePlayback()
             onTimeSelected: function(timeMs) { pane.seekTime(timeMs) }
+            onDurationEditStarted: pane.running = false
+            onDurationChanged: function(index, durationMs) { pane.resizeFrame(index, durationMs) }
         }
     }
 }

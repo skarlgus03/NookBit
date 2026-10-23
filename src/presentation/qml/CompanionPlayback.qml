@@ -12,11 +12,14 @@ Rectangle {
     property bool playing: false
     property bool finished: false
     property real positionMs: 0
+    property bool editable: false
     readonly property real durationMs: timeline.durationMs
     readonly property real currentTimeMs: timeline.currentTimeMs
     signal toggleRequested()
     signal frameSelected(int index)
     signal timeSelected(real timeMs)
+    signal durationEditStarted()
+    signal durationChanged(int index, real durationMs)
     color: theme.surface
     border.color: theme.border
     radius: UiMetrics.radiusPanel
@@ -80,7 +83,10 @@ Rectangle {
             currentIndex: playback.currentIndex
             followPlayback: playback.playing
             positionMs: playback.positionMs
+            editable: playback.editable
             onTimeSelected: function(timeMs) { playback.timeSelected(timeMs) }
+            onDurationEditStarted: playback.durationEditStarted()
+            onDurationChanged: function(index, durationMs) { playback.durationChanged(index, durationMs) }
         }
     }
 }

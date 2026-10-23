@@ -105,6 +105,7 @@ QtObject {
     readonly property int companionTimelineHeight: 160
     readonly property int companionTimelineRulerHeight: 32
     readonly property int companionTimelineKeySize: 10
+    readonly property int companionTimelineResizeHandleWidth: 12
     readonly property int companionTimelinePixelsPerSecond: 160
     readonly property int companionTimelineTickMs: 500
     readonly property int companionFrameWidth: 84

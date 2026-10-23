@@ -1245,8 +1245,21 @@ int main(int argc, char* argv[]) {
                 Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(110)));
             const auto draft = workspace->property("draft").toMap().value("pivot").toMap();
             workspaceReady = workspaceReady && draft.value("x").toDouble() == 100 && draft.value("y").toDouble() == 110;
-            workspace->setProperty("drafts", QVariantMap{});
+            // 지속시간 편집은 시간 커서를 보존하고 상한·하한 및 편집 모드를 지키는지 검사한다.
+            auto* ruler = timeline ? timeline->findChild<QQuickItem*>(QStringLiteral("companionTimeRulerSeekArea")) : nullptr;
+            workspaceReady = workspaceReady && ruler && ruler->height() == uiMetrics->property("companionTimelineRulerHeight").toDouble() &&
+                QMetaObject::invokeMethod(workspace, "seekTime", Q_ARG(QVariant, QVariant(100))) &&
+                QMetaObject::invokeMethod(workspace, "resizeFrame", Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) &&
+                timeline->property("durationMs").toDouble() == duration + 400 &&
+                timeline->property("currentTimeMs").toDouble() == 100 &&
+                QMetaObject::invokeMethod(workspace, "resizeFrame", Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(-500))) &&
+                timeline->property("durationMs").toDouble() == duration - 184 &&
+                QMetaObject::invokeMethod(workspace, "resetEdits") &&
+                timeline->property("durationMs").toDouble() == duration;
             workspace->setProperty("editing", false);
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "resizeFrame",
+                Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) &&
+                timeline->property("durationMs").toDouble() == duration;
         }
         const bool ready = workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
