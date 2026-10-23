@@ -14,6 +14,8 @@ Rectangle {
     property bool showBubble: true
     property bool running: true
     property bool editing: false
+    property bool allowEditing: true
+    property string previewMessage: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
     property var drafts: ({})
     readonly property var descriptor: animations && animations.length && choice.currentIndex >= 0 && choice.currentIndex < animations.length
         ? animations[choice.currentIndex].descriptor : ({})
@@ -30,10 +32,17 @@ Rectangle {
 
     // 선택한 프레임에서 재생을 정지하는 함수.
     function selectFrame(index) {
+        if (!sprite.steps.length) return
         running = false
         sprite.retainedStep = ({})
-        sprite.sequenceIndex = index
+        sprite.sequenceIndex = Math.max(0, Math.min(index, sprite.steps.length - 1))
         sprite.finished = false
+    }
+    // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
+    function togglePlayback() {
+        const resume = !playbackActive
+        if (sprite.finished) sprite.restart()
+        running = resume
     }
     // 선택한 프레임의 기준점을 임시 조정값으로 보관하는 함수.
     function movePoint(kind, x, y) {
@@ -52,7 +61,7 @@ Rectangle {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.spaceGroup
-        spacing: UiMetrics.spaceControl
+        spacing: UiMetrics.spaceGroup
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("애니메이션"); color: pane.theme.text }
@@ -64,16 +73,26 @@ Rectangle {
                 textRole: "label"
             }
             AppButton {
+                visible: pane.allowEditing
                 text: qsTr("편집")
                 checkable: true
                 checked: pane.editing
                 onClicked: pane.editing = checked
             }
+            AppButton {
+                visible: pane.editing
+                text: qsTr("조정 초기화")
+                onClicked: pane.drafts = ({})
+            }
         }
-        Item {
+        Rectangle {
             id: stage
+            objectName: "companionPreviewStage"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            color: pane.theme.surface
+            border.color: pane.theme.border
+            radius: UiMetrics.radiusPanel
             clip: true
             readonly property real frameWidth: sprite.steps.reduce((size, frame) => Math.max(size, frame.region.width / frame.pixelsPerUnit), 1)
             readonly property real frameHeight: sprite.steps.reduce((size, frame) => Math.max(size, frame.region.height / frame.pixelsPerUnit), 1)
@@ -97,7 +116,7 @@ Rectangle {
                 visible: pane.showBubble && pane.active
                 configuration: pane.bubble
                 dark: pane.dark
-                message: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
+                message: pane.previewMessage
                 screenArea: Qt.rect(0, 0, parent.width, parent.height)
                 anchorPoint: Qt.point(stage.origin.x + (pane.pivot.x + pane.attachment.x) * stage.zoom,
                     stage.origin.y + (pane.pivot.y + pane.attachment.y) * stage.zoom)
@@ -139,58 +158,17 @@ Rectangle {
             wrapMode: Text.Wrap
             font.pixelSize: UiMetrics.textBody
         }
-        RowLayout {
+        CompanionPlayback {
+            objectName: "companionPlaybackSection"
             Layout.fillWidth: true
-            Rectangle {
-                Layout.preferredWidth: UiMetrics.companionPlaybackStatusWidth
-                Layout.preferredHeight: UiMetrics.primaryActionHeight
-                radius: UiMetrics.radiusControl
-                color: pane.playbackActive ? pane.theme.menuSelected : pane.theme.surface
-                border.color: pane.playbackActive ? pane.theme.primaryFocus : pane.theme.border
-                Label {
-                    objectName: "companionPlaybackStatus"
-                    anchors.centerIn: parent
-                    text: !sprite.steps.length ? qsTr("프레임 없음") : sprite.finished ? qsTr("재생 완료") : pane.playbackActive ? qsTr("● 재생 중") : qsTr("일시정지")
-                    font.pixelSize: UiMetrics.textEmphasis
-                    font.bold: true
-                    color: pane.theme.text
-                }
-            }
-            AppButton {
-                objectName: "companionPlaybackButton"
-                Layout.preferredHeight: UiMetrics.primaryActionHeight
-                text: pane.playbackActive ? qsTr("일시정지") : qsTr("▶ 재생")
-                enabled: sprite.steps.length > 0
-                onClicked: {
-                    const resume = !pane.playbackActive
-                    if (sprite.finished) sprite.restart()
-                    pane.running = resume
-                }
-            }
-            Label {
-                Layout.fillWidth: true
-                text: sprite.steps.length ? qsTr("프레임 %1 / %2\n%3 s / %4 s").arg(sprite.sequenceIndex + 1).arg(sprite.steps.length).arg((timeline.currentTimeMs / 1000).toFixed(2)).arg((timeline.durationMs / 1000).toFixed(2)) : ""
-                color: pane.theme.text
-                font.pixelSize: UiMetrics.textEmphasis
-                font.bold: true
-            }
-            AppButton {
-                visible: pane.editing
-                text: qsTr("조정 초기화")
-                onClicked: pane.drafts = ({})
-            }
-        }
-        CompanionTimeline {
-            id: timeline
-            objectName: "companionFrameTimeline"
-            Layout.fillWidth: true
-            Layout.preferredHeight: UiMetrics.companionTimelineHeight
             steps: sprite.steps
             theme: pane.theme
             filtering: pane.descriptor.filtering || "nearest"
-            followPlayback: pane.playbackActive
+            playing: pane.playbackActive
+            finished: sprite.finished
             currentIndex: sprite.sequenceIndex
             onFrameSelected: function(index) { pane.selectFrame(index) }
+            onToggleRequested: pane.togglePlayback()
         }
     }
 }
