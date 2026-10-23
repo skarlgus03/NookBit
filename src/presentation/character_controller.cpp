@@ -2,6 +2,7 @@
 #include <QThread>
 #include <algorithm>
 #include <utility>
+#include <cmath>
 
 namespace nookbit {
 // 캐릭터 이미지와 별개인 말풍선 설정을 화면 값으로 변환하는 함수.
@@ -45,8 +46,67 @@ QString CharacterController::animationId() const { return animationId_; }
 // 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
 QVariantMap CharacterController::animation() const {
     auto result = animationFor(animationId_);
+    auto steps = result.value("steps").toList();
+    const auto frames = edits_.value("frames").toMap();
+    const auto durations = edits_.value("durations").toMap().value(animationId_).toMap();
+    for (qsizetype i = 0; i < steps.size(); ++i) {
+        auto step = steps[i].toMap();
+        const auto edit = frames.value(step.value("frameId").toString()).toMap();
+        for (const auto& name : {QStringLiteral("pivot"), QStringLiteral("attachment")})
+            if (edit.contains(name)) step.insert(name, edit.value(name));
+        if (durations.contains(QString::number(i))) step.insert("durationMs", durations.value(QString::number(i)));
+        steps[i] = step;
+    }
+    if (!steps.isEmpty()) result.insert("steps", steps);
     if (!result.isEmpty()) result.insert("cueId", cueId_);
     return result;
+}
+// 참조·좌표·시간을 모두 검사하여 개인 편집값을 검증하는 함수.
+Result<void> CharacterController::validateEdits(const QVariantMap& edits) const {
+    const auto fail = [] { return Result<void>::failure({"character.invalid_edits", "편집값의 프레임·애니메이션 참조 또는 좌표·지속시간을 확인해 주세요."}); };
+    // JSON 숫자만 허용하고 문자열·불리언의 자동 변환을 차단하는 함수.
+    const auto number = [](const QVariant& value) {
+        const auto type = value.metaType().id();
+        return type == QMetaType::Double || type == QMetaType::Float || type == QMetaType::Int ||
+            type == QMetaType::UInt || type == QMetaType::LongLong || type == QMetaType::ULongLong;
+    };
+    for (auto it = edits.begin(); it != edits.end(); ++it)
+        if ((it.key() != "frames" && it.key() != "durations") || it.value().metaType().id() != QMetaType::QVariantMap) return fail();
+    const auto frames = edits.value("frames").toMap();
+    const auto durations = edits.value("durations").toMap();
+    if (!imagePack_) return frames.isEmpty() && durations.isEmpty() ? Result<void>::success() : fail();
+    for (auto frame = frames.begin(); frame != frames.end(); ++frame) {
+        if (!imagePack_->frames.contains(frame.key().toStdString()) || frame.value().metaType().id() != QMetaType::QVariantMap) return fail();
+        const auto points = frame.value().toMap();
+        for (auto point = points.begin(); point != points.end(); ++point) {
+            if ((point.key() != "pivot" && point.key() != "attachment") || point.value().metaType().id() != QMetaType::QVariantMap) return fail();
+            const auto xy = point.value().toMap();
+            if (xy.size() != 2 || !xy.contains("x") || !xy.contains("y")) return fail();
+            for (const auto& value : xy)
+                if (!number(value) || !std::isfinite(value.toDouble()) || std::abs(value.toDouble()) > 1024) return fail();
+        }
+    }
+    for (auto animation = durations.begin(); animation != durations.end(); ++animation) {
+        const auto found = imagePack_->animations.find(animation.key().toStdString());
+        if (found == imagePack_->animations.end() || animation.value().metaType().id() != QMetaType::QVariantMap) return fail();
+        const auto values = animation.value().toMap();
+        for (auto step = values.begin(); step != values.end(); ++step) {
+            bool validIndex = false;
+            const int index = step.key().toInt(&validIndex);
+            const double ms = step.value().toDouble();
+            if (!validIndex || step.key() != QString::number(index) || index < 0 || static_cast<size_t>(index) >= found->second.steps.size() ||
+                !number(step.value()) || !std::isfinite(ms) || ms < 16 || ms > 60000 || std::floor(ms) != ms) return fail();
+        }
+    }
+    return Result<void>::success();
+}
+// 원본 데이터를 보존하며 실제 재생에 개인 편집값을 반영하는 함수.
+Result<void> CharacterController::setEdits(QVariantMap edits) {
+    if (QThread::currentThread() != thread()) return Result<void>::failure({"character.wrong_thread", "Apply on the owning thread."});
+    const auto checked = validateEdits(edits);
+    if (!checked) return checked;
+    if (edits_ != edits) { edits_ = std::move(edits); emit animationChanged(); }
+    return Result<void>::success();
 }
 // 팩의 모든 애니메이션을 화면에서 독립적으로 선택할 수 있게 반환하는 함수.
 QVariantList CharacterController::previewAnimations() const {
@@ -106,6 +166,7 @@ Result<void> CharacterController::setPresentation(CharacterPresentation presenta
     presentation_ = std::move(presentation);
     imageBaseUrl_ = std::move(imageBaseUrl);
     imagePack_.reset();
+    edits_.clear();
     refreshState();
     if (previousAnimationId == animationId_ && previousCueId == cueId_) emit animationChanged();
     emit previewAnimationsChanged();
@@ -120,6 +181,7 @@ Result<void> CharacterController::setImagePack(ImagePack pack) {
     const auto previousAnimation = animationId_;
     const auto previousCue = cueId_;
     imagePack_ = std::move(pack);
+    edits_.clear();
     refreshState();
     if (previousAnimation == animationId_ && previousCue == cueId_) emit animationChanged();
     emit previewAnimationsChanged();

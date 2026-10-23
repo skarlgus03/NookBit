@@ -110,6 +110,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_controller.cpp
       presentation/character_settings_controller.hpp
       presentation/character_settings_controller.cpp
+      presentation/companion_edit_controller.hpp
+      presentation/companion_edit_controller.cpp
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp

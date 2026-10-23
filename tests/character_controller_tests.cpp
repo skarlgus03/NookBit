@@ -1,6 +1,9 @@
 #include "presentation/character_controller.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
+#include "infrastructure/configuration/json_image_pack_loader.hpp"
+#include "presentation/companion_edit_controller.hpp"
+#include <limits>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QSemaphore>
@@ -193,6 +196,81 @@ void testPresentationConfiguration() {
     expect(!nookbit::loadCharacterPresentation(malformed.fileName(), schema),
            "unsupported profile versions must fail schema validation");
 }
+// 원본 보존·참조 검증·저장 실패·다시 읽기를 포함한 개인 편집 적용을 검사하는 함수.
+void testCompanionEdits() {
+    nookbit::JsonImagePackLoader loader(profilePath("schemas/imagepack.schema.json"));
+    const auto loaded = loader.load(std::filesystem::path(profilePath("resources/imagepacks/test/imagepack.json").toStdWString()));
+    expect(loaded.hasValue(), "companion edit fixture must load");
+    if (!loaded) return;
+    nookbit::CharacterController character;
+    expect(character.setImagePack(loaded.value()).hasValue(), "companion edit fixture must configure");
+    QMap<QString, QVariantMap> stored;
+    bool failSave = false;
+    // 검증된 데이터만 실제 재생에 전달하는 함수.
+    const auto apply = [&](const QVariantMap& edits) { return character.setEdits(edits); };
+    // 메모리 보관소에서 팩별 저장값을 읽는 함수.
+    const auto read = [&](const QString& key) { return nookbit::Result<QVariantMap>::success(stored.value(key)); };
+    // 실패를 주입할 수 있는 보관소에 개인 설정을 저장하는 함수.
+    const auto save = [&](const QString& key, const QVariantMap& edits) {
+        if (failSave) return nookbit::Result<void>::failure({"test.save_failed", "save failed"});
+        stored.insert(key, edits);
+        return nookbit::Result<void>::success();
+    };
+    // 현재 팩의 프레임과 설정값을 검증하는 함수.
+    const auto validate = [&](const QVariantMap& edits) { return character.validateEdits(edits); };
+    nookbit::CompanionEditController editor(validate, apply, read, save);
+    editor.loadPack("first");
+    const QVariantMap frameEdit{{"pivot", QVariantMap{{"x", 60.5}, {"y", 90.0}}},
+        {"attachment", QVariantMap{{"x", 40.0}, {"y", -70.0}}}};
+    const QVariantMap edits{{"frames", QVariantMap{{"idle-0", frameEdit}}},
+        {"durations", QVariantMap{{"idle", QVariantMap{{"0", 900}}}}}};
+    const auto before = character.animation();
+    expect(editor.applyChanges(edits), "valid edits must save and apply");
+    const auto first = character.animation().value("steps").toList().front().toMap();
+    expect(first.value("pivot").toMap().value("x").toDouble() == 60.5 && first.value("durationMs").toInt() == 900 &&
+        first.value("attachment").toMap().value("x").toInt() == 40, "desktop playback must receive all three edit types");
+    const auto original = character.previewAnimations();
+    for (const auto& entry : original) {
+        const auto value = entry.toMap();
+        if (value.value("label") == "idle")
+            expect(value.value("descriptor").toMap().value("steps") == before.value("steps"), "raw preview metadata must preserve the original pack");
+    }
+    expect(loaded.value().frames.at("idle-0").pivot.x == 64 && loaded.value().animations.at("idle").steps[0].durationMs == 400,
+        "author pack values must remain unchanged");
+    auto invalid = edits;
+    invalid["frames"] = QVariantMap{{"missing-frame", frameEdit}};
+    expect(!editor.applyChanges(invalid) && editor.applied() == edits && stored.value("first") == edits,
+        "bad frame references must preserve both saved and active settings");
+    invalid = edits;
+    invalid["durations"] = QVariantMap{{"idle", QVariantMap{{"999", 100}}}};
+    expect(!editor.applyChanges(invalid), "bad animation step references must fail");
+    invalid["durations"] = QVariantMap{{"idle", QVariantMap{{"0", 15}}}};
+    expect(!editor.applyChanges(invalid), "duration limits must be checked before saving");
+    invalid["durations"] = QVariantMap{{"idle", QVariantMap{{"0", 60001}}}};
+    expect(!editor.applyChanges(invalid), "upper duration limit must be checked");
+    invalid = edits;
+    invalid["frames"] = QVariantMap{{"idle-0", QVariantMap{{"pivot", QVariantMap{{"x", std::numeric_limits<double>::infinity()}, {"y", 0}}}}}};
+    expect(!editor.applyChanges(invalid), "non-finite coordinates must fail");
+    failSave = true;
+    int appliedUpdates = 0;
+    QObject::connect(&editor, &nookbit::CompanionEditController::appliedChanged, [&] { ++appliedUpdates; });
+    expect(!editor.applyChanges({}) && editor.applied() == edits && character.animation().value("steps").toList().front().toMap() == first,
+        "save failure must leave the previous desktop playback active");
+    expect(appliedUpdates == 0, "save errors must not tell the view to replace its unsaved draft");
+    failSave = false;
+    editor.loadPack("second");
+    expect(editor.applied().isEmpty() && character.animation().value("steps") == before.value("steps"), "other packs must not inherit edits");
+    nookbit::CompanionEditController restored(validate, apply, read, save);
+    restored.loadPack("first");
+    expect(restored.applied() == edits && character.animation().value("steps").toList().front().toMap() == first,
+        "a new editor instance must restore saved playback edits");
+    expect(restored.applyChanges({}) && character.animation().value("steps") == before.value("steps"),
+        "applying empty edits must restore author defaults");
+    stored.insert("broken", invalid);
+    restored.loadPack("broken");
+    expect(!restored.status().isEmpty() && restored.applied().isEmpty() && character.animation().value("steps") == before.value("steps"),
+        "invalid saved edits must be reported without applying invalid playback data");
+}
 } // namespace
 
 // 캐릭터 상태와 작업 알림 연결 검사를 실행하는 함수.
@@ -202,5 +280,6 @@ int main(int argc, char* argv[]) {
     testRunnerConnection();
     testIndependentSources();
     testPresentationConfiguration();
+    testCompanionEdits();
     return failures == 0 ? 0 : 1;
 }

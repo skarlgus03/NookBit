@@ -14,8 +14,8 @@ Window {
     property bool dark: true
     property var bubbleSettings: ({})
     // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
-    readonly property point bubbleOffset: bubbleSettings.attachment
-        ? Qt.point(bubbleSettings.attachment.x, bubbleSettings.attachment.y) : Qt.point(0, -120)
+    readonly property var currentAttachment: sprite.renderedStep.attachment || bubbleSettings.attachment || ({x: 0, y: -120})
+    readonly property point bubbleOffset: Qt.point(currentAttachment.x, currentAttachment.y)
     property bool actionAvailable: false
     property bool testingBubble: false
     signal settingsRequested()

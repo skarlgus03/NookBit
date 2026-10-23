@@ -16,16 +16,26 @@ Rectangle {
     property bool editing: false
     property bool allowEditing: true
     property string previewMessage: qsTr("잠깐 쉬고 있어요. 함께 정리해 볼까요?")
+    property var savedEdits: ({})
+    property string editStatus: ""
+    property point userPivotOffset: Qt.point(0, 0)
+    property point userBubbleOffset: Qt.point(0, 0)
+    signal applyRequested(var edits)
     property var drafts: ({})
     property var durationDrafts: ({})
     readonly property var authoredDescriptor: animations && animations.length && choice.currentIndex >= 0 && choice.currentIndex < animations.length
         ? animations[choice.currentIndex].descriptor : ({})
     readonly property var descriptor: withDurationDrafts(authoredDescriptor)
-    readonly property var step: sprite.currentStep
+    readonly property var step: sprite.renderedStep
     readonly property string frameKey: step.frameId || ""
     readonly property var draft: drafts[frameKey] || ({})
-    readonly property var pivot: draft.pivot || step.pivot || ({x: 0, y: 0})
-    readonly property var attachment: draft.attachment || bubble.attachment || ({x: 0, y: -120})
+    readonly property var basePivot: draft.pivot || step.pivot || ({x: 0, y: 0})
+    readonly property var pivot: ({x: basePivot.x + userPivotOffset.x, y: basePivot.y + userPivotOffset.y})
+    readonly property var baseAttachment: draft.attachment || bubble.attachment || ({x: 0, y: -120})
+    readonly property var attachment: ({x: baseAttachment.x + userBubbleOffset.x - userPivotOffset.x,
+        y: baseAttachment.y + userBubbleOffset.y - userPivotOffset.y})
+    readonly property bool dirty: JSON.stringify(drafts) !== JSON.stringify(savedEdits.frames || ({}))
+        || JSON.stringify(durationDrafts) !== JSON.stringify(savedEdits.durations || ({}))
     readonly property bool playbackActive: active && running && !clock.finished && sprite.steps.length > 0
     color: theme.alternate
     radius: UiMetrics.radiusPanel
@@ -63,6 +73,11 @@ Rectangle {
     }
     // 기준점과 지속시간 초안을 함께 초기화하는 함수.
     function resetEdits() { drafts = ({}); durationDrafts = ({}) }
+    // 마지막 적용값을 복제하여 미적용 변경을 되돌리는 함수.
+    function reloadEdits() {
+        drafts = JSON.parse(JSON.stringify(savedEdits.frames || ({})))
+        durationDrafts = JSON.parse(JSON.stringify(savedEdits.durations || ({})))
+    }
     // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
     function togglePlayback() {
         const resume = !playbackActive
@@ -71,15 +86,18 @@ Rectangle {
     }
     // 선택한 프레임의 기준점을 임시 조정값으로 보관하는 함수.
     function movePoint(kind, x, y) {
-        if (!sprite.metadataValid) return
+        if (!sprite.ready) return
         const values = Object.assign({}, drafts)
         const value = Object.assign({}, values[frameKey] || {})
-        if (kind === 0) value.pivot = {x: x, y: y}
-        else value.attachment = {x: x - pivot.x, y: y - pivot.y}
+        if (kind === 0) value.pivot = {x: x - userPivotOffset.x, y: y - userPivotOffset.y}
+        else value.attachment = {x: x - pivot.x - userBubbleOffset.x + userPivotOffset.x,
+            y: y - pivot.y - userBubbleOffset.y + userPivotOffset.y}
         values[frameKey] = value
         drafts = values
     }
-    onAnimationsChanged: { resetEdits(); choice.currentIndex = animations && animations.length ? 0 : -1; running = true }
+    onSavedEditsChanged: reloadEdits()
+    Component.onCompleted: reloadEdits()
+    onAnimationsChanged: { reloadEdits(); choice.currentIndex = animations && animations.length ? 0 : -1; running = true }
     onEditingChanged: if (editing) running = false
     onActiveChanged: if (!active) running = false
 
@@ -116,7 +134,7 @@ Rectangle {
             }
             AppButton {
                 visible: pane.editing
-                text: qsTr("조정 초기화")
+                text: qsTr("팩 기본값")
                 onClicked: pane.resetEdits()
             }
         }
@@ -190,10 +208,40 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             visible: pane.editing
-            text: qsTr("파랑: 캐릭터 기준점 · 주황: 말풍선 부착점\n아래 프레임 오른쪽 끝을 끌면 지속시간이 바뀌어요. 변경값은 아직 저장되지 않아요.")
+            text: qsTr("파랑: 캐릭터 기준점 · 주황: 말풍선 부착점\n아래 프레임 오른쪽 끝을 끌면 지속시간이 바뀌어요. 적용 전에는 미리보기만 변경돼요.")
             color: pane.theme.muted
             wrapMode: Text.Wrap
             font.pixelSize: UiMetrics.textBody
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            visible: pane.allowEditing && (pane.editing || pane.dirty)
+            Label {
+                Layout.fillWidth: true
+                text: pane.dirty ? qsTr("적용하지 않은 변경이 있어요") : qsTr("저장된 상태예요")
+                color: pane.dirty ? pane.theme.text : pane.theme.muted
+                font.bold: pane.dirty
+                wrapMode: Text.Wrap
+            }
+            AppButton {
+                objectName: "companionCancelEditsButton"
+                text: qsTr("변경 취소")
+                enabled: pane.dirty
+                onClicked: { pane.running = false; pane.reloadEdits() }
+            }
+            AppButton {
+                objectName: "companionApplyEditsButton"
+                text: qsTr("적용")
+                enabled: pane.dirty
+                onClicked: pane.applyRequested({frames: pane.drafts, durations: pane.durationDrafts})
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: pane.editStatus.length > 0
+            text: pane.editStatus
+            color: pane.theme.muted
+            wrapMode: Text.Wrap
         }
         CompanionPlayback {
             objectName: "companionPlaybackSection"

@@ -196,6 +196,8 @@ if(TARGET nookbit_json_config)
 
   add_executable(nookbit_character_controller_tests
     character_controller_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/companion_edit_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/companion_edit_controller.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp

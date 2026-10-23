@@ -972,6 +972,8 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: UiMetrics.spaceSection
             CompanionPreview {
+                id: companionPreview
+                enabled: !characterSettings.busy
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 animations: characterController.previewAnimations
@@ -980,6 +982,12 @@ ApplicationWindow {
                 dark: root.editorDark
                 active: root.currentPage === 5
                 showBubble: previewBubbleToggle.checked
+                savedEdits: companionEdits.applied
+                editStatus: companionEdits.status
+                allowEditing: companionEdits.available
+                userPivotOffset: characterSettings.pivotOffset
+                userBubbleOffset: characterSettings.bubbleOffset
+                onApplyRequested: function(edits) { companionEdits.applyChanges(edits) }
             }
             ScrollView {
                 id: companionControls
@@ -1023,12 +1031,12 @@ ApplicationWindow {
                         if (items[i].key === characterSettings.selectedKey) return i
                     return -1
                 }
-                enabled: !characterSettings.busy
+                enabled: !characterSettings.busy && !companionPreview.dirty
                 onActivated: characterSettings.selectPack(currentValue)
             }
             AppButton {
                 text: qsTr("팩 폴더 가져오기…")
-                enabled: !characterSettings.busy
+                enabled: !characterSettings.busy && !companionPreview.dirty
                 onClicked: imagePackFolderDialog.open()
             }
             Label { text: qsTr("표시 크기: %1%").arg(Math.round(characterSettings.userScale * 100)) }

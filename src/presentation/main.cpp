@@ -55,6 +55,9 @@
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QSettings>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include "presentation/companion_edit_controller.hpp"
 #include <QSqlQuery>
 #include <QTextStream>
 #include <QTimer>
@@ -862,6 +865,39 @@ int main(int argc, char* argv[]) {
             uiPreferences.setValue(prefix + "/bubble", characterSettings.bubbleOffset());
             uiPreferences.sync();
         });
+    // 저장 위치는 조립부에서 제공하고 편집 담당자는 레지스트리를 직접 알지 않는다.
+    QMap<QString, QVariantMap> verificationEdits;
+    nookbit::CompanionEditController companionEdits(
+        [&characterController](const QVariantMap& edits) { return characterController.validateEdits(edits); },
+        [&characterController](const QVariantMap& edits) { return characterController.setEdits(edits); },
+        [&uiPreferences, &verificationEdits, verifyUi](const QString& key) -> nookbit::Result<QVariantMap> {
+            // 팩별 개인 편집 문서를 읽고 저장 형식을 검증하는 함수.
+            if (verifyUi) return nookbit::Result<QVariantMap>::success(verificationEdits.value(key));
+            const auto bytes = uiPreferences.value(QStringLiteral("character/edits/") + key).toByteArray();
+            if (bytes.isEmpty()) return nookbit::Result<QVariantMap>::success({});
+            const auto document = QJsonDocument::fromJson(bytes);
+            const auto root = document.object();
+            if (!document.isObject() || root.value("schemaVersion").toInt() != 1 || !root.value("edits").isObject())
+                return nookbit::Result<QVariantMap>::failure({"character.invalid_saved_edits", "저장된 컴패니언 편집값을 읽지 못했어요. 팩 기본값을 사용해요."});
+            return nookbit::Result<QVariantMap>::success(root.value("edits").toObject().toVariantMap());
+        },
+        [&uiPreferences, &verificationEdits, verifyUi](const QString& key, const QVariantMap& edits) -> nookbit::Result<void> {
+            // 개인 편집값만 저장하고 저장 오류 시 이전 설정을 복구하는 함수.
+            if (verifyUi) { verificationEdits.insert(key, edits); return nookbit::Result<void>::success(); }
+            const auto path = QStringLiteral("character/edits/") + key;
+            const bool existed = uiPreferences.contains(path);
+            const auto previous = uiPreferences.value(path);
+            const auto document = QJsonDocument::fromVariant(QVariantMap{{"schemaVersion", 1}, {"edits", edits}});
+            uiPreferences.setValue(path, document.toJson(QJsonDocument::Compact));
+            uiPreferences.sync();
+            if (uiPreferences.status() == QSettings::NoError) return nookbit::Result<void>::success();
+            if (existed) uiPreferences.setValue(path, previous); else uiPreferences.remove(path);
+            uiPreferences.sync();
+            return nookbit::Result<void>::failure({"character.save_edits_failed", "컴패니언 편집값을 저장하지 못했어요. 변경 내용은 초안에 남아 있어요."});
+        });
+    companionEdits.loadPack(characterSettings.selectedKey());
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &companionEdits,
+        &nookbit::CompanionEditController::loadPack);
     const auto characterScreens = [] {
         QList<QRect> areas;
         for (const auto* screen : QGuiApplication::screens()) areas.append(screen->availableGeometry());
@@ -979,6 +1015,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
+    engine.rootContext()->setContextProperty(QStringLiteral("companionEdits"), &companionEdits);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
@@ -1260,6 +1297,19 @@ int main(int argc, char* argv[]) {
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "resizeFrame",
                 Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) &&
                 timeline->property("durationMs").toDouble() == duration;
+            // 화면의 적용 신호가 저장 담당자로 이어지고 취소 시 마지막 적용값을 복원하는지 검사한다.
+            workspace->setProperty("editing", true);
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "resizeFrame",
+                Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) && workspace->property("dirty").toBool();
+            const QVariantMap edits{{"frames", workspace->property("drafts")}, {"durations", workspace->property("durationDrafts")}};
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "applyRequested", Q_ARG(QVariant, QVariant(edits))) &&
+                !companionEdits.applied().isEmpty() && !workspace->property("dirty").toBool() &&
+                QMetaObject::invokeMethod(workspace, "resizeFrame", Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(700))) &&
+                workspace->property("dirty").toBool() && QMetaObject::invokeMethod(workspace, "reloadEdits") &&
+                !workspace->property("dirty").toBool() && timeline->property("durationMs").toDouble() == duration + 400;
+            workspaceReady = workspaceReady && companionEdits.applyChanges({}) && !workspace->property("dirty").toBool() &&
+                timeline->property("durationMs").toDouble() == duration;
+            workspace->setProperty("editing", false);
         }
         const bool ready = workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&

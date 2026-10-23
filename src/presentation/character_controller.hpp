@@ -40,6 +40,10 @@ public:
     [[nodiscard]] QVariantMap animation() const;
     /// 실제 활동 상태를 바꾸지 않고 미리보기용 애니메이션 목록을 반환하는 함수.
     [[nodiscard]] QVariantList previewAnimations() const;
+    /// 원본 팩의 참조와 범위에 맞는 개인 편집값인지 검사하는 함수.
+    [[nodiscard]] Result<void> validateEdits(const QVariantMap& edits) const;
+    /// 검증한 개인 편집값을 실제 재생 데이터에 적용하는 함수.
+    [[nodiscard]] Result<void> setEdits(QVariantMap edits);
     /// 말풍선의 부착점·피벗·선택적 배경을 값으로 전달하는 함수.
     [[nodiscard]] QVariantMap bubble() const;
     /// 검증한 표현 설정을 교체하고 현재 상황을 다시 선택하는 함수.
@@ -68,6 +72,7 @@ private:
     CharacterPresentation presentation_;
     QUrl imageBaseUrl_;
     std::optional<ImagePack> imagePack_;
+    QVariantMap edits_;
     State state_{State::Resting};
 };
 } // namespace nookbit
