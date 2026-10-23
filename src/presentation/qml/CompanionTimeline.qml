@@ -10,6 +10,7 @@ Rectangle {
     property int currentIndex: 0
     property string filtering: "nearest"
     property bool followPlayback: false
+    readonly property real pixelsPerMs: UiMetrics.companionTimelinePixelsPerSecond / 1000
     readonly property var entries: buildEntries(steps)
     readonly property real durationMs: entries.length ? entries[entries.length - 1].endMs : 0
     readonly property real currentTimeMs: entries.length && currentIndex >= 0 && currentIndex < entries.length ? entries[currentIndex].startMs : 0
@@ -22,7 +23,7 @@ Rectangle {
     // 재생 위치가 트랙 밖으로 나가면 현재 프레임이 보이도록 따라가는 함수.
     function followCurrentFrame() {
         if (!followPlayback || durationMs <= 0) return
-        const position = track.contentWidth * currentTimeMs / durationMs
+        const position = currentTimeMs * pixelsPerMs
         if (position < track.contentX || position > track.contentX + track.width - UiMetrics.spaceSection)
             track.contentX = Math.max(0, Math.min(track.contentWidth - track.width, position - track.width / 2))
     }
@@ -52,20 +53,23 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: UiMetrics.spaceControl
         clip: true
-        contentWidth: Math.max(width, timeline.durationMs / Math.max(1, timeline.steps.reduce((minimum, frame) => Math.min(minimum, frame.durationMs), Infinity)) * UiMetrics.companionTimelineKeySize * 2)
+        // 애니메이션 길이나 창 크기가 바뀌어도 1초의 표시 폭은 유지한다.
+        contentWidth: Math.max(width, (Math.ceil(timeline.durationMs / UiMetrics.companionTimelineTickMs) + 1) * UiMetrics.companionTimelineTickMs * timeline.pixelsPerMs)
         contentHeight: height
         flickableDirection: Flickable.HorizontalFlick
         ScrollBar.horizontal: ScrollBar {}
         Repeater {
-            model: timeline.durationMs > 0 ? 6 : 0
+            // 긴 애니메이션에서도 현재 보이는 눈금만 생성한다.
+            model: Math.ceil(track.width / (UiMetrics.companionTimelineTickMs * timeline.pixelsPerMs)) + 2
             delegate: Item {
                 required property int index
-                x: track.contentWidth * index / 5
+                readonly property int tickIndex: Math.floor(track.contentX / (UiMetrics.companionTimelineTickMs * timeline.pixelsPerMs)) + index
+                x: tickIndex * UiMetrics.companionTimelineTickMs * timeline.pixelsPerMs
                 height: track.height
                 Rectangle { width: UiMetrics.borderNormal; height: parent.height; color: timeline.theme.border }
                 Label {
-                    x: index === 5 ? -width : UiMetrics.spaceSmall
-                    text: (timeline.durationMs * index / 5 / 1000).toFixed(2) + " s"
+                    x: UiMetrics.spaceSmall
+                    text: Number((tickIndex * UiMetrics.companionTimelineTickMs / 1000).toFixed(1)) + " s"
                     color: timeline.theme.muted
                     font.pixelSize: UiMetrics.textBody
                 }
@@ -77,9 +81,9 @@ Rectangle {
                 id: cell
                 required property var modelData
                 readonly property bool selected: modelData.index === timeline.currentIndex
-                x: timeline.durationMs > 0 ? track.contentWidth * modelData.startMs / timeline.durationMs : 0
+                x: modelData.startMs * timeline.pixelsPerMs
                 y: UiMetrics.companionTimelineRulerHeight
-                width: timeline.durationMs > 0 ? track.contentWidth * modelData.step.durationMs / timeline.durationMs : 0
+                width: modelData.step.durationMs * timeline.pixelsPerMs
                 height: track.height - y - UiMetrics.spaceSection
                 color: selected ? timeline.theme.menuSelected : timeline.theme.alternate
                 border.color: selected ? timeline.theme.primaryFocus : timeline.theme.border
@@ -112,7 +116,7 @@ Rectangle {
             }
         }
         Rectangle {
-            x: timeline.durationMs > 0 ? Math.min(track.contentWidth - width, track.contentWidth * timeline.currentTimeMs / timeline.durationMs) : 0
+            x: timeline.currentTimeMs * timeline.pixelsPerMs
             width: UiMetrics.borderActive
             height: track.height - UiMetrics.spaceControl
             color: timeline.theme.primaryFocus
@@ -120,7 +124,7 @@ Rectangle {
         MouseArea {
             width: track.contentWidth; height: track.height
             // 시간 눈금 위를 누르거나 끌어서 해당 프레임으로 이동하는 함수.
-            function seek(mouse) { timeline.selectTime(Math.max(0, mouse.x / Math.max(1, track.contentWidth) * timeline.durationMs)) }
+            function seek(mouse) { timeline.selectTime(Math.max(0, mouse.x / timeline.pixelsPerMs)) }
             onPressed: function(mouse) { seek(mouse) }
             onPositionChanged: function(mouse) { if (pressed) seek(mouse) }
         }
