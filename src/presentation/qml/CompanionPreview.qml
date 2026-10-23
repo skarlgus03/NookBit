@@ -22,6 +22,7 @@ Rectangle {
     readonly property var draft: drafts[frameKey] || ({})
     readonly property var pivot: draft.pivot || step.pivot || ({x: 0, y: 0})
     readonly property var attachment: draft.attachment || bubble.attachment || ({x: 0, y: -120})
+    readonly property bool playbackActive: active && running && !sprite.finished && sprite.steps.length > 0
     color: theme.alternate
     radius: UiMetrics.radiusPanel
     border.color: theme.border
@@ -139,16 +140,39 @@ Rectangle {
             font.pixelSize: UiMetrics.textBody
         }
         RowLayout {
+            Layout.fillWidth: true
+            Rectangle {
+                Layout.preferredWidth: UiMetrics.companionPlaybackStatusWidth
+                Layout.preferredHeight: UiMetrics.primaryActionHeight
+                radius: UiMetrics.radiusControl
+                color: pane.playbackActive ? pane.theme.menuSelected : pane.theme.surface
+                border.color: pane.playbackActive ? pane.theme.primaryFocus : pane.theme.border
+                Label {
+                    objectName: "companionPlaybackStatus"
+                    anchors.centerIn: parent
+                    text: !sprite.steps.length ? qsTr("프레임 없음") : sprite.finished ? qsTr("재생 완료") : pane.playbackActive ? qsTr("● 재생 중") : qsTr("일시정지")
+                    font.pixelSize: UiMetrics.textEmphasis
+                    font.bold: true
+                    color: pane.theme.text
+                }
+            }
             AppButton {
                 objectName: "companionPlaybackButton"
-                text: pane.running ? qsTr("정지") : qsTr("재생")
+                Layout.preferredHeight: UiMetrics.primaryActionHeight
+                text: pane.playbackActive ? qsTr("일시정지") : qsTr("▶ 재생")
                 enabled: sprite.steps.length > 0
-                onClicked: { if (sprite.finished) sprite.restart(); pane.running = !pane.running }
+                onClicked: {
+                    const resume = !pane.playbackActive
+                    if (sprite.finished) sprite.restart()
+                    pane.running = resume
+                }
             }
             Label {
                 Layout.fillWidth: true
-                text: sprite.steps.length ? qsTr("%1 / %2 · %3 ms").arg(sprite.sequenceIndex + 1).arg(sprite.steps.length).arg(pane.step.durationMs) : qsTr("프레임이 없어요")
+                text: sprite.steps.length ? qsTr("프레임 %1 / %2\n%3 s / %4 s").arg(sprite.sequenceIndex + 1).arg(sprite.steps.length).arg((timeline.currentTimeMs / 1000).toFixed(2)).arg((timeline.durationMs / 1000).toFixed(2)) : ""
                 color: pane.theme.text
+                font.pixelSize: UiMetrics.textEmphasis
+                font.bold: true
             }
             AppButton {
                 visible: pane.editing
@@ -156,42 +180,17 @@ Rectangle {
                 onClicked: pane.drafts = ({})
             }
         }
-        ListView {
+        CompanionTimeline {
             id: timeline
             objectName: "companionFrameTimeline"
             Layout.fillWidth: true
             Layout.preferredHeight: UiMetrics.companionTimelineHeight
-            orientation: ListView.Horizontal
-            spacing: UiMetrics.spaceControl
-            clip: true
-            model: sprite.steps
+            steps: sprite.steps
+            theme: pane.theme
+            filtering: pane.descriptor.filtering || "nearest"
+            followPlayback: pane.playbackActive
             currentIndex: sprite.sequenceIndex
-            highlightMoveDuration: 0
-            ScrollBar.horizontal: ScrollBar {}
-            delegate: Rectangle {
-                required property var modelData
-                required property int index
-                width: UiMetrics.companionFrameWidth
-                height: timeline.height - UiMetrics.spaceSection
-                radius: UiMetrics.radiusControl
-                color: pane.theme.surface
-                border.color: index === sprite.sequenceIndex ? pane.theme.primaryFocus : pane.theme.border
-                border.width: index === sprite.sequenceIndex ? UiMetrics.borderActive : UiMetrics.borderNormal
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: UiMetrics.spaceSmall
-                    CharacterSprite {
-                        width: parent.width; height: UiMetrics.companionFrameImageHeight
-                        descriptor: ({steps: [modelData], filtering: pane.descriptor.filtering})
-                        playing: false
-                        userScale: Math.min(width / (modelData.region.width / modelData.pixelsPerUnit), height / (modelData.region.height / modelData.pixelsPerUnit))
-                        anchor: Qt.point((width - modelData.region.width / modelData.pixelsPerUnit * userScale) / 2 + modelData.pivot.x * userScale,
-                            (height - modelData.region.height / modelData.pixelsPerUnit * userScale) / 2 + modelData.pivot.y * userScale)
-                    }
-                    Label { width: parent.width; text: (index + 1) + " · " + modelData.frameId; elide: Text.ElideRight; color: pane.theme.text; font.pixelSize: UiMetrics.textBody }
-                }
-                MouseArea { anchors.fill: parent; onClicked: pane.selectFrame(index) }
-            }
+            onFrameSelected: function(index) { pane.selectFrame(index) }
         }
     }
 }

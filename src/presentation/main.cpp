@@ -1231,8 +1231,17 @@ int main(int argc, char* argv[]) {
             QMetaObject::invokeMethod(workspace, "selectFrame", Q_ARG(QVariant, QVariant(1))) &&
             !workspace->property("running").toBool() && previewSprite->property("sequenceIndex").toInt() == 1;
         if (workspaceReady) {
+            auto* timeline = workspace->findChild<QObject*>(QStringLiteral("companionFrameTimeline"));
+            auto* playbackStatus = workspace->findChild<QObject*>(QStringLiteral("companionPlaybackStatus"));
+            const double duration = timeline ? timeline->property("durationMs").toDouble() : 0;
+            workspaceReady = timeline && playbackStatus && duration > 0 &&
+                playbackStatus->property("text").toString() == QStringLiteral("일시정지") &&
+                QMetaObject::invokeMethod(timeline, "selectTime", Q_ARG(QVariant, QVariant(duration))) &&
+                previewSprite->property("sequenceIndex").toInt() == 3 &&
+                QMetaObject::invokeMethod(timeline, "selectTime", Q_ARG(QVariant, QVariant(0))) &&
+                previewSprite->property("sequenceIndex").toInt() == 0;
             workspace->setProperty("editing", true);
-            workspaceReady = QMetaObject::invokeMethod(workspace, "movePoint", Q_ARG(QVariant, QVariant(0)),
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "movePoint", Q_ARG(QVariant, QVariant(0)),
                 Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(110)));
             const auto draft = workspace->property("draft").toMap().value("pivot").toMap();
             workspaceReady = workspaceReady && draft.value("x").toDouble() == 100 && draft.value("y").toDouble() == 110;
