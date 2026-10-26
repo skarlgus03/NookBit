@@ -1,5 +1,7 @@
 # NookBit
 
+홈의 **설정** 바로 아래 **알림**에서 등록된 알림 종류를 켜고 끌 수 있다. 현재 항목은 폴더 감시의 **정리 제안**이다. 알림 표시만 제어하며 감시·파일 작업·작업 기록은 계속 유지한다. 선택은 자동 저장된다. 확장할 때의 데이터와 수명 규칙은 [알림·Interact·행동 설계](docs/companion-behavior-design.md)에 정리했다.
+
 제작 문서: [AI용 분류 규칙 작성 계약](docs/ai-rule-authoring-v3.md) ·
 [캐릭터팩 제작 가이드](docs/user/character-pack-guide.ko.md).
 앱의 규칙 편집기와 캐릭터 설정에서 각각 Markdown 파일로 바로 저장할 수 있다.

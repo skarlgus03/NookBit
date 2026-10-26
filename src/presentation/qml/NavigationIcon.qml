@@ -30,6 +30,11 @@ Canvas {
             ctx.moveTo(8, 9); ctx.lineTo(8, 11)
             ctx.moveTo(16, 9); ctx.lineTo(16, 11)
             ctx.moveTo(8, 15); ctx.quadraticCurveTo(12, 19, 16, 15)
+        } else if (kind === "notifications") {
+            ctx.moveTo(5, 17); ctx.lineTo(7, 14); ctx.lineTo(7, 9)
+            ctx.bezierCurveTo(7, 2, 17, 2, 17, 9)
+            ctx.lineTo(17, 14); ctx.lineTo(19, 17); ctx.closePath()
+            ctx.moveTo(9, 20); ctx.quadraticCurveTo(12, 23, 15, 20)
         } else if (kind === "history") {
             ctx.arc(12, 12, 9, 0, Math.PI * 2)
             ctx.moveTo(12, 6); ctx.lineTo(12, 12); ctx.lineTo(16, 15)

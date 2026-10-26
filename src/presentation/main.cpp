@@ -73,6 +73,7 @@
 #include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
+#include "presentation/notification_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
 #include "presentation/character_window_controller.hpp"
 #include <QScreen>
@@ -190,7 +191,8 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
 }
 
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
-static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension, QObject* metrics) {
+static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension, QObject* metrics,
+                                       nookbit::NotificationController& notifications) {
     auto* button = mainWindow->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
     auto* rules = mainWindow->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
     if (!button || !rules) return false;
@@ -208,7 +210,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10}) {
+    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
@@ -367,8 +369,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         }
         if (page == 8) {
             // 설정 제목과 구분선이 세 그룹에 같은 규격으로 배치되는지 검사한다.
-            const auto titles = mainWindow->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
-            const auto dividers = mainWindow->findChildren<QQuickItem*>(QStringLiteral("settingsSectionDivider"));
+            auto* settings = mainWindow->findChild<QObject*>(QStringLiteral("settingsPage"));
+            if (!settings) return false;
+            const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
+            const auto dividers = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionDivider"));
             if (titles.size() != 3 || dividers.size() != 3) return false;
             for (auto* title : titles) {
                 if (title->property("font").value<QFont>().pixelSize() != metrics->property("textSectionTitle").toInt() ||
@@ -377,6 +381,24 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             for (auto* divider : dividers) {
                 if (!divider->isVisible() || divider->height() != metrics->property("borderNormal").toInt() || divider->width() <= 0) return false;
             }
+        }
+        if (page == 11) {
+            // Repeater 안의 알림 스위치를 실제 화면 트리에서 찾는 함수.
+            const auto findToggle = [](auto&& self, QQuickItem* item) -> QQuickItem* {
+                if (item->objectName() == QStringLiteral("notificationToggle_file.offer")) return item;
+                for (auto* child : item->childItems()) if (auto* found = self(self, child)) return found;
+                return nullptr;
+            };
+            auto* toggle = findToggle(findToggle, extension->contentItem());
+            if (!toggle || !notifications.isEnabled("file.offer") ||
+                !notifications.publish({"file.offer", "verify-offer", true, "Test", "Test notice"})) return false;
+            click(toggle);
+            if (notifications.isEnabled("file.offer") || notifications.activeTypes().contains("file.offer")) return false;
+            toggle = findToggle(findToggle, extension->contentItem());
+            if (!toggle) return false;
+            click(toggle);
+            if (!notifications.isEnabled("file.offer") || !notifications.activeTypes().contains("file.offer")) return false;
+            if (!notifications.publish({"file.offer", "verify-offer", false, {}, {}})) return false;
         }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
@@ -495,7 +517,7 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
         for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
         return nullptr;
     };
-    for (const int page : {7, 1, 4, 5, 8}) {
+    for (const int page : {7, 1, 4, 5, 8, 11}) {
         auto* button = find(find, home, QStringLiteral("homeNavigation%1").arg(page));
         auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
         auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;
@@ -1003,27 +1025,60 @@ int main(int argc, char* argv[]) {
         });
     for (auto* screen : QGuiApplication::screens())
         QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
+    // 알림 표시 설정만 저장하며 감시 기능이나 작업 기록에는 관여하지 않는 창구.
+    QMap<QString, bool> verificationNotificationFlags;
+    nookbit::NotificationController notifications(
+        [&uiPreferences, &verificationNotificationFlags, verifyUi](const QString& id, bool fallback) {
+            // 등록된 알림 종류의 사용자 표시 설정을 읽는 함수.
+            return verifyUi ? verificationNotificationFlags.value(id, fallback)
+                : uiPreferences.value(QStringLiteral("notifications/types/") + id + "/enabled", fallback).toBool();
+        },
+        [&uiPreferences, &verificationNotificationFlags, verifyUi](const QString& id, bool value) -> nookbit::Result<void> {
+            // 표시 설정만 저장하고 실패하면 기존 설정을 보존하는 함수.
+            if (verifyUi) { verificationNotificationFlags.insert(id, value); return nookbit::Result<void>::success(); }
+            const auto key = QStringLiteral("notifications/types/") + id + "/enabled";
+            const bool existed = uiPreferences.contains(key);
+            const auto previous = uiPreferences.value(key);
+            uiPreferences.setValue(key, value);
+            uiPreferences.sync();
+            if (uiPreferences.status() == QSettings::NoError) return nookbit::Result<void>::success();
+            if (existed) uiPreferences.setValue(key, previous); else uiPreferences.remove(key);
+            uiPreferences.sync();
+            return nookbit::Result<void>::failure({"notification.save_failed", "알림 설정을 저장하지 못했어요. 이전 설정을 유지해요."});
+        });
+    const auto registeredNotice = notifications.registerType({"file.offer", "folder-watch", "폴더 감시",
+        "정리 제안", "감시 폴더에서 정리할 파일이 발견되면 알려줘요.", true});
+    if (!registeredNotice) { QTextStream(stderr) << QString::fromStdString(registeredNotice.error().message) << Qt::endl; return EXIT_FAILURE; }
     nookbit::ICharacterChannel& characterChannel = characterController;
+    // 표시가 허용된 알림을 컴패니언 표현 창구에만 연결하는 조립부 어댑터.
+    QObject::connect(&notifications, &nookbit::NotificationController::notificationChanged, &characterController,
+        [&characterChannel](const QString& typeId, const QString& sourceId, const QString& instanceId,
+            bool active, const QString&, const QString& message) {
+            const auto received = characterChannel.publish({sourceId.toStdString(), (typeId + "/" + instanceId).toStdString(),
+                nookbit::CharacterUpdateKind::Attention, active, message.toStdString(), typeId.toStdString()});
+            if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
+        });
     // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
     const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
         const auto received = characterChannel.publish({"file-operations", "current-operation",
             nookbit::CharacterUpdateKind::Activity, backgroundTasks.fileWorkActive(), {}, "file.work"});
         if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
     };
-    // 감시 제안 상태를 공통 주의 요청으로 변환해 인터페이스 창구에 전달하는 함수.
-    const auto reportCharacterAttention = [&characterChannel, &watchController] {
-        const auto received = characterChannel.publish({"folder-watch", "organization-offer",
-            nookbit::CharacterUpdateKind::Attention, watchController.proposalVisible(), {}, "file.offer"});
+    nookbit::INotificationChannel& notificationChannel = notifications;
+    // 감시 기능의 제안 상태를 컴패니언을 모르는 공통 알림 창구로 전달하는 함수.
+    const auto reportWatchNotification = [&notificationChannel, &watchController] {
+        const auto received = notificationChannel.publish({"file.offer", "organization-offer",
+            watchController.proposalVisible(), "정리 제안", "정리할 파일이 있어요!"});
         if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
     };
     // 작업 상태를 값으로 전달하고 캐릭터가 다른 컨트롤러를 호출하지 않게 연결하는 함수.
     QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged,
         &characterController, reportCharacterActivity);
-    // 감시 제안의 생성·수락·나중에 처리 결과를 캐릭터에 전달하는 함수.
+    // 감시 제안의 생성·수락·나중에 처리 결과를 공통 알림 창구에 전달하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::watchChanged,
-        &characterController, reportCharacterAttention);
+        &notifications, reportWatchNotification);
     reportCharacterActivity();
-    reportCharacterAttention();
+    reportWatchNotification();
     // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
         &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {
@@ -1088,6 +1143,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
+    engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("companionEdits"), &companionEdits);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
@@ -1277,7 +1333,7 @@ int main(int argc, char* argv[]) {
                 checkLayout(developer->property("visible").toBool(), "developer tools");
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
-                checkLayout(verifyExtensionInteraction(window, extension, uiMetrics), "page content and real close clicks");
+                checkLayout(verifyExtensionInteraction(window, extension, uiMetrics, notifications), "page content, notification toggles and real close clicks");
                 checkLayout(verifyHomeMenuAlignment(window, uiMetrics), "centered home menu text and left icons");
                 checkLayout(verifyBusyPresentation(window, extension, backgroundTasks), "subwindow busy overlay and unlocked window movement");
             }

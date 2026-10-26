@@ -92,7 +92,8 @@ QtObject {
         {width: 720, height: 680, minWidth: 640, minHeight: 580},
         {width: 560, height: 520, minWidth: 500, minHeight: 520},
         {width: 960, height: 760, minWidth: 860, minHeight: 680},
-        {width: 860, height: 700, minWidth: 720, minHeight: 540}
+        {width: 860, height: 700, minWidth: 720, minHeight: 540},
+        {width: 560, height: 560, minWidth: 500, minHeight: 440}
     ]
 
     // 규칙 캔버스의 글씨·블록 크기는 독립적인 표시 프리셋으로 관리한다.

@@ -58,7 +58,8 @@ Rectangle {
                         {label: qsTr("분류 규칙"), page: 1, icon: "rules", section: ""},
                         {label: qsTr("작업 기록"), page: 4, icon: "history", section: ""},
                         {label: qsTr("컴패니언"), page: 5, icon: "companion", section: qsTr("컴패니언")},
-                        {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱")}
+                        {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱")},
+                        {label: qsTr("알림"), page: 11, icon: "notifications", section: ""}
                     ]
                     delegate: ColumnLayout {
                         required property var modelData

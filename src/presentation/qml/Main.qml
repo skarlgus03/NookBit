@@ -26,9 +26,9 @@ ApplicationWindow {
         userScale: characterSettings.userScale
         userPivotOffset: characterSettings.pivotOffset
         userBubbleOffset: characterSettings.bubbleOffset
-        actionAvailable: watchController.proposalVisible && !backgroundTasks.busy
+        actionAvailable: notifications.activeTypes.includes("file.offer") && !backgroundTasks.busy
         onActionRequested: {
-            if (!watchController.proposalVisible || backgroundTasks.busy) return
+            if (!notifications.activeTypes.includes("file.offer") || !watchController.proposalVisible || backgroundTasks.busy) return
             appLifecycle.openWindow()
             watchProposalDialog.open()
         }
@@ -376,11 +376,11 @@ ApplicationWindow {
             anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
-                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("컴패니언"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인")][root.currentPage]
+                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("컴패니언"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인"), qsTr("알림")][root.currentPage]
                 color: root.editorDark ? "#edf2f8" : "#273344"
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 6, 10].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
         }
     }
@@ -436,6 +436,16 @@ ApplicationWindow {
         // 파일 정리에서 요청한 규칙 편집 페이지를 연결 창에 표시하는 함수.
         onPageRequested: function(page) { root.currentPage = page }
         onRecoveryRequested: { recoveryDialog.open(); recoveryController.refreshRecoveryCases() }
+    }
+    NotificationSettingsPage {
+        parent: extensionHost
+        anchors.fill: parent
+        anchors.margins: UiMetrics.editorInset
+        visible: root.currentPage === 11
+        dark: root.editorDark
+        types: notifications.types
+        status: notifications.status
+        onEnabledRequested: function(typeId, value) { notifications.setEnabled(typeId, value) }
     }
     ScrollView {
         id: settingsScroll

@@ -31,6 +31,7 @@ add_library(nookbit_core STATIC
   modules/watch/watch_file_readiness.cpp
   modules/character/character_presentation.cpp
   modules/character/image_pack.cpp
+  modules/notifications/notification_center.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
   modules/planner/path_safety_validator.cpp
@@ -112,6 +113,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_settings_controller.cpp
       presentation/companion_edit_controller.hpp
       presentation/companion_edit_controller.cpp
+      presentation/notification_controller.hpp
+      presentation/notification_controller.cpp
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp
@@ -181,6 +184,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/AppTextField.qml
         presentation/qml/AppSpinBox.qml
         presentation/qml/CompactHome.qml
+        presentation/qml/NotificationSettingsPage.qml
         presentation/qml/FileSortPage.qml
         presentation/qml/FileSortPreview.qml
         presentation/qml/FileSortStatus.qml
