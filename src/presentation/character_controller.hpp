@@ -6,18 +6,21 @@
 #include <nookbit/application/character_channel.hpp>
 #include <nookbit/domain/character_presentation.hpp>
 #include <nookbit/domain/image_pack.hpp>
+#include "modules/character/behavior_manager.hpp"
 #include <optional>
 #include <map>
 
 namespace nookbit {
 /// 다른 화면이나 파일 작업을 호출하지 않고 캐릭터 표시 상태만 관리한다.
-class CharacterController final : public QObject, public ICharacterChannel {
+class CharacterController final : public QObject, public ICharacterChannel, public IBehaviorChannel {
     Q_OBJECT
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString stateKey READ stateKey NOTIFY stateChanged)
     Q_PROPERTY(QString message READ message NOTIFY stateChanged)
     Q_PROPERTY(QString cueId READ cueId NOTIFY stateChanged)
     Q_PROPERTY(QString animationId READ animationId NOTIFY stateChanged)
+    Q_PROPERTY(QString behaviorId READ behaviorId NOTIFY stateChanged)
+    Q_PROPERTY(QString reactionId READ reactionId NOTIFY reactionChanged)
     Q_PROPERTY(QVariantMap animation READ animation NOTIFY animationChanged)
     Q_PROPERTY(QVariantMap bubble READ bubble NOTIFY animationChanged)
     Q_PROPERTY(QVariantList previewAnimations READ previewAnimations NOTIFY previewAnimationsChanged)
@@ -36,6 +39,16 @@ public:
     [[nodiscard]] QString cueId() const;
     /// 현재 상황에 연결된 애니메이션 이름을 반환하는 함수.
     [[nodiscard]] QString animationId() const;
+    /// 일시 반응에 가려져도 유지되는 기본 행동 식별자를 반환하는 함수.
+    [[nodiscard]] QString behaviorId() const { return behaviorId_; }
+    /// 현재 표시 중인 상호작용 요청 식별자를 반환하는 함수.
+    [[nodiscard]] QString reactionId() const { return reactionId_; }
+    /// 새 행동 정의를 등록하고 현재 상황을 다시 판단하는 함수.
+    [[nodiscard]] Result<void> registerBehavior(CompanionBehavior behavior);
+    /// 기본 행동 선택에 사용할 독립적인 상황 입력을 받는 함수.
+    [[nodiscard]] Result<void> publish(const BehaviorUpdate& update) override;
+    /// 기본 행동과 별도로 일시 반응을 표시하거나 빈 ID로 해제하는 함수.
+    void presentInteraction(const QString& instanceId, const QString& cueId, const QString& message);
     /// 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
     [[nodiscard]] QVariantMap animation() const;
     /// 실제 활동 상태를 바꾸지 않고 미리보기용 애니메이션 목록을 반환하는 함수.
@@ -58,6 +71,7 @@ signals:
     void stateChanged();
     void animationChanged();
     void previewAnimationsChanged();
+    void reactionChanged();
 private:
     /// 지정한 애니메이션을 독립적인 재생 데이터로 변환하는 함수.
     [[nodiscard]] QVariantMap animationFor(const QString& id) const;
@@ -66,6 +80,11 @@ private:
     using EntryKey = std::pair<std::string, std::string>;
     std::map<EntryKey, CharacterUpdate> activities_;
     std::map<EntryKey, CharacterUpdate> attentions_;
+    BehaviorManager behaviors_;
+    QString behaviorId_{QStringLiteral("resting")};
+    QString reactionId_;
+    QString reactionCue_;
+    QString reactionMessage_;
     QString message_{QStringLiteral("잠깐 쉬고 있어요.")};
     QString cueId_{QStringLiteral("resting")};
     QString animationId_;

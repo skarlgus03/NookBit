@@ -23,12 +23,13 @@ ApplicationWindow {
         bubbleSettings: characterController.bubble
         dark: root.editorDark
         message: characterController.message
+        interactions: companionInteractions
         userScale: characterSettings.userScale
         userPivotOffset: characterSettings.pivotOffset
         userBubbleOffset: characterSettings.bubbleOffset
-        actionAvailable: notifications.activeTypes.includes("file.offer") && !backgroundTasks.busy
+        actionAvailable: characterController.reactionId === "" && notifications.activeTypes.includes("file.offer") && !backgroundTasks.busy
         onActionRequested: {
-            if (!notifications.activeTypes.includes("file.offer") || !watchController.proposalVisible || backgroundTasks.busy) return
+            if (characterController.reactionId !== "" || !notifications.activeTypes.includes("file.offer") || !watchController.proposalVisible || backgroundTasks.busy) return
             appLifecycle.openWindow()
             watchProposalDialog.open()
         }
@@ -1021,7 +1022,12 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             AppButton { text: qsTr("바탕화면 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
-            Label { text: qsTr("왼쪽 드래그: 이동 · 우클릭: 설정"); font.pixelSize: UiMetrics.textBody }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("클릭: 반응 · 드래그: 이동\nShift + 드래그: 쓰다듬기 · 우클릭: 설정")
+                wrapMode: Text.Wrap
+                font.pixelSize: UiMetrics.textBody
+            }
             AppComboBox {
                 id: characterPackChoice
                 Layout.fillWidth: true

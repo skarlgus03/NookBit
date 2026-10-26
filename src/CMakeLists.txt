@@ -31,6 +31,8 @@ add_library(nookbit_core STATIC
   modules/watch/watch_file_readiness.cpp
   modules/character/character_presentation.cpp
   modules/character/image_pack.cpp
+  modules/character/behavior_manager.cpp
+  modules/character/interaction_manager.cpp
   modules/notifications/notification_center.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
@@ -115,6 +117,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/companion_edit_controller.cpp
       presentation/notification_controller.hpp
       presentation/notification_controller.cpp
+      presentation/companion_interaction_controller.hpp
+      presentation/companion_interaction_controller.cpp
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp

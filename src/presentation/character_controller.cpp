@@ -23,7 +23,36 @@ QVariantMap CharacterController::bubble() const {
     return result;
 }
 // 휴식 상태의 캐릭터 표시 모델을 만드는 생성자.
-CharacterController::CharacterController(QObject* parent) : QObject(parent) {}
+CharacterController::CharacterController(QObject* parent) : QObject(parent) {
+    (void)behaviors_.registerBehavior({"resting", "resting", 0, {}, {}});
+    (void)behaviors_.registerBehavior({"calling", "calling", 10, {"attention"}, {}});
+    (void)behaviors_.registerBehavior({"working", "working", 20, {"working"}, {}});
+}
+// 기본 동작을 조건 데이터로 확장하고 즉시 다시 선택하는 함수.
+Result<void> CharacterController::registerBehavior(CompanionBehavior behavior) {
+    if (QThread::currentThread() != thread()) return Result<void>::failure({"character.wrong_thread", "Register on the owning thread."});
+    auto result = behaviors_.registerBehavior(std::move(behavior));
+    if (result) refreshState();
+    return result;
+}
+// 업무 상태 입력과 충돌하지 않는 외부 상황 태그를 받는 함수.
+Result<void> CharacterController::publish(const BehaviorUpdate& update) {
+    if (QThread::currentThread() != thread()) return Result<void>::failure({"character.wrong_thread", "Publish on the owning thread."});
+    if (update.sourceId == "character-status") return Result<void>::failure({"behavior.reserved_source", "This source is reserved for activity adaptation."});
+    auto result = behaviors_.publish(update);
+    if (result) refreshState();
+    return result;
+}
+// 반응이 끝나면 보관한 과거 상태 대신 최신 상황으로 돌아가는 함수.
+void CharacterController::presentInteraction(const QString& instanceId, const QString& cueId, const QString& message) {
+    if (QThread::currentThread() != thread()) return;
+    if (reactionId_ == instanceId && reactionCue_ == cueId && reactionMessage_ == message) return;
+    reactionId_ = instanceId;
+    reactionCue_ = instanceId.isEmpty() ? QString() : cueId;
+    reactionMessage_ = instanceId.isEmpty() ? QString() : message;
+    refreshState();
+    emit reactionChanged();
+}
 // 현재 캐릭터 상태를 반환하는 함수.
 CharacterController::State CharacterController::state() const noexcept { return state_; }
 // 그림·애니메이션 선택용 고정 상태 이름을 반환하는 함수.
@@ -206,17 +235,22 @@ Result<void> CharacterController::publish(const CharacterUpdate& update) {
 }
 // 작업 중을 우선하고 남은 제안 여부로 다음 상태를 고르는 함수.
 void CharacterController::refreshState() {
-    const auto next = !activities_.empty() ? State::Working : !attentions_.empty() ? State::Calling : State::Resting;
+    (void)behaviors_.publish({"character-status", "work", {"working"}, !activities_.empty()});
+    (void)behaviors_.publish({"character-status", "attention", {"attention"}, !attentions_.empty()});
+    const auto behavior = behaviors_.current();
+    const auto behaviorName = QString::fromStdString(behavior ? behavior->id : "resting");
+    const auto next = behaviorName == "working" ? State::Working : behaviorName == "calling" ? State::Calling : State::Resting;
     auto text = QStringLiteral("잠깐 쉬고 있어요.");
     const auto fallback = next == State::Working ? "working" : next == State::Calling ? "calling" : "resting";
-    std::string requestedCue = fallback;
+    std::string requestedCue = behavior ? behavior->cueId : fallback;
     const CharacterUpdate* selected = nullptr;
     if (next != State::Resting) {
         const auto& entries = next == State::Working ? activities_ : attentions_;
-        selected = &entries.begin()->second;
-        if (!selected->cueId.empty()) requestedCue = selected->cueId;
+        if (!entries.empty()) selected = &entries.begin()->second;
+        if (selected && !selected->cueId.empty()) requestedCue = selected->cueId;
         text = next == State::Working ? QStringLiteral("작업 중이에요.") : QStringLiteral("확인할 내용이 있어요!");
     }
+    if (!reactionId_.isEmpty()) requestedCue = reactionCue_.toStdString();
     const auto findCue = [this](const std::string& id) {
         return std::find_if(presentation_.cues.begin(), presentation_.cues.end(),
             [&id](const CharacterCue& cue) { return cue.id == id; });
@@ -236,10 +270,12 @@ void CharacterController::refreshState() {
         if (cue != presentation_.cues.end()) animation = QString::fromStdString(cue->animationId);
     }
     if (selected && !selected->message.empty()) text = QString::fromStdString(selected->message);
+    if (!reactionId_.isEmpty() && !reactionMessage_.isEmpty()) text = reactionMessage_;
     const auto cueName = QString::fromStdString(requestedCue);
-    if (next == state_ && text == message_ && cueName == cueId_ && animation == animationId_) return;
+    if (next == state_ && behaviorName == behaviorId_ && text == message_ && cueName == cueId_ && animation == animationId_) return;
     const bool animationReplaced = animationId_ != animation || cueId_ != cueName;
     state_ = next;
+    behaviorId_ = behaviorName;
     message_ = text;
     cueId_ = cueName;
     animationId_ = animation;

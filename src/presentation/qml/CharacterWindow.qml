@@ -8,6 +8,7 @@ Window {
     required property var placement
     required property var descriptor
     required property string message
+    required property var interactions
     property real userScale: 0.5
     property point userPivotOffset: Qt.point(0, 0)
     property point userBubbleOffset: Qt.point(0, 0)
@@ -34,6 +35,14 @@ Window {
     onClosing: function(event) { event.accepted = false; placement.setShown(false) }
     onXChanged: positionCommit.restart()
     onYChanged: positionCommit.restart()
+    // 숨겨질 때 진행 중 입력과 반응을 함께 정리하는 함수.
+    onVisibleChanged: {
+        if (!visible && interactions) {
+            interactions.cancel()
+            gestureInput.tracking = false
+            gestureInput.gestureKind = ""
+        }
+    }
 
     // 정수 창 좌표의 반올림 오차는 버리고 실제 창 이동량만 저장하는 함수.
     function commitPosition() {
@@ -106,12 +115,70 @@ Window {
         styleColor: "#263246"
     }
     MouseArea {
+        id: gestureInput
+        objectName: "companionGestureInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        // 왼쪽 버튼은 창 이동, 오른쪽 버튼은 설정 열기로 처리하는 함수.
+        preventStealing: true
+        property bool tracking: false
+        property string gestureKind: ""
+        property point pressScreen: Qt.point(0, 0)
+        property point startAnchor: Qt.point(0, 0)
+        // 개인 배율과 추가 피벗 보정을 제거한 프레임 피벗 기준 논리 좌표를 구하는 함수.
+        function contactPoint(mouse) {
+            return Qt.point((mouse.x - sprite.anchor.x) / pet.userScale + pet.userPivotOffset.x,
+                            (mouse.y - sprite.anchor.y) / pet.userScale + pet.userPivotOffset.y)
+        }
+        // 클릭은 놓을 때 확정하고 Shift 입력은 쓰다듬기로 구별하는 함수.
         onPressed: function(mouse) {
-            if (mouse.button === Qt.LeftButton) pet.startSystemMove()
-            else pet.settingsRequested()
+            if (mouse.button === Qt.RightButton) {
+                if (tracking) pet.interactions.cancel()
+                tracking = false
+                gestureKind = ""
+                pet.settingsRequested()
+                return
+            }
+            tracking = true
+            gestureKind = ""
+            pressScreen = mapToGlobal(mouse.x, mouse.y)
+            startAnchor = Qt.point(pet.placement.anchorX, pet.placement.anchorY)
+            if (mouse.modifiers & Qt.ShiftModifier) {
+                const point = contactPoint(mouse)
+                tracking = pet.interactions.begin("companion.pet", point.x, point.y)
+                if (tracking) gestureKind = "companion.pet"
+            }
+        }
+        // 이동 임계값을 넘은 조작만 끌기로 확정하고 수락된 경우에 위치를 바꾸는 함수.
+        onPositionChanged: function(mouse) {
+            if (!tracking || !(pressedButtons & Qt.LeftButton)) return
+            const screen = mapToGlobal(mouse.x, mouse.y)
+            const dx = screen.x - pressScreen.x, dy = screen.y - pressScreen.y
+            const point = contactPoint(mouse)
+            if (gestureKind === "") {
+                if (Math.hypot(dx, dy) < Qt.styleHints.startDragDistance) return
+                if (!pet.interactions.begin("companion.drag", point.x, point.y)) { tracking = false; return }
+                gestureKind = "companion.drag"
+            }
+            if (!pet.interactions.update(point.x, point.y)) { tracking = false; gestureKind = ""; return }
+            if (gestureKind === "companion.drag")
+                pet.placement.moveAnchor(Math.round(startAnchor.x + dx), Math.round(startAnchor.y + dy))
+        }
+        // 연속 입력의 종료와 단발 클릭을 서로 배타적으로 처리하는 함수.
+        onReleased: function(mouse) {
+            if (mouse.button !== Qt.LeftButton || !tracking) return
+            if (gestureKind !== "") pet.interactions.end()
+            else {
+                const point = contactPoint(mouse)
+                pet.interactions.invoke("companion.click", point.x, point.y)
+            }
+            tracking = false
+            gestureKind = ""
+        }
+        // 포인터 입력을 잃으면 나중에 클릭이나 종료를 추가 실행하지 않는 함수.
+        onCanceled: {
+            if (tracking) pet.interactions.cancel()
+            tracking = false
+            gestureKind = ""
         }
     }
     Timer {

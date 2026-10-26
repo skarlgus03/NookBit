@@ -74,6 +74,7 @@
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "presentation/notification_controller.hpp"
+#include "presentation/companion_interaction_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
 #include "presentation/character_window_controller.hpp"
 #include <QScreen>
@@ -188,6 +189,55 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
         host.hide();
     }
     return true;
+}
+
+// 화면 밖 자동 검사에서 클릭·끌기·쓰다듬기가 서로 중복 실행되지 않는지 검사하는 함수.
+static bool verifyCompanionGestures(QQuickWindow* window, nookbit::CharacterWindowController& placement,
+    nookbit::CompanionInteractionController& interactions, nookbit::CharacterController& character) {
+    if (!window) return false;
+    const QPoint original(placement.anchorX(), placement.anchorY());
+    const bool originallyShown = placement.shown();
+    placement.setShown(true);
+    QCoreApplication::processEvents();
+    auto* area = window->findChild<QQuickItem*>(QStringLiteral("companionGestureInput"));
+    if (!area) return false;
+    const QPointF point(window->width() / 2.0, window->height() / 2.0);
+    // 실제 포인터 경로를 따라 QML 입력 판정 코드까지 실행하는 함수.
+    const auto send = [window](QEvent::Type type, QPointF position, Qt::MouseButton button,
+        Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QMouseEvent event(type, position, window->mapToGlobal(position.toPoint()), button, buttons, modifiers);
+        QCoreApplication::sendEvent(window, &event);
+        QCoreApplication::processEvents();
+    };
+    send(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton);
+    bool ready = character.reactionId().isEmpty();
+    send(QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton);
+    ready = ready && !character.reactionId().isEmpty() && !interactions.active();
+    interactions.cancel();
+    send(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, point + QPointF(60, 0), Qt::NoButton, Qt::LeftButton);
+    ready = ready && interactions.active() && area->property("gestureKind").toString() == "companion.drag" &&
+        QPoint(placement.anchorX(), placement.anchorY()) != original;
+    send(QEvent::MouseButtonRelease, point + QPointF(60, 0), Qt::LeftButton, Qt::NoButton);
+    ready = ready && !interactions.active() && character.message() == QStringLiteral("여기로 왔어요.");
+    interactions.cancel();
+    placement.moveAnchor(original.x(), original.y());
+    send(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+    send(QEvent::MouseMove, point + QPointF(20, 0), Qt::NoButton, Qt::LeftButton, Qt::ShiftModifier);
+    ready = ready && interactions.active() && area->property("gestureKind").toString() == "companion.pet" &&
+        QPoint(placement.anchorX(), placement.anchorY()) == original;
+    send(QEvent::MouseButtonRelease, point + QPointF(20, 0), Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+    ready = ready && !interactions.active() && !character.reactionId().isEmpty();
+    interactions.cancel();
+    send(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+    ready = ready && interactions.active() && QMetaObject::invokeMethod(area, "canceled");
+    ready = ready && !interactions.active() && character.reactionId().isEmpty();
+    send(QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+    interactions.cancel();
+    placement.moveAnchor(original.x(), original.y());
+    placement.setShown(originallyShown);
+    if (!ready) QTextStream(stderr) << "Companion gesture routing failed" << Qt::endl;
+    return ready;
 }
 
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
@@ -1012,8 +1062,17 @@ int main(int argc, char* argv[]) {
         uiPreferences.setValue(QStringLiteral("character/windowShown"), characterWindow.shown());
         uiPreferences.sync();
     };
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::positionChanged, &application, saveCharacterWindow);
+    QTimer characterPositionSave;
+    characterPositionSave.setSingleShot(true);
+    characterPositionSave.setInterval(180);
+    QObject::connect(&characterPositionSave, &QTimer::timeout, &application, saveCharacterWindow);
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::positionChanged, &characterPositionSave,
+        [&characterPositionSave] {
+            // 드래그 중 좌표 변경은 즉시 반영하되 디스크 저장은 잠깐 묶는 함수.
+            characterPositionSave.start();
+        });
     QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &application, saveCharacterWindow);
+    QObject::connect(&application, &QCoreApplication::aboutToQuit, &application, saveCharacterWindow);
     // 모니터 추가·제거와 작업 영역 변경 시 보이지 않는 위치를 복원하는 함수.
     const auto refreshCharacterScreens = [&characterWindow, characterScreens] { characterWindow.setScreens(characterScreens()); };
     QObject::connect(&application, &QGuiApplication::screenRemoved, &characterWindow, refreshCharacterScreens);
@@ -1025,6 +1084,26 @@ int main(int argc, char* argv[]) {
         });
     for (auto* screen : QGuiApplication::screens())
         QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
+    nookbit::InteractionManager interactionManager;
+    const auto interactionsRegistered = nookbit::registerBasicCompanionInteractions(interactionManager);
+    if (!interactionsRegistered) return EXIT_FAILURE;
+    nookbit::CompanionInteractionController companionInteractions(interactionManager, "primary", [&characterController] {
+        // 입력 당시 기본 행동과 일시 반응을 값으로만 전달하는 함수.
+        return nookbit::InteractionContext{characterController.behaviorId().toStdString(), characterController.reactionId().toStdString()};
+    });
+    QObject::connect(&companionInteractions, &nookbit::CompanionInteractionController::reactionRequested,
+        &characterController, &nookbit::CharacterController::presentInteraction);
+    const auto refreshInteractionTarget = [&companionInteractions, &characterWindow] {
+        // 바탕화면 표시 여부만 입력 가능 상태에 반영하는 함수.
+        companionInteractions.setAvailable(characterWindow.shown());
+    };
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &companionInteractions, refreshInteractionTarget);
+    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &companionInteractions,
+        [&companionInteractions](const QString&) {
+            // 새 팩에 이전 상호작용 반응을 이어서 표시하지 않는 함수.
+            companionInteractions.cancel();
+        });
+    refreshInteractionTarget();
     // 알림 표시 설정만 저장하며 감시 기능이나 작업 기록에는 관여하지 않는 창구.
     QMap<QString, bool> verificationNotificationFlags;
     nookbit::NotificationController notifications(
@@ -1144,6 +1223,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
+    engine.rootContext()->setContextProperty(QStringLiteral("companionInteractions"), &companionInteractions);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("companionEdits"), &companionEdits);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
@@ -1511,7 +1591,8 @@ int main(int argc, char* argv[]) {
             workspace->setProperty("editing", false);
         }
         const bool buttonFeedbackReady = verifyButtonFeedback(engine, uiMetrics);
-        const bool ready = buttonFeedbackReady && workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
+        const bool gesturesReady = verifyCompanionGestures(desktopCharacter, characterWindow, companionInteractions, characterController);
+        const bool ready = gesturesReady && buttonFeedbackReady && workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
