@@ -11,6 +11,7 @@ Rectangle {
     property string filtering: "nearest"
     property bool followPlayback: false
     property bool editable: false
+    property bool snapEnabled: true
     property bool resizing: false
     property real resizeExtraMs: 0
     readonly property real pixelsPerMs: UiMetrics.companionTimelinePixelsPerSecond / 1000
@@ -49,6 +50,16 @@ Rectangle {
         if (!entries.length || !isFinite(timeMs)) return
         timeSelected(Math.max(0, Math.min(durationMs, timeMs)))
     }
+    // 사용자 조작 시각을 공통 시간 눈금에 맞추고 임시 해제는 그대로 통과시키는 함수.
+    function snappedTime(timeMs, bypass) {
+        return editable && snapEnabled && !bypass
+            ? Math.round(timeMs / UiMetrics.companionTimelineSnapMs) * UiMetrics.companionTimelineSnapMs : timeMs
+    }
+    // 프레임 길이가 아닌 끝 시각을 눈금에 붙인 뒤 유효한 지속시간을 반환하는 함수.
+    function resizedDuration(startMs, durationMs, bypass) {
+        const end = snappedTime(startMs + durationMs, bypass)
+        return Math.max(16, Math.min(60000, Math.round(end - startMs)))
+    }
     Flickable {
         id: track
         anchors.fill: parent
@@ -60,6 +71,21 @@ Rectangle {
         flickableDirection: Flickable.HorizontalFlick
         interactive: !timeline.resizing
         ScrollBar.horizontal: ScrollBar {}
+        Repeater {
+            model: timeline.editable && timeline.snapEnabled
+                ? Math.ceil(track.width / (UiMetrics.companionTimelineSnapMs * timeline.pixelsPerMs)) + 2 : 0
+            delegate: Rectangle {
+                required property int index
+                readonly property int tickIndex: Math.floor(track.contentX / (UiMetrics.companionTimelineSnapMs * timeline.pixelsPerMs)) + index
+                x: tickIndex * UiMetrics.companionTimelineSnapMs * timeline.pixelsPerMs
+                y: UiMetrics.companionTimelineRulerHeight - height
+                width: UiMetrics.borderNormal
+                height: UiMetrics.spaceControl
+                color: timeline.theme.muted
+                opacity: 0.5
+                visible: (tickIndex * UiMetrics.companionTimelineSnapMs) % UiMetrics.companionTimelineTickMs !== 0
+            }
+        }
         Repeater {
             // 긴 애니메이션에서도 현재 보이는 눈금만 생성한다.
             model: Math.ceil(track.width / (UiMetrics.companionTimelineTickMs * timeline.pixelsPerMs)) + 2
@@ -130,8 +156,9 @@ Rectangle {
                     cursorShape: Qt.SizeHorCursor
                     property real startX: 0
                     property real originalDuration: 0
+                    property bool moved: false
                     ToolTip.visible: containsMouse || pressed
-                    ToolTip.text: qsTr("%1 ms · 드래그하여 길이 조절").arg(Math.round(cell.dragging ? cell.pendingDuration : cell.modelData.step.durationMs))
+                    ToolTip.text: qsTr("%1 ms · 드래그하여 길이 조절 · Alt: 스냅 해제").arg(Math.round(cell.dragging ? cell.pendingDuration : cell.modelData.step.durationMs))
                     Rectangle {
                         anchors.right: parent.right
                         width: UiMetrics.borderActive
@@ -143,25 +170,30 @@ Rectangle {
                     onPressed: function(mouse) {
                         startX = mapToItem(track.contentItem, mouse.x, mouse.y).x
                         originalDuration = cell.modelData.step.durationMs
+                        moved = false
                         cell.pendingDuration = originalDuration
                         cell.dragging = true
                         timeline.resizing = true
                         timeline.durationEditStarted()
                     }
                     // 드래그 중 모델은 유지하고 해당 구간의 표시 폭만 바꾸는 함수.
-                    onPositionChanged: function(mouse) {
+                    function updateDuration(mouse) {
                         if (!pressed) return
                         const x = mapToItem(track.contentItem, mouse.x, mouse.y).x
-                        cell.pendingDuration = Math.max(16, Math.min(60000, Math.round(originalDuration + (x - startX) / timeline.pixelsPerMs)))
+                        if (!moved && Math.abs(x - startX) < 1) return
+                        moved = true
+                        cell.pendingDuration = timeline.resizedDuration(cell.modelData.startMs,
+                            originalDuration + (x - startX) / timeline.pixelsPerMs, (mouse.modifiers & Qt.AltModifier) !== 0)
                         timeline.resizeExtraMs = Math.max(0, cell.pendingDuration - originalDuration)
                     }
+                    onPositionChanged: function(mouse) { updateDuration(mouse) }
                     // 마우스를 놓을 때 확정값을 전달하여 뒤 구간들을 다시 배치하는 함수.
-                    onReleased: {
+                    onReleased: function(mouse) {
                         const duration = cell.pendingDuration
                         cell.dragging = false
                         timeline.resizing = false
                         timeline.resizeExtraMs = 0
-                        timeline.durationChanged(cell.modelData.index, duration)
+                        if (moved && duration !== originalDuration) timeline.durationChanged(cell.modelData.index, duration)
                     }
                     // 드래그가 취소되면 표시 폭을 원래 값으로 복구하는 함수.
                     onCanceled: { cell.dragging = false; timeline.resizing = false; timeline.resizeExtraMs = 0 }
@@ -189,7 +221,9 @@ Rectangle {
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
             // 시간 눈금 위를 누르거나 끌어서 해당 프레임으로 이동하는 함수.
-            function seek(mouse) { timeline.selectTime(Math.max(0, mouse.x / timeline.pixelsPerMs)) }
+            function seek(mouse) {
+                timeline.selectTime(timeline.snappedTime(Math.max(0, mouse.x / timeline.pixelsPerMs), (mouse.modifiers & Qt.AltModifier) !== 0))
+            }
             onPressed: function(mouse) { seek(mouse) }
             onPositionChanged: function(mouse) { if (pressed) seek(mouse) }
         }

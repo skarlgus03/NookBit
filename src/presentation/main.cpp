@@ -1278,6 +1278,18 @@ int main(int argc, char* argv[]) {
                 QMetaObject::invokeMethod(timeline, "selectTime", Q_ARG(QVariant, QVariant(0))) &&
                 previewSprite->property("sequenceIndex").toInt() == 0;
             workspace->setProperty("editing", true);
+            // 프레임 시작이 눈금 밖에 있어도 끝 시각에 붙고 임시 해제를 지키는지 검사한다.
+            QVariant snapResult;
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(timeline, "snappedTime", Q_RETURN_ARG(QVariant, snapResult),
+                Q_ARG(QVariant, QVariant(437)), Q_ARG(QVariant, QVariant(false))) && snapResult.toDouble() == 400 &&
+                QMetaObject::invokeMethod(timeline, "resizedDuration", Q_RETURN_ARG(QVariant, snapResult),
+                    Q_ARG(QVariant, QVariant(150)), Q_ARG(QVariant, QVariant(286)), Q_ARG(QVariant, QVariant(false))) && snapResult.toDouble() == 250 &&
+                QMetaObject::invokeMethod(timeline, "resizedDuration", Q_RETURN_ARG(QVariant, snapResult),
+                    Q_ARG(QVariant, QVariant(150)), Q_ARG(QVariant, QVariant(286)), Q_ARG(QVariant, QVariant(true))) && snapResult.toDouble() == 286;
+            timeline->setProperty("snapEnabled", false);
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(timeline, "snappedTime", Q_RETURN_ARG(QVariant, snapResult),
+                Q_ARG(QVariant, QVariant(437)), Q_ARG(QVariant, QVariant(false))) && snapResult.toDouble() == 437;
+            timeline->setProperty("snapEnabled", true);
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "movePoint", Q_ARG(QVariant, QVariant(0)),
                 Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(110)));
             const auto draft = workspace->property("draft").toMap().value("pivot").toMap();

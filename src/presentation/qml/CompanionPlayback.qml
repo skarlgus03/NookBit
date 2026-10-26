@@ -13,6 +13,7 @@ Rectangle {
     property bool finished: false
     property real positionMs: 0
     property bool editable: false
+    property bool snapEnabled: true
     readonly property real durationMs: timeline.durationMs
     readonly property real currentTimeMs: timeline.currentTimeMs
     signal toggleRequested()
@@ -33,6 +34,16 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("재생"); color: playback.theme.text; font.pixelSize: UiMetrics.textSectionTitle; font.bold: true }
+            AppButton {
+                objectName: "companionTimelineSnapButton"
+                visible: playback.editable
+                text: qsTr("스냅 · %1초").arg(UiMetrics.companionTimelineSnapMs / 1000)
+                checkable: true
+                checked: playback.snapEnabled
+                onClicked: playback.snapEnabled = checked
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("시간 눈금에 맞추기 · Alt를 누르면 잠시 해제")
+            }
             Item { Layout.fillWidth: true }
             Label {
                 objectName: "companionPlaybackStatus"
@@ -84,6 +95,7 @@ Rectangle {
             followPlayback: playback.playing
             positionMs: playback.positionMs
             editable: playback.editable
+            snapEnabled: playback.snapEnabled
             onTimeSelected: function(timeMs) { playback.timeSelected(timeMs) }
             onDurationEditStarted: playback.durationEditStarted()
             onDurationChanged: function(index, durationMs) { playback.durationChanged(index, durationMs) }

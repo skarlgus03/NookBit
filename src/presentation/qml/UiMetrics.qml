@@ -108,6 +108,7 @@ QtObject {
     readonly property int companionTimelineResizeHandleWidth: 12
     readonly property int companionTimelinePixelsPerSecond: 160
     readonly property int companionTimelineTickMs: 500
+    readonly property int companionTimelineSnapMs: 100
     readonly property int companionFrameWidth: 84
     readonly property int companionFrameImageHeight: 48
     readonly property int bubbleTextSize: 16
