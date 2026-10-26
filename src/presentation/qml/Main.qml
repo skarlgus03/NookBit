@@ -24,6 +24,8 @@ ApplicationWindow {
         dark: root.editorDark
         message: characterController.message
         interactions: companionInteractions
+        onGestureHeldChanged: companionMotion.setPointerHeld(gestureHeld)
+        onVisualBoundsUpdated: function(left, right) { companionMotion.setVisualBounds(left, right) }
         userScale: characterSettings.userScale
         userPivotOffset: characterSettings.pivotOffset
         userBubbleOffset: characterSettings.bubbleOffset
@@ -1022,6 +1024,12 @@ ApplicationWindow {
                 onToggled: characterWindow.setShown(checked)
             }
             AppButton { text: qsTr("바탕화면 위치 되돌리기"); onClicked: characterWindow.resetPosition() }
+            CheckBox {
+                text: qsTr("쉬는 동안 가끔 걷기")
+                checked: companionMotion.enabled
+                enabled: characterController.canWalk
+                onToggled: companionMotion.setEnabled(checked)
+            }
             Label {
                 Layout.fillWidth: true
                 text: qsTr("클릭: 반응 · 드래그: 이동\nShift + 드래그: 쓰다듬기 · 우클릭: 설정")

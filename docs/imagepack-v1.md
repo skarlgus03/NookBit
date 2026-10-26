@@ -1,5 +1,12 @@
 # NookBit ImagePack v1
 
+Optional `walk.left` / `walk.right` cue bindings enable autonomous walking.
+If both bind to the same clip, it is treated as a left-facing original and mirrored
+around its pivot when facing right. Use different clips for independently authored
+directions. Looping clips are recommended; frame durations do not control movement
+speed. Older packs without these bindings remain stationary. See the
+[behavior contract](companion-behavior-design.md) for timing and interruption rules.
+
 Status: the JSON loader, common resolved frame data and pivot-aware renderer are
 implemented. The default test character now loads a complete ImagePack beside
 the executable. Folder importing, pack selection, personal scale adjustment,

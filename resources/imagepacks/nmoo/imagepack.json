@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "packType": "imagepack",
   "id": "nookbit.nmoo",
-  "name": "Nmoo - Standing",
-  "version": "0.1.0",
+  "name": "Nmoo - Idle & Walk",
+  "version": "0.2.0",
   "display": {
     "referenceSize": { "width": 256, "height": 256 },
     "pixelsPerUnit": 4,
@@ -17,11 +17,17 @@
   },
   "sources": [
     { "id": "eyes-open", "kind": "image", "file": "images/eyes-open.png" },
-    { "id": "eyes-closed", "kind": "image", "file": "images/eyes-closed.png" }
+    { "id": "eyes-closed", "kind": "image", "file": "images/eyes-closed.png" },
+    { "id": "walk-1", "kind": "image", "file": "images/walk-1.png" },
+    { "id": "walk-2", "kind": "image", "file": "images/walk-2.png" },
+    { "id": "walk-3", "kind": "image", "file": "images/walk-3.png" }
   ],
   "frames": [
     { "id": "eyes-open", "sourceId": "eyes-open", "region": { "type": "image" } },
-    { "id": "eyes-closed", "sourceId": "eyes-closed", "region": { "type": "image" } }
+    { "id": "eyes-closed", "sourceId": "eyes-closed", "region": { "type": "image" } },
+    { "id": "walk-1", "sourceId": "walk-1", "region": { "type": "image" } },
+    { "id": "walk-2", "sourceId": "walk-2", "region": { "type": "image" } },
+    { "id": "walk-3", "sourceId": "walk-3", "region": { "type": "image" } }
   ],
   "animations": [
     {
@@ -31,11 +37,23 @@
         { "frameId": "eyes-open", "durationMs": 3000 },
         { "frameId": "eyes-closed", "durationMs": 150 }
       ]
+    },
+    {
+      "id": "walk",
+      "loop": true,
+      "steps": [
+        { "frameId": "walk-1", "durationMs": 140 },
+        { "frameId": "walk-2", "durationMs": 140 },
+        { "frameId": "walk-3", "durationMs": 140 },
+        { "frameId": "walk-2", "durationMs": 140 }
+      ]
     }
   ],
   "bindings": [
     { "cueId": "resting", "animationId": "standing" },
     { "cueId": "calling", "animationId": "standing" },
-    { "cueId": "working", "animationId": "standing" }
+    { "cueId": "working", "animationId": "standing" },
+    { "cueId": "walk.left", "animationId": "walk" },
+    { "cueId": "walk.right", "animationId": "walk" }
   ]
 }

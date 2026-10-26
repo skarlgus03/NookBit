@@ -63,6 +63,14 @@ grid 필드는 frameWidth/frameHeight/columns/rows이며 모두 1 이상의 정�
 - 필수 cueId: `resting`(휴식), `calling`(말 걸기), `working`(작업 중). 모두 있어야 하며 같은 animationId를 연결해도 됨.
 - 선택 cueId: `file.offer`, `file.work` 등 앱이 실제 보내는 상황. 모르는 상황은 해당 기본 상태로 대체됨. 새 이름을 적는 것만으로 새 기능이 생기지 않음.
 
+선택적으로 `walk.left`와 `walk.right`를 모두 연결하면 자율 걷기를 사용할 수 있습니다.
+같은 animationId에 연결하면 왼쪽 방향 원본을 오른쪽에서 피벗 기준으로 반전합니다.
+서로 다른 animationId이면 각 방향 전용 그림으로 사용하며 반전하지 않습니다.
+걷기 클립은 `loop: true`를 권장합니다. 예: PNG 1→2→3→2 순서, 각 140ms.
+그림 재생 시간과 화면 이동 속도는 별도이며 프레임을 늘린다고 더 멀리 걷지 않습니다.
+기존 PNG·프레임별 pivot을 그대로 사용하며 추가 JSON 필드는 없습니다.
+한 방향이라도 연결이 없으면 자동 이동하지 않습니다. 컴패니언 관리에서 자율 걷기를 끌 수 있습니다.
+
 ## 6. 최소 예제
 
 128×128 PNG를 images/character.png로 준비하고 아래 객체 전체를 imagepack.json으로 저장하세요. 세 상황 모두 같은 정지 그림을 사용합니다.

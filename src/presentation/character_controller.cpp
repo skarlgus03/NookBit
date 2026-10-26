@@ -72,6 +72,10 @@ QString CharacterController::message() const {
 QString CharacterController::cueId() const { return cueId_; }
 // 현재 상황에 연결된 애니메이션 이름을 반환하는 함수.
 QString CharacterController::animationId() const { return animationId_; }
+// 걷기 그림이 없는 팩에서는 자율 이동을 시작하지 않게 검사하는 함수.
+bool CharacterController::canWalk() const {
+    return imagePack_ && imagePack_->bindings.contains("walk.left") && imagePack_->bindings.contains("walk.right");
+}
 // 재생기에 이미지 주소·격자·프레임 순서·시간을 값으로 전달하는 함수.
 QVariantMap CharacterController::animation() const {
     auto result = animationFor(animationId_);
@@ -87,7 +91,11 @@ QVariantMap CharacterController::animation() const {
         steps[i] = step;
     }
     if (!steps.isEmpty()) result.insert("steps", steps);
-    if (!result.isEmpty()) result.insert("cueId", cueId_);
+    if (!result.isEmpty()) {
+        result.insert("cueId", cueId_);
+        result.insert("mirrorX", cueId_ == "walk.right" && imagePack_ && imagePack_->bindings.contains("walk.left") &&
+            imagePack_->bindings.at("walk.left") == animationId_.toStdString());
+    }
     return result;
 }
 // 참조·좌표·시간을 모두 검사하여 개인 편집값을 검증하는 함수.

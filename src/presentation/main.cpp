@@ -75,6 +75,7 @@
 #include "presentation/character_controller.hpp"
 #include "presentation/notification_controller.hpp"
 #include "presentation/companion_interaction_controller.hpp"
+#include "presentation/companion_motion_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
 #include "presentation/character_window_controller.hpp"
 #include <QScreen>
@@ -960,7 +961,8 @@ int main(int argc, char* argv[]) {
     nookbit::DirectoryImagePackLibrary imagePackLibrary(imagePackLoader,
         QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/test/imagepack.json")),
         QDir(verifyUi ? QCoreApplication::applicationDirPath() : appData).filePath(
-            verifyUi ? QStringLiteral("verify-unused-imagepacks") : QStringLiteral("imagepacks")));
+            verifyUi ? QStringLiteral("verify-unused-imagepacks") : QStringLiteral("imagepacks")),
+        {{"builtin-nmoo", QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/nmoo/imagepack.json"))}});
     // 임포트 수명은 보관소보다 짧게 유지하고 파일 정리 실행기와 분리한다.
     nookbit::BackgroundTaskRunner characterImports;
     nookbit::CharacterSettingsController characterSettings(imagePackLibrary,
@@ -1104,6 +1106,39 @@ int main(int argc, char* argv[]) {
             companionInteractions.cancel();
         });
     refreshInteractionTarget();
+    for (const auto& behavior : {nookbit::CompanionBehavior{"walking.left", "walk.left", 5, {"walk.left"}, {"working", "attention"}},
+                               nookbit::CompanionBehavior{"walking.right", "walk.right", 5, {"walk.right"}, {"working", "attention"}}}) {
+        if (!characterController.registerBehavior(behavior)) return EXIT_FAILURE;
+    }
+    nookbit::IBehaviorChannel& behaviorChannel = characterController;
+    nookbit::CompanionMotionController companionMotion(
+        [&characterController, &characterWindow] {
+            // 컴패니언의 현재 상황과 화면 범위만 모션 모듈에 값으로 전달하는 함수.
+            const auto behavior = characterController.behaviorId();
+            const auto area = characterWindow.screenArea();
+            const bool idleOrWalking = behavior == "resting" || behavior == "walking.left" || behavior == "walking.right";
+            return nookbit::IdleWalkContext{characterWindow.shown() && characterController.canWalk() && idleOrWalking && characterController.reactionId().isEmpty(),
+                static_cast<double>(characterWindow.anchorX()), static_cast<double>(area.left() + 32), static_cast<double>(area.right() - 32)};
+        },
+        [&behaviorChannel, &characterWindow](const nookbit::IdleWalkStep& step) {
+            // 모션 출력만 행동 창구와 창 위치에 연결하고 파일 작업에는 관여하지 않는 함수.
+            const auto accepted = behaviorChannel.publish({"companion.motion", "idle-walk", {step.direction < 0 ? "walk.left" : "walk.right"}, step.walking});
+            if (!accepted) { QTextStream(stderr) << QString::fromStdString(accepted.error().message) << Qt::endl; return; }
+            if (step.move) characterWindow.moveAnchor(static_cast<int>(std::round(step.x)), characterWindow.anchorY());
+        }, !verifyUi && uiPreferences.value(QStringLiteral("character/autonomousWalk"), true).toBool());
+    QObject::connect(&characterController, &nookbit::CharacterController::stateChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
+    QObject::connect(&characterController, &nookbit::CharacterController::reactionChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
+    QObject::connect(&characterController, &nookbit::CharacterController::previewAnimationsChanged, &companionMotion, &nookbit::CompanionMotionController::restart);
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
+    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::screenAreaChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
+    QObject::connect(&companionMotion, &nookbit::CompanionMotionController::enabledChanged, &application,
+        [&uiPreferences, &companionMotion, verifyUi] {
+            // 사용자의 자율 걷기 선택만 자동 저장하는 함수.
+            if (verifyUi) return;
+            uiPreferences.setValue(QStringLiteral("character/autonomousWalk"), companionMotion.enabled());
+            uiPreferences.sync();
+        });
+    companionMotion.refresh();
     // 알림 표시 설정만 저장하며 감시 기능이나 작업 기록에는 관여하지 않는 창구.
     QMap<QString, bool> verificationNotificationFlags;
     nookbit::NotificationController notifications(
@@ -1224,6 +1259,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
     engine.rootContext()->setContextProperty(QStringLiteral("companionInteractions"), &companionInteractions);
+    engine.rootContext()->setContextProperty(QStringLiteral("companionMotion"), &companionMotion);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("companionEdits"), &companionEdits);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);

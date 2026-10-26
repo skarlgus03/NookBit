@@ -25,13 +25,19 @@ bool validKey(const QString& key) {
 ImagePackEntry entry(const std::string& key, const ImagePack& pack) { return {key, pack.name, pack.version}; }
 }
 // 외부에서 제공한 보관 경로와 로더를 저장하는 생성자.
-DirectoryImagePackLibrary::DirectoryImagePackLibrary(const IImagePackLoader& loader, QString bundledManifest, QString storageRoot)
-    : loader_(loader), bundledManifest_(std::move(bundledManifest)), storageRoot_(std::move(storageRoot)) {}
+DirectoryImagePackLibrary::DirectoryImagePackLibrary(const IImagePackLoader& loader, QString bundledManifest, QString storageRoot,
+    std::map<std::string, QString> additionalBundled)
+    : loader_(loader), bundledManifest_(std::move(bundledManifest)), storageRoot_(std::move(storageRoot)), additionalBundled_(std::move(additionalBundled)) {}
 // 내장 팩 및 UUID 폴더의 검증 성공 항목만 목록에 추가하는 함수.
 Result<std::vector<ImagePackEntry>> DirectoryImagePackLibrary::list() const {
     std::vector<ImagePackEntry> items;
     auto bundled = load("builtin");
     if (bundled) items.push_back(entry("builtin", bundled.value()));
+    for (const auto& [key, manifest] : additionalBundled_) {
+        if (!key.starts_with("builtin-") || key == "builtin") continue;
+        auto pack = load(key);
+        if (pack) items.push_back(entry(key, pack.value()));
+    }
     const QDir root(storageRoot_);
     for (const auto& key : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
         if (!validKey(key)) continue;
@@ -43,6 +49,10 @@ Result<std::vector<ImagePackEntry>> DirectoryImagePackLibrary::list() const {
 // 목록 키만 경로로 해석하고 심볼릭 링크로 보관소 밖에 나가는 선택을 거부하는 함수.
 Result<ImagePack> DirectoryImagePackLibrary::load(const std::string& key) const {
     if (key == "builtin") return loader_.load(path(bundledManifest_));
+    if (key.starts_with("builtin-")) {
+        const auto found = additionalBundled_.find(key);
+        if (found != additionalBundled_.end()) return loader_.load(path(found->second));
+    }
     const auto text = QString::fromStdString(key);
     if (!validKey(text)) return Result<ImagePack>::failure(problem(QStringLiteral("알 수 없는 캐릭터 팩입니다.")));
     const QDir root(storageRoot_);

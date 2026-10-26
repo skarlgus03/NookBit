@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QThread>
+#include <QQuickItem>
 #include <memory>
 #include <functional>
 #include <iostream>
@@ -157,6 +158,14 @@ void testImagePackPlayback() {
     expect(region->property("x").toDouble() == 33 && region->property("y").toDouble() == 108,
         "user pivot adjustment must be applied in logical units");
     sprite->setProperty("userPivotOffset", QPointF(0, 0));
+    auto mirrored = character.animation();
+    mirrored.insert("mirrorX", true);
+    sprite->setProperty("descriptor", mirrored);
+    auto* regionItem = qobject_cast<QQuickItem*>(region);
+    auto* spriteItem = qobject_cast<QQuickItem*>(sprite.get());
+    expect(regionItem && spriteItem && regionItem->mapToItem(spriteItem, QPointF(0, 0)).x() == 164 &&
+        regionItem->mapToItem(spriteItem, QPointF(64, 0)).x() == 100,
+        "mirroring must reflect image around the character pivot rather than the canvas center");
     auto pack = loaded.value();
     pack.bubble.attachment = {12, -160};
     pack.bubble.pivot = {0.25, 1};

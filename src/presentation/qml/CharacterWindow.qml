@@ -17,6 +17,9 @@ Window {
     // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
     readonly property var currentAttachment: sprite.renderedStep.attachment || bubbleSettings.attachment || ({x: 0, y: -120})
     readonly property point bubbleOffset: Qt.point(currentAttachment.x, currentAttachment.y)
+    readonly property bool mirrored: descriptor.mirrorX === true
+    readonly property bool gestureHeld: gestureInput.tracking
+    signal visualBoundsUpdated(real left, real right)
     property bool actionAvailable: false
     property bool testingBubble: false
     signal settingsRequested()
@@ -27,6 +30,8 @@ Window {
     title: qsTr("NookBit 캐릭터")
     visible: placement.shown
     readonly property var bounds: frameBounds()
+    onBoundsChanged: visualBoundsUpdated(bounds.left, bounds.right)
+    Component.onCompleted: visualBoundsUpdated(bounds.left, bounds.right)
     width: Math.max(180, Math.ceil(bounds.right - bounds.left) + 32)
     height: Math.max(100, Math.ceil(bounds.bottom - bounds.top) + 76)
     x: Math.round(placement.anchorX - sprite.anchor.x)
@@ -62,7 +67,7 @@ Window {
         transientParent: pet
         visible: pet.visible && message.length > 0
         screenArea: pet.placement.screenArea
-        anchorPoint: Qt.point(pet.x + sprite.anchor.x + (pet.bubbleOffset.x + pet.userBubbleOffset.x - pet.userPivotOffset.x) * pet.userScale,
+        anchorPoint: Qt.point(pet.x + sprite.anchor.x + (pet.bubbleOffset.x + pet.userBubbleOffset.x - pet.userPivotOffset.x) * pet.userScale * (pet.mirrored ? -1 : 1),
                               pet.y + sprite.anchor.y + (pet.bubbleOffset.y + pet.userBubbleOffset.y - pet.userPivotOffset.y) * pet.userScale)
         message: pet.testingBubble ? qsTr("말풍선 위치 테스트예요. 캐릭터를 화면 가장자리로 옮겨보세요!") : pet.message
         actionAvailable: pet.testingBubble || pet.actionAvailable
@@ -87,8 +92,8 @@ Window {
             const r = l + step.region.width * userScale / step.pixelsPerUnit
             const b = t + step.region.height * userScale / step.pixelsPerUnit
             if (!isFinite(l) || !isFinite(t) || !isFinite(r) || !isFinite(b)) continue
-            left = Math.min(left, l); top = Math.min(top, t)
-            right = Math.max(right, r); bottom = Math.max(bottom, b)
+            left = Math.min(left, mirrored ? -r : l); top = Math.min(top, t)
+            right = Math.max(right, mirrored ? -l : r); bottom = Math.max(bottom, b)
         }
         // 비정상적으로 큰 팩의 좌표로 거대한 네이티브 창을 만들지 않는다.
         return {left: Math.max(-1024, left), top: Math.max(-1024, top),
@@ -126,7 +131,7 @@ Window {
         property point startAnchor: Qt.point(0, 0)
         // 개인 배율과 추가 피벗 보정을 제거한 프레임 피벗 기준 논리 좌표를 구하는 함수.
         function contactPoint(mouse) {
-            return Qt.point((mouse.x - sprite.anchor.x) / pet.userScale + pet.userPivotOffset.x,
+            return Qt.point((mouse.x - sprite.anchor.x) / pet.userScale * (pet.mirrored ? -1 : 1) + pet.userPivotOffset.x,
                             (mouse.y - sprite.anchor.y) / pet.userScale + pet.userPivotOffset.y)
         }
         // 클릭은 놓을 때 확정하고 Shift 입력은 쓰다듬기로 구별하는 함수.
@@ -138,12 +143,12 @@ Window {
                 pet.settingsRequested()
                 return
             }
+            pressScreen = mapToGlobal(mouse.x, mouse.y)
             tracking = true
             gestureKind = ""
-            pressScreen = mapToGlobal(mouse.x, mouse.y)
             startAnchor = Qt.point(pet.placement.anchorX, pet.placement.anchorY)
             if (mouse.modifiers & Qt.ShiftModifier) {
-                const point = contactPoint(mouse)
+                const point = contactPoint(mapFromGlobal(pressScreen.x, pressScreen.y))
                 tracking = pet.interactions.begin("companion.pet", point.x, point.y)
                 if (tracking) gestureKind = "companion.pet"
             }

@@ -85,6 +85,11 @@ Item {
         height: sprite.metadataValid ? sprite.renderedStep.region.height * sprite.pixelScale : 0
         visible: sprite.ready || (sprite.metadataValid && sprite.geometryValid && sprite.retainingFrame)
         clip: true
+        transform: Scale {
+            origin.x: sprite.anchor.x - crop.x
+            origin.y: sprite.anchor.y - crop.y
+            xScale: sprite.descriptor.mirrorX === true ? -1 : 1
+        }
         Image {
             id: atlas
             objectName: "characterAtlas"

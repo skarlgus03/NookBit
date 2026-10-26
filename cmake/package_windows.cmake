@@ -11,6 +11,10 @@ if(NOT EXISTS "${NOOKBIT_TEST_PACK}/imagepack.json" OR NOT EXISTS "${NOOKBIT_TES
 endif()
 file(COPY_FILE "${NOOKBIT_EXECUTABLE}" "${NOOKBIT_PACKAGE_DIR}/nookbit.exe" ONLY_IF_DIFFERENT)
 file(COPY "${NOOKBIT_TEST_PACK}/" DESTINATION "${NOOKBIT_PACKAGE_DIR}/imagepacks/test")
+if(NOT EXISTS "${NOOKBIT_NMOO_PACK}/imagepack.json")
+  message(FATAL_ERROR "The bundled Nmoo ImagePack is missing.")
+endif()
+file(COPY "${NOOKBIT_NMOO_PACK}/" DESTINATION "${NOOKBIT_PACKAGE_DIR}/imagepacks/nmoo")
 set(deploy_options)
 if(NOOKBIT_COMPACT_PACKAGE)
   list(APPEND deploy_options --skip-plugin-types qmltooling

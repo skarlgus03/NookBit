@@ -33,6 +33,7 @@ add_library(nookbit_core STATIC
   modules/character/image_pack.cpp
   modules/character/behavior_manager.cpp
   modules/character/interaction_manager.cpp
+  modules/character/idle_walk_state.cpp
   modules/notifications/notification_center.cpp
   modules/planner/collision_resolver.cpp
   modules/planner/planner.cpp
@@ -119,6 +120,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/notification_controller.cpp
       presentation/companion_interaction_controller.hpp
       presentation/companion_interaction_controller.cpp
+      presentation/companion_motion_controller.hpp
+      presentation/companion_motion_controller.cpp
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp
@@ -155,10 +158,16 @@ if(NOOKBIT_BUILD_QT_APP)
     set_property(TARGET nookbit APPEND PROPERTY LINK_DEPENDS
       "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/imagepack.json"
       "${PROJECT_SOURCE_DIR}/resources/imagepacks/test/images/test-character.png")
+    file(GLOB NOOKBIT_NMOO_ASSETS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/resources/imagepacks/nmoo/images/*.png")
+    set_property(TARGET nookbit APPEND PROPERTY LINK_DEPENDS
+      "${PROJECT_SOURCE_DIR}/resources/imagepacks/nmoo/imagepack.json" ${NOOKBIT_NMOO_ASSETS})
     add_custom_command(TARGET nookbit POST_BUILD
       COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
         "$<TARGET_FILE_DIR:nookbit>/imagepacks/test"
+      COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${PROJECT_SOURCE_DIR}/resources/imagepacks/nmoo"
+        "$<TARGET_FILE_DIR:nookbit>/imagepacks/nmoo"
       COMMENT "Deploying the test ImagePack"
       VERBATIM)
     target_include_directories(nookbit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -238,6 +247,7 @@ if(NOOKBIT_BUILD_QT_APP)
           "-DNOOKBIT_BUILD_CONFIG=$<CONFIG>"
           "-DNOOKBIT_COMPACT_PACKAGE=${NOOKBIT_COMPACT_PACKAGE}"
           "-DNOOKBIT_TEST_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
+          "-DNOOKBIT_NMOO_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/nmoo"
           -P "${PROJECT_SOURCE_DIR}/cmake/package_windows.cmake"
         DEPENDS nookbit
         COMMENT "Packaging the NookBit Windows runtime"

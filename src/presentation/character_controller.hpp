@@ -21,6 +21,7 @@ class CharacterController final : public QObject, public ICharacterChannel, publ
     Q_PROPERTY(QString animationId READ animationId NOTIFY stateChanged)
     Q_PROPERTY(QString behaviorId READ behaviorId NOTIFY stateChanged)
     Q_PROPERTY(QString reactionId READ reactionId NOTIFY reactionChanged)
+    Q_PROPERTY(bool canWalk READ canWalk NOTIFY previewAnimationsChanged)
     Q_PROPERTY(QVariantMap animation READ animation NOTIFY animationChanged)
     Q_PROPERTY(QVariantMap bubble READ bubble NOTIFY animationChanged)
     Q_PROPERTY(QVariantList previewAnimations READ previewAnimations NOTIFY previewAnimationsChanged)
@@ -43,6 +44,8 @@ public:
     [[nodiscard]] QString behaviorId() const { return behaviorId_; }
     /// 현재 표시 중인 상호작용 요청 식별자를 반환하는 함수.
     [[nodiscard]] QString reactionId() const { return reactionId_; }
+    /// 현재 팩이 양방향 걷기 바인딩을 제공하는지 반환하는 함수.
+    [[nodiscard]] bool canWalk() const;
     /// 새 행동 정의를 등록하고 현재 상황을 다시 판단하는 함수.
     [[nodiscard]] Result<void> registerBehavior(CompanionBehavior behavior);
     /// 기본 행동 선택에 사용할 독립적인 상황 입력을 받는 함수.

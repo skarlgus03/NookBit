@@ -59,7 +59,7 @@ Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접
 
 ## 기능을 추가할 때
 
-알림·Interact·행동의 책임과 데이터 수명은 [컴패니언 행동 설계](companion-behavior-design.md)를 따른다. 알림 종류는 `INotificationChannel`로 발생 상태를 전달하고, 등록 정보로 설정 목록을 만든다. 표시 허용 여부와 실제 기능 실행은 분리한다. `InteractionManager`는 등록된 처리기로 요청을 전달하고 세션을 관리하며, `BehaviorManager`는 등록된 조건으로 기본 행동을 고른다. 기본 행동과 일시 반응을 분리하되 반응 큐·자율 이동·동적 모듈 로딩은 후속 단계다.
+알림·Interact·행동의 책임과 데이터 수명은 [컴패니언 행동 설계](companion-behavior-design.md)를 따른다. 알림 종류는 `INotificationChannel`로 발생 상태를 전달하고, 등록 정보로 설정 목록을 만든다. 표시 허용 여부와 실제 기능 실행은 분리한다. `InteractionManager`는 등록된 처리기로 요청을 전달하고 세션을 관리하며, `BehaviorManager`는 등록된 조건으로 기본 행동을 고른다. `IdleWalkState`는 시간과 수평 범위만으로 모션을 계산하고 Qt 어댑터가 필요한 갱신 시점을 예약한다. 실제 창 위치와 행동 창구의 연결은 조립부가 담당한다. 기본 행동과 일시 반응을 분리하되 반응 큐·일반 행동 스케줄러·동적 모듈 로딩은 후속 단계다.
 
 정리 실패·재시작·되돌리기·감시 등록 흐름의 재현 테스트와 현재 보장 범위는 [백엔드 안전 점검](backend-safety-checks.md)에 정리한다.
 
