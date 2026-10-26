@@ -246,7 +246,7 @@ ApplicationWindow {
         ruleFormDirty = false
     }
     width: homeWidth
-    height: Math.min(540, Screen.desktopAvailableHeight - 60)
+    height: Math.min(UiMetrics.homeDefaultHeight, Screen.desktopAvailableHeight - 60)
     minimumWidth: homeWidth
     maximumWidth: homeWidth
     minimumHeight: 420

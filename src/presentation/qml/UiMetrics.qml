@@ -80,6 +80,7 @@ QtObject {
     readonly property int borderNormal: 1
     readonly property int borderActive: 2
     readonly property int windowResizeGrip: 7
+    readonly property int homeDefaultHeight: 660
     // 페이지 순서는 Main의 페이지 번호와 같고 창 크기는 본체와 독립적이다.
     readonly property var extensionDefaults: [
         null,
