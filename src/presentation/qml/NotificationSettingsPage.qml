@@ -16,7 +16,7 @@ ScrollView {
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
     ColumnLayout {
         width: page.availableWidth
-        spacing: UiMetrics.settingsSectionSpacing
+        spacing: UiMetrics.spaceSection
         Label {
             Layout.fillWidth: true
             text: qsTr("받을 알림을 선택하세요")
@@ -32,25 +32,56 @@ ScrollView {
         }
         Repeater {
             model: page.types
-            delegate: SettingsSection {
+            delegate: Rectangle {
+                id: notificationItem
                 required property var modelData
                 Layout.fillWidth: true
-                title: modelData.sourceName
-                dark: page.dark
-                Switch {
-                    objectName: "notificationToggle_" + modelData.id
-                    Layout.fillWidth: true
-                    text: modelData.name
-                    checked: modelData.enabled
-                    font.weight: UiMetrics.settingsLabelWeight
-                    onToggled: page.enabledRequested(modelData.id, checked)
-                }
-                Label {
-                    Layout.fillWidth: true
-                    text: modelData.description
-                    textFormat: Text.PlainText
-                    wrapMode: Text.Wrap
-                    color: page.theme.muted
+                implicitHeight: itemContent.implicitHeight + UiMetrics.pageInset * 2
+                color: page.theme.surface
+                radius: UiMetrics.radiusCard
+                border.width: UiMetrics.borderNormal
+                border.color: page.theme.border
+                RowLayout {
+                    id: itemContent
+                    anchors.fill: parent
+                    anchors.margins: UiMetrics.pageInset
+                    spacing: UiMetrics.spaceSection
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: UiMetrics.spaceSmall
+                        Label {
+                            Layout.fillWidth: true
+                            text: notificationItem.modelData.name
+                            textFormat: Text.PlainText
+                            wrapMode: Text.Wrap
+                            font.pixelSize: UiMetrics.textEmphasis
+                            font.weight: UiMetrics.groupTitleWeight
+                            color: page.theme.text
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: notificationItem.modelData.description
+                            textFormat: Text.PlainText
+                            wrapMode: Text.Wrap
+                            color: page.theme.muted
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: notificationItem.modelData.sourceName
+                            textFormat: Text.PlainText
+                            wrapMode: Text.Wrap
+                            font.pixelSize: UiMetrics.textCaption
+                            color: page.theme.muted
+                        }
+                    }
+                    Switch {
+                        objectName: "notificationToggle_" + notificationItem.modelData.id
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: UiMetrics.controlHeight
+                        checked: notificationItem.modelData.enabled
+                        Accessible.name: notificationItem.modelData.name
+                        onToggled: page.enabledRequested(notificationItem.modelData.id, checked)
+                    }
                 }
             }
         }
