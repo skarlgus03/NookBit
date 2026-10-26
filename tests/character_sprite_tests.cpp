@@ -10,12 +10,27 @@
 #include <QImage>
 #include <QThread>
 #include <QQuickItem>
+#include <QQuickImageProvider>
 #include <memory>
 #include <functional>
 #include <iostream>
 
 namespace {
 int failures = 0;
+// 정상적인 비동기 이미지 지연을 재현해 상태 전환 중 빈 프레임을 검사하는 제공자.
+class DelayedFrameProvider final : public QQuickImageProvider {
+public:
+    // 실제 창이나 외부 파일 없이 이미지 로딩을 재현하는 생성자.
+    DelayedFrameProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+    // 별도 로딩 스레드에서 잠시 기다린 뒤 새 프레임을 제공하는 함수.
+    QImage requestImage(const QString&, QSize* size, const QSize&) override {
+        QThread::msleep(60);
+        QImage frame(512, 512, QImage::Format_ARGB32);
+        frame.fill(Qt::blue);
+        if (size) *size = frame.size();
+        return frame;
+    }
+};
 // 예상과 다르면 검사 실패를 기록하는 함수.
 void expect(bool value, const char* message) {
     if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
@@ -217,6 +232,39 @@ void testImagePackPlayback() {
     expect(region->property("x").toDouble() == 68 && region->property("y").toDouble() == 104 &&
         region->property("width").toDouble() == 96 && region->property("height").toDouble() == 112,
         "trimming must change bounds without changing the character's logical scale or anchor");
+    engine.addImageProvider("transition", new DelayedFrameProvider);
+    auto outgoing = character.animation();
+    outgoing.insert("mirrorX", true);
+    sprite->setProperty("descriptor", outgoing);
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }), "outgoing clip ready before transition");
+    QCoreApplication::processEvents();
+    const auto heldFrame = sprite->property("renderedStep").toMap();
+    const auto heldX = region->property("x").toDouble();
+    const auto heldY = region->property("y").toDouble();
+    auto incomingStep = heldFrame;
+    incomingStep.insert("frameId", "incoming-idle");
+    incomingStep.insert("source", QUrl("image://transition/idle"));
+    incomingStep.insert("imageWidth", 512);
+    incomingStep.insert("imageHeight", 512);
+    incomingStep.insert("region", QVariantMap{{"x", 0}, {"y", 0}, {"width", 512}, {"height", 512}});
+    incomingStep.insert("pivot", QVariantMap{{"x", 20}, {"y", 30}});
+    sprite->setProperty("descriptor", QVariantMap{{"id", "incoming-idle"}, {"steps", QVariantList{incomingStep}}, {"mirrorX", false}});
+    expect(!sprite->property("ready").toBool() && sprite->property("retainingFrame").toBool(), "new clip is loading asynchronously");
+    if (sprite->property("renderedStep").toMap() != heldFrame || !sprite->property("renderedMirrorX").toBool() ||
+        region->property("x").toDouble() != heldX || region->property("y").toDouble() != heldY) {
+        std::cerr << "Transition: frame=" << sprite->property("renderedStep").toMap().value("frameId").toString().toStdString()
+            << " expected=" << heldFrame.value("frameId").toString().toStdString()
+            << " mirror=" << sprite->property("renderedMirrorX").toBool()
+            << " visible=" << region->property("visible").toBool()
+            << " xy=" << region->property("x").toDouble() << ',' << region->property("y").toDouble()
+            << " expected=" << heldX << ',' << heldY << '\n';
+    }
+    expect(region->property("visible").toBool() && sprite->property("renderedStep").toMap() == heldFrame &&
+        sprite->property("renderedMirrorX").toBool() && region->property("x").toDouble() == heldX && region->property("y").toDouble() == heldY,
+        "clip replacement must retain outgoing pixels geometry and direction together");
+    expect(waitFor([&] { return sprite->property("ready").toBool(); }) && !sprite->property("renderedMirrorX").toBool() &&
+        sprite->property("renderedStep").toMap().value("frameId").toString() == "incoming-idle",
+        "new clip and direction appear together only when image is ready");
     expect(!sprite->property("clip").toBool(), "nominal viewport must not clip wider or outside-pivot poses");
     expect(character.publish({"work", "job", nookbit::CharacterUpdateKind::Activity, true, {}, "file.work"}).hasValue(),
         "work cue should select the remaining atlas animation");

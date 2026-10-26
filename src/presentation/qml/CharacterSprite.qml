@@ -9,6 +9,7 @@ Item {
     property int sequenceIndex: 0
     property bool finished: false
     property var retainedStep: ({})
+    property bool retainedMirrorX: false
     property real userScale: 0.5
     property point userPivotOffset: Qt.point(0, 0)
     property point anchor: Qt.point(width / 2, height * 0.75)
@@ -26,6 +27,7 @@ Item {
     readonly property string currentFrameId: currentStep.frameId || ""
     readonly property bool retainingFrame: atlas.status === Image.Loading && retainedStep.source !== undefined
     readonly property var renderedStep: retainingFrame ? retainedStep : currentStep
+    readonly property bool renderedMirrorX: retainingFrame ? retainedMirrorX : descriptor.mirrorX === true
     readonly property real pixelScale: metadataValid ? userScale / renderedStep.pixelsPerUnit : 0
     readonly property bool geometryValid: isFinite(userScale) && userScale > 0
         && isFinite(userPivotOffset.x) && isFinite(userPivotOffset.y)
@@ -61,20 +63,29 @@ Item {
 
     // 새 재생 설정을 받으면 첫 프레임과 미완료 상태로 돌아가는 함수.
     function restart() {
-        retainedStep = ({})
         sequenceIndex = 0
         finished = false
+        // 새 설명·이미지 상태의 바인딩이 모두 갱신된 뒤 실제 준비된 프레임만 보관한다.
+        Qt.callLater(rememberReadyFrame)
+    }
+    // 실제 준비된 그림의 영역과 방향을 다음 애니메이션 로딩까지 보관하는 함수.
+    function rememberReadyFrame() {
+        if (!ready || String(atlas.source) !== String(currentStep.source)) return
+        retainedStep = currentStep
+        retainedMirrorX = descriptor.mirrorX === true
     }
     // 지정된 순서로 다음 프레임을 선택하고 일회 재생은 마지막 프레임에 멈추는 함수.
     function advanceFrame() {
         if (!ready || finished) return
         // 다음 PNG를 읽는 동안 이전 이미지의 영역과 피벗도 함께 유지한다.
-        retainedStep = currentStep
+        rememberReadyFrame()
         if (sequenceIndex + 1 < steps.length) sequenceIndex++
         else if (descriptor.loop) sequenceIndex = 0
         else finished = true
     }
     onDescriptorChanged: if (!externallyDriven) restart()
+    onReadyChanged: if (ready) rememberReadyFrame()
+    onCurrentStepChanged: Qt.callLater(rememberReadyFrame)
 
     Item {
         id: crop
@@ -88,7 +99,7 @@ Item {
         transform: Scale {
             origin.x: sprite.anchor.x - crop.x
             origin.y: sprite.anchor.y - crop.y
-            xScale: sprite.descriptor.mirrorX === true ? -1 : 1
+            xScale: sprite.renderedMirrorX ? -1 : 1
         }
         Image {
             id: atlas

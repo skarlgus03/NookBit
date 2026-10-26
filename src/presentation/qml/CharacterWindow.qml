@@ -17,7 +17,7 @@ Window {
     // 캐릭터 부착점은 이미지 피벗 기준 논리 좌표이며 개인 배율을 적용한다.
     readonly property var currentAttachment: sprite.renderedStep.attachment || bubbleSettings.attachment || ({x: 0, y: -120})
     readonly property point bubbleOffset: Qt.point(currentAttachment.x, currentAttachment.y)
-    readonly property bool mirrored: descriptor.mirrorX === true
+    readonly property bool mirrored: sprite.renderedMirrorX
     readonly property bool gestureHeld: gestureInput.tracking
     signal visualBoundsUpdated(real left, real right)
     property bool actionAvailable: false
@@ -84,7 +84,7 @@ Window {
     // 애니메이션 전체 포즈의 피벗 기준 영역을 구해 프레임마다 창이 흔들리지 않게 하는 함수.
     function frameBounds() {
         let left = -40, top = -48, right = 40, bottom = 16
-        const steps = sprite.steps
+        const steps = sprite.retainingFrame ? sprite.steps.concat([sprite.renderedStep]) : sprite.steps
         for (let i = 0; i < steps.length; ++i) {
             const step = steps[i]
             if (!step.region || !step.pivot || !(step.pixelsPerUnit > 0)) continue
