@@ -33,6 +33,7 @@ Rectangle {
         spacing: UiMetrics.spaceControl
         RowLayout {
             Layout.fillWidth: true
+            Layout.minimumHeight: UiMetrics.controlHeight
             Label { text: qsTr("재생"); color: playback.theme.text; font.pixelSize: UiMetrics.textSectionTitle; font.bold: true }
             AppButton {
                 objectName: "companionTimelineSnapButton"

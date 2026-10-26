@@ -1277,7 +1277,20 @@ int main(int argc, char* argv[]) {
                 previewSprite->property("sequenceIndex").toInt() == 3 &&
                 QMetaObject::invokeMethod(timeline, "selectTime", Q_ARG(QVariant, QVariant(0))) &&
                 previewSprite->property("sequenceIndex").toInt() == 0;
+            // 실제 페이지 배치가 갱신될 때까지 짧게 기다리는 함수.
+            const auto settlePreview = [] {
+                QEventLoop layout;
+                QTimer::singleShot(60, &layout, &QEventLoop::quit);
+                layout.exec();
+            };
+            QMetaObject::invokeMethod(engine.rootObjects().first(), "openCharacterSettings");
+            workspace->setProperty("editing", false);
+            settlePreview();
+            auto* previewStage = workspace->findChild<QQuickItem*>(QStringLiteral("companionPreviewStage"));
+            const double previewHeight = previewStage ? previewStage->height() : 0;
             workspace->setProperty("editing", true);
+            settlePreview();
+            workspaceReady = workspaceReady && previewStage && previewHeight > 0 && std::abs(previewStage->height() - previewHeight) < 1;
             // 프레임 시작이 눈금 밖에 있어도 끝 시각에 붙고 임시 해제를 지키는지 검사한다.
             QVariant snapResult;
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(timeline, "snappedTime", Q_RETURN_ARG(QVariant, snapResult),
@@ -1294,6 +1307,9 @@ int main(int argc, char* argv[]) {
                 Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(110)));
             const auto draft = workspace->property("draft").toMap().value("pivot").toMap();
             workspaceReady = workspaceReady && draft.value("x").toDouble() == 100 && draft.value("y").toDouble() == 110;
+            auto* coordinates = workspace->findChild<QObject*>(QStringLiteral("companionPivotCoordinates"));
+            workspaceReady = workspaceReady && coordinates && coordinates->property("text").toString().contains("X 100.0") &&
+                coordinates->property("text").toString().contains("Y 110.0");
             // 지속시간 편집은 시간 커서를 보존하고 상한·하한 및 편집 모드를 지키는지 검사한다.
             auto* ruler = timeline ? timeline->findChild<QQuickItem*>(QStringLiteral("companionTimeRulerSeekArea")) : nullptr;
             workspaceReady = workspaceReady && ruler && ruler->height() == uiMetrics->property("companionTimelineRulerHeight").toDouble() &&
@@ -1315,7 +1331,11 @@ int main(int argc, char* argv[]) {
                 Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) && workspace->property("dirty").toBool();
             const QVariantMap edits{{"frames", workspace->property("drafts")}, {"durations", workspace->property("durationDrafts")}};
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "applyRequested", Q_ARG(QVariant, QVariant(edits))) &&
-                !companionEdits.applied().isEmpty() && !workspace->property("dirty").toBool() &&
+                !companionEdits.applied().isEmpty() && !workspace->property("dirty").toBool();
+            settlePreview();
+            auto* savedNotice = workspace->findChild<QQuickItem*>(QStringLiteral("companionSavedNotice"));
+            workspaceReady = workspaceReady && savedNotice && savedNotice->opacity() > 0 && companionEdits.status().isEmpty() &&
+                std::abs(previewStage->height() - previewHeight) < 1 &&
                 QMetaObject::invokeMethod(workspace, "resizeFrame", Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(700))) &&
                 workspace->property("dirty").toBool() && QMetaObject::invokeMethod(workspace, "reloadEdits") &&
                 !workspace->property("dirty").toBool() && timeline->property("durationMs").toDouble() == duration + 400;

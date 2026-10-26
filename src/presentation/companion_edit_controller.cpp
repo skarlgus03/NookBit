@@ -47,7 +47,7 @@ bool CompanionEditController::applyChanges(const QVariantMap& edits) {
         return false;
     }
     applied_ = edits;
-    status_ = QStringLiteral("편집 내용을 저장하고 적용했어요.");
+    status_.clear();
     emit appliedChanged();
     emit changed();
     return true;

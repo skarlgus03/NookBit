@@ -187,6 +187,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CharacterBadge.qml
         presentation/qml/CharacterSprite.qml
         presentation/qml/CharacterAnchorEditor.qml
+        presentation/qml/AnchorHandle.qml
         presentation/qml/CompanionPreview.qml
         presentation/qml/CompanionTimeline.qml
         presentation/qml/CompanionPlayback.qml

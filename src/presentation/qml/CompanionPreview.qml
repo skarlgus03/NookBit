@@ -78,6 +78,8 @@ Rectangle {
         drafts = JSON.parse(JSON.stringify(savedEdits.frames || ({})))
         durationDrafts = JSON.parse(JSON.stringify(savedEdits.durations || ({})))
     }
+    // 저장 성공 알림을 화면 위에 잠깐 표시하는 함수.
+    function showSavedNotice() { saveNoticeAnimation.restart() }
     // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
     function togglePlayback() {
         const resume = !playbackActive
@@ -134,8 +136,26 @@ Rectangle {
             }
             AppButton {
                 visible: pane.editing
-                text: qsTr("팩 기본값")
+                text: qsTr("기본값")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("팩 기본값으로 되돌리기")
                 onClicked: pane.resetEdits()
+            }
+            AppButton {
+                objectName: "companionCancelEditsButton"
+                visible: pane.allowEditing
+                text: qsTr("취소")
+                enabled: pane.dirty
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("마지막 적용 상태로 돌아가기")
+                onClicked: { pane.running = false; pane.reloadEdits() }
+            }
+            AppButton {
+                objectName: "companionApplyEditsButton"
+                visible: pane.allowEditing
+                text: qsTr("적용")
+                enabled: pane.dirty
+                onClicked: pane.applyRequested({frames: pane.drafts, durations: pane.durationDrafts})
             }
         }
         Rectangle {
@@ -186,62 +206,104 @@ Rectangle {
                     readonly property color guide: index === 0 ? UiTheme.characterPivotGuide : UiTheme.characterBubbleGuide
                     x: stage.origin.x + (pane.pivot.x + (index === 1 ? pane.attachment.x : 0)) * stage.zoom
                     y: stage.origin.y + (pane.pivot.y + (index === 1 ? pane.attachment.y : 0)) * stage.zoom
-                    Rectangle { x: -handle.x; width: stage.width; height: UiMetrics.borderNormal; color: handle.guide; opacity: 0.6 }
-                    Rectangle {
-                        width: UiMetrics.characterAnchorHandle; height: width
-                        x: -width / 2; y: -height / 2; radius: width / 2
-                        color: handle.guide; border.color: pane.theme.surface
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.SizeAllCursor
-                            // 이미지 논리 좌표로 변환하여 조정점을 이동하는 함수.
-                            onPositionChanged: function(mouse) {
-                                if (!pressed) return
-                                const pos = mapToItem(stage, mouse.x, mouse.y)
-                                pane.movePoint(handle.index, (pos.x - stage.origin.x) / stage.zoom, (pos.y - stage.origin.y) / stage.zoom)
-                            }
+                    Rectangle { x: -handle.x; width: stage.width; height: UiMetrics.borderNormal; color: handle.guide; opacity: 0.35 }
+                    Rectangle { y: -handle.y; width: UiMetrics.borderNormal; height: stage.height; color: handle.guide; opacity: 0.35 }
+                    AnchorHandle {
+                        id: marker
+                        x: -width / 2; y: -height / 2
+                        markerColor: handle.guide
+                        backdropColor: pane.theme.surface
+                        diamond: handle.index === 1
+                        description: handle.index === 0 ? qsTr("캐릭터 기준점 · 십자 중심을 드래그") : qsTr("말풍선 부착점 · 십자 중심을 드래그")
+                        // 이미지 논리 좌표로 변환하여 기준점을 이동하는 함수.
+                        onDragged: function(localX, localY) {
+                            const pos = marker.mapToItem(stage, localX, localY)
+                            pane.movePoint(handle.index, (pos.x - stage.origin.x) / stage.zoom, (pos.y - stage.origin.y) / stage.zoom)
                         }
                     }
                 }
             }
-        }
-        Label {
-            Layout.fillWidth: true
-            visible: pane.editing
-            text: qsTr("파랑: 캐릭터 기준점 · 주황: 말풍선 부착점\n아래 프레임 오른쪽 끝을 끌면 지속시간이 바뀌어요. 적용 전에는 미리보기만 변경돼요.")
-            color: pane.theme.muted
-            wrapMode: Text.Wrap
-            font.pixelSize: UiMetrics.textBody
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            visible: pane.allowEditing && (pane.editing || pane.dirty)
-            Label {
-                Layout.fillWidth: true
-                text: pane.dirty ? qsTr("적용하지 않은 변경이 있어요") : qsTr("저장된 상태예요")
-                color: pane.dirty ? pane.theme.text : pane.theme.muted
-                font.bold: pane.dirty
-                wrapMode: Text.Wrap
+            Rectangle {
+                objectName: "companionCoordinateReadout"
+                anchors.left: parent.left; anchors.top: parent.top
+                anchors.margins: UiMetrics.spaceGroup
+                width: Math.min(UiMetrics.companionCoordinateWidth, parent.width - UiMetrics.spaceGroup * 2)
+                height: coordinateLabels.implicitHeight + UiMetrics.spaceControl * 2
+                visible: pane.editing && sprite.metadataValid
+                color: pane.theme.alternate
+                border.color: pane.theme.border
+                radius: UiMetrics.radiusControl
+                Column {
+                    id: coordinateLabels
+                    anchors.fill: parent
+                    anchors.margins: UiMetrics.spaceControl
+                    spacing: UiMetrics.spaceSmall
+                    Label {
+                        width: parent.width
+                        text: qsTr("%1 · 이미지 좌상단 기준").arg(pane.frameKey)
+                        elide: Text.ElideRight
+                        color: pane.theme.muted
+                        font.pixelSize: UiMetrics.textBody
+                    }
+                    Label {
+                        objectName: "companionPivotCoordinates"
+                        text: qsTr("기준점   X %1   Y %2").arg(pane.pivot.x.toFixed(1)).arg(pane.pivot.y.toFixed(1))
+                        color: UiTheme.characterPivotGuide
+                        font.pixelSize: UiMetrics.textBody
+                        font.bold: true
+                    }
+                    Label {
+                        objectName: "companionAttachmentCoordinates"
+                        text: qsTr("말풍선   X %1   Y %2").arg((pane.pivot.x + pane.attachment.x).toFixed(1)).arg((pane.pivot.y + pane.attachment.y).toFixed(1))
+                        color: UiTheme.characterBubbleGuide
+                        font.pixelSize: UiMetrics.textBody
+                        font.bold: true
+                    }
+                }
             }
-            AppButton {
-                objectName: "companionCancelEditsButton"
-                text: qsTr("변경 취소")
-                enabled: pane.dirty
-                onClicked: { pane.running = false; pane.reloadEdits() }
+            Rectangle {
+                id: savedNotice
+                objectName: "companionSavedNotice"
+                anchors.right: parent.right; anchors.top: parent.top
+                anchors.margins: UiMetrics.spaceGroup
+                width: savedNoticeText.implicitWidth + UiMetrics.spaceSection * 2
+                height: UiMetrics.controlHeight
+                radius: UiMetrics.radiusControl
+                color: pane.theme.accent
+                opacity: 0
+                visible: opacity > 0
+                Label {
+                    id: savedNoticeText
+                    anchors.centerIn: parent
+                    text: qsTr("저장되었습니다.")
+                    color: pane.theme.accentText
+                    font.pixelSize: UiMetrics.textBody
+                }
             }
-            AppButton {
-                objectName: "companionApplyEditsButton"
-                text: qsTr("적용")
-                enabled: pane.dirty
-                onClicked: pane.applyRequested({frames: pane.drafts, durations: pane.durationDrafts})
+            SequentialAnimation {
+                id: saveNoticeAnimation
+                PropertyAction { target: savedNotice; property: "opacity"; value: 0 }
+                NumberAnimation { target: savedNotice; property: "opacity"; to: 1; duration: UiMetrics.transientNoticeFadeMs }
+                PauseAnimation { duration: UiMetrics.transientNoticeHoldMs }
+                NumberAnimation { target: savedNotice; property: "opacity"; to: 0; duration: UiMetrics.transientNoticeFadeMs }
             }
-        }
-        Label {
-            Layout.fillWidth: true
-            visible: pane.editStatus.length > 0
-            text: pane.editStatus
-            color: pane.theme.muted
-            wrapMode: Text.Wrap
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                anchors.margins: UiMetrics.spaceGroup
+                height: errorLabel.implicitHeight + UiMetrics.spaceControl * 2
+                visible: pane.editStatus.length > 0
+                color: pane.theme.surface
+                border.color: pane.theme.border
+                radius: UiMetrics.radiusControl
+                Label {
+                    id: errorLabel
+                    anchors.fill: parent
+                    anchors.margins: UiMetrics.spaceControl
+                    text: pane.editStatus
+                    color: pane.theme.text
+                    wrapMode: Text.Wrap
+                }
+            }
         }
         CompanionPlayback {
             objectName: "companionPlaybackSection"

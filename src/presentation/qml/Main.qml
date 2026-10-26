@@ -987,7 +987,9 @@ ApplicationWindow {
                 allowEditing: companionEdits.available
                 userPivotOffset: characterSettings.pivotOffset
                 userBubbleOffset: characterSettings.bubbleOffset
-                onApplyRequested: function(edits) { companionEdits.applyChanges(edits) }
+                onApplyRequested: function(edits) {
+                    if (companionEdits.applyChanges(edits)) companionPreview.showSavedNotice()
+                }
             }
             ScrollView {
                 id: companionControls

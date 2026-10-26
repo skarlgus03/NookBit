@@ -101,6 +101,11 @@ QtObject {
     readonly property int characterAnchorWidth: 640
     readonly property int characterAnchorHeight: 560
     readonly property int characterAnchorHandle: 22
+    readonly property int characterAnchorHitSize: 32
+    readonly property int characterAnchorVisualSize: 24
+    readonly property int companionCoordinateWidth: 240
+    readonly property int transientNoticeFadeMs: 160
+    readonly property int transientNoticeHoldMs: 1400
     readonly property int companionSettingsWidth: 320
     readonly property int companionTimelineHeight: 160
     readonly property int companionTimelineRulerHeight: 32
