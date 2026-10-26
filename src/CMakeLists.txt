@@ -189,6 +189,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CharacterAnchorEditor.qml
         presentation/qml/AnchorHandle.qml
         presentation/qml/CompanionPreview.qml
+        presentation/qml/CompanionCoordinateEditor.qml
         presentation/qml/CompanionTimeline.qml
         presentation/qml/CompanionPlayback.qml
         presentation/qml/CompanionPlaybackClock.qml

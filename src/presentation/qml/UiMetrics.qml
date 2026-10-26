@@ -104,6 +104,10 @@ QtObject {
     readonly property int characterAnchorHitSize: 32
     readonly property int characterAnchorVisualSize: 24
     readonly property int companionCoordinateWidth: 240
+    readonly property int companionCoordinateEditorWidth: 360
+    readonly property real companionPreviewZoomMin: 0.1
+    readonly property real companionPreviewZoomMax: 4
+    readonly property real companionPreviewZoomStep: 1.15
     readonly property int transientNoticeFadeMs: 160
     readonly property int transientNoticeHoldMs: 1400
     readonly property int companionSettingsWidth: 320

@@ -76,6 +76,7 @@
 #include <QQuickWindow>
 #include <QQuickItem>
 #include <QMouseEvent>
+#include <QLineF>
 #include <QKeyEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -1291,6 +1292,20 @@ int main(int argc, char* argv[]) {
             workspace->setProperty("editing", true);
             settlePreview();
             workspaceReady = workspaceReady && previewStage && previewHeight > 0 && std::abs(previewStage->height() - previewHeight) < 1;
+            auto* animationChoice = workspace->findChild<QObject*>(QStringLiteral("companionAnimationChoice"));
+            auto* nextShortcut = workspace->findChild<QObject*>(QStringLiteral("companionNextFrameShortcut"));
+            auto* world = workspace->findChild<QQuickItem*>(QStringLiteral("companionPreviewWorld"));
+            auto* previewBubble = workspace->findChild<QObject*>(QStringLiteral("companionBubblePreview"));
+            workspaceReady = workspaceReady && animationChoice && !animationChoice->property("enabled").toBool() &&
+                nextShortcut && nextShortcut->property("enabled").toBool() && world && previewBubble &&
+                !previewBubble->property("constrainToArea").toBool();
+            if (workspaceReady) {
+                const auto beforeZoom = world->mapFromItem(previewStage, QPointF(100, 120));
+                workspaceReady = QMetaObject::invokeMethod(workspace, "zoomPreview", Q_ARG(QVariant, QVariant(0.5)),
+                    Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(120))) &&
+                    QLineF(beforeZoom, world->mapFromItem(previewStage, QPointF(100, 120))).length() < 0.01 &&
+                    !workspace->property("dirty").toBool() && QMetaObject::invokeMethod(workspace, "resetPreview");
+            }
             // 프레임 시작이 눈금 밖에 있어도 끝 시각에 붙고 임시 해제를 지키는지 검사한다.
             QVariant snapResult;
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(timeline, "snappedTime", Q_RETURN_ARG(QVariant, snapResult),
@@ -1310,6 +1325,28 @@ int main(int argc, char* argv[]) {
             auto* coordinates = workspace->findChild<QObject*>(QStringLiteral("companionPivotCoordinates"));
             workspaceReady = workspaceReady && coordinates && coordinates->property("text").toString().contains("X 100.0") &&
                 coordinates->property("text").toString().contains("Y 110.0");
+            // 숫자 입력과 프레임 전체 정렬이 소수점까지 동일한 점을 복사하는지 검사한다.
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "setCoordinates",
+                Q_ARG(QVariant, QVariant(100.25)), Q_ARG(QVariant, QVariant(110.5)),
+                Q_ARG(QVariant, QVariant(180.75)), Q_ARG(QVariant, QVariant(-50.125))) &&
+                QMetaObject::invokeMethod(workspace, "alignFrames", Q_ARG(QVariant, QVariant(2)));
+            const auto aligned = workspace->property("drafts").toMap();
+            const auto originalSteps = workspace->property("authoredDescriptor").toMap().value("steps").toList();
+            for (const auto& item : originalSteps) {
+                const auto value = aligned.value(item.toMap().value("frameId").toString()).toMap();
+                workspaceReady = workspaceReady && value.value("pivot").toMap().value("x").toDouble() == 100.25 &&
+                    value.value("pivot").toMap().value("y").toDouble() == 110.5 &&
+                    value.value("attachment").toMap().value("x").toDouble() == 80.5 &&
+                    value.value("attachment").toMap().value("y").toDouble() == -160.625;
+            }
+            workspaceReady = workspaceReady && !originalSteps.isEmpty() && timeline->property("durationMs").toDouble() == duration;
+            workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "fitPreview");
+            if (workspaceReady) {
+                auto* bubbleItem = qobject_cast<QQuickItem*>(previewBubble);
+                const auto area = bubbleItem->mapRectToItem(previewStage, QRectF(0, 0, bubbleItem->width(), bubbleItem->height()));
+                workspaceReady = area.left() >= -1 && area.top() >= -1 && area.right() <= previewStage->width() + 1 &&
+                    area.bottom() <= previewStage->height() + 1 && QMetaObject::invokeMethod(workspace, "resetPreview");
+            }
             // 지속시간 편집은 시간 커서를 보존하고 상한·하한 및 편집 모드를 지키는지 검사한다.
             auto* ruler = timeline ? timeline->findChild<QQuickItem*>(QStringLiteral("companionTimeRulerSeekArea")) : nullptr;
             workspaceReady = workspaceReady && ruler && ruler->height() == uiMetrics->property("companionTimelineRulerHeight").toDouble() &&
@@ -1322,6 +1359,7 @@ int main(int argc, char* argv[]) {
                 QMetaObject::invokeMethod(workspace, "resetEdits") &&
                 timeline->property("durationMs").toDouble() == duration;
             workspace->setProperty("editing", false);
+            workspaceReady = workspaceReady && animationChoice->property("enabled").toBool();
             workspaceReady = workspaceReady && QMetaObject::invokeMethod(workspace, "resizeFrame",
                 Q_ARG(QVariant, QVariant(0)), Q_ARG(QVariant, QVariant(600))) &&
                 timeline->property("durationMs").toDouble() == duration;

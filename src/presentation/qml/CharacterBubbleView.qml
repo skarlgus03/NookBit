@@ -10,6 +10,7 @@ Item {
     required property string message
     property var configuration: ({})
     property bool dark: true
+    property bool constrainToArea: true
     readonly property color surfaceColor: dark ? "#263246" : "#f6f8fb"
     readonly property color edgeColor: dark ? "#718298" : "#a5b3c4"
     property bool actionAvailable: false
@@ -20,20 +21,21 @@ Item {
     readonly property bool customReady: customSkin && customImage.status === Image.Ready
         && customImage.sourceSize.width === skin.imageWidth && customImage.sourceSize.height === skin.imageHeight
     readonly property var pivot: configuration.pivot || ({x: 0.1, y: 1})
-    width: Math.max(1, Math.min(customSkin ? skin.width : UiMetrics.bubbleMaximumWidth, screenArea.width - 2 * UiMetrics.bubbleScreenMargin))
-    height: Math.max(1, Math.min(screenArea.height - 2 * UiMetrics.bubbleScreenMargin, customSkin ? skin.height
+    width: Math.max(1, Math.min(customSkin ? skin.width : UiMetrics.bubbleMaximumWidth,
+        constrainToArea ? screenArea.width - 2 * UiMetrics.bubbleScreenMargin : Infinity))
+    height: Math.max(1, Math.min(constrainToArea ? screenArea.height - 2 * UiMetrics.bubbleScreenMargin : Infinity, customSkin ? skin.height
         : Math.max(64, Math.min(bodyText.implicitHeight, UiMetrics.bubbleTextSize * 1.5 * UiMetrics.bubbleMaximumLines) + 34 + (actionAvailable ? 38 : 0)))
     )
-    readonly property bool flippedLeft: overflow(anchorPoint.x - (1 - pivot.x) * width, width, screenArea.x, screenArea.width)
+    readonly property bool flippedLeft: constrainToArea && overflow(anchorPoint.x - (1 - pivot.x) * width, width, screenArea.x, screenArea.width)
         < overflow(anchorPoint.x - pivot.x * width, width, screenArea.x, screenArea.width)
-    readonly property bool belowAnchor: overflow(anchorPoint.y - (1 - pivot.y) * height, height, screenArea.y, screenArea.height)
+    readonly property bool belowAnchor: constrainToArea && overflow(anchorPoint.y - (1 - pivot.y) * height, height, screenArea.y, screenArea.height)
         < overflow(anchorPoint.y - pivot.y * height, height, screenArea.y, screenArea.height)
     readonly property point effectivePivot: Qt.point((flippedLeft ? 1 - pivot.x : pivot.x) * width,
                                                     (belowAnchor ? 1 - pivot.y : pivot.y) * height)
-    readonly property real placementX: Math.round(Math.max(screenArea.x + 8, Math.min(screenArea.x + screenArea.width - width - 8,
-        anchorPoint.x - effectivePivot.x)))
-    readonly property real placementY: Math.round(Math.max(screenArea.y + 8, Math.min(screenArea.y + screenArea.height - height - 8,
-        anchorPoint.y - effectivePivot.y)))
+    readonly property real placementX: Math.round(constrainToArea ? Math.max(screenArea.x + 8, Math.min(screenArea.x + screenArea.width - width - 8,
+        anchorPoint.x - effectivePivot.x)) : anchorPoint.x - effectivePivot.x)
+    readonly property real placementY: Math.round(constrainToArea ? Math.max(screenArea.y + 8, Math.min(screenArea.y + screenArea.height - height - 8,
+        anchorPoint.y - effectivePivot.y)) : anchorPoint.y - effectivePivot.y)
     // 화면 밖으로 나가는 길이를 계산해 더 안전한 피벗 방향을 선택하는 함수.
     function overflow(start, length, screenStart, screenLength) {
         return Math.max(0, screenStart + 8 - start) + Math.max(0, start + length - (screenStart + screenLength - 8))

@@ -91,5 +91,15 @@ int main(int argc, char** argv) {
     expect(bubble->width() <= 320 && bubble->height() <= 168, "long messages keep bounded default bubble size");
     auto* body = bubble->findChild<QObject*>(QStringLiteral("characterBubbleText"));
     expect(body && body->property("maximumLineCount").toInt() == 4, "shared body limits long text to four lines");
+    auto* view = bubble->findChild<QObject*>(QStringLiteral("characterBubbleView"));
+    expect(view != nullptr, "shared bubble view must be available for preview placement");
+    if (view) {
+        view->setProperty("constrainToArea", false);
+        bubble->setProperty("screenArea", QRectF(0, 0, 80, 60));
+        bubble->setProperty("anchorPoint", QPointF(20, -300));
+        expect(!view->property("belowAnchor").toBool() && !view->property("flippedLeft").toBool() &&
+            view->property("placementY").toDouble() < -300 && view->property("width").toDouble() == 320,
+            "editor preview must preserve offscreen attachment and native bubble dimensions without flipping");
+    }
     return failures ? 1 : 0;
 }
