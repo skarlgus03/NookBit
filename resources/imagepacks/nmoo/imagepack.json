@@ -3,7 +3,7 @@
   "packType": "imagepack",
   "id": "nookbit.nmoo",
   "name": "Nmoo - Idle & Walk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "display": {
     "referenceSize": { "width": 256, "height": 256 },
     "pixelsPerUnit": 4,
@@ -20,14 +20,16 @@
     { "id": "eyes-closed", "kind": "image", "file": "images/eyes-closed.png" },
     { "id": "walk-1", "kind": "image", "file": "images/walk-1.png" },
     { "id": "walk-2", "kind": "image", "file": "images/walk-2.png" },
-    { "id": "walk-3", "kind": "image", "file": "images/walk-3.png" }
+    { "id": "walk-3", "kind": "image", "file": "images/walk-3.png" },
+    { "id": "notice", "kind": "image", "file": "images/notice.png" }
   ],
   "frames": [
     { "id": "eyes-open", "sourceId": "eyes-open", "region": { "type": "image" } },
     { "id": "eyes-closed", "sourceId": "eyes-closed", "region": { "type": "image" } },
     { "id": "walk-1", "sourceId": "walk-1", "region": { "type": "image" } },
     { "id": "walk-2", "sourceId": "walk-2", "region": { "type": "image" } },
-    { "id": "walk-3", "sourceId": "walk-3", "region": { "type": "image" } }
+    { "id": "walk-3", "sourceId": "walk-3", "region": { "type": "image" } },
+    { "id": "notice", "sourceId": "notice", "region": { "type": "image" } }
   ],
   "animations": [
     {
@@ -47,11 +49,17 @@
         { "frameId": "walk-3", "durationMs": 140 },
         { "frameId": "walk-2", "durationMs": 140 }
       ]
+    },
+    {
+      "id": "notice",
+      "loop": true,
+      "steps": [ { "frameId": "notice", "durationMs": 1000 } ]
     }
   ],
   "bindings": [
     { "cueId": "resting", "animationId": "standing" },
-    { "cueId": "calling", "animationId": "standing" },
+    { "cueId": "calling", "animationId": "notice" },
+    { "cueId": "file.offer", "animationId": "notice" },
     { "cueId": "working", "animationId": "standing" },
     { "cueId": "walk.left", "animationId": "walk" },
     { "cueId": "walk.right", "animationId": "walk" }
