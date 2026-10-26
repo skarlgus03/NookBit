@@ -4,10 +4,9 @@ import QtQuick.Controls
 // 메인 메뉴의 아이콘·정중앙 글씨·선택 강조를 공통 규격으로 표시하는 버튼.
 AppButton {
     id: control
-    property bool dark: false
     property bool selected: false
     property string iconKind: "folder"
-    readonly property var theme: UiTheme.colors(dark)
+    readonly property var theme: UiTheme.colors(control.dark)
     readonly property color foreground: theme.text
     implicitHeight: UiMetrics.mainNavigationHeight
     leftPadding: UiMetrics.controlPadding
@@ -40,11 +39,11 @@ AppButton {
             elide: Text.ElideRight
         }
     }
-    background: Rectangle {
-        radius: UiMetrics.radiusControl
-        color: control.selected ? control.theme.menuSelected : "transparent"
-        border.width: UiMetrics.borderNormal
-        border.color: control.hovered || control.visualFocus ? control.theme.menuFocus : control.theme.menuBorder
-        Behavior on color { ColorAnimation { duration: UiMetrics.selectionFadeDuration } }
+    background: ButtonFeedback {
+        button: control
+        selected: control.selected
+        normalColor: "transparent"
+        selectedColor: control.theme.menuSelected
+        idleBorder: control.theme.menuBorder
     }
 }

@@ -51,6 +51,9 @@
 #include "presentation/app_lifecycle_controller.hpp"
 #include <QMetaObject>
 #include <QQmlApplicationEngine>
+#include <QQmlComponent>
+#include <QQmlProperty>
+#include <memory>
 #include <QEventLoop>
 #include <QQmlContext>
 #include <QStandardPaths>
@@ -114,6 +117,76 @@ static bool verifyBundledHistorySchema(const QString& migrationPath) {
 // 실행 파일에 내장된 여러 해상도의 공통 앱 아이콘을 읽는 함수.
 static QIcon applicationIcon() {
     return QIcon(QStringLiteral(":/nookbit/icons/nookbit.ico"));
+}
+
+// 공통 버튼의 실제 호버·누름·선택·짧은 클릭·비활성을 밝고 어두운 테마에서 검사하는 함수.
+static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
+    QQuickWindow host;
+    host.resize(300, 110);
+    // 상태 애니메이션이 화면 프레임에 반영되기를 기다리는 함수.
+    const auto settle = [](int ms) {
+        QEventLoop events;
+        QTimer::singleShot(ms, &events, &QEventLoop::quit);
+        events.exec();
+    };
+    // 사용자 화면 대신 별도 검사 창에 포인터 입력을 보내는 함수.
+    const auto pointer = [&host](QEvent::Type type, QPointF position, Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, position, QPointF(host.mapToGlobal(position.toPoint())), button, buttons, Qt::NoModifier);
+        QCoreApplication::sendEvent(&host, &event);
+    };
+    for (const auto& type : {QStringLiteral("AppButton"), QStringLiteral("LargeActionButton"), QStringLiteral("HomeMenuButton")}) {
+        QQmlComponent component(&engine);
+        component.setData(QStringLiteral("import QtQuick\nimport NookBit\n%1 { text: 'Feedback'; x: 40; y: 20; width: 220; height: 64; checkable: true }")
+            .arg(type).toUtf8(), QUrl(QStringLiteral("qrc:/button-feedback-fixture.qml")));
+        std::unique_ptr<QObject> object(component.create());
+        auto* button = qobject_cast<QQuickItem*>(object.get());
+        if (!button) { QTextStream(stderr) << component.errorString(); return false; }
+        button->setParentItem(host.contentItem());
+        if (type == "LargeActionButton") button->setProperty("primary", true);
+        auto* surface = button->findChild<QQuickItem*>(QStringLiteral("buttonFeedbackSurface"));
+        if (!surface) return false;
+        host.show();
+        for (const bool dark : {false, true}) {
+            // 실패한 버튼 종류와 상태를 표시하는 함수.
+            const auto fail = [&](const char* state) {
+                QTextStream(stderr) << "Button feedback failed: " << type << " dark=" << dark << " state=" << state << Qt::endl;
+                return false;
+            };
+            QQmlProperty(button, QStringLiteral("dark")).write(dark);
+            if (button->property("dark").toBool() != dark) return fail("theme");
+            button->setProperty("enabled", true);
+            button->setProperty("checked", false);
+            pointer(QEvent::MouseMove, QPointF(5, 5), Qt::NoButton, Qt::NoButton);
+            settle(150);
+            const auto normal = surface->property("color").value<QColor>();
+            pointer(QEvent::MouseMove, QPointF(100, 45), Qt::NoButton, Qt::NoButton);
+            settle(150);
+            const auto hover = surface->property("color").value<QColor>();
+            if (!button->property("hovered").toBool() || normal == hover) return fail("hover");
+            button->setProperty("down", true);
+            settle(20);
+            if (surface->property("color").value<QColor>() == hover || surface->scale() >= 1 || button->width() != 220 || button->height() != 64) return fail("press");
+            button->setProperty("down", false);
+            button->setProperty("checked", true);
+            settle(150);
+            auto* text = type == "HomeMenuButton" ? button->findChild<QObject*>(QStringLiteral("homeMenuLabel"))
+                : button->property("contentItem").value<QQuickItem*>();
+            if (!text || text->property("color").value<QColor>() != button->property("buttonForeground").value<QColor>()) {
+                QTextStream(stderr) << "Button text=" << (text ? text->property("color").value<QColor>().name() : "missing")
+                    << " expected=" << button->property("buttonForeground").value<QColor>().name()
+                    << " dark=" << button->property("dark").toBool() << Qt::endl;
+                return fail("selected text");
+            }
+            pointer(QEvent::MouseButtonPress, QPointF(100, 45), Qt::LeftButton, Qt::LeftButton);
+            pointer(QEvent::MouseButtonRelease, QPointF(100, 45), Qt::LeftButton, Qt::NoButton);
+            if (!surface->property("recentClick").toBool()) return fail("click acknowledgement");
+            button->setProperty("enabled", false);
+            settle(metrics->property("buttonClickPulseMs").toInt() + metrics->property("buttonReleaseMs").toInt() + 30);
+            if (surface->property("pushed").toBool() || surface->opacity() >= 1) return fail("disabled");
+        }
+        host.hide();
+    }
+    return true;
 }
 
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
@@ -1381,7 +1454,8 @@ int main(int argc, char* argv[]) {
                 timeline->property("durationMs").toDouble() == duration;
             workspace->setProperty("editing", false);
         }
-        const bool ready = workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
+        const bool buttonFeedbackReady = verifyButtonFeedback(engine, uiMetrics);
+        const bool ready = buttonFeedbackReady && workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
@@ -1424,6 +1498,8 @@ int main(int argc, char* argv[]) {
                            QFile::exists(QStringLiteral(":/nookbit/imagepack.schema.json")) &&
                            QFile::exists(QStringLiteral(":/nookbit/watch.schema.json"));
         if (!ready) {
+            QTextStream(stderr) << "UI verification: buttons=" << buttonFeedbackReady << " companion=" << workspaceReady
+                << " layout=" << compactLayout << " guide=" << guideReady << " zoom=" << defaultRuleZoom << " tray=" << closeToTray << Qt::endl;
             return EXIT_FAILURE;
         }
         // 비동기로 읽는 내장 PNG의 크기 검증까지 마친 뒤 자동 검사를 완료한다.

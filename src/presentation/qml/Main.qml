@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Templates as T
 import QtQuick.Dialogs as NativeDialogs
 
 ApplicationWindow {
@@ -176,25 +175,17 @@ ApplicationWindow {
         characterSettingsDialog.open()
     }
 
-    // 탐색 버튼은 선택 상태만 배경에 표시하고 마우스 강조는 테두리로 나타내는 버튼.
-    component NavigationButton: T.Button {
+    // 탐색 버튼도 공통 호버·누름·선택 피드백을 사용하는 버튼.
+    component NavigationButton: AppButton {
         id: navButton
+        dark: root.editorDark
         padding: UiMetrics.buttonPadding
         implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
         implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
-        contentItem: Text {
-            text: navButton.text
-            font: navButton.font
-            color: root.theme.navigationText
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            radius: UiMetrics.radiusControl
-            color: navButton.highlighted ? root.theme.navigationSelected : root.theme.navigationButton
-            border.color: navButton.hovered || navButton.visualFocus || navButton.down
-                          ? root.theme.navigationFocus : root.theme.navigationBorder
-            border.width: navButton.hovered || navButton.visualFocus || navButton.down ? UiMetrics.borderActive : UiMetrics.borderNormal
+        background: ButtonFeedback {
+            button: navButton
+            normalColor: root.theme.navigationButton
+            selectedColor: root.theme.navigationSelected
         }
     }
 

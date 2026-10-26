@@ -12,7 +12,10 @@ QtObject {
         navigationText: "#253428", navigationButton: "#f3f5f1", navigationSelected: "#dce9db",
         navigationBorder: "#d9dfd4", navigationFocus: "#7da58a",
         menuSelected: "#e6eef7", menuBorder: "#d7dfe9", menuFocus: "#7898bb",
-        accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9"
+        accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9",
+        buttonHover: "#dce6f3", buttonPressed: "#becfe4", buttonChecked: "#ccddf0",
+        buttonBorder: "#acb9ca", buttonFocus: "#527cad",
+        primaryHover: "#4f739b", primaryPressed: "#2b4565"
     })
     readonly property var dark: ({
         window: "#161a22", surface: "#202633", alternate: "#242d3b", inspectionVeil: "#ffffff",
@@ -21,7 +24,10 @@ QtObject {
         navigationText: "#edf2f8", navigationButton: "#2b3546", navigationSelected: "#3e5270",
         navigationBorder: "#3d4757", navigationFocus: "#86aad6",
         menuSelected: "#2d3d55", menuBorder: "#3d4757", menuFocus: "#7898bb",
-        accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9"
+        accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9",
+        buttonHover: "#3d506c", buttonPressed: "#192a40", buttonChecked: "#344f70",
+        buttonBorder: "#56657b", buttonFocus: "#91b8e4",
+        primaryHover: "#4f739b", primaryPressed: "#2b4565"
     })
     // 지정한 밝기의 역할별 색상 규격을 반환하는 함수.
     function colors(darkMode) { return darkMode ? dark : light }

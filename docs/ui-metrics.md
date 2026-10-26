@@ -37,6 +37,23 @@ Use `AppButton`, `AppComboBox`, `AppTextField`, and `AppSpinBox` for ordinary co
 
 Use `LargeActionButton` for preview/sort and cancel/confirm pairs. It owns their common 60 px height, typography, padding, radius, and focus border. `primary` changes only emphasis, not size. Paired instances use equal preferred widths. Smoke tests compare confirmation button dimensions to the actual preview button, avoiding a token-only check that could miss a smaller generic button.
 
+## Button feedback
+
+`ButtonFeedback` is the shared background for `AppButton`, large actions, home menus,
+file-page buttons, navigation and rule-editor commands. State colors live in `UiTheme`:
+normal has a visible border, hover uses a blue tint and stronger outline, press uses
+a deeper tint immediately, and checked/selected state keeps a persistent fill.
+Labels retain contrasting foreground colors, including checked buttons in light mode.
+Disabled controls are muted and cannot accept input. Numeric +/- indicators use the
+same hover/press colors.
+
+`buttonTransitionMs` (90 ms), `buttonReleaseMs` (120 ms), and `buttonClickPulseMs`
+(130 ms) control response timing. A short click retains its input acknowledgement
+briefly; it does not indicate that a background operation has completed.
+Only the background uses `buttonPressedScale` (0.985) and `buttonPressedOffset`
+(1 px). The control's layout bounds and hit area do not shrink or move.
+Common size tokens and icon/text alignment remain unchanged.
+
 Pending rows use `filePreviewSize` (48 px), with a `fileRowHeight` of 64 px. The presentation-only preview provider asynchronously decodes a small first-frame thumbnail for PNG/JPEG/WebP/BMP/GIF, honors image orientation, and preserves aspect ratio. To bound work, originals larger than 32 MiB or 16 megapixels are not decoded. Corrupt, missing, unsupported, or oversized images fall back to file-type icons. Thumbnails are not persisted to disk.
 
 The underlying icon provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, without reading real-file content. It caches at most 128 file types and falls back to a generic document icon. Core file classification and movement are not involved. Dragging files over the page shows a translucent white veil and a readable centered instruction; it does not alter the ordinary button hover style.
@@ -80,7 +97,7 @@ File sorting uses input, preview, confirmation, execution, and result panes insi
 
 Manual sorting now includes a centered `FileSortConfirmation` pane between preparation and execution. It displays the controller's frozen source/destination pairs, not a newly recomputed plan. Confirm calls the existing `confirmSort`; cancel/back/Escape calls `cancelSort` and restores the invoking input/preview pane. Switching away while awaiting inline confirmation cancels it. Only requests armed by `FileSortPage` use this route; other explicit workflows retain their existing confirmation dialog. Pending confirmation disables main navigation while keeping inline confirmation controls usable. It never grants approval by opening the pane.
 
-The compact home groups file sorting/rules/history under file management and settings under app controls. Buttons use shared `NavigationIcon` drawings, `textNavigation`, and `mainNavigationHeight`. `selectedPage` follows the actual external page (settings subpages map to settings) and its background fades with `selectionFadeDuration`. The menu scrolls at short window heights. Work/status content is centered within a bounded width instead of spreading a few labels across the entire pane; real progress remains authoritative, with no fake movement animation.
+The compact home groups file sorting/rules/history under file management and settings under app controls. Buttons use shared `NavigationIcon` drawings, `textNavigation`, and `mainNavigationHeight`. `selectedPage` follows the actual external page (settings subpages map to settings), with the shared button state colors and timing. The menu scrolls at short window heights. Work/status content is centered within a bounded width instead of spreading a few labels across the entire pane; real progress remains authoritative, with no fake movement animation.
 
 Menu buttons retain visible block borders when idle. Busy state disables navigation/business content, not the entire window content item: the main title drag region and resize edges remain usable. Inspection/undo progress is a non-modal, non-focusing popup owned by the extension window. Manual execution uses its own inline status pane instead. If the extension is hidden, progress does not open it or appear over the main home. Other root dialogs keep explicit busy guards. Smoke tests hold a no-file background job to verify popup ownership, inspection/file-work routing, active title drag input, and disabled navigation.
 

@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Templates as T
 
 // 파일 대기 목록·정리 위치·정리 요청은 홈과 분리된 페이지에서만 표시한다.
 Rectangle {
@@ -103,24 +102,15 @@ Rectangle {
     readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
     color: dark ? "#161a22" : "#ffffff"
 
-    component FlatButton: T.Button {
+    component FlatButton: AppButton {
         id: control
+        dark: home.dark
         padding: UiMetrics.buttonPadding
         implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
         implicitHeight: UiMetrics.controlHeight
-        contentItem: Text {
-            text: control.text
-            color: control.enabled ? home.foreground : home.muted
-            font.pixelSize: UiMetrics.textBody
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            radius: UiMetrics.radiusControl
-            color: home.surface
-            border.color: control.hovered || control.visualFocus ? "#7898bb" : home.edge
-            border.width: control.hovered || control.visualFocus ? 2 : 1
-            opacity: control.enabled ? 1 : 0.6
+        background: ButtonFeedback {
+            button: control
+            normalColor: home.surface
         }
     }
     ScrollView {

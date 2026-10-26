@@ -170,6 +170,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/UiTheme.qml
         presentation/qml/GuideDownload.qml
         presentation/qml/AppButton.qml
+        presentation/qml/ButtonFeedback.qml
         presentation/qml/LargeActionButton.qml
         presentation/qml/BackButton.qml
         presentation/qml/NavigationIcon.qml

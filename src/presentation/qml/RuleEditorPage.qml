@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
-import QtQuick.Templates as T
 
 Item {
     id: page
@@ -52,29 +51,16 @@ Item {
     palette.highlight: darkMode ? "#55769f" : "#80a88a"
     palette.highlightedText: "#ffffff"
 
-    // 마우스를 올려도 배경과 글자색은 유지하고 테두리만 강조하는 버튼.
-    component ThemeButton: T.Button {
+    // 규칙 편집기 버튼도 공통 상태 피드백을 사용하는 버튼.
+    component ThemeButton: AppButton {
         id: themedButton
+        dark: page.darkMode
         padding: UiMetrics.buttonPadding
         implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
         implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
-        contentItem: Text {
-            text: themedButton.text
-            font: themedButton.font
-            color: themedButton.enabled ? page.primaryText : page.mutedText
-            opacity: themedButton.enabled ? 1 : 0.55
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        background: Rectangle {
-            radius: UiMetrics.radiusControl
-            color: page.buttonColor
-            border.color: themedButton.enabled &&
-                          (themedButton.hovered || themedButton.visualFocus || themedButton.down)
-                          ? page.buttonFocusColor : page.borderColor
-            border.width: themedButton.enabled &&
-                          (themedButton.hovered || themedButton.visualFocus || themedButton.down) ? 2 : 1
+        background: ButtonFeedback {
+            button: themedButton
+            normalColor: page.buttonColor
         }
     }
 
