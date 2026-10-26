@@ -3,7 +3,7 @@
   "packType": "imagepack",
   "id": "nookbit.nmoo",
   "name": "Nmoo - Idle & Walk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "display": {
     "referenceSize": { "width": 256, "height": 256 },
     "pixelsPerUnit": 4,
