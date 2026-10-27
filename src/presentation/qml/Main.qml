@@ -111,6 +111,10 @@ ApplicationWindow {
 
     CompactHome {
         id: compactHome
+        pendingCount: pendingFiles.count
+        watchEnabled: watchController.enabled
+        watchFolder: watchController.folder
+        companionDescriptor: characterController.animation
         navigationEnabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         currentPage: root.currentPage
         width: root.homeWidth

@@ -45,6 +45,8 @@ the alpha of `UiTheme.white` using the shared overlay opacity, without adding a 
 | Primary action | `primaryActionHeight` | 46 px |
 | Paired file actions | `largeActionHeight` | 60 px |
 | Home navigation | `navigationHeight` | 48 px |
+| Home companion portrait | `homePortraitSize` | 64 px |
+| Home pending-count badge | `homeBadgeHeight` | 22 px |
 | Window button | `windowButtonSize` | 32 px |
 
 Typography uses only four foundation sizes: `typeBody` (14), `typeEmphasis` (16),
@@ -61,7 +63,7 @@ Use `LargeActionButton` for preview/sort and cancel/confirm pairs. It owns their
 
 `AppButton` is the only factory for `ButtonFeedback`. Large actions, home menus,
 file-page buttons, navigation and rule-editor commands inherit it without replacing
-their backgrounds. `appearance` selects `Standard`, `Navigation`, `Menu`, or `Surface`;
+their backgrounds. `appearance` selects `Standard`, `Navigation`, `Menu`, `Surface`, or `Soft`;
 `primary` selects a primary action, `selected` contributes to persistent selection,
 `accentOutline` requests an idle accent outline, and `backgroundRadius` changes only
 shape. Pages do not supply hover/pressed colors. The contract test rejects separate
@@ -91,6 +93,17 @@ with a full-text tooltip.
 Home uses dedicated `navigationHover` / `navigationSelected` / `navigationPressed`
 colors. Light fills are `#dedce9` / `#d4d0e6` / `#c9c5df`: selection is stronger than
 hover and softer than pressing. Dark mode keeps raised/accentSoft/pressedSoft.
+
+Soft actions use `softButton`, `softButtonHover`, and `softButtonPressed`, derived
+from the existing soft accent and typed accent color in `UiTheme`; text uses
+`accentSoftText`. Pages select the appearance without defining state colors.
+
+The home status card uses surface/radiusCard, shared 16 px padding and 12 px gaps.
+Its static 64 px portrait fits the current descriptor's first frame, including atlas
+regions, pixels-per-unit, pivot and mirroring. It does not run an animation timer or
+guess a face crop. Missing art uses the shared companion icon. The 40 px soft action
+only requests the sorting page. The card and menu share one scroll area; the file
+menu's count badge reserves label space and hides when the queue is empty.
 
 `buttonTransitionMs` (90 ms) and `buttonReleaseMs` (120 ms) control the hover layer's
 fade in/out. Press state is immediate and ends when the pointer is released; there

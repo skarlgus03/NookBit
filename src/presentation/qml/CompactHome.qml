@@ -1,14 +1,17 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Templates as T
 
-// 홈은 기능 실행 없이 페이지 선택과 창 조작만 제공한다.
+// 홈은 전달받은 상태 요약과 페이지 선택·창 조작만 제공한다.
 Rectangle {
     id: home
     objectName: "compactHome"
     property bool dark: false
     property bool navigationEnabled: true
+    property int pendingCount: 0
+    property bool watchEnabled: false
+    property string watchFolder: ""
+    property var companionDescriptor: ({})
     property int currentPage: 0
     readonly property int selectedPage: [3, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
     signal pageRequested(int page)
@@ -52,6 +55,16 @@ Rectangle {
             ColumnLayout {
                 width: menuScroll.availableWidth
                 spacing: UiMetrics.spaceGroup
+                HomeStatusCard {
+                    Layout.fillWidth: true
+                    Layout.bottomMargin: UiMetrics.spaceSmall
+                    pendingCount: home.pendingCount
+                    watchEnabled: home.watchEnabled
+                    watchFolder: home.watchFolder
+                    companionDescriptor: home.companionDescriptor
+                    dark: home.dark
+                    onSortRequested: home.pageRequested(7)
+                }
                 Repeater {
                     model: [
                         {label: qsTr("파일 정리"), page: 7, icon: "folder", section: qsTr("파일 관리")},
@@ -73,6 +86,7 @@ Rectangle {
                             iconKind: modelData.icon
                             Layout.fillWidth: true
                             text: modelData.label
+                            badgeText: modelData.page === 7 && home.pendingCount > 0 ? String(home.pendingCount) : ""
                             // 작업 기록은 조회 후 열고 나머지는 해당 페이지로 이동하는 함수.
                             onClicked: modelData.page === 4 ? home.historyRequested() : home.pageRequested(modelData.page)
                         }

@@ -6,6 +6,9 @@
 #include <QQuickWindow>
 #include <QEventLoop>
 #include <QTimer>
+#include <QImage>
+#include <QTemporaryDir>
+#include <QElapsedTimer>
 #include <memory>
 #include <iostream>
 
@@ -157,6 +160,97 @@ int main(int argc, char** argv) {
     expect(!confirm->property("visible").toBool() && recovery->property("cancelCalls").toInt() == 1
         && recovery->property("confirmCalls").toInt() == 0 && !recovery->property("awaitingRecoveryConfirmation").toBool(),
         "leaving recovery cancels approval and cannot start file work");
+
+    // 홈이 전달받은 값만으로 표시되고 상태 소유자를 변경하지 않는지 검사한다.
+    auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 420}, {"pendingCount", 5},
+        {"watchEnabled", true}, {"watchFolder", QStringLiteral("D:\\Downloads\\")}});
+    if (!home) return 1;
+    auto* homeItem = qobject_cast<QQuickItem*>(home.get());
+    homeItem->setParentItem(host.contentItem());
+    settle();
+    // Repeater가 만든 메뉴까지 실제 화면 트리에서 찾는 함수.
+    const auto find = [](auto&& self, QQuickItem* item, const QString& name) -> QQuickItem* {
+        if (item->objectName() == name) return item;
+        for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    auto* card = find(find, homeItem, QStringLiteral("homeStatusCard"));
+    auto* action = find(find, homeItem, QStringLiteral("homeStatusAction"));
+    auto* summary = find(find, homeItem, QStringLiteral("homePendingSummary"));
+    auto* watchSummary = find(find, homeItem, QStringLiteral("homeWatchSummary"));
+    auto* filesButton = find(find, homeItem, QStringLiteral("homeNavigation7"));
+    auto* badge = filesButton ? find(find, filesButton, QStringLiteral("homeNavigationBadge")) : nullptr;
+    if (!card || !action || !summary || !watchSummary || !filesButton || !badge) return 1;
+    expect(summary->property("text").toString().contains("5") && badge->isVisible()
+        && filesButton->property("badgeText").toString() == "5"
+        && card->property("folderName").toString() == "Downloads",
+        "home summary and badge reflect injected values and normalize Windows folder paths");
+    home->setProperty("pendingCount", 0);
+    home->setProperty("watchEnabled", false);
+    QCoreApplication::processEvents();
+    expect(!badge->isVisible() && summary->property("text").toString().contains(QStringLiteral("없어요"))
+        && watchSummary->property("text").toString().contains(QStringLiteral("꺼짐")),
+        "empty queue and disabled watching have explicit home states");
+    home->setProperty("pendingCount", 1000000);
+    settle();
+    auto* menuLabel = find(find, filesButton, QStringLiteral("homeMenuLabel"));
+    expect(menuLabel && menuLabel->mapToItem(filesButton, QPointF(menuLabel->width(), 0)).x()
+        <= badge->mapToItem(filesButton, QPointF()).x(), "large file counts reserve space instead of covering menu labels");
+    QQmlComponent observerComponent(&engine);
+    observerComponent.setData(R"(import QtQuick
+        Connections {
+            required property var home
+            property int lastPage: -1
+            target: home
+            // 홈의 이동 요청만 기록하고 파일 작업은 실행하지 않는 함수.
+            function onPageRequested(page) { lastPage = page }
+        })", QUrl());
+    std::unique_ptr<QObject> observer(observerComponent.createWithInitialProperties({{"home", QVariant::fromValue(home.get())}}));
+    if (!observer) { std::cerr << observerComponent.errorString().toStdString(); return 1; }
+    QMetaObject::invokeMethod(action, "clicked");
+    expect(observer->property("lastPage").toInt() == 7 && action->height() == metrics->property("controlHeight").toInt(),
+        "home action only requests the sorting page and uses the shared control height");
+    home->setProperty("navigationEnabled", false);
+    auto* titleDrag = find(find, homeItem, QStringLiteral("homeWindowDragArea"));
+    expect(!action->isEnabled() && titleDrag && titleDrag->isEnabled(), "busy navigation lock preserves title dragging");
+    home->setProperty("navigationEnabled", true);
+    auto* scroll = find(find, homeItem, QStringLiteral("homeNavigationMenu"));
+    auto* flickable = scroll ? scroll->property("contentItem").value<QQuickItem*>() : nullptr;
+    auto* lastMenu = find(find, homeItem, QStringLiteral("homeNavigation11"));
+    if (!flickable || !lastMenu) return 1;
+    const auto contentHeight = flickable->property("contentHeight").toDouble();
+    expect(contentHeight > flickable->height(), "short home windows keep card and all menus in one scroll area");
+    flickable->setProperty("contentY", contentHeight - flickable->height());
+    settle();
+    expect(lastMenu->mapToItem(flickable, QPointF()).y() >= -1
+        && lastMenu->mapToItem(flickable, QPointF(0, lastMenu->height())).y() <= flickable->height() + 1,
+        "the final navigation entry remains reachable at minimum window height");
+
+    // 공유 아틀라스와 비중앙 피벗·미러가 있어도 정지 미리보기를 상자 안에 맞추는 검사.
+    QTemporaryDir images;
+    if (!images.isValid()) return 1;
+    QImage atlas(128, 64, QImage::Format_ARGB32);
+    atlas.fill(Qt::red);
+    const auto imagePath = images.filePath(QStringLiteral("home-atlas.png"));
+    if (!atlas.save(imagePath)) return 1;
+    const QVariantMap step{{"frameId", "first"}, {"source", QUrl::fromLocalFile(imagePath)},
+        {"imageWidth", 128}, {"imageHeight", 64}, {"pixelsPerUnit", 1}, {"durationMs", 100},
+        {"region", QVariantMap{{"x", 64}, {"y", 0}, {"width", 64}, {"height", 64}}},
+        {"pivot", QVariantMap{{"x", 15}, {"y", 40}}}};
+    home->setProperty("companionDescriptor", QVariantMap{{"steps", QVariantList{step, step}},
+        {"mirrorX", true}, {"loop", true}, {"filtering", "linear"}});
+    auto* sprite = home->findChild<QQuickItem*>(QStringLiteral("homeCompanionSprite"));
+    if (!sprite) return 1;
+    QElapsedTimer deadline;
+    deadline.start();
+    while (!sprite->property("ready").toBool() && deadline.elapsed() < 2000) settle();
+    auto* crop = sprite->findChild<QQuickItem*>(QStringLiteral("characterFrameRegion"));
+    auto* timer = sprite->findChild<QObject*>(QStringLiteral("characterSpriteTimer"));
+    const auto pictureBounds = crop ? crop->mapRectToItem(sprite, QRectF(QPointF(), crop->size())) : QRectF();
+    expect(sprite->property("ready").toBool() && timer && !timer->property("running").toBool()
+        && pictureBounds.left() >= -0.01 && pictureBounds.top() >= -0.01
+        && pictureBounds.right() <= sprite->width() + 0.01 && pictureBounds.bottom() <= sprite->height() + 0.01,
+        "home portrait reuses atlas rendering, fits mirrored arbitrary pivots and never runs an animation timer");
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

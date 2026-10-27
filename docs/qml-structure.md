@@ -9,6 +9,9 @@
 | 파일 | 담당하는 내용 |
 | --- | --- |
 | `Main.qml` | 메인·확장 창, 페이지 선택, 창 크기 복원, Controller 전달, 기능 간 요청 연결 |
+| `CompactHome.qml` | 전달받은 상태 카드·메뉴 구성, 페이지 이동과 창 조작 요청 |
+| `HomeStatusCard.qml` | 대기 파일 수·감시 폴더 요약, 정리 화면 이동 요청 |
+| `CompanionPortrait.qml` | 전달받은 그림 정보로 기존 Sprite의 첫 프레임을 정지 표시 |
 | `PageSurface.qml` | 페이지 공통 바탕, 열기·닫기 요청. 페이지 번호와 다른 화면은 모른다. |
 | `AppSettingsPage.qml` | 앱 설정 표시, 다른 설정 화면으로 이동 요청 |
 | `CollisionSettingsPage.qml` | 파일 이름 충돌 처리 설정 |
@@ -27,6 +30,9 @@
 
 ## 연결 원칙
 
+- 홈 카드에는 Main이 대기 수·감시 상태·현재 컴패니언 그림 정보를 값으로 전달한다.
+  카드는 Controller를 모르며 이동 요청만 보낸다. 그림은 팩의 전체 프레임을 맞춰
+  표시하고 재생 타이머를 켜지 않는다. 카드와 메뉴는 하나의 스크롤 영역을 공유한다.
 - 페이지는 필요한 Controller·데이터를 `required property`로 받는다. 앱 컨텍스트의
   `previewController`, `watchController` 같은 이름이나 Main의 `root`·`extensionHost`를
   직접 참조하지 않는다. Controller는 빌려 사용하며 새로 생성하거나 소유하지 않는다.

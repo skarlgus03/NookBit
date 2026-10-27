@@ -104,6 +104,9 @@ int main(int argc, char** argv) {
                 "primary button text remains readable in normal/hover/press for both themes");
         expect(contrast(QColor(colors.value("accentSoftText").toString()), QColor(colors.value("navigationSelected").toString())) >= 4.5,
             "selected navigation text contrasts with its soft background");
+        for (const char* role : {"softButton", "softButtonHover", "softButtonPressed"})
+            expect(contrast(QColor(colors.value("accentSoftText").toString()), QColor(colors.value(role).toString())) >= 4.5,
+                "soft action labels contrast with normal, hover and pressed fills");
         for (const QString role : {QStringLiteral("success"), QStringLiteral("warning"), QStringLiteral("danger")})
             expect(contrast(QColor(colors.value(role).toString()), QColor(colors.value(role + "Surface").toString())) >= 4.5,
                 "semantic status text remains readable on its corresponding background");

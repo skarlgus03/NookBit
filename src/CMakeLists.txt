@@ -210,6 +210,8 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/AppTextField.qml
         presentation/qml/AppSpinBox.qml
         presentation/qml/CompactHome.qml
+        presentation/qml/HomeStatusCard.qml
+        presentation/qml/CompanionPortrait.qml
         presentation/qml/NotificationSettingsPage.qml
         presentation/qml/FileSortPage.qml
         presentation/qml/FileSortPreview.qml

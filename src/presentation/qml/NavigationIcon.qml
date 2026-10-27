@@ -19,7 +19,10 @@ Canvas {
         ctx.lineWidth = UiMetrics.borderActive
         ctx.lineCap = "round"; ctx.lineJoin = "round"
         ctx.beginPath()
-        if (kind === "folder") {
+        if (kind === "forward") {
+            ctx.moveTo(4, 12); ctx.lineTo(20, 12)
+            ctx.moveTo(14, 6); ctx.lineTo(20, 12); ctx.lineTo(14, 18)
+        } else if (kind === "folder") {
             ctx.moveTo(3, 7); ctx.lineTo(3, 20); ctx.lineTo(21, 20); ctx.lineTo(21, 8); ctx.lineTo(11, 8); ctx.lineTo(9, 5); ctx.lineTo(3, 5); ctx.lineTo(3, 7)
         } else if (kind === "rules") {
             ctx.rect(2, 9, 6, 6); ctx.rect(16, 2, 6, 6); ctx.rect(16, 16, 6, 6)

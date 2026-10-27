@@ -37,6 +37,8 @@ QtObject {
     readonly property int navigationIconSize: 24
     readonly property int textNavigation: typeEmphasis
     readonly property int mainMenuIconSize: navigationIconSize
+    readonly property int homePortraitSize: 64
+    readonly property int homeBadgeHeight: 22
     readonly property int textGroupTitle: typeEmphasis
     readonly property int navigationTextWeight: Font.DemiBold
     readonly property int groupTitleWeight: Font.DemiBold
