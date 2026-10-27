@@ -69,6 +69,15 @@ QtObject {
     readonly property int fileIconSize: 32
     readonly property int filePreviewSize: 48
     readonly property int fileRowHeight: 64
+    readonly property int pendingRowHeight: 56
+    readonly property int pendingPreviewSize: 36
+    readonly property int pendingTypeWidth: 72
+    readonly property int fileSortFooterHeight: 76
+    readonly property int fileSortStepperHeight: 44
+    readonly property int fileSortStepCircleSize: 22
+    readonly property int fileSortStepConnectorWidth: 18
+    readonly property int fileSortListHeaderHeight: 44
+    readonly property int fileSortActionMinWidth: 140
     readonly property int dropHintMaxWidth: 480
     readonly property int floatingCloseSize: 24
     readonly property int spaceTiny: 2

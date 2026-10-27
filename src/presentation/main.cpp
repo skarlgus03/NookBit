@@ -1518,8 +1518,10 @@ int main(int argc, char* argv[]) {
                     && std::abs(previewButton->width() - sortButton->width()) <= 1
                     && previewButton->height() == uiMetrics->property("largeActionHeight").toInt()
                     && sortButton->height() == previewButton->height()
-                    && undoButton->mapToScene(QPointF()).y() >= sortButton->mapToScene(QPointF()).y() + sortButton->height(),
-                    "large paired actions and separate undo");
+                    && undoButton->mapToScene(QPointF(undoButton->width(), 0)).x() <= previewButton->mapToScene(QPointF()).x()
+                    && std::abs(undoButton->mapToScene(QPointF(0, undoButton->height() / 2)).y()
+                        - sortButton->mapToScene(QPointF(0, sortButton->height() / 2)).y()) <= 1,
+                    "large paired actions and separate undo on fixed footer");
                 window->setX(previousX);
                 QCoreApplication::processEvents();
                 window->hide();

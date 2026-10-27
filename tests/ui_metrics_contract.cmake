@@ -11,7 +11,7 @@ foreach(qml_file IN LISTS qml_files)
     message(FATAL_ERROR "${qml_name}: use AppButton appearance instead of overriding its feedback background")
   endif()
   # 페이지는 Main의 id나 앱 전역 Controller를 숨은 의존성으로 사용하지 않는다.
-  if(qml_name MATCHES "^(CompactHome|HomeStatusCard|CompanionPortrait|HomeMenuButton|AppSettingsPage|CollisionSettingsPage|CompanionPage|DeveloperToolsPage|HistoryPage|RecoveryPage|WatchSettingsPage|FileSortPage|RuleEditorPage|RuleEditorState|RuleCanvas|RuleNodeCard|RuleInspector|RuleTestPanel|RuleEditorToolbar|RuleDocumentActions|RuleEditorButton|RuleEditorMenu|LegacyRuleEditorDialog|WatchProposalDialog|SortConfirmationDialog|OperationProgressPopup|GuideDownload)\\.qml$"
+  if(qml_name MATCHES "^(CompactHome|HomeStatusCard|CompanionPortrait|HomeMenuButton|AppSettingsPage|CollisionSettingsPage|CompanionPage|DeveloperToolsPage|HistoryPage|RecoveryPage|WatchSettingsPage|FileSortPage|FileSortInput|FileSortStepper|RuleEditorPage|RuleEditorState|RuleCanvas|RuleNodeCard|RuleInspector|RuleTestPanel|RuleEditorToolbar|RuleDocumentActions|RuleEditorButton|RuleEditorMenu|LegacyRuleEditorDialog|WatchProposalDialog|SortConfirmationDialog|OperationProgressPopup|GuideDownload)\\.qml$"
       AND source MATCHES "(root|extensionHost|previewController|pendingFiles|recoveryController|watchController|historyController|characterController|characterSettings|characterWindow|companionMotion|companionEdits|uiSettings|destinationSettings|backgroundTasks|userGuides|ruleEditor)\\.")
     message(FATAL_ERROR "${qml_name}: receive page dependencies through properties; request navigation through signals")
   endif()

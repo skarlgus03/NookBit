@@ -115,6 +115,17 @@ themes. They also check selection, geometry, home outlines and disabled input st
 
 Pending rows use `filePreviewSize` (48 px), with a `fileRowHeight` of 64 px. The presentation-only preview provider asynchronously decodes a small first-frame thumbnail for PNG/JPEG/WebP/BMP/GIF, honors image orientation, and preserves aspect ratio. To bound work, originals larger than 32 MiB or 16 megapixels are not decoded. Corrupt, missing, unsupported, or oversized images fall back to file-type icons. Thumbnails are not persisted to disk.
 
+The redesigned sorting input uses `pendingRowHeight` (56 px) and displays the same
+cached previews at `pendingPreviewSize` (36 px). Names and paths reserve a flexible
+column; extension labels use `pendingTypeWidth` (72 px). Full paths and notices have
+hover tooltips. File sizes are not queried by the UI or invented from names.
+Rules and destination share a two-column header; the list fills the remaining space
+and scrolls independently. Its empty state owns the drop guidance. The fixed
+`fileSortFooterHeight` (76 px) footer separates undo from equal-width preview/sort
+actions, retaining `LargeActionButton` height (60 px). There is no new clear-all API.
+The informational `FileSortStepper` has four stages, mapping execution and completion
+to the final stage. Existing panes slide below it without changing workflow logic.
+
 The underlying icon provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, without reading real-file content. It caches at most 128 file types and falls back to a generic document icon. Core file classification and movement are not involved. Dragging files over the page shows a translucent white veil and a readable centered instruction; it does not alter the ordinary button hover style.
 
 ## Progress, recovery and history pages

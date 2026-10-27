@@ -214,6 +214,8 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CompanionPortrait.qml
         presentation/qml/NotificationSettingsPage.qml
         presentation/qml/FileSortPage.qml
+          presentation/qml/FileSortInput.qml
+          presentation/qml/FileSortStepper.qml
         presentation/qml/FileSortPreview.qml
         presentation/qml/FileSortStatus.qml
         presentation/qml/FileSortConfirmation.qml

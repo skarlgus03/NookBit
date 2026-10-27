@@ -251,6 +251,49 @@ int main(int argc, char** argv) {
         && pictureBounds.left() >= -0.01 && pictureBounds.top() >= -0.01
         && pictureBounds.right() <= sprite->width() + 0.01 && pictureBounds.bottom() <= sprite->height() + 0.01,
         "home portrait reuses atlas rendering, fits mirrored arbitrary pivots and never runs an animation timer");
+    // 최소 창에서도 목록과 하단 동작이 겹치지 않고 같은 버튼 규격을 유지하는지 검사한다.
+    QQmlComponent pendingComponent(&engine);
+    pendingComponent.setData(R"(import QtQml.Models
+        ListModel { property int unavailableCount: 0; property string storageNotice: "" })", QUrl());
+    std::unique_ptr<QObject> pending(pendingComponent.create());
+    auto sortController = fake(engine, R"(
+        property string activeRuleLabel: "A long imported sorting rule document name.json"
+        property string defaultDestinationRoot: "D:/NookBitTest"
+        property string message: ""
+        property bool canUndo: false
+        property bool awaitingConfirmation: false
+        function clear() { message = "" }
+    )");
+    if (!pending || !sortController) return 1;
+    auto input = create(engine, "FileSortInput", {{"controller", QVariant::fromValue(sortController.get())},
+        {"pending", QVariant::fromValue(pending.get())}, {"recovery", QVariant::fromValue(recovery.get())},
+        {"width", 640}, {"height", 478}});
+    if (!input) return 1;
+    auto* inputItem = qobject_cast<QQuickItem*>(input.get());
+    inputItem->setParentItem(host.contentItem());
+    for (bool dark : {false, true}) {
+        input->setProperty("dark", dark);
+        for (int width : {640, 720, 1100}) {
+            inputItem->setWidth(width);
+            settle();
+            auto* bar = find(find, inputItem, "fileSortActionBar");
+            auto* queue = find(find, inputItem, "pendingQueueCard");
+            auto* previewAction = find(find, inputItem, "compactPreviewButton");
+            auto* sortAction = find(find, inputItem, "compactSortButton");
+            auto* empty = find(find, inputItem, "pendingEmptyState");
+            if (!bar || !queue || !previewAction || !sortAction || !empty) return 1;
+            expect(queue->mapToItem(inputItem, QPointF(0, queue->height())).y() <= bar->mapToItem(inputItem, QPointF()).y()
+                && bar->mapToItem(inputItem, QPointF(0, bar->height())).y() <= inputItem->height()
+                && sortAction->mapToItem(inputItem, QPointF(sortAction->width(), 0)).x() <= inputItem->width(),
+                "sorting queue and fixed footer fit the minimum height across window widths");
+            expect(previewAction->width() == sortAction->width() && previewAction->height() == sortAction->height()
+                && empty->isVisible() && !previewAction->isEnabled() && !sortAction->isEnabled(),
+                "empty queues show guidance and disable equally sized sorting actions in both themes");
+        }
+    }
+    auto stepper = create(engine, "FileSortStepper", {{"workflowStep", 4}});
+    expect(stepper && stepper->property("currentStep").toInt() == 3,
+        "execution and completion share the last informational step without adding a new workflow state");
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

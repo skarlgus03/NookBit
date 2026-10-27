@@ -107,133 +107,36 @@ Rectangle {
     readonly property color edge: theme.border
     color: theme.surface
 
-    component FlatButton: AppButton {
+    FileSortStepper {
+        id: stepper
+        anchors.left: parent.left
+        anchors.right: parent.right
+        workflowStep: home.workflowStep
         dark: home.dark
-        appearance: AppButton.Surface
     }
-    ScrollView {
-        id: homeScroll
-        objectName: "fileSortScroll"
+    FileSortInput {
         enabled: home.workflowStep === 0 && !home.transitioning
         visible: home.paneVisible(0)
-        x: UiMetrics.pageInset + home.paneX(0)
-        y: UiMetrics.pageInset
-        width: home.width - UiMetrics.pageInset * 2
-        height: home.height - UiMetrics.pageInset * 2
-        contentWidth: availableWidth
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ColumnLayout {
-            width: homeScroll.availableWidth
-            spacing: UiMetrics.spaceControl
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 92
-                Column {
-                    anchors.centerIn: parent
-                    spacing: UiMetrics.spaceSmall
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("＋ 이 페이지 어디든 파일을 놓으세요"); font.bold: true; font.pixelSize: UiMetrics.textEmphasis; color: home.foreground }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; text: qsTr("대기 목록에만 추가돼요. 원본은 그대로 있어요"); font.pixelSize: UiMetrics.textBody; color: home.muted }
-                }
-            }
-            RowLayout {
-                Label { text: qsTr("대기 목록"); color: home.foreground; font.bold: true }
-                Item { Layout.fillWidth: true }
-                Label { text: qsTr("%1개").arg(home.pending.count); color: home.muted }
-            }
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.max(160, Math.min(240, home.height - 485))
-                color: home.surface; radius: UiMetrics.radiusCard; border.color: home.edge
-                Text { anchors.centerIn: parent; visible: home.pending.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: UiMetrics.textBody }
-                ListView {
-                    id: files
-                    anchors.fill: parent; anchors.margins: UiMetrics.spaceControl
-                    model: home.pending; clip: true; spacing: UiMetrics.spaceExtraSmall
-                    ScrollBar.vertical: ScrollBar {}
-                    delegate: Item {
-                        required property int index
-                        required property string fileName
-                        required property string fullPath
-                        required property bool available
-                        width: files.width; height: UiMetrics.fileRowHeight
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: UiMetrics.spaceGroup
-                            Image {
-                                objectName: "pendingFileIcon"
-                                Layout.preferredWidth: UiMetrics.filePreviewSize
-                                Layout.preferredHeight: UiMetrics.filePreviewSize
-                                source: "image://filepreviews/" + encodeURIComponent(fullPath)
-                                sourceSize: Qt.size(UiMetrics.filePreviewSize, UiMetrics.filePreviewSize)
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectFit
-                                opacity: available ? 1 : 0.45
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true; spacing: UiMetrics.spaceTiny
-                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : home.theme.danger; font.pixelSize: UiMetrics.textBody }
-                                Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: UiMetrics.textBody }
-                            }
-                            FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: home.pending.removeAt(index) }
-                        }
-                    }
-                }
-            }
-            Label { Layout.fillWidth: true; visible: home.pending.storageNotice.length > 0; text: home.pending.storageNotice; wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
-            Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: UiMetrics.textBody }
-            FlatButton {
-                Layout.fillWidth: true
-                text: home.controller.activeRuleLabel + "  ›"
-                contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: UiMetrics.textBody; verticalAlignment: Text.AlignVCenter }
-                onClicked: home.pageRequested(1)
-            }
-            Label { text: qsTr("정리할 위치"); color: home.muted; font.pixelSize: UiMetrics.textBody }
-            AppTextField {
-                id: destination
-                objectName: "compactDestinationField"
-                Layout.fillWidth: true
-                text: home.controller.defaultDestinationRoot
-                placeholderText: qsTr("정리 폴더의 전체 경로")
-                font.pixelSize: UiMetrics.textBody
-                color: home.foreground
-                onTextEdited: home.controller.clear()
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: UiMetrics.spaceGroup
-                LargeActionButton {
-                    objectName: "compactPreviewButton"
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 1
-                    text: qsTr("결과 미리보기")
-                    enabled: home.pending.count > 0 && home.pending.unavailableCount === 0
-                    // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
-                    onClicked: { home.controller.createPreview(destination.text); home.showStep(1) }
-                }
-                LargeActionButton {
-                    objectName: "compactSortButton"
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 1
-                    primary: true
-                    text: qsTr("정리하기")
-                    enabled: home.pending.count > 0 && home.pending.unavailableCount === 0 && !home.controller.awaitingConfirmation
-                    // 미리보기·준비 후 기존 최종 확인을 거쳐야만 실제 파일 이동을 시작하는 함수.
-                    onClicked: {
-                        home.controller.createPreview(destination.text)
-                        if (home.controller.hasPreview && home.controller.hasMovableSteps) home.requestSort()
-                    }
-                }
-            }
-            FlatButton {
-                objectName: "compactUndoButton"
-                text: qsTr("되돌리기")
-                enabled: home.controller.canUndo
-                onClicked: home.controller.undoLastMove()
-            }
-            Label { Layout.fillWidth: true; text: home.controller.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
-            Label { Layout.fillWidth: true; visible: home.pending.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
-            FlatButton { text: qsTr("중단 작업 확인"); visible: home.recovery.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
+        x: home.paneX(0)
+        y: stepper.height
+        width: home.width
+        height: home.height - stepper.height
+        controller: home.controller
+        pending: home.pending
+        recovery: home.recovery
+        dark: home.dark
+        onRulesRequested: home.pageRequested(1)
+        onRecoveryRequested: home.recoveryRequested()
+        onUndoRequested: home.controller.undoLastMove()
+        // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
+        onPreviewRequested: function(destination) {
+            home.controller.createPreview(destination)
+            home.showStep(1)
+        }
+        // 미리보기·검사·최종 확인을 거친 요청만 이동 실행으로 전달하는 함수.
+        onSortRequested: function(destination) {
+            home.controller.createPreview(destination)
+            if (home.controller.hasPreview && home.controller.hasMovableSteps) home.requestSort()
         }
     }
     DropArea {
@@ -284,7 +187,8 @@ Rectangle {
     FileSortPreview {
         x: home.paneX(1)
         width: home.width
-        height: home.height
+        y: stepper.height
+        height: home.height - stepper.height
         visible: home.paneVisible(1)
         enabled: home.previewOpen && !home.transitioning
         controller: home.controller
@@ -296,7 +200,8 @@ Rectangle {
     FileSortConfirmation {
         x: home.paneX(2)
         width: home.width
-        height: home.height
+        y: stepper.height
+        height: home.height - stepper.height
         visible: home.paneVisible(2)
         enabled: home.workflowStep === 2 && !home.transitioning
         controller: home.controller
@@ -312,7 +217,8 @@ Rectangle {
             objectName: modelData === 3 ? "fileSortProgress" : "fileSortComplete"
             x: home.paneX(modelData)
             width: home.width
-            height: home.height
+            y: stepper.height
+            height: home.height - stepper.height
             visible: home.paneVisible(modelData)
             enabled: home.workflowStep === modelData && !home.transitioning
             completed: modelData === 4
