@@ -6,7 +6,6 @@ import QtQuick.Dialogs
 Item {
     id: page
     signal openCurrentEditor()
-    signal themeChangeRequested()
     signal editorDraftReplaced()
 
     property bool oldEditorFormDirty: false
@@ -63,6 +62,54 @@ Item {
             button: themedButton
             normalColor: page.buttonColor
         }
+    }
+    // 공통 드롭다운 화살표와 규격을 사용하는 편집기 메뉴 버튼.
+    component MenuButton: ThemeButton {
+        rightPadding: UiMetrics.dropdownTrailingPadding
+        DropdownIndicator {
+            anchors.right: parent.right
+            anchors.rightMargin: UiMetrics.controlPadding
+            anchors.verticalCenter: parent.verticalCenter
+            strokeColor: page.primaryText
+        }
+    }
+    // 역할별 메뉴가 같은 폭·여백·테마를 공유하는 팝업.
+    component EditorMenu: Popup {
+        id: menu
+        property Item anchorButton
+        default property alias items: menuContents.data
+        parent: anchorButton
+        y: anchorButton.height + UiMetrics.spaceExtraSmall
+        width: UiMetrics.ruleMenuWidth
+        implicitHeight: menuContents.implicitHeight + topPadding + bottomPadding
+        padding: UiMetrics.buttonPadding
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        background: Rectangle {
+            radius: UiMetrics.radiusControl
+            color: page.surfaceColor
+            border.color: page.borderColor
+        }
+        contentItem: ColumnLayout { id: menuContents; spacing: UiMetrics.spaceExtraSmall }
+    }
+    readonly property var shortcutRows: [
+        {keys: qsTr("우클릭"), action: qsTr("블록 추가")},
+        {keys: qsTr("우드래그"), action: qsTr("화면 이동")},
+        {keys: qsTr("마우스 휠"), action: qsTr("확대 · 축소")},
+        {keys: qsTr("좌드래그"), action: qsTr("범위 선택")},
+        {keys: qsTr("Shift + 클릭"), action: qsTr("추가 선택")},
+        {keys: qsTr("Ctrl + 드래그"), action: qsTr("부모 · 형제 기준 스냅")},
+        {keys: qsTr("Alt + 선 클릭"), action: qsTr("연결 해제")},
+        {keys: qsTr("Delete"), action: qsTr("선택 블록 삭제")},
+        {keys: qsTr("Ctrl + C / V"), action: qsTr("복사 · 붙여넣기")},
+        {keys: qsTr("Ctrl + Shift + L"), action: qsTr("선택 블록 세로 정렬")}
+    ]
+    // 메뉴를 하나만 열고 같은 버튼을 다시 누르면 닫는 함수.
+    function toggleToolbarPopup(popup) {
+        const shouldOpen = !popup.visible
+        for (const candidate of [jsonFileMenu, editMenu, viewMenu, ruleHelpPanel]) candidate.close()
+        if (shouldOpen) popup.open()
     }
 
     property var blocks: [
@@ -231,7 +278,7 @@ Item {
 
     // 공용 오버레이에 올라간 페이지 소유 창만 닫고 편집·테스트 데이터는 보존하는 함수.
     function dismissTransientUi() {
-        for (const popup of [ruleTestPanel, addNodeMenu, jsonFileMenu, confirmSave, confirmReload,
+        for (const popup of [ruleTestPanel, addNodeMenu, jsonFileMenu, editMenu, viewMenu, ruleHelpPanel, confirmSave, confirmReload,
                              exportErrorDialog, confirmImportReplace, importErrorDialog, externalDestinationConfirm,
                              ruleTestFileDialog, importFileDialog, exportFileDialog, destinationFolderDialog])
             popup.close()
@@ -962,6 +1009,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
+            spacing: UiMetrics.spaceSection
             Label {
                 text: qsTr("분류 규칙")
                 font.pixelSize: UiMetrics.textPageTitle
@@ -970,23 +1018,9 @@ Item {
             }
             Item { Layout.fillWidth: true }
             ThemeButton {
-                text: page.darkMode ? qsTr("밝은 화면") : qsTr("어두운 화면")
-                onClicked: page.themeChangeRequested()
-            }
-            ThemeButton {
                 text: qsTr("규칙 테스트")
                 objectName: "ruleTestButton"
                 onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
-            }
-            ThemeButton {
-                objectName: "rulesUserGuideButton"
-                text: qsTr("AI용 작성 문서 저장…")
-                onClicked: rulesGuideDownload.saveDocument()
-            }
-            ThemeButton {
-                id: jsonFileButton
-                text: qsTr("JSON 파일 ▾")
-                onClicked: jsonFileMenu.visible ? jsonFileMenu.close() : jsonFileMenu.open()
             }
             ThemeButton {
                 text: qsTr("전체 저장")
@@ -996,22 +1030,8 @@ Item {
                     else page.saveAll()
                 }
             }
-            ThemeButton {
-                text: qsTr("저장본 다시 열기")
-                onClicked: confirmReload.open()
-            }
-            ThemeButton {
-                text: qsTr("기존 편집기")
-                visible: false
-                onClicked: page.openCurrentEditor()
-            }
         }
 
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("캔버스에서 우클릭해 블록을 추가하고, 오른쪽 점에서 다음 블록의 왼쪽 점으로 선을 연결하세요.")
-            color: page.mutedText
-        }
         Label {
             Layout.fillWidth: true
             visible: rulesGuideDownload.status !== ""
@@ -1020,53 +1040,38 @@ Item {
             wrapMode: Text.Wrap
         }
 
-        Rectangle {
+        RowLayout {
+            objectName: "ruleEditorToolbar"
             Layout.fillWidth: true
-            Layout.preferredHeight: 56
-            radius: UiMetrics.radiusPanel
-            color: page.darkMode ? "#3b3020" : "#fff4dd"
-            border.color: page.darkMode ? "#806240" : "#dfc591"
-            Label {
-                anchors.fill: parent
-                anchors.margins: UiMetrics.spaceGroup
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Text.WordWrap
-                text: qsTr("규칙은 저장 전에 초안으로 검증합니다. 노드 위치는 분류 규칙과 별도로 저장돼 검사 순서를 바꾸지 않아요.")
-                color: page.darkMode ? "#f3d59d" : "#6a4a19"
+            spacing: UiMetrics.spaceGroup
+            MenuButton {
+                id: jsonFileButton
+                objectName: "ruleFileMenuButton"
+                text: qsTr("파일")
+                onClicked: page.toggleToolbarPopup(jsonFileMenu)
             }
-        }
-
-        Flow {
-            Layout.fillWidth: true
-            spacing: UiMetrics.spaceControl
-            ThemeButton {
-                text: qsTr("+ 블록 추가")
-                onClicked: page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2)
+            MenuButton {
+                id: editMenuButton
+                objectName: "ruleEditMenuButton"
+                text: qsTr("편집")
+                onClicked: page.toggleToolbarPopup(editMenu)
             }
-            Label { height: UiMetrics.controlHeight; verticalAlignment: Text.AlignVCenter; text: qsTr("연결선 모양"); color: page.primaryText }
-            AppComboBox {
-                model: [qsTr("곡선"), qsTr("직선")]
-                currentIndex: page.connectionStyle
-                onActivated: (index) => {
-                    page.connectionStyle = index
-                    lineCanvas.requestPaint()
-                }
+            MenuButton {
+                id: viewMenuButton
+                objectName: "ruleViewMenuButton"
+                text: qsTr("보기")
+                onClicked: page.toggleToolbarPopup(viewMenu)
             }
             ThemeButton {
-                text: qsTr("노드 전체 보기")
-                onClicked: page.fitAllNodes()
+                objectName: "ruleHelpButton"
+                text: qsTr("도움말")
+                hoverEnabled: true
+                ToolTip.visible: hovered && !ruleHelpPanel.visible
+                ToolTip.delay: UiMetrics.tooltipDelayMs
+                ToolTip.text: qsTr("단축키 · 사용법 · AI 작성 문서")
+                onClicked: page.toggleToolbarPopup(ruleHelpPanel)
             }
-            ThemeButton {
-                text: qsTr("선택 세로 정렬")
-                enabled: page.selectedIds.filter(id => id !== 1).length >= 2
-                onClicked: page.alignSelectedVertically()
-            }
-            Label { height: UiMetrics.controlHeight; verticalAlignment: Text.AlignVCenter; text: qsTr("글씨 크기"); color: page.primaryText }
-            AppComboBox {
-                model: [qsTr("작게"), qsTr("보통"), qsTr("크게")]
-                currentIndex: page.fontPresetIndex
-                onActivated: (index) => page.fontPresetIndex = index
-            }
+            Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("%1%").arg(Math.round(page.zoom * 100))
                 color: page.mutedText
@@ -1075,13 +1080,6 @@ Item {
             }
         }
 
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("우클릭: 블록 추가 · 우드래그: 화면 이동 · 좌드래그: 선택 · Shift+클릭: 추가 선택 · Ctrl+Shift+L: 세로 정렬 · Ctrl+드래그: 부모/형제 스냅 · Alt+선 클릭: 연결 해제 · Delete: 삭제 · Ctrl+C/V: 복사/붙여넣기")
-            color: page.mutedText
-            font.pixelSize: UiMetrics.textCaption
-            wrapMode: Text.WordWrap
-        }
 
         RowLayout {
             Layout.fillWidth: true
@@ -1097,6 +1095,7 @@ Item {
 
                 Item {
                     id: canvasViewport
+                    objectName: "ruleCanvasViewport"
                     anchors.fill: parent
                     anchors.margins: 1
                     clip: true
@@ -1857,39 +1856,184 @@ Item {
         }
     }
 
-    Popup {
+    EditorMenu {
         id: jsonFileMenu
-        parent: jsonFileButton
-        x: 0
-        y: jsonFileButton.height + 4
-        width: 170
-        padding: UiMetrics.buttonPadding
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle {
-            radius: UiMetrics.radiusControl
-            color: page.surfaceColor
-            border.color: page.borderColor
-        }
-        contentItem: ColumnLayout {
-            spacing: UiMetrics.spaceExtraSmall
-            ThemeButton {
-                Layout.fillWidth: true
-                text: qsTr("JSON 불러오기")
-                onClicked: {
-                    jsonFileMenu.close()
-                    if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
-                        confirmImportReplace.open()
-                    else importFileDialog.open()
-                }
+        objectName: "ruleFileMenu"
+        anchorButton: jsonFileButton
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("JSON 불러오기…")
+            onClicked: {
+                jsonFileMenu.close()
+                if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
+                    confirmImportReplace.open()
+                else importFileDialog.open()
             }
-            ThemeButton {
-                Layout.fillWidth: true
-                text: qsTr("JSON 내보내기")
-                onClicked: {
-                    jsonFileMenu.close()
-                    exportFileDialog.open()
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("JSON 내보내기…")
+            onClicked: { jsonFileMenu.close(); exportFileDialog.open() }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("저장본 다시 열기…")
+            onClicked: { jsonFileMenu.close(); confirmReload.open() }
+        }
+    }
+
+    EditorMenu {
+        id: editMenu
+        objectName: "ruleEditMenu"
+        anchorButton: editMenuButton
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("블록 추가…")
+            onClicked: { editMenu.close(); page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2) }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("복사")
+            enabled: page.selectedIds.some(id => id !== 1)
+            onClicked: { editMenu.close(); page.copySelectedBlocks(); canvasViewport.forceActiveFocus() }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("붙여넣기")
+            enabled: page.copiedBlocks.length > 0
+            onClicked: { editMenu.close(); page.pasteCopiedBlocks(); canvasViewport.forceActiveFocus() }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("선택 블록 세로 정렬")
+            enabled: page.selectedIds.filter(id => id !== 1).length >= 2
+            onClicked: { editMenu.close(); page.alignSelectedVertically(); canvasViewport.forceActiveFocus() }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("선택 블록 삭제")
+            enabled: page.selectedIds.some(id => id !== 1)
+            onClicked: { editMenu.close(); page.removeSelectedBlock(); canvasViewport.forceActiveFocus() }
+        }
+    }
+
+    EditorMenu {
+        id: viewMenu
+        objectName: "ruleViewMenu"
+        anchorButton: viewMenuButton
+        Label { text: qsTr("연결선 모양"); color: page.primaryText; font.bold: true }
+        AppComboBox {
+            objectName: "ruleConnectionStyleCombo"
+            Layout.fillWidth: true
+            model: [qsTr("곡선"), qsTr("직선")]
+            currentIndex: page.connectionStyle
+            onActivated: (index) => { page.connectionStyle = index; lineCanvas.requestPaint() }
+        }
+        Label { text: qsTr("글씨 크기"); color: page.primaryText; font.bold: true }
+        AppComboBox {
+            objectName: "ruleFontPresetCombo"
+            Layout.fillWidth: true
+            model: [qsTr("작게"), qsTr("보통"), qsTr("크게")]
+            currentIndex: page.fontPresetIndex
+            onActivated: (index) => page.fontPresetIndex = index
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("노드 전체 보기")
+            onClicked: { viewMenu.close(); page.fitAllNodes(); canvasViewport.forceActiveFocus() }
+        }
+        ThemeButton {
+            Layout.fillWidth: true
+            text: qsTr("기본 보기 (100%)")
+            onClicked: { viewMenu.close(); page.resetDefaultView(); canvasViewport.forceActiveFocus() }
+        }
+    }
+
+    Popup {
+        id: ruleHelpPanel
+        objectName: "ruleHelpPanel"
+        parent: canvasViewport
+        x: Math.max(0, canvasViewport.width - width - UiMetrics.spaceSection)
+        y: UiMetrics.spaceSection
+        width: Math.max(1, Math.min(UiMetrics.ruleHelpWidth, canvasViewport.width - UiMetrics.spaceSection * 2))
+        height: Math.min(helpContents.implicitHeight + topPadding + bottomPadding,
+                         Math.max(1, canvasViewport.height - UiMetrics.spaceSection * 2))
+        padding: UiMetrics.spaceSection
+        modal: false
+        dim: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle { color: page.surfaceColor; radius: UiMetrics.radiusPanel; border.color: page.borderColor }
+        contentItem: ScrollView {
+            id: helpScroll
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                id: helpContents
+                width: helpScroll.availableWidth
+                spacing: UiMetrics.spaceSection
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("단축키 · 사용법")
+                        font.pixelSize: UiMetrics.textSectionTitle
+                        font.bold: true
+                        color: page.primaryText
+                    }
+                    ThemeButton {
+                        objectName: "ruleHelpCloseButton"
+                        text: "×"
+                        implicitWidth: UiMetrics.iconButtonSize
+                        Accessible.name: qsTr("도움말 닫기")
+                        onClicked: ruleHelpPanel.close()
+                    }
+                }
+                ThemeButton {
+                    objectName: "rulesUserGuideButton"
+                    Layout.fillWidth: true
+                    text: qsTr("AI용 작성 문서 저장…")
+                    onClicked: { ruleHelpPanel.close(); rulesGuideDownload.saveDocument() }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("블록의 오른쪽 점에서 다음 블록의 왼쪽 점으로 연결하세요. 연결 중 빈 곳에서 놓으면 취소돼요.")
+                    wrapMode: Text.Wrap
+                    color: page.mutedText
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: UiMetrics.spaceControl
+                    Repeater {
+                        objectName: "ruleShortcutList"
+                        model: page.shortcutRows
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: UiMetrics.spaceGroup
+                            Label {
+                                Layout.preferredWidth: UiMetrics.shortcutKeyWidth
+                                text: modelData.keys
+                                font.bold: true
+                                font.pixelSize: UiMetrics.textCaption
+                                wrapMode: Text.Wrap
+                                color: page.primaryText
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.action
+                                wrapMode: Text.Wrap
+                                color: page.primaryText
+                            }
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("단축키는 캔버스에 초점이 있을 때 동작해요. 규칙은 저장 전에 검증하며, 노드 위치를 옮겨도 검사 순서는 바뀌지 않아요.")
+                    wrapMode: Text.Wrap
+                    color: page.mutedText
                 }
             }
         }

@@ -929,7 +929,6 @@ ApplicationWindow {
         anchors.topMargin: 0
         visible: root.currentPage === 1
         darkMode: root.editorDark
-        onThemeChangeRequested: uiSettings.darkMode = !uiSettings.darkMode
         onOpenCurrentEditor: ruleDialog.open()
         onEditorDraftReplaced: {
             root.selectedRulePath = ""

@@ -295,6 +295,26 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             auto* guide = rules->findChild<QObject*>(QStringLiteral("rulesGuideDownload"));
             if (!guideButton || !guide || guide->property("guideKey").toString() != "rules" ||
                 !guide->findChild<QObject*>(QStringLiteral("guideSaveDialog"))) return false;
+            // 역할별 메뉴는 실제 버튼으로 열고 같은 버튼으로 다시 닫을 수 있어야 한다.
+            for (const auto& names : {std::pair{"ruleFileMenuButton", "ruleFileMenu"},
+                                      std::pair{"ruleEditMenuButton", "ruleEditMenu"},
+                                      std::pair{"ruleViewMenuButton", "ruleViewMenu"},
+                                      std::pair{"ruleHelpButton", "ruleHelpPanel"}}) {
+                auto* menuButton = rules->findChild<QQuickItem*>(QString::fromLatin1(names.first));
+                auto* menu = rules->findChild<QObject*>(QString::fromLatin1(names.second));
+                if (!menuButton || !menu) return false;
+                click(menuButton);
+                if (!menu->property("opened").toBool()) {
+                    QTextStream(stderr) << "Rule toolbar menu did not open: " << names.second << Qt::endl;
+                    return false;
+                }
+                if (QString::fromLatin1(names.second) == "ruleHelpPanel" && !guideButton->isVisible()) return false;
+                click(menuButton);
+                if (menu->property("visible").toBool()) {
+                    QTextStream(stderr) << "Rule toolbar menu did not toggle closed: " << names.second << Qt::endl;
+                    return false;
+                }
+            }
             // 추가 메뉴가 조건·분기·종착점을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
             const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
             if (groups.size() != 3) return false;

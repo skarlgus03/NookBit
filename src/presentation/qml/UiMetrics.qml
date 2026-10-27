@@ -19,6 +19,10 @@ QtObject {
     readonly property int numericInputWidth: 180
     readonly property int numericStepSize: 28
     readonly property int nodeAddMenuWidth: 224
+    readonly property int ruleMenuWidth: 260
+    readonly property int ruleHelpWidth: 440
+    readonly property int shortcutKeyWidth: 160
+    readonly property int tooltipDelayMs: 500
     readonly property int primaryActionHeight: 46
     readonly property int largeActionHeight: 60
     readonly property int textDropHint: 20
