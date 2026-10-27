@@ -290,6 +290,16 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             click(ruleTestButton);
             if (!testPanel->property("opened").toBool()) return false;
             QMetaObject::invokeMethod(testPanel, "close");
+            // 긴 버튼 이름을 넣어도 빈 공간 대신 글자가 먼저 잘리지 않는지 검사한다.
+            const auto originalTestText = ruleTestButton->property("text");
+            ruleTestButton->setProperty("text", QStringLiteral("파일 분류 규칙을 테스트하고 결과를 확인합니다"));
+            QCoreApplication::processEvents();
+            auto* testText = ruleTestButton->property("contentItem").value<QQuickItem*>();
+            const bool fullButtonText = testText && !testText->property("truncated").toBool() &&
+                testText->width() + 1 >= testText->implicitWidth();
+            ruleTestButton->setProperty("text", originalTestText);
+            QCoreApplication::processEvents();
+            if (!fullButtonText) return false;
             // 규칙 문서 버튼이 읽기 창 대신 직접 저장 창구에 연결되는지 검사한다.
             auto* guideButton = rules->findChild<QQuickItem*>(QStringLiteral("rulesUserGuideButton"));
             auto* guide = rules->findChild<QObject*>(QStringLiteral("rulesGuideDownload"));

@@ -183,8 +183,6 @@ ApplicationWindow {
         id: navButton
         dark: root.editorDark
         padding: UiMetrics.buttonPadding
-        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
         background: ButtonFeedback {
             button: navButton
             normalColor: root.theme.navigationButton

@@ -32,40 +32,68 @@ Item {
     readonly property int blockWidth: UiMetrics.nodeWidths[fontPresetIndex]
     readonly property int blockHeight: UiMetrics.nodeHeights[fontPresetIndex]
     property bool darkMode: false
-    readonly property color pageColor: darkMode ? "#161a22" : "#f5f5f2"
-    readonly property color surfaceColor: darkMode ? "#202633" : "#ffffff"
-    readonly property color canvasColor: darkMode ? "#191f2a" : "#f8faf7"
-    readonly property color borderColor: darkMode ? "#3d4757" : "#d9dfd8"
-    readonly property color primaryText: darkMode ? "#edf2f8" : "#27352b"
-    readonly property color mutedText: darkMode ? "#aab6c7" : "#58655b"
-    readonly property color gridColor: darkMode ? "#2a3241" : "#e8ede7"
+    readonly property var theme: UiTheme.colors(darkMode)
+    readonly property color pageColor: theme.window
+    readonly property color surfaceColor: theme.surface
+    readonly property color canvasColor: theme.editorCanvas
+    readonly property color borderColor: theme.border
+    readonly property color primaryText: theme.text
+    readonly property color mutedText: theme.muted
+    readonly property color gridColor: theme.editorGrid
     readonly property color nodeColor: darkMode ? "#252d3b" : "#ffffff"
-    readonly property color buttonColor: darkMode ? "#303b4d" : "#f3f5f1"
-    readonly property color buttonFocusColor: darkMode ? "#86aad6" : "#7da58a"
+    readonly property color buttonColor: theme.button
+    readonly property color buttonFocusColor: theme.buttonFocus
     palette.window: pageColor
     palette.windowText: primaryText
     palette.button: buttonColor
     palette.buttonText: primaryText
     palette.base: darkMode ? "#252d3b" : "#ffffff"
     palette.text: primaryText
-    palette.highlight: darkMode ? "#55769f" : "#80a88a"
+    palette.highlight: theme.accent
     palette.highlightedText: "#ffffff"
 
     // 규칙 편집기 버튼도 공통 상태 피드백을 사용하는 버튼.
     component ThemeButton: AppButton {
         id: themedButton
+        property int labelAlignment: Text.AlignHCenter
         dark: page.darkMode
         padding: UiMetrics.buttonPadding
-        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: Math.max(UiMetrics.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
+        contentItem: Text {
+            text: themedButton.text
+            font: themedButton.font
+            color: themedButton.buttonForeground
+            horizontalAlignment: themedButton.labelAlignment
+            verticalAlignment: Text.AlignVCenter
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+        }
         background: ButtonFeedback {
             button: themedButton
+            primary: themedButton.primary
             normalColor: page.buttonColor
         }
     }
+    // 긴 명령도 줄바꿈하고 버튼 테두리 대신 행 단위로 구분하는 메뉴 항목.
+    component MenuAction: ThemeButton {
+        Layout.fillWidth: true
+        flat: true
+        leftPadding: UiMetrics.controlPadding
+        rightPadding: UiMetrics.controlPadding
+        labelAlignment: Text.AlignLeft
+    }
     // 공통 드롭다운 화살표와 규격을 사용하는 편집기 메뉴 버튼.
     component MenuButton: ThemeButton {
+        id: menuButton
+        property bool menuOpen: false
+        Layout.minimumWidth: implicitWidth
         rightPadding: UiMetrics.dropdownTrailingPadding
+        background: ButtonFeedback {
+            button: menuButton
+            normalColor: "transparent"
+            selected: menuButton.menuOpen
+            selectedColor: page.theme.buttonChecked
+            idleBorder: menuButton.menuOpen ? page.theme.editorAccent : "transparent"
+        }
         DropdownIndicator {
             anchors.right: parent.right
             anchors.rightMargin: UiMetrics.controlPadding
@@ -1010,6 +1038,19 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: UiMetrics.spaceSection
+            Rectangle {
+                implicitWidth: UiMetrics.controlHeight
+                implicitHeight: UiMetrics.controlHeight
+                radius: UiMetrics.radiusControl
+                color: page.theme.editorTint
+                NavigationIcon {
+                    anchors.centerIn: parent
+                    width: UiMetrics.navigationIconSize
+                    height: UiMetrics.navigationIconSize
+                    kind: "rules"
+                    strokeColor: page.theme.editorAccent
+                }
+            }
             Label {
                 text: qsTr("분류 규칙")
                 font.pixelSize: UiMetrics.textPageTitle
@@ -1018,13 +1059,24 @@ Item {
             }
             Item { Layout.fillWidth: true }
             ThemeButton {
+                id: testAction
+                Layout.minimumWidth: implicitWidth
                 text: qsTr("규칙 테스트")
                 objectName: "ruleTestButton"
+                background: ButtonFeedback {
+                    button: testAction
+                    normalColor: page.surfaceColor
+                    idleBorder: page.theme.editorAccent
+                    selected: ruleTestPanel.visible
+                }
                 onClicked: ruleTestPanel.visible ? ruleTestPanel.close() : ruleTestPanel.open()
             }
             ThemeButton {
+                objectName: "ruleSaveButton"
+                Layout.minimumWidth: implicitWidth
                 text: qsTr("전체 저장")
                 font.bold: true
+                primary: true
                 onClicked: {
                     if (ruleEditor.dirty || page.oldEditorFormDirty) confirmSave.open()
                     else page.saveAll()
@@ -1040,31 +1092,43 @@ Item {
             wrapMode: Text.Wrap
         }
 
-        RowLayout {
+        Rectangle {
             objectName: "ruleEditorToolbar"
             Layout.fillWidth: true
-            spacing: UiMetrics.spaceGroup
+            implicitHeight: toolbarContents.implicitHeight + UiMetrics.spaceControl * 2
+            radius: UiMetrics.radiusControl
+            color: page.theme.editorTint
+            RowLayout {
+            id: toolbarContents
+            anchors.fill: parent
+            anchors.margins: UiMetrics.spaceControl
+            spacing: UiMetrics.spaceSection
             MenuButton {
                 id: jsonFileButton
                 objectName: "ruleFileMenuButton"
                 text: qsTr("파일")
+                menuOpen: jsonFileMenu.visible
                 onClicked: page.toggleToolbarPopup(jsonFileMenu)
             }
             MenuButton {
                 id: editMenuButton
                 objectName: "ruleEditMenuButton"
                 text: qsTr("편집")
+                menuOpen: editMenu.visible
                 onClicked: page.toggleToolbarPopup(editMenu)
             }
             MenuButton {
                 id: viewMenuButton
                 objectName: "ruleViewMenuButton"
                 text: qsTr("보기")
+                menuOpen: viewMenu.visible
                 onClicked: page.toggleToolbarPopup(viewMenu)
             }
             ThemeButton {
                 objectName: "ruleHelpButton"
+                Layout.minimumWidth: implicitWidth
                 text: qsTr("도움말")
+                flat: true
                 hoverEnabled: true
                 ToolTip.visible: hovered && !ruleHelpPanel.visible
                 ToolTip.delay: UiMetrics.tooltipDelayMs
@@ -1077,6 +1141,7 @@ Item {
                 color: page.mutedText
                 height: UiMetrics.controlHeight
                 verticalAlignment: Text.AlignVCenter
+            }
             }
         }
 
@@ -1785,10 +1850,17 @@ Item {
         }
 
         Label {
+            id: editorStatus
             Layout.fillWidth: true
             text: page.statusText
-            color: page.darkMode ? "#a9c5e9" : "#42634b"
+            color: page.mutedText
+            wrapMode: Text.Wrap
+            maximumLineCount: 3
             elide: Text.ElideRight
+            HoverHandler { id: statusHover }
+            ToolTip.visible: statusHover.hovered && editorStatus.truncated
+            ToolTip.text: editorStatus.text
+            ToolTip.delay: UiMetrics.tooltipDelayMs
         }
     }
 
@@ -1860,8 +1932,7 @@ Item {
         id: jsonFileMenu
         objectName: "ruleFileMenu"
         anchorButton: jsonFileButton
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("JSON 불러오기…")
             onClicked: {
                 jsonFileMenu.close()
@@ -1870,13 +1941,11 @@ Item {
                 else importFileDialog.open()
             }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("JSON 내보내기…")
             onClicked: { jsonFileMenu.close(); exportFileDialog.open() }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("저장본 다시 열기…")
             onClicked: { jsonFileMenu.close(); confirmReload.open() }
         }
@@ -1886,31 +1955,26 @@ Item {
         id: editMenu
         objectName: "ruleEditMenu"
         anchorButton: editMenuButton
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("블록 추가…")
             onClicked: { editMenu.close(); page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2) }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("복사")
             enabled: page.selectedIds.some(id => id !== 1)
             onClicked: { editMenu.close(); page.copySelectedBlocks(); canvasViewport.forceActiveFocus() }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("붙여넣기")
             enabled: page.copiedBlocks.length > 0
             onClicked: { editMenu.close(); page.pasteCopiedBlocks(); canvasViewport.forceActiveFocus() }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("선택 블록 세로 정렬")
             enabled: page.selectedIds.filter(id => id !== 1).length >= 2
             onClicked: { editMenu.close(); page.alignSelectedVertically(); canvasViewport.forceActiveFocus() }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("선택 블록 삭제")
             enabled: page.selectedIds.some(id => id !== 1)
             onClicked: { editMenu.close(); page.removeSelectedBlock(); canvasViewport.forceActiveFocus() }
@@ -1937,13 +2001,11 @@ Item {
             currentIndex: page.fontPresetIndex
             onActivated: (index) => page.fontPresetIndex = index
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("노드 전체 보기")
             onClicked: { viewMenu.close(); page.fitAllNodes(); canvasViewport.forceActiveFocus() }
         }
-        ThemeButton {
-            Layout.fillWidth: true
+        MenuAction {
             text: qsTr("기본 보기 (100%)")
             onClicked: { viewMenu.close(); page.resetDefaultView(); canvasViewport.forceActiveFocus() }
         }

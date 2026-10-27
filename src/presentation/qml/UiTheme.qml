@@ -15,7 +15,8 @@ QtObject {
         accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9",
         buttonHover: "#dce6f3", buttonPressed: "#becfe4", buttonChecked: "#ccddf0",
         buttonBorder: "#acb9ca", buttonFocus: "#527cad",
-        primaryHover: "#4f739b", primaryPressed: "#2b4565"
+        primaryHover: "#4f739b", primaryPressed: "#2b4565",
+        editorAccent: "#4f78b8", editorTint: "#edf3fc", editorCanvas: "#f6f8fc", editorGrid: "#e4eaf3"
     })
     readonly property var dark: ({
         window: "#161a22", surface: "#202633", alternate: "#242d3b", inspectionVeil: "#ffffff",
@@ -27,7 +28,8 @@ QtObject {
         accent: "#405e80", accentText: "#ffffff", primaryFocus: "#88a8c9",
         buttonHover: "#3d506c", buttonPressed: "#192a40", buttonChecked: "#344f70",
         buttonBorder: "#56657b", buttonFocus: "#91b8e4",
-        primaryHover: "#4f739b", primaryPressed: "#2b4565"
+        primaryHover: "#4f739b", primaryPressed: "#2b4565",
+        editorAccent: "#8eb7f5", editorTint: "#23344e", editorCanvas: "#191f2a", editorGrid: "#29364b"
     })
     // 지정한 밝기의 역할별 색상 규격을 반환하는 함수.
     function colors(darkMode) { return darkMode ? dark : light }
