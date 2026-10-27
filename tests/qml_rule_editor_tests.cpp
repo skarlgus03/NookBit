@@ -3,6 +3,7 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QJSValue>
+#include <QColor>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QMouseEvent>
@@ -10,6 +11,7 @@
 #include <QTimer>
 #include <memory>
 #include <iostream>
+#include <cmath>
 
 namespace {
 int failures = 0;
@@ -49,6 +51,31 @@ void settle() {
     QTimer::singleShot(100, &events, &QEventLoop::quit);
     events.exec();
 }
+
+// sRGB 글씨와 배경의 상대 휘도 대비를 계산하는 함수.
+double contrast(const QColor& first, const QColor& second) {
+    // 색상 채널을 선형 광량으로 바꾸는 함수.
+    const auto channel = [](double value) { return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4); };
+    // 표준 가중치로 색상의 상대 휘도를 구하는 함수.
+    const auto luminance = [&](const QColor& color) {
+        return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) + 0.0722 * channel(color.blueF());
+    };
+    const double a = luminance(first), b = luminance(second);
+    return (qMax(a, b) + 0.05) / (qMin(a, b) + 0.05);
+}
+
+// 그리기에 전달하는 제어점으로 베지어 곡선의 한 점을 계산하는 함수.
+QPointF curvePoint(const QVariantMap& curve, double t) {
+    const double inverse = 1 - t;
+    return {
+        inverse * inverse * inverse * curve.value("x1").toDouble()
+            + 3 * inverse * inverse * t * curve.value("cx1").toDouble()
+            + 3 * inverse * t * t * curve.value("cx2").toDouble() + t * t * t * curve.value("x2").toDouble(),
+        inverse * inverse * inverse * curve.value("y1").toDouble()
+            + 3 * inverse * inverse * t * curve.value("cy1").toDouble()
+            + 3 * inverse * t * t * curve.value("cy2").toDouble() + t * t * t * curve.value("y2").toDouble()
+    };
+}
 }
 
 // 분리된 편집 상태·노드 입력·저장 연결을 파일 작업 없이 검증하는 함수.
@@ -69,6 +96,52 @@ int main(int argc, char** argv) {
     auto state = create(engine, "RuleEditorState", {{"viewportWidth", 1000}, {"viewportHeight", 720}});
     auto other = create(engine, "RuleEditorState");
     if (!state || !other) return 1;
+    for (const char* mode : {"light", "dark"}) {
+        const auto colors = theme->property(mode).value<QJSValue>().toVariant().toMap();
+        const QColor foreground(colors.value("accentText").toString());
+        for (const char* role : {"accent", "primaryHover", "primaryPressed"})
+            expect(contrast(foreground, QColor(colors.value(role).toString())) >= 4.5,
+                "primary button text remains readable in normal/hover/press for both themes");
+        expect(contrast(QColor(colors.value("accentSoftText").toString()), QColor(colors.value("menuSelected").toString())) >= 4.5,
+            "selected navigation text contrasts with its soft background");
+        for (const QString role : {QStringLiteral("success"), QStringLiteral("warning"), QStringLiteral("danger")})
+            expect(contrast(QColor(colors.value(role).toString()), QColor(colors.value(role + "Surface").toString())) >= 4.5,
+                "semantic status text remains readable on its corresponding background");
+        const QColor accent(colors.value("accent").toString()), marquee = colors.value("marquee").value<QColor>();
+        expect(marquee.isValid() && qAbs(marquee.alphaF() - 0.2) < 0.01
+            && qAbs(marquee.redF() - accent.redF()) < 0.01 && qAbs(marquee.blueF() - accent.blueF()) < 0.01,
+            "selection tint derives from the actual typed theme accent");
+    }
+    for (const double zoom : {0.1, 0.25, 1.0, 2.5}) {
+        state->setProperty("zoom", zoom);
+        const auto curves = call(engine, state.get(), "connectionSegments", {0, 0, 20 * zoom, 80 * zoom}).toVariant().toList();
+        expect(curves.size() == 1, "forward wires use one continuous curve");
+        if (curves.isEmpty()) return 1;
+        const auto curve = curves.first().toMap();
+        expect(curve.value("cx1").toDouble() >= 0 && curve.value("cx1").toDouble() <= curve.value("cx2").toDouble()
+            && curve.value("cx2").toDouble() <= 20 * zoom,
+            "short wires cannot overshoot or fold when zoomed out");
+    }
+    state->setProperty("zoom", 1.0);
+    const QVariantList reverseBlocks{
+        QVariantMap{{"id", 1}, {"type", "start"}, {"x", 500}, {"y", 100}},
+        QVariantMap{{"id", 2}, {"type", "extension"}, {"x", 100}, {"y", 100}}
+    };
+    const QVariantMap reversed{{"valid", true}, {"blocks", reverseBlocks},
+        {"edges", QVariantList{QVariantMap{{"from", 1}, {"to", 2}}}}, {"nextId", 3}, {"incompleteLeaves", 1}};
+    call(engine, state.get(), "restoreGraph", {reversed});
+    const double sourceX = 500 + state->property("blockWidth").toDouble();
+    const double centerY = 100 + state->property("blockHeight").toDouble() / 2;
+    const auto reverseCurves = call(engine, state.get(), "connectionSegments", {sourceX, centerY, 100, centerY}).toVariant().toList();
+    expect(reverseCurves.size() == 2, "same-height reverse wires detour instead of folding over a line");
+    if (reverseCurves.size() != 2) return 1;
+    const auto firstCurve = reverseCurves.first().toMap(), lastCurve = reverseCurves.last().toMap();
+    expect(firstCurve.value("x2") == lastCurve.value("x1") && firstCurve.value("y2") == lastCurve.value("y1")
+        && firstCurve.value("y2").toDouble() < centerY, "reverse curve segments share a smooth upper join");
+    const auto sample = curvePoint(firstCurve, 0.5);
+    expect(call(engine, state.get(), "edgeAt", {sample.x(), sample.y()}).toInt() == 0,
+        "Alt selection follows the exact multi-segment curve used to draw the wire");
+    call(engine, state.get(), "resetExample");
     const auto initialEdges = list(state.get(), "edges");
     expect(!call(engine, state.get(), "connectBlocks", {3, 2}).toBool()
         && list(state.get(), "edges") == initialEdges, "cycle rejection cannot mutate the graph");

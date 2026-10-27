@@ -299,13 +299,14 @@ Rectangle {
     }
     // 선택한 직선·곡선 방식으로 연결선과 드래그 중인 선을 그리는 함수.
     function drawEdge(context, x1, y1, x2, y2, temporary, highlighted, tested) {
-        const bend = Math.max(65, Math.abs(x2 - x1) * 0.45);
         context.beginPath();
         context.moveTo(x1, y1);
-        if (editor.connectionStyle === 0)
-            context.bezierCurveTo(x1 + bend, y1, x2 - bend, y2, x2, y2);
-        else
+        if (editor.connectionStyle === 0) {
+            for (const curve of editor.connectionSegments(x1, y1, x2, y2))
+                context.bezierCurveTo(curve.cx1, curve.cy1, curve.cx2, curve.cy2, curve.x2, curve.y2);
+        } else {
             context.lineTo(x2, y2);
+        }
         context.lineWidth = highlighted || tested ? 8 : Math.max(1, (temporary ? 4 : 4.5) * editor.zoom);
         context.lineCap = "round";
         context.strokeStyle = highlighted ? theme.edgeDisconnect : tested ? theme.edgeTrace : temporary

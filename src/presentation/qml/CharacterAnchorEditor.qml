@@ -9,6 +9,8 @@ Dialog {
     required property var settings
     required property var descriptor
     required property var bubble
+    property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     property point draftPivot: Qt.point(0, 0)
     property point draftBubble: Qt.point(0, 0)
     title: qsTr("캐릭터 기준점 조정")
@@ -53,12 +55,12 @@ Dialog {
                     readonly property point offset: index === 0 ? editor.draftPivot : Qt.point(stage.attachment.x + editor.draftBubble.x, stage.attachment.y + editor.draftBubble.y)
                     x: stage.base.x + offset.x * stage.zoom
                     y: stage.base.y + offset.y * stage.zoom
-                    Rectangle { x: -marker.x; width: stage.width; height: 1; color: marker.index === 0 ? UiTheme.characterPivotGuide : UiTheme.characterBubbleGuide; opacity: 0.65 }
+                    Rectangle { x: -marker.x; width: stage.width; height: 1; color: marker.index === 0 ? editor.theme.pivotGuide : editor.theme.bubbleGuide; opacity: 0.65 }
                     Label { x: UiMetrics.spaceGroup; y: -height - UiMetrics.spaceExtraSmall; text: marker.index === 0 ? qsTr("캐릭터 기준점") : qsTr("말풍선 부착점") }
                     Rectangle {
                         width: UiMetrics.characterAnchorHandle; height: width; radius: width / 2
                         x: -width / 2; y: -height / 2
-                        color: marker.index === 0 ? UiTheme.characterPivotGuide : UiTheme.characterBubbleGuide
+                        color: marker.index === 0 ? editor.theme.pivotGuide : editor.theme.bubbleGuide
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.SizeAllCursor

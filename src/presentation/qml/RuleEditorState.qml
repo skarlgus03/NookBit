@@ -1,4 +1,5 @@
 import QtQuick
+import "RuleConnectionGeometry.js" as ConnectionGeometry
 
 // 그래프·선택·카메라·시험 결과만 소유하며 화면 부품과 Controller를 알지 않는 편집 세션.
 QtObject {
@@ -761,14 +762,9 @@ QtObject {
         repaintRequested();
     }
 
-    // 화면의 한 점에서 선분까지의 거리를 구하는 함수.
-    function distanceToSegment(px, py, x1, y1, x2, y2) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const lengthSquared = dx * dx + dy * dy;
-        const fraction = lengthSquared > 0 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared)) :
-                                             0;
-        return Math.hypot(px - (x1 + fraction * dx), py - (y1 + fraction * dy));
+    // 그리기와 연결선 선택에 같은 제어점 계산을 제공하는 함수.
+    function connectionSegments(x1, y1, x2, y2) {
+        return ConnectionGeometry.curveSegments(x1, y1, x2, y2, zoom)
     }
 
     // 커서에 가장 가까운 연결선을 찾아 Alt 강조 대상으로 정하는 함수.
@@ -785,25 +781,9 @@ QtObject {
             const b = positionFor(target);
             const from = screenPoint(a.x + blockWidth, a.y + blockHeight / 2);
             const to = screenPoint(b.x, b.y + blockHeight / 2);
-            let current = Infinity;
-            if (connectionStyle === 1) {
-                current = distanceToSegment(screenX, screenY, from.x, from.y, to.x, to.y);
-            } else {
-                const bend = Math.max(65, Math.abs(to.x - from.x) * 0.45);
-                let previousX = from.x;
-                let previousY = from.y;
-                for (let step = 1; step <= 24; ++step) {
-                    const t = step / 24;
-                    const inverse = 1 - t;
-                    const x = inverse * inverse * inverse * from.x + 3 * inverse * inverse * t * (from.x + bend) + 3
-                          * inverse * t * t * (to.x - bend) + t * t * t * to.x;
-                    const y = inverse * inverse * inverse * from.y + 3 * inverse * inverse * t * from.y + 3 * inverse
-                          * t * t * to.y + t * t * t * to.y;
-                    current = Math.min(current, distanceToSegment(screenX, screenY, previousX, previousY, x, y));
-                    previousX = x;
-                    previousY = y;
-                }
-            }
+            const current = connectionStyle === 1
+                ? ConnectionGeometry.distanceToSegment(screenX, screenY, from.x, from.y, to.x, to.y)
+                : ConnectionGeometry.distanceToCurve(screenX, screenY, connectionSegments(from.x, from.y, to.x, to.y))
             if (current < distance) {
                 nearest = index;
                 distance = current;

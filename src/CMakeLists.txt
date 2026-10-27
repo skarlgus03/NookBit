@@ -230,6 +230,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CharacterBubbleView.qml
         presentation/qml/RuleEditorPage.qml
         presentation/qml/RuleEditorState.qml
+        presentation/qml/RuleConnectionGeometry.js
         presentation/qml/RuleEditorButton.qml
         presentation/qml/RuleEditorMenu.qml
         presentation/qml/RuleNodeCard.qml

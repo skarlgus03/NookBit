@@ -368,7 +368,7 @@ ScrollView {
                         width: previewList.width
                         height: previewRow.implicitHeight + 20
                         radius: UiMetrics.radiusPanel
-                        color: modelData.statusKey === "planned" ? (page.theme.successSurface) : (page.theme.alternate)
+                        color: modelData.statusKey === "planned" ? page.theme.successSurface : page.theme.warningSurface
                         border.color: modelData.statusKey === "planned" ? (page.theme.successBorder) : page.theme.border
                         ColumnLayout {
                             id: previewRow

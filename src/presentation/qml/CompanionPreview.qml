@@ -359,7 +359,7 @@ Rectangle {
                         id: handle
                         required property int index
                         visible: pane.editing && !pane.running && sprite.metadataValid
-                        readonly property color guide: index === 0 ? UiTheme.characterPivotGuide : UiTheme.characterBubbleGuide
+                        readonly property color guide: index === 0 ? pane.theme.pivotGuide : pane.theme.bubbleGuide
                         x: stage.origin.x + (pane.pivot.x + (index === 1 ? pane.attachment.x : 0)) * stage.zoom
                         y: stage.origin.y + (pane.pivot.y + (index === 1 ? pane.attachment.y : 0)) * stage.zoom
                         Rectangle {
@@ -454,14 +454,14 @@ Rectangle {
                     Label {
                         objectName: "companionPivotCoordinates"
                         text: qsTr("기준점   X %1   Y %2").arg(pane.pivot.x.toFixed(1)).arg(pane.pivot.y.toFixed(1))
-                        color: UiTheme.characterPivotGuide
+                        color: pane.theme.pivotGuide
                         font.pixelSize: UiMetrics.textBody
                         font.bold: true
                     }
                     Label {
                         objectName: "companionAttachmentCoordinates"
                         text: qsTr("말풍선   X %1   Y %2").arg((pane.pivot.x + pane.attachment.x).toFixed(1)).arg((pane.pivot.y + pane.attachment.y).toFixed(1))
-                        color: UiTheme.characterBubbleGuide
+                        color: pane.theme.bubbleGuide
                         font.pixelSize: UiMetrics.textBody
                         font.bold: true
                     }

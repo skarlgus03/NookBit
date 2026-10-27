@@ -5,19 +5,19 @@ import QtQuick
 QtObject {
     readonly property color white: "#ffffff"
     readonly property var lightPalette: ({
-        window: "#f5f7fa", surface: white, raised: "#eef2f7",
-        text: "#243247", muted: "#64748b", border: "#d8e0ea", grid: "#e3e9f1",
-        accent: "#426fb0", hover: "#365e99", pressed: "#2b4d80",
-        accentSoft: "#e8effa", focus: "#6f9bd3", pressedSoft: "#cddcf2",
+        window: "#f3f3f7", surface: white, raised: "#ecebf3",
+        text: "#24233a", muted: "#615f78", border: "#e0dfea", grid: "#e6e5ee",
+        accent: "#3e3a6e", hover: "#4a4683", pressed: "#2f2c57", onAccent: white,
+        accentSoft: "#e6e5f4", focus: "#7a74c4", pressedSoft: "#d3d1ec",
         success: "#28764e", successSoft: "#edf7f0",
         warning: "#946020", warningSoft: "#fff4df",
         danger: "#ac423a", dangerSoft: "#fff0ee"
     })
     readonly property var darkPalette: ({
-        window: "#161b24", surface: "#202938", raised: "#283448",
-        text: "#edf2f8", muted: "#a6b4c8", border: "#3c4b62", grid: "#29364a",
-        accent: "#426fb0", hover: "#527fbe", pressed: "#33598f",
-        accentSoft: "#263a57", focus: "#91b8ed", pressedSoft: "#314c70",
+        window: "#16161f", surface: "#20202c", raised: "#2a2a3a",
+        text: "#ecebf4", muted: "#a6a4bc", border: "#33334a", grid: "#262636",
+        accent: "#a9b0f0", hover: "#bcc2f4", pressed: "#8f97e0", onAccent: "#16163a",
+        accentSoft: "#2a2a48", focus: "#c3c8f7", pressedSoft: "#34345a",
         success: "#8eccaa", successSoft: "#203d31",
         warning: "#e8bf7c", warningSoft: "#463720",
         danger: "#f1a79c", dangerSoft: "#432b32"
@@ -28,35 +28,37 @@ QtObject {
         age: "#237c83", otherwise: "#596575", destination: "#39734c", exclude: "#944b68",
         fallback: "#53677e"
     })
-    readonly property color characterPivotGuide: lightPalette.accent
-    readonly property color characterBubbleGuide: lightPalette.warning
+    readonly property color lightAccentColor: lightPalette.accent
+    readonly property color darkAccentColor: darkPalette.accent
     readonly property var light: buildTheme(lightPalette, false)
     readonly property var dark: buildTheme(darkPalette, true)
 
     // 기본 팔레트를 화면·상태·버튼·캔버스가 공유할 의미별 색상표로 변환하는 함수.
     function buildTheme(p, isDark) {
+        const accentColor = isDark ? darkAccentColor : lightAccentColor
         return {
             window: p.window, surface: p.surface, alternate: p.raised, home: p.window,
             inspectionVeil: white, text: p.text, contentText: p.text, muted: p.muted, homeMuted: p.muted,
             border: p.border, sectionBorder: p.border, button: p.raised,
             navigationText: p.text, navigationButton: p.raised, navigationSelected: p.accentSoft,
             navigationBorder: p.border, navigationFocus: p.focus,
-            navigationActiveText: isDark ? p.focus : p.accent,
+            navigationActiveText: p.accent,
             menuSelected: p.accentSoft, menuBorder: p.border, menuFocus: p.focus,
-            accent: p.accent, accentText: white, primaryFocus: p.focus,
+            accent: p.accent, accentText: p.onAccent, accentSoftText: p.accent, primaryFocus: p.focus,
             buttonHover: p.accentSoft, buttonPressed: p.pressedSoft, buttonChecked: p.accentSoft,
             buttonBorder: p.border, buttonFocus: p.focus, primaryHover: p.hover, primaryPressed: p.pressed,
-            editorAccent: isDark ? p.focus : p.accent, editorTint: p.accentSoft,
+            editorAccent: p.accent, editorTint: p.accentSoft,
             editorCanvas: p.window, editorGrid: p.grid,
             success: p.success, successSurface: p.successSoft, successBorder: p.success,
             warning: p.warning, warningSurface: p.warningSoft, danger: p.danger, dangerSurface: p.dangerSoft,
             bubbleSurface: p.surface, bubbleBorder: p.border, bubbleAction: p.accent,
             nodeSurface: p.surface, nodeKinds: nodePalette, onNode: white,
-            edge: isDark ? p.focus : p.accent, edgePending: p.muted,
+            edge: p.accent, edgePending: p.muted,
             edgeDisconnect: p.warning, edgeTrace: p.success, snap: p.success,
             nodeInputSurface: p.successSoft, nodeInputBorder: p.success, nodeInputIcon: nodePalette.start,
             nodeInputText: p.text, nodeInputMuted: p.muted,
-            marquee: Qt.rgba(0.26, 0.44, 0.69, 0.2)
+            pivotGuide: p.accent, bubbleGuide: p.warning,
+            marquee: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.2)
         }
     }
     // 지정한 밝기의 역할별 색상 규격을 반환하는 함수.

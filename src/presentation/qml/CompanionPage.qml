@@ -168,6 +168,7 @@ PageSurface {
         id: characterAnchorDialog
         parent: page
         settings: page.settings
+        dark: page.dark
         descriptor: page.character.animation
         bubble: page.character.bubble
     }

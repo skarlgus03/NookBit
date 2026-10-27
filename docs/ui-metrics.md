@@ -3,12 +3,29 @@
 The source of truth is `src/presentation/qml/UiMetrics.qml`, a presentation-only QML singleton. Core services and use cases must not depend on it. The native application font also reads `textBody` from this singleton.
 
 Shared colors live separately in `UiTheme.qml`. Light/dark foundation palettes
-derive semantic roles for surfaces, text, borders, blue accents and status feedback.
+derive semantic roles for surfaces, text, borders, companion-inspired navy/lavender
+accents and status feedback.
 All QML pages, rule nodes and default companion bubbles consume these roles; hex
 colors outside `UiTheme.qml` fail the contract test. Rule-node categories retain a
 small shared categorical palette; success/warning/error colors convey state.
 Pack-provided PNG skins are not recolored. App inputs and native menus inherit the
 same palette. Theme is presentation-only; no backend dependency is introduced.
+
+The light accent is hood navy (`#3e3a6e`) with white `onAccent`; the dark accent is
+eye lavender (`#a9b0f0`) with dark `onAccent` (`#16163a`). `accentText` derives from
+that foreground, including hover and press. `accentSoftText` is for soft accent
+backgrounds. Focus uses its own brighter outline, while navigation, editor emphasis
+and wires use the actual accent. Selection marquee RGB derives from a typed accent
+color and uses alpha 0.2; palette strings must not be accessed as `.r`/`.g`/`.b`.
+Companion contact/bubble guides use theme-aware `pivotGuide` and `bubbleGuide` roles.
+
+Status colors and categorical node colors retain their existing values. Light
+warning text on the proposed raised surface measures about 4.49:1, so the developer
+preview's warning rows now use `warningSurface` (about 4.87:1). New status text should
+use its semantic surface rather than placing warning labels on raised surfaces.
+Primary labels on their normal accents measure about 10.32:1 light / 8.39:1 dark.
+The only color arithmetic outside the theme is the file-drop overlay: it changes
+the alpha of `UiTheme.white` using the shared overlay opacity, without adding a hue.
 
 `fontFamily` prefers installed Noto Sans KR; `fontFallback` is Malgun Gothic, followed by the platform's original default. No font files are bundled or downloaded. The application font is inherited by ordinary QML text and native menus/dialogs. `--verify-ui` reports the resolved family so a missing font is not mistaken for a successful substitution.
 
@@ -44,7 +61,7 @@ Use `LargeActionButton` for preview/sort and cancel/confirm pairs. It owns their
 
 `ButtonFeedback` is the shared background for `AppButton`, large actions, home menus,
 file-page buttons, navigation and rule-editor commands. State colors live in `UiTheme`:
-ordinary commands have a visible border, hover uses a blue tint and stronger outline, press uses
+ordinary commands have a visible border, hover uses an accent tint and stronger outline, press uses
 a deeper tint immediately, and checked/selected state keeps a persistent fill.
 Labels retain contrasting foreground colors, including checked buttons in light mode.
 Disabled controls are muted and cannot accept input. Numeric +/- indicators use the
@@ -52,7 +69,7 @@ same hover/press colors.
 
 Home navigation is borderless: 24 px icon and 16 px label are both left aligned,
 separated by `spaceGroup`, in a 48 px row. Unselected rows have no fill; hover adds a
-neutral surface, and the selected row keeps a subtle blue rounded fill and accent
+neutral surface, and the selected row keeps a subtle navy/lavender rounded fill and accent
 foreground. Keyboard focus and press feedback remain visible. Menu command names
 do not include manually appended ellipses; genuine constrained text can still elide
 with a full-text tooltip.
@@ -98,6 +115,11 @@ bubble geometry remains authoritative; its fallback text uses shared typography.
 ## Verification
 
 `nookbit_ui_metrics_contract` rejects inline font sizes, positive control padding/spacing, and raw ordinary controls outside the shared components. `nookbit_qml_smoke` compares rendered dropdown/number-field heights and arrow dimensions to the singleton and checks menu opening, rule edits, keyboard entry, theme switching, and page closing.
+
+`nookbit_qml_rule_editor_tests` also checks primary labels through normal/hover/press
+in both palettes, semantic status surfaces, accent-derived marquee color, and
+connection geometry at different zoom levels. These checks complement the user's
+manual light/dark visual review; desktop screenshots are not captured automatically.
 
 After changing metrics, run both tests and visually check long labels, light/dark themes, node presets, and display scaling.
 
