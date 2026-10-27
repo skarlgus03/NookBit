@@ -122,7 +122,7 @@ static QIcon applicationIcon() {
     return QIcon(QStringLiteral(":/nookbit/icons/nookbit.ico"));
 }
 
-// 공통 버튼의 실제 호버·누름·선택·짧은 클릭·비활성을 밝고 어두운 테마에서 검사하는 함수.
+// 공통 버튼의 페이드·실제 누름·선택·비활성을 밝고 어두운 테마에서 검사하는 함수.
 static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
     QQuickWindow host;
     host.resize(300, 110);
@@ -137,7 +137,8 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
         QMouseEvent event(type, position, QPointF(host.mapToGlobal(position.toPoint())), button, buttons, Qt::NoModifier);
         QCoreApplication::sendEvent(&host, &event);
     };
-    for (const auto& type : {QStringLiteral("AppButton"), QStringLiteral("LargeActionButton"), QStringLiteral("HomeMenuButton")}) {
+    for (const auto& type : {QStringLiteral("AppButton"), QStringLiteral("LargeActionButton"), QStringLiteral("HomeMenuButton"),
+            QStringLiteral("NavigationButton"), QStringLiteral("RuleEditorButton")}) {
         QQmlComponent component(&engine);
         component.setData(QStringLiteral("import QtQuick\nimport NookBit\n%1 { text: 'Feedback'; x: 40; y: 20; width: 220; height: 64; checkable: true }")
             .arg(type).toUtf8(), QUrl(QStringLiteral("qrc:/button-feedback-fixture.qml")));
@@ -147,7 +148,8 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
         button->setParentItem(host.contentItem());
         if (type == "LargeActionButton") button->setProperty("primary", true);
         auto* surface = button->findChild<QQuickItem*>(QStringLiteral("buttonFeedbackSurface"));
-        if (!surface) return false;
+        auto* layer = button->findChild<QQuickItem*>(QStringLiteral("buttonFeedbackLayer"));
+        if (!surface || !layer) return false;
         host.show();
         for (const bool dark : {false, true}) {
             // 실패한 버튼 종류와 상태를 표시하는 함수.
@@ -161,46 +163,60 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
             button->setProperty("checked", false);
             pointer(QEvent::MouseMove, QPointF(5, 5), Qt::NoButton, Qt::NoButton);
             settle(150);
-            const auto normal = surface->property("color").value<QColor>();
-            // 홈 메뉴는 윤곽선 없이 선택된 항목만 배경색을 유지하는지 검사한다.
+            if (layer->opacity() > 0.001) return fail("idle layer");
+            const QRectF normalGeometry(surface->position(), surface->size());
+            // 홈 선택은 호버 여부와 무관하게 유지하고 포인터 조작에는 테두리를 만들지 않는다.
             if (type == "HomeMenuButton") {
-                if (normal.alpha() != 0 || QQmlProperty(surface, QStringLiteral("border.width")).read().toInt() != 0)
+                if (surface->property("color").value<QColor>().alpha() != 0
+                    || QQmlProperty(surface, QStringLiteral("border.width")).read().toInt() != 0)
                     return fail("borderless home item");
                 button->setProperty("selected", true);
                 settle(150);
-                const auto selected = surface->property("color").value<QColor>();
+                const auto selected = layer->property("color").value<QColor>();
                 pointer(QEvent::MouseMove, QPointF(100, 45), Qt::NoButton, Qt::NoButton);
                 settle(150);
-                if (selected.alpha() == 0 || surface->property("color").value<QColor>() != selected)
+                if (layer->opacity() < 0.999 || layer->property("color").value<QColor>() != selected)
                     return fail("persistent home selection");
                 button->setProperty("selected", false);
                 pointer(QEvent::MouseMove, QPointF(5, 5), Qt::NoButton, Qt::NoButton);
                 settle(150);
             }
+            const auto hoverColor = layer->property("color").value<QColor>();
             pointer(QEvent::MouseMove, QPointF(100, 45), Qt::NoButton, Qt::NoButton);
-            settle(150);
-            const auto hover = surface->property("color").value<QColor>();
-            if (!button->property("hovered").toBool() || normal == hover) return fail("hover");
-            button->setProperty("down", true);
+            double previousOpacity = 0;
+            // 호버 전 구간에서 검은 RGB 중간색이나 눌림 상태가 끼어들지 않는지 검사한다.
+            for (int frame = 0; frame < 7; ++frame) {
+                settle(20);
+                const auto currentColor = layer->property("color").value<QColor>();
+                if (!button->property("hovered").toBool() || surface->property("pushed").toBool()
+                    || currentColor != hoverColor || currentColor.alpha() != 255
+                    || layer->opacity() + 0.001 < previousOpacity || surface->scale() != 1)
+                    return fail("stable hover fade");
+                previousOpacity = layer->opacity();
+            }
+            if (layer->opacity() < 0.999) return fail("hover completion");
+            pointer(QEvent::MouseButtonPress, QPointF(100, 45), Qt::LeftButton, Qt::LeftButton);
             settle(20);
-            if (surface->property("color").value<QColor>() == hover || surface->scale() >= 1 || button->width() != 220 || button->height() != 64) return fail("press");
-            button->setProperty("down", false);
+            if (!surface->property("pushed").toBool() || layer->property("color").value<QColor>() == hoverColor
+                || surface->scale() != 1 || QRectF(surface->position(), surface->size()) != normalGeometry
+                || button->width() != 220 || button->height() != 64) return fail("stable press");
+            if (type == "HomeMenuButton" && QQmlProperty(surface, QStringLiteral("border.width")).read().toInt() != 0)
+                return fail("no home click outline");
+            pointer(QEvent::MouseButtonRelease, QPointF(100, 45), Qt::LeftButton, Qt::NoButton);
             button->setProperty("checked", true);
             settle(150);
             auto* text = type == "HomeMenuButton" ? button->findChild<QObject*>(QStringLiteral("homeMenuLabel"))
                 : button->property("contentItem").value<QQuickItem*>();
-            if (!text || text->property("color").value<QColor>() != button->property("buttonForeground").value<QColor>()) {
-                QTextStream(stderr) << "Button text=" << (text ? text->property("color").value<QColor>().name() : "missing")
-                    << " expected=" << button->property("buttonForeground").value<QColor>().name()
-                    << " dark=" << button->property("dark").toBool() << Qt::endl;
+            if (!text || text->property("color").value<QColor>() != button->property("buttonForeground").value<QColor>())
                 return fail("selected text");
-            }
             pointer(QEvent::MouseButtonPress, QPointF(100, 45), Qt::LeftButton, Qt::LeftButton);
+            if (!surface->property("pushed").toBool()) return fail("real pointer press");
             pointer(QEvent::MouseButtonRelease, QPointF(100, 45), Qt::LeftButton, Qt::NoButton);
-            if (!surface->property("recentClick").toBool()) return fail("click acknowledgement");
+            if (surface->property("pushed").toBool()) return fail("no synthetic click pulse");
             button->setProperty("enabled", false);
-            settle(metrics->property("buttonClickPulseMs").toInt() + metrics->property("buttonReleaseMs").toInt() + 30);
-            if (surface->property("pushed").toBool() || surface->opacity() >= 1) return fail("disabled");
+            settle(metrics->property("buttonReleaseMs").toInt() + 30);
+            if (surface->property("pushed").toBool() || surface->opacity() >= 1 || layer->opacity() > 0.001)
+                return fail("disabled");
         }
         host.hide();
     }

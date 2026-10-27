@@ -108,15 +108,8 @@ Rectangle {
     color: theme.surface
 
     component FlatButton: AppButton {
-        id: control
         dark: home.dark
-        padding: UiMetrics.buttonPadding
-        implicitWidth: Math.max(UiMetrics.buttonMinWidth, contentItem.implicitWidth + leftPadding + rightPadding)
-        implicitHeight: UiMetrics.controlHeight
-        background: ButtonFeedback {
-            button: control
-            normalColor: home.surface
-        }
+        appearance: AppButton.Surface
     }
     ScrollView {
         id: homeScroll

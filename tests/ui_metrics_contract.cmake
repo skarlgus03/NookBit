@@ -6,6 +6,10 @@ foreach(qml_file IN LISTS qml_files)
     continue()
   endif()
   file(READ "${qml_file}" source)
+  # 명령 버튼의 상태 배경은 AppButton 한곳에서만 생성하고 변형은 appearance로 선택한다.
+  if(NOT qml_name STREQUAL "AppButton.qml" AND source MATCHES "ButtonFeedback[ \t\r\n]*\\{")
+    message(FATAL_ERROR "${qml_name}: use AppButton appearance instead of overriding its feedback background")
+  endif()
   # 페이지는 Main의 id나 앱 전역 Controller를 숨은 의존성으로 사용하지 않는다.
   if(qml_name MATCHES "^(AppSettingsPage|CollisionSettingsPage|CompanionPage|DeveloperToolsPage|HistoryPage|RecoveryPage|WatchSettingsPage|FileSortPage|RuleEditorPage|RuleEditorState|RuleCanvas|RuleNodeCard|RuleInspector|RuleTestPanel|RuleEditorToolbar|RuleDocumentActions|RuleEditorButton|RuleEditorMenu|LegacyRuleEditorDialog|WatchProposalDialog|SortConfirmationDialog|OperationProgressPopup|GuideDownload)\\.qml$"
       AND source MATCHES "(root|extensionHost|previewController|pendingFiles|recoveryController|watchController|historyController|characterController|characterSettings|characterWindow|companionMotion|companionEdits|uiSettings|destinationSettings|backgroundTasks|userGuides|ruleEditor)\\.")

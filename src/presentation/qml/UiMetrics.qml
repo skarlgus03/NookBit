@@ -46,9 +46,6 @@ QtObject {
     readonly property int buttonDefaultWidth: 100
     readonly property int buttonTransitionMs: 90
     readonly property int buttonReleaseMs: 120
-    readonly property int buttonClickPulseMs: 130
-    readonly property real buttonPressedScale: 0.985
-    readonly property int buttonPressedOffset: 1
     readonly property int confirmationContentWidth: 640
     readonly property int confirmationContentHeight: 480
     readonly property int operationPopupWidth: 440

@@ -59,13 +59,27 @@ Use `LargeActionButton` for preview/sort and cancel/confirm pairs. It owns their
 
 ## Button feedback
 
-`ButtonFeedback` is the shared background for `AppButton`, large actions, home menus,
-file-page buttons, navigation and rule-editor commands. State colors live in `UiTheme`:
-ordinary commands have a visible border, hover uses an accent tint and stronger outline, press uses
-a deeper tint immediately, and checked/selected state keeps a persistent fill.
-Labels retain contrasting foreground colors, including checked buttons in light mode.
-Disabled controls are muted and cannot accept input. Numeric +/- indicators use the
-same hover/press colors.
+`AppButton` is the only factory for `ButtonFeedback`. Large actions, home menus,
+file-page buttons, navigation and rule-editor commands inherit it without replacing
+their backgrounds. `appearance` selects `Standard`, `Navigation`, `Menu`, or `Surface`;
+`primary` selects a primary action, `selected` contributes to persistent selection,
+`accentOutline` requests an idle accent outline, and `backgroundRadius` changes only
+shape. Pages do not supply hover/pressed colors. The contract test rejects separate
+`ButtonFeedback` backgrounds outside `AppButton`.
+
+`ButtonFeedback` resolves the actual state using `button.down`, hover, keyboard
+focus, selection and enabled state. Colors come from `buttonTheme` in `UiTheme`.
+One opaque interaction layer fades over the ordinary background. Its RGB never
+interpolates from transparent black: only its opacity changes. This avoids the dark
+intermediate flash that can occur when animating a transparent navigation background
+directly toward a pale hover color. There is no color or geometry animation on the
+button background itself.
+
+Ordinary commands use a full outline; pointer hover/press on home navigation remains
+borderless. Keyboard focus can show a full focus ring. Selected items retain their
+fill while hovered. Primary and selected navigation foregrounds are resolved in
+`AppButton`, including disabled text. Numeric +/- indicators keep their own input
+behavior and use the same theme hover/press tokens.
 
 Home navigation is borderless: 24 px icon and 16 px label are both left aligned,
 separated by `spaceGroup`, in a 48 px row. Unselected rows have no fill; hover adds a
@@ -74,12 +88,13 @@ foreground. Keyboard focus and press feedback remain visible. Menu command names
 do not include manually appended ellipses; genuine constrained text can still elide
 with a full-text tooltip.
 
-`buttonTransitionMs` (90 ms), `buttonReleaseMs` (120 ms), and `buttonClickPulseMs`
-(130 ms) control response timing. A short click retains its input acknowledgement
-briefly; it does not indicate that a background operation has completed.
-Only the background uses `buttonPressedScale` (0.985) and `buttonPressedOffset`
-(1 px). The control's layout bounds and hit area do not shrink or move.
-Common size tokens and icon/text alignment remain unchanged.
+`buttonTransitionMs` (90 ms) and `buttonReleaseMs` (120 ms) control the hover layer's
+fade in/out. Press state is immediate and ends when the pointer is released; there
+is no synthetic post-click timer. The top-edge click stripe, background scaling and
+vertical translation have been removed. Button bounds and content remain still.
+Smoke tests sample the whole hover transition for a stable opaque RGB and increasing
+opacity, then send real pointer press/release events across five button types in both
+themes. They also check selection, geometry, home outlines and disabled input state.
 
 Pending rows use `filePreviewSize` (48 px), with a `fileRowHeight` of 64 px. The presentation-only preview provider asynchronously decodes a small first-frame thumbnail for PNG/JPEG/WebP/BMP/GIF, honors image orientation, and preserves aspect ratio. To bound work, originals larger than 32 MiB or 16 megapixels are not decoded. Corrupt, missing, unsupported, or oversized images fall back to file-type icons. Thumbnails are not persisted to disk.
 

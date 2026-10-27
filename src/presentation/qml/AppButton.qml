@@ -5,10 +5,17 @@ import QtQuick.Window
 // 일반 명령 버튼은 공통 높이·글씨·아이콘 규격을 사용한다.
 Button {
     id: control
+    enum Appearance { Standard, Navigation, Menu, Surface }
     property bool dark: Window.window ? Window.window.palette.window.hslLightness < 0.5 : false
     property bool primary: false
+    property bool selected: false
+    property int appearance: AppButton.Standard
+    property bool accentOutline: false
+    property real backgroundRadius: UiMetrics.radiusControl
     readonly property var buttonTheme: UiTheme.colors(control.dark)
-    readonly property color buttonForeground: !enabled ? buttonTheme.muted : primary ? buttonTheme.accentText : buttonTheme.text
+    readonly property bool activeSelection: selected || checked || highlighted
+    readonly property color buttonForeground: !enabled ? buttonTheme.muted : primary ? buttonTheme.accentText
+        : appearance === AppButton.Navigation && activeSelection ? buttonTheme.navigationActiveText : buttonTheme.text
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset, UiMetrics.buttonMinWidth,
                            Math.ceil(Math.max(implicitContentWidth, labelMetrics.advanceWidth))
                            + leftPadding + rightPadding + UiMetrics.spaceExtraSmall)
@@ -31,5 +38,5 @@ Button {
     palette.disabled.buttonText: buttonTheme.muted
     palette.disabled.windowText: buttonTheme.muted
     palette.disabled.brightText: buttonTheme.muted
-    background: ButtonFeedback { button: control; primary: control.primary }
+    background: ButtonFeedback { button: control }
 }

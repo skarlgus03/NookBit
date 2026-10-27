@@ -84,13 +84,8 @@ ColumnLayout {
         property bool menuOpen: false
         Layout.minimumWidth: implicitWidth
         rightPadding: UiMetrics.dropdownTrailingPadding
-        background: ButtonFeedback {
-            button: menuButton
-            normalColor: "transparent"
-            selected: menuButton.menuOpen
-            selectedColor: toolbar.theme.buttonChecked
-            idleBorder: menuButton.menuOpen ? toolbar.theme.editorAccent : "transparent"
-        }
+        appearance: AppButton.Menu
+        selected: menuButton.menuOpen
         DropdownIndicator {
             anchors.right: parent.right
             anchors.rightMargin: UiMetrics.controlPadding
@@ -137,16 +132,12 @@ ColumnLayout {
             Layout.fillWidth: true
         }
         ThemeButton {
-            id: testAction
             Layout.minimumWidth: implicitWidth
             text: qsTr("규칙 테스트")
             objectName: "ruleTestButton"
-            background: ButtonFeedback {
-                button: testAction
-                normalColor: toolbar.surfaceColor
-                idleBorder: toolbar.theme.editorAccent
-                selected: toolbar.testOpened
-            }
+            appearance: AppButton.Surface
+            accentOutline: true
+            selected: toolbar.testOpened
             onClicked: toolbar.testRequested()
         }
         ThemeButton {

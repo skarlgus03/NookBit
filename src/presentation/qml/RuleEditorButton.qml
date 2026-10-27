@@ -6,7 +6,6 @@ import QtQuick.Layouts
 AppButton {
     id: themedButton
     property int labelAlignment: Text.AlignHCenter
-    padding: UiMetrics.buttonPadding
     contentItem: Text {
         text: themedButton.text
         font: themedButton.font
@@ -15,10 +14,5 @@ AppButton {
         verticalAlignment: Text.AlignVCenter
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
-    }
-    background: ButtonFeedback {
-        button: themedButton
-        primary: themedButton.primary
-        normalColor: themedButton.buttonTheme.button
     }
 }

@@ -4,10 +4,9 @@ import QtQuick.Controls
 // 아이콘과 글씨를 왼쪽에 정렬하고 현재 페이지에만 선택 배경을 표시하는 버튼.
 AppButton {
     id: control
-    property bool selected: false
     property string iconKind: "folder"
-    readonly property var theme: UiTheme.colors(control.dark)
-    readonly property color foreground: !enabled ? theme.muted : selected ? theme.navigationActiveText : theme.text
+    appearance: AppButton.Navigation
+    readonly property color foreground: buttonForeground
     implicitHeight: UiMetrics.mainNavigationHeight
     leftPadding: UiMetrics.controlPadding
     rightPadding: UiMetrics.controlPadding
@@ -38,13 +37,5 @@ AppButton {
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
-    }
-    background: ButtonFeedback {
-        button: control
-        selected: control.selected
-        showBorder: false
-        normalColor: "transparent"
-        hoverColor: control.theme.alternate
-        selectedColor: control.theme.menuSelected
     }
 }

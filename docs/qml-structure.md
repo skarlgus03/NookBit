@@ -30,6 +30,9 @@
 - 페이지는 필요한 Controller·데이터를 `required property`로 받는다. 앱 컨텍스트의
   `previewController`, `watchController` 같은 이름이나 Main의 `root`·`extensionHost`를
   직접 참조하지 않는다. Controller는 빌려 사용하며 새로 생성하거나 소유하지 않는다.
+- 명령 버튼의 배경은 `AppButton`만 생성한다. 페이지·파생 버튼은 `appearance`,
+  `primary`, `selected`, `accentOutline` 같은 역할만 고르고 별도 상태 배경을 만들지 않는다.
+  상태별 채움·전체 테두리는 `ButtonFeedback`, 실제 색은 `UiTheme`가 결정한다.
 - 페이지 이동과 다른 기능의 테스트는 `signal`로 요청한다. Main이 이 요청을 받아
   페이지 번호를 바꾸거나 해당 기능의 창구에 전달한다.
 - `PageSurface.open()`·`close()`는 요청을 발생시키는 함수다. 실제 표시 여부는
