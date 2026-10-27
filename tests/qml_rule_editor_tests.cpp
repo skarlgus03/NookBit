@@ -110,6 +110,12 @@ int main(int argc, char** argv) {
         for (const QString role : {QStringLiteral("success"), QStringLiteral("warning"), QStringLiteral("danger")})
             expect(contrast(QColor(colors.value(role).toString()), QColor(colors.value(role + "Surface").toString())) >= 4.5,
                 "semantic status text remains readable on its corresponding background");
+        const auto fileTypes = colors.value("fileTypes").toMap();
+        for (const auto& value : fileTypes) {
+            const auto swatch = value.toMap();
+            expect(contrast(QColor(swatch.value("foreground").toString()), QColor(swatch.value("background").toString())) >= 4.5,
+                "file type labels contrast with their category tiles in both themes");
+        }
         const QColor accent(colors.value("accent").toString()), marquee = colors.value("marquee").value<QColor>();
         expect(marquee.isValid() && qAbs(marquee.alphaF() - 0.2) < 0.01
             && qAbs(marquee.redF() - accent.redF()) < 0.01 && qAbs(marquee.blueF() - accent.blueF()) < 0.01,

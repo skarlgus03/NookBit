@@ -130,22 +130,12 @@ Item {
                         width: files.width - UiMetrics.spaceControl
                         height: Math.max(UiMetrics.fileRowHeight, fileText.implicitHeight + UiMetrics.spaceGroup)
                         spacing: UiMetrics.spaceGroup
-                        Rectangle {
+                        FileTypeBadge {
+                            objectName: "historyFileType_" + modelData.fileName
                             Layout.preferredWidth: UiMetrics.historyTypeTileSize
                             Layout.preferredHeight: UiMetrics.historyTypeTileSize
-                            color: detail.theme.editorTint
-                            radius: UiMetrics.radiusControl
-                            Label {
-                                anchors.centerIn: parent
-                                width: parent.width - UiMetrics.spaceTiny * 2
-                                text: modelData.fileName.lastIndexOf(".") > 0 ? modelData.fileName.slice(modelData.fileName.lastIndexOf(".") + 1).toUpperCase() : qsTr("파일")
-                                textFormat: Text.PlainText
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                                color: detail.theme.accentSoftText
-                                font.pixelSize: UiMetrics.textBody
-                                font.bold: true
-                            }
+                            fileName: modelData.fileName
+                            dark: detail.dark
                         }
                         ColumnLayout {
                             id: fileText

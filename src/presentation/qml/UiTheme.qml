@@ -12,7 +12,14 @@ QtObject {
         navigationHover: "#dedce9", navigationSelected: "#d4d0e6", navigationPressed: "#c9c5df",
         success: "#28764e", successSoft: "#edf7f0",
         warning: "#946020", warningSoft: "#fff4df",
-        danger: "#ac423a", dangerSoft: "#fff0ee"
+        danger: "#ac423a", dangerSoft: "#fff0ee",
+        fileTypes: {
+            image: {background: "#f8e9d9", foreground: "#8e4c16"},
+            document: {background: "#e5edf8", foreground: "#2f588a"},
+            archive: {background: "#eee5f7", foreground: "#6b3d92"},
+            video: {background: "#f8e3ec", foreground: "#924265"},
+            audio: {background: "#dff0ee", foreground: "#28645f"}
+        }
     })
     readonly property var darkPalette: ({
         window: "#16161f", surface: "#20202c", raised: "#2a2a3a",
@@ -21,7 +28,14 @@ QtObject {
         accentSoft: "#2a2a48", focus: "#c3c8f7", pressedSoft: "#34345a",
         success: "#8eccaa", successSoft: "#203d31",
         warning: "#e8bf7c", warningSoft: "#463720",
-        danger: "#f1a79c", dangerSoft: "#432b32"
+        danger: "#f1a79c", dangerSoft: "#432b32",
+        fileTypes: {
+            image: {background: "#432f22", foreground: "#f0bb85"},
+            document: {background: "#25344a", foreground: "#a4c6f1"},
+            archive: {background: "#372a49", foreground: "#d0b2f0"},
+            video: {background: "#452b3a", foreground: "#efb1cf"},
+            audio: {background: "#243d3b", foreground: "#9ed6cd"}
+        }
     })
     // 노드의 종류는 기능 구분에 필요한 색만 사용하며 두 테마에서 공유한다.
     readonly property var nodePalette: ({
@@ -55,6 +69,7 @@ QtObject {
             buttonBorder: p.border, buttonFocus: p.focus, primaryHover: p.hover, primaryPressed: p.pressed,
             editorAccent: p.accent, editorTint: p.accentSoft,
             editorCanvas: p.window, editorGrid: p.grid,
+            fileTypes: Object.assign({other: {background: p.raised, foreground: p.muted}}, p.fileTypes),
             success: p.success, successSurface: p.successSoft, successBorder: p.success,
             warning: p.warning, warningSurface: p.warningSoft, danger: p.danger, dangerSurface: p.dangerSoft,
             bubbleSurface: p.surface, bubbleBorder: p.border, bubbleAction: p.accent,

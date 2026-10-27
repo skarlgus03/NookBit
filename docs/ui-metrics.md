@@ -168,6 +168,14 @@ The bottom action area uses `historyFooterHeight` (76 px) and the shared soft un
 button, preserving the original confirmation dialog. Busy work disables refresh,
 selection and undo. No inactive search or location-opening controls are shown.
 
+History file tiles use the reusable `FileTypeBadge`, with case-insensitive extension
+groups: images (orange), documents including PDF (blue), archives (purple), videos
+(rose), audio (teal), and other/extensionless files (neutral). Extension letters stay
+visible so color is not the only cue. `UiTheme` owns each light/dark background and
+foreground pair under `fileTypes`; the neutral pair derives from raised/muted roles.
+The text/background pairs are checked for at least 4.5:1 contrast. Classification is
+presentation-only and reads the filename, never file contents or organizing rules.
+
 ## Deliberate exceptions
 
 Not every number is a design token. Window positioning and sizes, canvas coordinates, hit testing, image crop rectangles, animation timing, and ImagePack pivots/scales are feature geometry or data, not shared control metrics. Do not mechanically replace these with unrelated spacing tokens. Character drawing proportions also remain local.

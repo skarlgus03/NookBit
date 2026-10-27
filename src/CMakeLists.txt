@@ -190,6 +190,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/HistoryPage.qml
           presentation/qml/HistoryTimeline.qml
           presentation/qml/HistoryDetail.qml
+          presentation/qml/FileTypeBadge.qml
         presentation/qml/RecoveryPage.qml
         presentation/qml/CompanionPage.qml
         presentation/qml/AppSettingsPage.qml

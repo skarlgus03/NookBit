@@ -19,6 +19,7 @@
 | `HistoryPage.qml` | 기록 표시, 작업 선택, 되돌리기 확인창 |
 | `HistoryTimeline.qml` | 전달된 최근 기록의 날짜별 목록, 선택·새로고침 요청 |
 | `HistoryDetail.qml` | 선택 기록의 요약·파일 경로, 되돌리기 요청. Controller를 알지 않는다. |
+| `FileTypeBadge.qml` | 파일명에서 확장자 종류만 판별하고 공통 테마의 의미색·글씨로 표시 |
 | `RecoveryPage.qml` | 중단 작업 목록과 복구 승인 확인창 |
 | `CompanionPage.qml` | 팩 선택·표시 설정, 미리보기 연결, 가져오기·가이드·개인 보정 창 |
 | `FileSortPage.qml` | 대기 목록과 미리보기·확인·진행·결과 화면의 전환 상태 |

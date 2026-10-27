@@ -312,6 +312,12 @@ int main(int argc, char** argv) {
         auto* undoAction = find(find, detailItem, "historyUndoButton");
         auto* moved = find(find, detailItem, "historyAppliedSummary");
         auto* restored = find(find, detailItem, "historyRolledBackSummary");
+        auto* documentBadge = find(find, detailItem, "historyFileType_report.pdf");
+        auto* imageBadge = find(find, detailItem, "historyFileType_photo.png");
+        expect(documentBadge && imageBadge && documentBadge->property("category").toString() == "document"
+            && imageBadge->property("category").toString() == "image"
+            && documentBadge->property("color") != imageBadge->property("color"),
+            "history uses distinct document and image tiles in both themes");
         expect(moved && restored && moved->property("count").toInt() == 1 && restored->property("count").toInt() == 1,
             "history counts distinguish current moves from restored files independently of translated labels");
         expect(undoAction && undoAction->isEnabled()
