@@ -9,6 +9,7 @@ ColumnLayout {
     required property Item canvasHost
     property string guideStatus: ""
     property bool testOpened: false
+    property bool hasUnsavedChanges: false
     signal saveRequested
     signal testRequested
     signal importRequested
@@ -17,7 +18,7 @@ ColumnLayout {
     signal guideRequested
     signal addRequested
     signal focusCanvasRequested
-    spacing: UiMetrics.spaceGroup
+    spacing: UiMetrics.spaceControl
     property bool dark: false
     readonly property var theme: UiTheme.colors(dark)
     readonly property color surfaceColor: theme.surface
@@ -108,35 +109,38 @@ ColumnLayout {
     }
     RowLayout {
         Layout.fillWidth: true
-        spacing: UiMetrics.spaceSection
-        Rectangle {
-            implicitWidth: UiMetrics.controlHeight
-            implicitHeight: UiMetrics.controlHeight
-            radius: UiMetrics.radiusControl
-            color: toolbar.theme.editorTint
-            NavigationIcon {
-                anchors.centerIn: parent
-                width: UiMetrics.navigationIconSize
-                height: UiMetrics.navigationIconSize
-                kind: "rules"
-                strokeColor: toolbar.theme.editorAccent
+        spacing: UiMetrics.spaceGroup
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            spacing: UiMetrics.spaceTiny
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("분류 흐름")
+                font.pixelSize: UiMetrics.textSectionTitle
+                font.bold: true
+                color: toolbar.primaryText
+                elide: Text.ElideRight
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("블록 %1개 · 연결 %2개").arg(toolbar.editor.blocks.length).arg(toolbar.editor.edges.length)
+                font.pixelSize: UiMetrics.textBody
+                color: toolbar.mutedText
+                elide: Text.ElideRight
             }
         }
         Label {
-            text: qsTr("분류 규칙")
-            font.pixelSize: UiMetrics.textPageTitle
-            font.bold: true
-            color: toolbar.primaryText
-        }
-        Item {
-            Layout.fillWidth: true
+            objectName: "ruleSaveState"
+            text: toolbar.hasUnsavedChanges ? qsTr("저장하지 않은 변경") : qsTr("저장됨")
+            font.pixelSize: UiMetrics.textBody
+            color: toolbar.hasUnsavedChanges ? toolbar.theme.accent : toolbar.mutedText
         }
         ThemeButton {
             Layout.minimumWidth: implicitWidth
             text: qsTr("규칙 테스트")
             objectName: "ruleTestButton"
             appearance: AppButton.Surface
-            accentOutline: true
             selected: toolbar.testOpened
             onClicked: toolbar.testRequested()
         }
@@ -163,14 +167,14 @@ ColumnLayout {
     Rectangle {
         objectName: "ruleEditorToolbar"
         Layout.fillWidth: true
-        implicitHeight: toolbarContents.implicitHeight + UiMetrics.spaceControl * 2
+        implicitHeight: toolbarContents.implicitHeight + UiMetrics.spaceExtraSmall * 2
         radius: UiMetrics.radiusControl
-        color: toolbar.theme.editorTint
+        color: toolbar.theme.surface
         RowLayout {
             id: toolbarContents
             anchors.fill: parent
-            anchors.margins: UiMetrics.spaceControl
-            spacing: UiMetrics.spaceSection
+            anchors.margins: UiMetrics.spaceExtraSmall
+            spacing: UiMetrics.spaceExtraSmall
             MenuButton {
                 id: jsonFileButton
                 objectName: "ruleFileMenuButton"
@@ -205,6 +209,19 @@ ColumnLayout {
             }
             Item {
                 Layout.fillWidth: true
+            }
+            ThemeButton {
+                objectName: "ruleQuickAddButton"
+                text: qsTr("+ 블록 추가")
+                flat: true
+                onClicked: toolbar.addRequested()
+            }
+            Rectangle {
+                Layout.preferredWidth: UiMetrics.borderNormal
+                Layout.preferredHeight: UiMetrics.iconSize
+                Layout.leftMargin: UiMetrics.spaceControl
+                Layout.rightMargin: UiMetrics.spaceControl
+                color: toolbar.borderColor
             }
             Label {
                 text: qsTr("%1%").arg(Math.round(toolbar.editor.zoom * 100))

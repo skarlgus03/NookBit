@@ -267,6 +267,41 @@ int main(int argc, char** argv) {
     call(engine, documents.get(), "saveAll");
     expect(controller->property("layouts").toInt() == 1 && list(state.get(), "blocks") == unsaved
         && !state->property("stagedGraph").toBool(), "save failure cannot claim a saved graph or discard its draft");
+    // 최소 편집기 폭에서도 메뉴와 주요 명령이 잘리거나 겹치지 않는지 검사한다.
+    auto toolbar = create(engine, "RuleEditorToolbar", {{"editor", QVariant::fromValue(state.get())},
+        {"canvasHost", QVariant::fromValue(host.contentItem())}, {"width", 828}});
+    auto inspector = create(engine, "RuleInspector", {{"editor", QVariant::fromValue(state.get())},
+        {"destinations", QVariant::fromValue(controller.get())}, {"overlayHost", QVariant::fromValue(host.contentItem())},
+        {"width", metrics->property("ruleInspectorWidth")}, {"height", 480}});
+    if (!toolbar || !inspector) return 1;
+    auto* toolbarItem = qobject_cast<QQuickItem*>(toolbar.get());
+    toolbarItem->setParentItem(host.contentItem());
+    qobject_cast<QQuickItem*>(inspector.get())->setParentItem(host.contentItem());
+    for (bool dark : {false, true}) {
+        toolbar->setProperty("dark", dark);
+        inspector->setProperty("dark", dark);
+        settle();
+        auto* save = toolbar->findChild<QQuickItem*>("ruleSaveButton");
+        auto* test = toolbar->findChild<QQuickItem*>("ruleTestButton");
+        auto* quickAdd = toolbar->findChild<QQuickItem*>("ruleQuickAddButton");
+        auto* view = toolbar->findChild<QQuickItem*>("ruleViewMenuButton");
+        if (!save || !test || !quickAdd || !view) return 1;
+        expect(test->mapToItem(toolbarItem, QPointF(test->width(), 0)).x() <= save->mapToItem(toolbarItem, QPointF()).x()
+            && save->mapToItem(toolbarItem, QPointF(save->width(), 0)).x() <= toolbarItem->width()
+            && view->mapToItem(toolbarItem, QPointF(view->width(), 0)).x() <= quickAdd->mapToItem(toolbarItem, QPointF()).x(),
+            "compact editor menus and main actions fit the minimum content width in both themes");
+    }
+    auto* savedState = toolbar->findChild<QObject*>("ruleSaveState");
+    toolbar->setProperty("hasUnsavedChanges", true);
+    expect(savedState && savedState->property("text").toString().contains(QStringLiteral("변경")),
+        "toolbar reflects unsaved changes without writing the document");
+    call(engine, state.get(), "selectOnly", {2});
+    auto* value = inspector->findChild<QQuickItem*>("ruleInspectorValue");
+    expect(value && value->isVisible() && inspector->property("valueLabel").toString() == QStringLiteral("파일 크기"),
+        "inspector labels the selected condition's actual input");
+    call(engine, state.get(), "selectOnly", {1});
+    expect(value && !value->isVisible() && inspector->property("selectionKind").toString() == QStringLiteral("시작점"),
+        "the unique input node has guidance instead of an editable condition value");
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

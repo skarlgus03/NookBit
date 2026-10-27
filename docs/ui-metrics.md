@@ -126,6 +126,16 @@ actions, retaining `LargeActionButton` height (60 px). There is no new clear-all
 The informational `FileSortStepper` has four stages, mapping execution and completion
 to the final stage. Existing panes slide below it without changing workflow logic.
 
+The rule editor uses shared 16 px page insets and an unaccented surface for the menu
+strip. Its compact heading reports block/connection counts and receives unsaved
+state from the page; it never performs persistence itself. The inspector width is
+`ruleInspectorWidth` (280 px), with a selection summary of at least
+`ruleSelectionHeaderHeight` (80 px). Condition inputs have type-specific labels,
+comparison/unit headings and the common `AppTextField` focus/hover treatment.
+The `ruleStatusHeight` (28 px) footer reserves a single stable line for status plus
+selection count; truncated status is available in a full-text tooltip. Node geometry,
+palette categories, camera behavior and connection semantics are unchanged.
+
 The underlying icon provider fetches Windows association icons using extension-based synthetic names and `SHGFI_USEFILEATTRIBUTES`, without reading real-file content. It caches at most 128 file types and falls back to a generic document icon. Core file classification and movement are not involved. Dragging files over the page shows a translucent white veil and a readable centered instruction; it does not alter the ordinary button hover style.
 
 ## Progress, recovery and history pages

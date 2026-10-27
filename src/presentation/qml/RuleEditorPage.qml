@@ -76,7 +76,7 @@ Item {
     }
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: UiMetrics.editorInset
+        anchors.margins: UiMetrics.spaceSection
         spacing: UiMetrics.spaceGroup
         RuleEditorToolbar {
             id: toolbar
@@ -86,6 +86,7 @@ Item {
             dark: page.darkMode
             testOpened: testPanel.visible
             guideStatus: documents.guideStatus
+            hasUnsavedChanges: session.graphDirty || page.controller.dirty || page.oldEditorFormDirty
             onSaveRequested: documents.requestSave()
             onTestRequested: testPanel.visible ? testPanel.close() : testPanel.open()
             onImportRequested: documents.requestImport()
@@ -108,7 +109,7 @@ Item {
             }
             RuleInspector {
                 id: inspector
-                Layout.preferredWidth: 238
+                Layout.preferredWidth: UiMetrics.ruleInspectorWidth
                 Layout.fillHeight: true
                 editor: session
                 destinations: page.destinations
@@ -116,20 +117,31 @@ Item {
                 dark: page.darkMode
             }
         }
-        Label {
-            id: editorStatus
+        RowLayout {
             Layout.fillWidth: true
-            text: session.statusText
-            color: page.theme.muted
-            wrapMode: Text.Wrap
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            HoverHandler {
-                id: statusHover
+            Layout.preferredHeight: UiMetrics.ruleStatusHeight
+            spacing: UiMetrics.spaceGroup
+            Label {
+                id: editorStatus
+                objectName: "ruleEditorStatus"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: session.statusText
+                textFormat: Text.PlainText
+                font.pixelSize: UiMetrics.textBody
+                color: page.theme.muted
+                elide: Text.ElideRight
+                HoverHandler { id: statusHover }
+                ToolTip.visible: statusHover.hovered && editorStatus.truncated
+                ToolTip.text: editorStatus.text
+                ToolTip.delay: UiMetrics.tooltipDelayMs
             }
-            ToolTip.visible: statusHover.hovered && editorStatus.truncated
-            ToolTip.text: editorStatus.text
-            ToolTip.delay: UiMetrics.tooltipDelayMs
+            Label {
+                visible: session.selectedIds.length > 0
+                text: qsTr("%1개 선택").arg(session.selectedIds.length)
+                font.pixelSize: UiMetrics.textBody
+                color: page.theme.accent
+            }
         }
     }
     RuleTestPanel {

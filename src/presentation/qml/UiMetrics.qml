@@ -26,6 +26,9 @@ QtObject {
     readonly property int nodeAddMenuWidth: 224
     readonly property int ruleMenuWidth: 260
     readonly property int ruleHelpWidth: 440
+    readonly property int ruleInspectorWidth: 280
+    readonly property int ruleStatusHeight: 28
+    readonly property int ruleSelectionHeaderHeight: 80
     readonly property int shortcutKeyWidth: 160
     readonly property int tooltipDelayMs: 500
     readonly property int primaryActionHeight: 46

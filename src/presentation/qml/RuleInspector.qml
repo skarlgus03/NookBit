@@ -6,6 +6,7 @@ import QtQuick.Dialogs
 // 선택 블록의 설정과 목적지 선택창만 소유하는 패널.
 Frame {
     id: inspector
+    objectName: "ruleInspector"
     required property var editor
     property bool dark: false
     readonly property var theme: UiTheme.colors(dark)
@@ -19,6 +20,13 @@ Frame {
     required property Item overlayHost
     property int folderTargetId: -1
     property string externalFolder: ""
+    readonly property string selectedType: editor.selectedBlock ? editor.selectedBlock.type : ""
+    readonly property string selectionKind: selectedType === "start" ? qsTr("시작점")
+        : ["destination", "exclude"].includes(selectedType) ? qsTr("종착점")
+        : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
+    readonly property string valueLabel: selectedType === "destination" ? qsTr("목적지 경로")
+        : selectedType === "extension" ? qsTr("확장자") : selectedType === "name" ? qsTr("이름에 포함할 글자")
+        : selectedType === "size" ? qsTr("파일 크기") : selectedType === "age" ? qsTr("수정 후 경과일") : qsTr("표시 값")
     padding: UiMetrics.spaceSection
     background: Rectangle {
         radius: UiMetrics.radiusPanel
@@ -43,16 +51,42 @@ Frame {
                 font.bold: true
                 color: inspector.primaryText
             }
-            Label {
+            Rectangle {
                 Layout.fillWidth: true
-                text: inspector.editor.selectedIds.length > 1 ? qsTr("%1개 블록 선택됨 · 함께 이동하거나 Delete로 제거할 수 있어요.").arg(
-                                                                    inspector.editor.selectedIds.length) :
-                                                                inspector.editor.selectedBlock
-                                                                ? inspector.editor.titleFor(
-                                                                      inspector.editor.selectedBlock.type) : qsTr(
-                                                                      "블록을 선택하세요")
-                wrapMode: Text.WordWrap
-                color: inspector.mutedText
+                Layout.preferredHeight: UiMetrics.borderNormal
+                color: inspector.borderColor
+            }
+            Rectangle {
+                objectName: "ruleSelectionSummary"
+                Layout.fillWidth: true
+                implicitHeight: Math.max(UiMetrics.ruleSelectionHeaderHeight, selectionText.implicitHeight + UiMetrics.spaceGroup * 2)
+                color: inspector.theme.window
+                radius: UiMetrics.radiusControl
+                ColumnLayout {
+                    id: selectionText
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.margins: UiMetrics.spaceGroup
+                    spacing: UiMetrics.spaceExtraSmall
+                    Label {
+                        Layout.fillWidth: true
+                        text: inspector.editor.selectedIds.length > 1 ? qsTr("%1개 블록 선택됨").arg(inspector.editor.selectedIds.length)
+                            : inspector.editor.selectedBlock ? inspector.editor.titleFor(inspector.selectedType) : qsTr("선택한 블록이 없어요")
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: UiMetrics.textEmphasis
+                        font.bold: true
+                        color: inspector.primaryText
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: inspector.editor.selectedIds.length > 1 ? qsTr("함께 이동하거나 세로로 정렬할 수 있어요.")
+                            : inspector.editor.selectedBlock ? inspector.selectionKind : qsTr("캔버스에서 블록을 선택해 주세요.")
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: UiMetrics.textBody
+                        color: inspector.mutedText
+                    }
+                }
             }
             Label {
                 Layout.fillWidth: true
@@ -63,15 +97,17 @@ Frame {
             }
             Label {
                 Layout.fillWidth: true
-                text: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type === "destination" ? qsTr(
-                                                                                                                    "목적지 경로") :
-                                                                                                                qsTr("표시 값")
+                text: inspector.valueLabel
+                font.pixelSize: UiMetrics.textBody
+                font.bold: true
+                color: inspector.primaryText
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
             }
             AppTextField {
                 id: inspectorValue
+                objectName: "ruleInspectorValue"
                 Layout.fillWidth: true
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
@@ -81,14 +117,10 @@ Frame {
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
                                                                                                                   "사진/여행") :
                                                                                                               qsTr("D:/중요자료")) :
-                                                     qsTr("예시 값")
+                                                     inspector.selectedType === "extension" ? qsTr("png, jpg, webp")
+                    : inspector.selectedType === "name" ? qsTr("포함할 글자") : qsTr("숫자 입력")
                 color: inspector.primaryText
                 placeholderTextColor: inspector.mutedText
-                background: Rectangle {
-                    radius: UiMetrics.radiusInner
-                    color: inspector.nodeColor
-                    border.color: inspector.borderColor
-                }
                 onEditingFinished: {
                     if (inspector.editor.selectedBlock)
                         inspector.editor.updateValue(inspector.editor.selectedBlock.id, text);
@@ -143,6 +175,14 @@ Frame {
                     externalDestinationConfirm.open();
                 }
             }
+            Label {
+                Layout.fillWidth: true
+                visible: ["size", "age"].includes(inspector.selectedType)
+                text: qsTr("비교 방법")
+                font.pixelSize: UiMetrics.textBody
+                font.bold: true
+                color: inspector.primaryText
+            }
             AppComboBox {
                 objectName: "sizeComparisonCombo"
                 Layout.fillWidth: true
@@ -187,6 +227,14 @@ Frame {
                                                                                         === inspector.editor.selectedBlock.comparison) :
                                                                -1
                 onActivated: inspector.editor.setComparison(inspector.editor.selectedId, currentValue)
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "size"
+                text: qsTr("단위")
+                font.pixelSize: UiMetrics.textBody
+                font.bold: true
+                color: inspector.primaryText
             }
             AppComboBox {
                 objectName: "sizeUnitCombo"
@@ -239,10 +287,25 @@ Frame {
             }
             Label {
                 Layout.fillWidth: true
+                visible: inspector.selectedType === "otherwise"
+                text: qsTr("같은 부모의 다른 조건이 모두 맞지 않을 때 이 가지로 진행해요.")
+                wrapMode: Text.WordWrap
+                font.pixelSize: UiMetrics.textBody
+                color: inspector.mutedText
+            }
+            Label {
+                Layout.fillWidth: true
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type === "exclude"
                 text: qsTr("이 가지에 도달한 파일은 이동하지 않고, 전체 예외도 적용하지 않아요.")
                 wrapMode: Text.WordWrap
                 color: inspector.mutedText
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: UiMetrics.spaceControl
+                Layout.preferredHeight: UiMetrics.borderNormal
+                visible: inspector.editor.orderFor(inspector.editor.selectedId) > 0
+                color: inspector.borderColor
             }
             Label {
                 Layout.fillWidth: true
