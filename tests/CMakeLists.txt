@@ -399,12 +399,20 @@ if(TARGET nookbit_json_config)
     "-DNOOKBIT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/ui_metrics_contract.cmake")
   add_executable(nookbit_qml_page_boundaries_tests qml_page_boundaries_tests.cpp)
+  add_executable(nookbit_qml_rule_editor_tests qml_rule_editor_tests.cpp)
+  target_compile_definitions(nookbit_qml_rule_editor_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_qml_rule_editor_tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
+  add_test(NAME nookbit_qml_rule_editor_tests COMMAND nookbit_qml_rule_editor_tests)
+  set_tests_properties(nookbit_qml_rule_editor_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic")
   target_compile_definitions(nookbit_qml_page_boundaries_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   target_link_libraries(nookbit_qml_page_boundaries_tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
   add_test(NAME nookbit_qml_page_boundaries_tests COMMAND nookbit_qml_page_boundaries_tests)
   set_tests_properties(nookbit_qml_page_boundaries_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic")
   if(WIN32)
+    set_tests_properties(nookbit_qml_rule_editor_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     set_tests_properties(nookbit_qml_page_boundaries_tests PROPERTIES
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()

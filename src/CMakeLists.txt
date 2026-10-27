@@ -229,6 +229,15 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/CharacterBubble.qml
         presentation/qml/CharacterBubbleView.qml
         presentation/qml/RuleEditorPage.qml
+        presentation/qml/RuleEditorState.qml
+        presentation/qml/RuleEditorButton.qml
+        presentation/qml/RuleEditorMenu.qml
+        presentation/qml/RuleNodeCard.qml
+        presentation/qml/RuleCanvas.qml
+        presentation/qml/RuleInspector.qml
+        presentation/qml/RuleTestPanel.qml
+        presentation/qml/RuleEditorToolbar.qml
+        presentation/qml/RuleDocumentActions.qml
     )
 
     target_link_libraries(nookbit PRIVATE
