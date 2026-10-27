@@ -41,6 +41,30 @@ QString historyStepStatusText(StepStatus status) {
     }
 }
 
+// 기록의 저장 상태에서 화면의 의미색만 결정하는 함수.
+QString historyStatusTone(PlanStatus status) {
+    switch (status) {
+    case PlanStatus::Completed:
+    case PlanStatus::RolledBack: return QStringLiteral("success");
+    case PlanStatus::Failed: return QStringLiteral("danger");
+    case PlanStatus::NeedsRecovery:
+    case PlanStatus::Executing:
+    case PlanStatus::RollingBack: return QStringLiteral("warning");
+    default: return QStringLiteral("neutral");
+    }
+}
+
+// 파일의 저장 상태를 번역 문구와 독립적인 표시 정보로 바꾸는 함수.
+QString historyStatusTone(StepStatus status) {
+    switch (status) {
+    case StepStatus::Applied:
+    case StepStatus::RolledBack: return QStringLiteral("success");
+    case StepStatus::Failed: return QStringLiteral("danger");
+    case StepStatus::NeedsRecovery: return QStringLiteral("warning");
+    default: return QStringLiteral("neutral");
+    }
+}
+
 } // namespace
 
 // 기록 조회와 외부 소유 파일 실행 계약으로 기록 화면을 준비하는 생성자.
@@ -106,6 +130,13 @@ void HistoryController::refreshHistory() {
             ? utc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd hh:mm"))
             : QString::fromStdString(entry.lastActivityUtc));
         row.insert(QStringLiteral("status"), historyStatusText(entry.status));
+        row.insert(QStringLiteral("statusTone"), historyStatusTone(entry.status));
+        const auto local = utc.toLocalTime();
+        row.insert(QStringLiteral("shortTime"), utc.isValid() ? local.toString(QStringLiteral("hh:mm")) : row.value("time").toString());
+        const auto dateLabel = local.date() == today ? QStringLiteral("오늘")
+            : local.date() == today.addDays(-1) ? QStringLiteral("어제") : local.toString(QStringLiteral("M월 d일"));
+        row.insert(QStringLiteral("detailTime"), utc.isValid()
+            ? dateLabel + " " + local.toString(QStringLiteral("hh:mm")) : row.value("time").toString());
         row.insert(QStringLiteral("fileCount"), entry.fileCount);
         row.insert(QStringLiteral("appliedCount"), entry.appliedCount);
         historyEntries_.append(row);
@@ -145,6 +176,9 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         row.insert(QStringLiteral("source"), displayPath(step.source));
         row.insert(QStringLiteral("destination"), displayPath(step.destination));
         row.insert(QStringLiteral("status"), historyStepStatusText(step.status));
+        row.insert(QStringLiteral("statusTone"), historyStatusTone(step.status));
+        row.insert(QStringLiteral("applied"), step.status == StepStatus::Applied);
+        row.insert(QStringLiteral("rolledBack"), step.status == StepStatus::RolledBack);
         if (step.failure) row["status"] = historyStepStatusText(step.status) + QStringLiteral(": %1 (%2)")
             .arg(QString::fromStdString(step.failure->message), QString::fromStdString(step.failure->code));
         historySteps_.append(row);

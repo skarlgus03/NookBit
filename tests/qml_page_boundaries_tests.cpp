@@ -294,6 +294,33 @@ int main(int argc, char** argv) {
     auto stepper = create(engine, "FileSortStepper", {{"workflowStep", 4}});
     expect(stepper && stepper->property("currentStep").toInt() == 3,
         "execution and completion share the last informational step without adding a new workflow state");
+    // 되돌림 요약은 번역된 상태 문구가 아니라 전달된 실제 상태 플래그로 집계하는 검사.
+    const QVariantList historyFiles{
+        QVariantMap{{"fileName", "report.pdf"}, {"source", "C:/Downloads/report.pdf"}, {"destination", "D:/Archive/report.pdf"},
+            {"status", "localized state"}, {"statusTone", "success"}, {"applied", true}, {"rolledBack", false}},
+        QVariantMap{{"fileName", "photo.png"}, {"source", "C:/Downloads/photo.png"}, {"destination", "D:/Pictures/photo.png"},
+            {"status", "another localized state"}, {"statusTone", "success"}, {"applied", false}, {"rolledBack", true}}};
+    auto historyDetail = create(engine, "HistoryDetail", {{"width", 559}, {"height", 480}, {"steps", historyFiles},
+        {"entry", QVariantMap{{"time", "2026-10-27 21:21"}, {"status", "Completed"}, {"statusTone", "success"}, {"fileCount", 2}}},
+        {"canUndo", true}, {"undoCount", 1}});
+    if (!historyDetail) return 1;
+    auto* detailItem = qobject_cast<QQuickItem*>(historyDetail.get());
+    detailItem->setParentItem(host.contentItem());
+    for (bool dark : {false, true}) {
+        historyDetail->setProperty("dark", dark);
+        settle();
+        auto* undoAction = find(find, detailItem, "historyUndoButton");
+        auto* moved = find(find, detailItem, "historyAppliedSummary");
+        auto* restored = find(find, detailItem, "historyRolledBackSummary");
+        expect(moved && restored && moved->property("count").toInt() == 1 && restored->property("count").toInt() == 1,
+            "history counts distinguish current moves from restored files independently of translated labels");
+        expect(undoAction && undoAction->isEnabled()
+            && undoAction->mapToItem(detailItem, QPointF(undoAction->width(), undoAction->height())).x() <= detailItem->width()
+            && undoAction->mapToItem(detailItem, QPointF(undoAction->width(), undoAction->height())).y() <= detailItem->height(),
+            "history undo stays reachable within the minimum detail size in both themes");
+    }
+    historyDetail->setProperty("busy", true);
+    expect(!find(find, detailItem, "historyUndoButton")->isEnabled(), "history cannot issue a second undo while file work is busy");
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

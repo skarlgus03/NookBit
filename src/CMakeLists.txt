@@ -188,6 +188,8 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/NavigationButton.qml
         presentation/qml/WatchSettingsPage.qml
         presentation/qml/HistoryPage.qml
+          presentation/qml/HistoryTimeline.qml
+          presentation/qml/HistoryDetail.qml
         presentation/qml/RecoveryPage.qml
         presentation/qml/CompanionPage.qml
         presentation/qml/AppSettingsPage.qml

@@ -1363,11 +1363,21 @@ void testHistoryUndoUpdatesLastMove() {
     const auto row = history.historyEntries().front().toMap();
     expect(row.value("dateGroup").toString() == QStringLiteral("오늘") && row.value("startsDateGroup").toBool(),
            "controller keeps plan rows and attaches date heading metadata");
+    expect(row.value("statusTone").toString() == "success" && row.value("shortTime").toString().size() == 5
+        && row.value("detailTime").toString().startsWith(QStringLiteral("오늘 ")),
+        "history presentation exposes semantic status and local heading time without parsing translated labels");
     history.selectHistoryPlan(history.historyEntries().front().toMap()
                                   .value(QStringLiteral("planId")).toString());
+    expect(history.historySteps().size() == 1 && history.historySteps().front().toMap().value("applied").toBool()
+        && !history.historySteps().front().toMap().value("rolledBack").toBool(),
+        "selected history exposes current applied and rollback flags for accurate summary counts");
     history.undoSelectedHistory();
     expect(QFile::exists(source) && !preview.canUndo(),
            "history rollback should restore file and clear last-move undo");
+    history.selectHistoryPlan(history.historyEntries().front().toMap().value("planId").toString());
+    expect(history.historySteps().front().toMap().value("rolledBack").toBool()
+        && !history.historySteps().front().toMap().value("applied").toBool() && !history.canUndoSelectedHistory(),
+        "history summary flags follow persisted rollback state and cannot offer a second undo");
 #endif
 }
 

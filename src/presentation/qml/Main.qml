@@ -416,7 +416,6 @@ ApplicationWindow {
         id: historyDialog
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: UiMetrics.spaceSection
         visible: root.currentPage === 4
         dark: root.editorDark
         controller: historyController

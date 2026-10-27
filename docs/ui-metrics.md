@@ -149,13 +149,24 @@ Read-only recovery-list refresh uses an inline indicator instead of the shared
 white veil. Open the page before dispatching the inspection to avoid briefly
 activating the previous page's progress popup. Resume/rollback retain the popup.
 
-History row width/height use `historyListWidth` / `historyRowHeight`. Date headings
-use `textSectionTitle` / `groupTitleWeight`. The controller adds `dateGroup` and
+History row width/height use `historyListWidth` (300 px) / `historyRowHeight` (76 px).
+Whole rows use common navigation feedback; only the selected row retains a fill.
+Date headings use `textBody` / `groupTitleWeight`. The controller adds `dateGroup` and
 `startsDateGroup` to existing plan rows; it does not insert fake records or change
 database schemas, plan IDs, selection or undo contracts. Grouping uses the last
 activity timestamp converted to local time: today, yesterday, this calendar week,
 last calendar week (Monday start), then older records. Invalid/future dates have
 explicit fallback labels. Refresh recalculates the headings, including after undo.
+
+History uses a full-height two-pane layout divided by the shared border color.
+The right pane shows the selected local time, semantic status, three summary cards
+(`historySummaryHeight`, 76 px), and one surface for file rows. Counts use explicit
+`applied` / `rolledBack` flags, not translated status strings. Each file shows its
+extension, name, source folder, destination folder and current status; full paths
+are available on hover, and failure messages wrap without being hidden.
+The bottom action area uses `historyFooterHeight` (76 px) and the shared soft undo
+button, preserving the original confirmation dialog. Busy work disables refresh,
+selection and undo. No inactive search or location-opening controls are shown.
 
 ## Deliberate exceptions
 

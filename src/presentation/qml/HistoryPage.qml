@@ -15,132 +15,38 @@ PageSurface {
 
     objectName: "historyDialog"
 
-    ColumnLayout {
+    readonly property var selectedEntry: controller.historyEntries.find(entry => entry.planId === controller.selectedHistoryPlanId) || null
+    background: Rectangle { color: page.theme.window }
+    RowLayout {
         anchors.fill: parent
-        spacing: UiMetrics.spaceCompact
-
-        Label {
-            Layout.fillWidth: true
-            text: page.controller.historyMessage
-            wrapMode: Text.WordWrap
-            color: page.theme.success
-        }
-        AppButton {
-            text: qsTr("목록 새로고침")
-            onClicked: page.controller.refreshHistory()
-        }
-        RowLayout {
-            Layout.fillWidth: true
+        spacing: 0
+        HistoryTimeline {
+            Layout.preferredWidth: UiMetrics.historyListWidth
             Layout.fillHeight: true
-            spacing: UiMetrics.spaceGroup
-
-            ListView {
-                id: historyList
-                objectName: "historyList"
-                Layout.preferredWidth: UiMetrics.historyListWidth
-                Layout.fillHeight: true
-                clip: true
-                spacing: UiMetrics.spaceSmall
-                model: page.controller.historyEntries
-                delegate: Column {
-                    required property var modelData
-                    width: historyList.width
-                    spacing: UiMetrics.spaceControl
-                    Label {
-                        objectName: "historyDateHeading"
-                        visible: modelData.startsDateGroup
-                        height: visible ? implicitHeight : 0
-                        text: modelData.dateGroup
-                        color: page.theme.text
-                        font.pixelSize: UiMetrics.textSectionTitle
-                        font.weight: UiMetrics.groupTitleWeight
-                    }
-                    Rectangle {
-                        width: parent.width
-                        height: UiMetrics.historyRowHeight
-                        radius: UiMetrics.radiusControl
-                        color: modelData.planId === page.controller.selectedHistoryPlanId ? page.theme.menuSelected :
-                                                                                            page.theme.alternate
-                        border.color: page.theme.border
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: UiMetrics.spaceCompact
-                            spacing: UiMetrics.spaceTiny
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.time + " · " + modelData.status
-                                font.bold: true
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                text: qsTr("대상 %1개 · 현재 이동됨 %2개").arg(modelData.fileCount).arg(modelData.appliedCount)
-                                color: page.theme.muted
-                            }
-                            AppButton {
-                                text: qsTr("파일 보기")
-                                onClicked: page.controller.selectHistoryPlan(modelData.planId)
-                            }
-                        }
-                    }
-                }
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: UiMetrics.spaceControl
-
-                Label {
-                    Layout.fillWidth: true
-                    text: page.controller.selectedHistoryPlanId.length > 0 ? qsTr("선택한 작업의 파일") : qsTr(
-                                                                                 "왼쪽에서 작업을 선택해 주세요.")
-                    font.bold: true
-                }
-                ScrollView {
-                    id: historyStepScroll
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    Column {
-                        width: historyStepScroll.availableWidth
-                        spacing: UiMetrics.spaceSmall
-
-                        Repeater {
-                            model: page.controller.historySteps
-                            delegate: Frame {
-                                required property var modelData
-                                width: parent.width
-
-                                ColumnLayout {
-                                    width: parent.width
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: modelData.fileName + " · " + modelData.status
-                                        font.bold: true
-                                        wrapMode: Text.WrapAnywhere
-                                    }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: qsTr("원본: ") + modelData.source
-                                        wrapMode: Text.WrapAnywhere
-                                    }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        text: qsTr("목적지: ") + modelData.destination
-                                        wrapMode: Text.WrapAnywhere
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                AppButton {
-                    text: qsTr("이 작업 되돌리기")
-                    enabled: page.controller.canUndoSelectedHistory
-                    onClicked: undoHistoryDialog.open()
-                }
-            }
+            entries: page.controller.historyEntries
+            selectedPlanId: page.controller.selectedHistoryPlanId
+            busy: page.busy
+            dark: page.dark
+            onPlanRequested: planId => page.controller.selectHistoryPlan(planId)
+            onRefreshRequested: page.controller.refreshHistory()
+        }
+        Rectangle {
+            Layout.preferredWidth: UiMetrics.borderNormal
+            Layout.fillHeight: true
+            color: page.theme.border
+        }
+        HistoryDetail {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.fillHeight: true
+            entry: page.selectedEntry
+            steps: page.controller.historySteps
+            message: page.controller.historyMessage
+            canUndo: page.controller.canUndoSelectedHistory
+            undoCount: page.controller.selectedHistoryFileCount
+            busy: page.busy
+            dark: page.dark
+            onUndoRequested: undoHistoryDialog.open()
         }
     }
 

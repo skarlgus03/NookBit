@@ -57,7 +57,10 @@ QtObject {
     readonly property int operationPopupHeight: 200
     readonly property real operationVeilOpacity: 0.72
     readonly property int historyListWidth: 300
-    readonly property int historyRowHeight: 112
+    readonly property int historyRowHeight: 76
+    readonly property int historySummaryHeight: 76
+    readonly property int historyFooterHeight: 76
+    readonly property int historyTypeTileSize: 36
     readonly property int windowButtonSize: 32
     readonly property int iconButtonSize: 32
     readonly property int buttonMinWidth: 80
