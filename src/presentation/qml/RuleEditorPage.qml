@@ -12,6 +12,7 @@ Item {
     property bool oldEditorFormDirty: false
     property int folderTargetId: -1
     property string externalFolder: ""
+    property bool pageInitialized: false
     readonly property var nodeAddGroups: [
         { title: qsTr("조건 검사"), hint: qsTr("조건이 맞으면 다음 노드로 진행해요."), nodes: [
             { type: "extension", title: qsTr("확장자") },
@@ -228,7 +229,19 @@ Item {
                                                canvasViewport.height - ruleTestPanel.height))
     }
 
-    Component.onCompleted: loadGraphFromDraft()
+    // 공용 오버레이에 올라간 페이지 소유 창만 닫고 편집·테스트 데이터는 보존하는 함수.
+    function dismissTransientUi() {
+        for (const popup of [ruleTestPanel, addNodeMenu, jsonFileMenu, confirmSave, confirmReload,
+                             exportErrorDialog, confirmImportReplace, importErrorDialog, externalDestinationConfirm,
+                             ruleTestFileDialog, importFileDialog, exportFileDialog, destinationFolderDialog])
+            popup.close()
+        rulesGuideDownload.closeDialog()
+    }
+    onVisibleChanged: if (!visible && pageInitialized) dismissTransientUi()
+    Component.onCompleted: {
+        loadGraphFromDraft()
+        pageInitialized = true
+    }
 
     GuideDownload {
         id: rulesGuideDownload

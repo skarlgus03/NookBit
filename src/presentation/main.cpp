@@ -279,6 +279,16 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 QTextStream(stderr) << "Rule editor toolbar click is blocked." << Qt::endl;
                 return false;
             }
+            // 다른 페이지로 이동하면 테스트 창을 닫고 돌아와도 자동으로 다시 열지 않는지 검사한다.
+            const auto graphBeforeLeave = rules->property("blocks").value<QJSValue>().toVariant();
+            mainWindow->setProperty("currentPage", 8);
+            QCoreApplication::processEvents();
+            if (testPanel->property("visible").toBool()) return false;
+            mainWindow->setProperty("currentPage", 1);
+            QCoreApplication::processEvents();
+            if (testPanel->property("visible").toBool() || rules->property("blocks").value<QJSValue>().toVariant() != graphBeforeLeave) return false;
+            click(ruleTestButton);
+            if (!testPanel->property("opened").toBool()) return false;
             QMetaObject::invokeMethod(testPanel, "close");
             // 규칙 문서 버튼이 읽기 창 대신 직접 저장 창구에 연결되는지 검사한다.
             auto* guideButton = rules->findChild<QQuickItem*>(QStringLiteral("rulesUserGuideButton"));
@@ -300,7 +310,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             auto* addMenu = rules->findChild<QObject*>(QStringLiteral("addNodeMenu"));
             if (!addMenu || !addMenu->property("opened").toBool() || addMenu->property("height").toDouble() <= 0 ||
                 addMenu->property("width").toInt() != metrics->property("nodeAddMenuWidth").toInt()) return false;
-            QMetaObject::invokeMethod(addMenu, "close");
+            mainWindow->setProperty("currentPage", 8);
+            QCoreApplication::processEvents();
+            if (addMenu->property("visible").toBool()) return false;
+            mainWindow->setProperty("currentPage", 1);
+            QCoreApplication::processEvents();
             // 새 크기 블록의 선택 목록이 초안을 직접 갱신하는지 검사한다.
             if (!QMetaObject::invokeMethod(rules, "addBlock", Q_ARG(QVariant, QVariant("size")),
                     Q_ARG(QVariant, QVariant(350)), Q_ARG(QVariant, QVariant(220)))) return false;
@@ -451,11 +465,16 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!notifications.isEnabled("file.offer") || !notifications.activeTypes().contains("file.offer")) return false;
             if (!notifications.publish({"file.offer", "verify-offer", false, {}, {}})) return false;
         }
+        if (page == 1) {
+            auto* testPanel = rules->findChild<QObject*>(QStringLiteral("ruleTestPanel"));
+            if (!testPanel || !QMetaObject::invokeMethod(testPanel, "open")) return false;
+        }
         click(button);
         if (mainWindow->property("currentPage").toInt() != 0 || extension->isVisible()) {
             QTextStream(stderr) << "Extension close click blocked on page " << page << Qt::endl;
             return false;
         }
+        if (page == 1 && rules->findChild<QObject*>(QStringLiteral("ruleTestPanel"))->property("visible").toBool()) return false;
     }
     return true;
 }

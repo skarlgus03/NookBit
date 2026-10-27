@@ -14,6 +14,8 @@ Item {
         saveDialog.selectedFile = userGuides.suggestedFile(guideKey)
         saveDialog.open()
     }
+    // 소유 페이지를 떠날 때 저장하지 않고 파일 선택창만 닫는 함수.
+    function closeDialog() { saveDialog.close() }
 
     NativeDialogs.FileDialog {
         id: saveDialog
