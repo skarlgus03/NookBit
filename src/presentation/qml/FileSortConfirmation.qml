@@ -8,9 +8,10 @@ Rectangle {
     objectName: "fileSortConfirmation"
     required property var controller
     property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     signal cancelRequested()
     signal confirmRequested()
-    color: dark ? "#161a22" : "#ffffff"
+    color: theme.surface
     BackButton { objectName: "fileConfirmationBackButton"; anchors.left: parent.left; anchors.top: parent.top; anchors.margins: UiMetrics.pageInset; onClicked: confirmation.cancelRequested() }
     ColumnLayout {
         anchors.centerIn: parent

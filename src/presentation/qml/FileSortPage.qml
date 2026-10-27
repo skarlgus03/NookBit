@@ -7,6 +7,7 @@ Rectangle {
     id: home
     objectName: "fileSortPage"
     property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     property int workflowStep: 0
     property int departingStep: 0
     property real transitionProgress: 1
@@ -96,11 +97,11 @@ Rectangle {
     }
     signal pageRequested(int page)
     signal recoveryRequested()
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
-    readonly property color muted: dark ? "#aab6c7" : "#748091"
-    readonly property color surface: dark ? "#242d3b" : "#ffffff"
-    readonly property color edge: dark ? "#3d4757" : "#e1e6ed"
-    color: dark ? "#161a22" : "#ffffff"
+    readonly property color foreground: theme.text
+    readonly property color muted: theme.muted
+    readonly property color surface: theme.surface
+    readonly property color edge: theme.border
+    color: theme.surface
 
     component FlatButton: AppButton {
         id: control
@@ -174,7 +175,7 @@ Rectangle {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: UiMetrics.spaceTiny
-                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : "#bc6257"; font.pixelSize: UiMetrics.textBody }
+                                Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : home.theme.danger; font.pixelSize: UiMetrics.textBody }
                                 Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: UiMetrics.textBody }
                             }
                             FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
@@ -182,7 +183,7 @@ Rectangle {
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
             Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: UiMetrics.textBody }
             FlatButton {
                 Layout.fillWidth: true
@@ -234,7 +235,7 @@ Rectangle {
                 onClicked: previewController.undoLastMove()
             }
             Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
-            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: "#bc6257"; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
             FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
         }
     }
@@ -260,7 +261,7 @@ Rectangle {
             objectName: "fileDropOverlay"
             anchors.fill: parent
             visible: pageDrop.containsDrag
-            color: Qt.rgba(1, 1, 1, UiMetrics.dropOverlayOpacity)
+            color: Qt.rgba(UiTheme.white.r, UiTheme.white.g, UiTheme.white.b, UiMetrics.dropOverlayOpacity)
             radius: UiMetrics.radiusControl
             Rectangle {
                 anchors.centerIn: parent

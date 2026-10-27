@@ -116,9 +116,9 @@ Window {
         // 정상 프레임 로딩은 이전 그림으로 기다리고 실제 오류일 때만 안내하는 표시.
         visible: sprite.error.length > 0
         text: sprite.error
-        color: "#ffffff"
+        color: UiTheme.white
         style: Text.Outline
-        styleColor: "#263246"
+        styleColor: UiTheme.dark.surface
     }
     MouseArea {
         id: gestureInput

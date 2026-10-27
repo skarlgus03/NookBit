@@ -4,7 +4,7 @@ import QtQuick
 Canvas {
     id: icon
     property string kind: "folder"
-    property color strokeColor: "#273344"
+    property color strokeColor: UiTheme.light.text
     implicitWidth: UiMetrics.navigationIconSize
     implicitHeight: UiMetrics.navigationIconSize
     onKindChanged: requestPaint()

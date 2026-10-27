@@ -162,6 +162,21 @@ static bool verifyButtonFeedback(QQmlEngine& engine, QObject* metrics) {
             pointer(QEvent::MouseMove, QPointF(5, 5), Qt::NoButton, Qt::NoButton);
             settle(150);
             const auto normal = surface->property("color").value<QColor>();
+            // 홈 메뉴는 윤곽선 없이 선택된 항목만 배경색을 유지하는지 검사한다.
+            if (type == "HomeMenuButton") {
+                if (normal.alpha() != 0 || QQmlProperty(surface, QStringLiteral("border.width")).read().toInt() != 0)
+                    return fail("borderless home item");
+                button->setProperty("selected", true);
+                settle(150);
+                const auto selected = surface->property("color").value<QColor>();
+                pointer(QEvent::MouseMove, QPointF(100, 45), Qt::NoButton, Qt::NoButton);
+                settle(150);
+                if (selected.alpha() == 0 || surface->property("color").value<QColor>() != selected)
+                    return fail("persistent home selection");
+                button->setProperty("selected", false);
+                pointer(QEvent::MouseMove, QPointF(5, 5), Qt::NoButton, Qt::NoButton);
+                settle(150);
+            }
             pointer(QEvent::MouseMove, QPointF(100, 45), Qt::NoButton, Qt::NoButton);
             settle(150);
             const auto hover = surface->property("color").value<QColor>();
@@ -607,7 +622,7 @@ static bool verifyInlineFilePreview(QQuickWindow* window, QQuickItem* page) {
         && destination->property("text").toString() == text;
 }
 
-// 아이콘과 글씨 길이에 관계없이 메뉴 글씨 중심이 버튼 전체 중심과 일치하는지 검사하는 함수.
+// 홈 메뉴의 아이콘과 글씨가 공통 간격으로 왼쪽 정렬되는지 검사하는 함수.
 static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
     auto* home = root->findChild<QQuickItem*>(QStringLiteral("compactHome"));
     if (!home) return false;
@@ -622,10 +637,11 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
         auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
         auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;
         if (!button || !label || !icon) return false;
-        const auto center = label->mapToItem(button, QPointF(label->width() / 2, label->height() / 2));
+        const auto labelOrigin = label->mapToItem(button, QPointF());
         const auto iconOrigin = icon->mapToItem(button, QPointF());
-        if (std::abs(center.x() - button->width() / 2) > 1
-            || std::abs(center.y() - button->height() / 2) > 1
+        if (label->property("horizontalAlignment").toInt() != Qt::AlignLeft
+            || std::abs(labelOrigin.x() - iconOrigin.x() - icon->width() - metrics->property("spaceGroup").toInt()) > 1
+            || std::abs(labelOrigin.y() + label->height() / 2 - button->height() / 2) > 1
             || std::abs(iconOrigin.x() - metrics->property("controlPadding").toInt()) > 1
             || icon->width() != metrics->property("mainMenuIconSize").toInt()
             || button->height() != metrics->property("mainNavigationHeight").toInt()) return false;
@@ -1499,7 +1515,7 @@ int main(int argc, char* argv[]) {
                 window->setProperty("currentPage", 0);
                 checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
                 checkLayout(verifyExtensionInteraction(window, extension, uiMetrics, notifications), "page content, notification toggles and real close clicks");
-                checkLayout(verifyHomeMenuAlignment(window, uiMetrics), "centered home menu text and left icons");
+                checkLayout(verifyHomeMenuAlignment(window, uiMetrics), "left aligned home menu text and icons");
                 checkLayout(verifyBusyPresentation(window, extension, backgroundTasks), "subwindow busy overlay and unlocked window movement");
             }
         }

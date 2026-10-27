@@ -11,8 +11,9 @@ Rectangle {
     property bool success: false
     property string resultMessage: ""
     property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     signal backRequested()
-    color: dark ? "#161a22" : "#ffffff"
+    color: theme.surface
     BackButton {
         objectName: status.completed ? "fileCompleteBackButton" : "fileProgressBackButton"
         visible: status.completed
@@ -27,7 +28,7 @@ Rectangle {
         width: Math.min(parent.width - UiMetrics.pageInset * 2, UiMetrics.confirmationContentWidth)
         spacing: UiMetrics.spaceGroup
         Item { Layout.fillHeight: true }
-        NavigationIcon { visible: !status.completed; Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: UiMetrics.filePreviewSize; Layout.preferredHeight: UiMetrics.filePreviewSize; kind: "folder"; strokeColor: status.dark ? "#edf2f8" : "#405e80" }
+        NavigationIcon { visible: !status.completed; Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: UiMetrics.filePreviewSize; Layout.preferredHeight: UiMetrics.filePreviewSize; kind: "folder"; strokeColor: status.dark ? status.theme.text : status.theme.accent }
         Label {
             Layout.fillWidth: true
             text: status.completed ? (status.success ? qsTr("정리를 마쳤어요") : qsTr("정리를 완료하지 못했어요")) : qsTr("파일을 정리하고 있어요")

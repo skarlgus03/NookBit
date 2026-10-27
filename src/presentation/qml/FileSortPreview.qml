@@ -8,12 +8,13 @@ Rectangle {
     objectName: "fileSortPreview"
     required property var controller
     property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     signal backRequested()
     signal sortRequested()
-    readonly property color foreground: dark ? "#edf2f8" : "#273344"
-    readonly property color muted: dark ? "#aab6c7" : "#748091"
-    readonly property color surface: dark ? "#242d3b" : "#f5f7fa"
-    color: dark ? "#161a22" : "#ffffff"
+    readonly property color foreground: theme.text
+    readonly property color muted: theme.muted
+    readonly property color surface: theme.alternate
+    color: theme.surface
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.pageInset

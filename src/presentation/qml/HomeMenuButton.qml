@@ -1,13 +1,13 @@
 import QtQuick
 import QtQuick.Controls
 
-// 메인 메뉴의 아이콘·정중앙 글씨·선택 강조를 공통 규격으로 표시하는 버튼.
+// 아이콘과 글씨를 왼쪽에 정렬하고 현재 페이지에만 선택 배경을 표시하는 버튼.
 AppButton {
     id: control
     property bool selected: false
     property string iconKind: "folder"
     readonly property var theme: UiTheme.colors(control.dark)
-    readonly property color foreground: theme.text
+    readonly property color foreground: !enabled ? theme.muted : selected ? theme.navigationActiveText : theme.text
     implicitHeight: UiMetrics.mainNavigationHeight
     leftPadding: UiMetrics.controlPadding
     rightPadding: UiMetrics.controlPadding
@@ -30,11 +30,11 @@ AppButton {
             objectName: "homeMenuLabel"
             anchors.fill: parent
             anchors.leftMargin: UiMetrics.mainMenuIconSize + UiMetrics.spaceGroup
-            anchors.rightMargin: UiMetrics.mainMenuIconSize + UiMetrics.spaceGroup
+            anchors.rightMargin: 0
             text: control.text
             font: control.font
             color: control.foreground
-            horizontalAlignment: Text.AlignHCenter
+            horizontalAlignment: Text.AlignLeft
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
@@ -42,8 +42,9 @@ AppButton {
     background: ButtonFeedback {
         button: control
         selected: control.selected
+        showBorder: false
         normalColor: "transparent"
+        hoverColor: control.theme.alternate
         selectedColor: control.theme.menuSelected
-        idleBorder: control.theme.menuBorder
     }
 }

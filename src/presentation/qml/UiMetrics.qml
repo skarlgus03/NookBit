@@ -6,15 +6,20 @@ QtObject {
     readonly property string fontFamily: "Noto Sans KR"
     readonly property string fontFallback: "Malgun Gothic"
     readonly property int pageSlideDuration: 180
-    readonly property int textBody: 14
-    readonly property int textCaption: 14
-    readonly property int textCompact: 11
-    readonly property int textAction: 15
-    readonly property int textEmphasis: 16
-    readonly property int textWindowTitle: 17
-    readonly property int textSectionTitle: 18
-    readonly property int textAppTitle: 25
-    readonly property int textPageTitle: 28
+    // 실제 크기는 네 단계뿐이며 화면에서는 아래 의미별 별칭을 선택한다.
+    readonly property int typeBody: 14
+    readonly property int typeEmphasis: 16
+    readonly property int typeTitle: 20
+    readonly property int typeDisplay: 28
+    readonly property int textBody: typeBody
+    readonly property int textCaption: typeBody
+    readonly property int textCompact: typeBody
+    readonly property int textAction: typeBody
+    readonly property int textEmphasis: typeEmphasis
+    readonly property int textWindowTitle: typeTitle
+    readonly property int textSectionTitle: typeTitle
+    readonly property int textAppTitle: typeDisplay
+    readonly property int textPageTitle: typeDisplay
     readonly property int controlHeight: 40
     readonly property int numericInputWidth: 180
     readonly property int numericStepSize: 28
@@ -25,14 +30,14 @@ QtObject {
     readonly property int tooltipDelayMs: 500
     readonly property int primaryActionHeight: 46
     readonly property int largeActionHeight: 60
-    readonly property int textDropHint: 20
+    readonly property int textDropHint: typeTitle
     readonly property real dropOverlayOpacity: 0.28
     readonly property int navigationHeight: 48
-    readonly property int mainNavigationHeight: 56
+    readonly property int mainNavigationHeight: navigationHeight
     readonly property int navigationIconSize: 24
-    readonly property int textNavigation: 18
-    readonly property int mainMenuIconSize: 32
-    readonly property int textGroupTitle: 16
+    readonly property int textNavigation: typeEmphasis
+    readonly property int mainMenuIconSize: navigationIconSize
+    readonly property int textGroupTitle: typeEmphasis
     readonly property int navigationTextWeight: Font.DemiBold
     readonly property int groupTitleWeight: Font.DemiBold
     readonly property int settingsLabelWeight: Font.Medium
@@ -102,14 +107,11 @@ QtObject {
     ]
 
     // 규칙 캔버스의 글씨·블록 크기는 독립적인 표시 프리셋으로 관리한다.
-    readonly property var nodeTextSizes: [11, 13, 16]
-    readonly property var nodeWidths: [206, 226, 262]
-    readonly property var nodeHeights: [82, 90, 104]
-    readonly property int nodeCaptionMinimum: 10
-    readonly property int nodeCaptionOffset: 2
-    readonly property int nodeHeadingOffset: 3
-    readonly property int nodeSymbolOffset: 5
-    readonly property int nodeBadgeOffset: 1
+    readonly property var nodeTextSizes: [typeBody, typeEmphasis, typeTitle]
+    readonly property var nodeCaptionSizes: [typeBody, typeBody, typeEmphasis]
+    readonly property var nodeSymbolSizes: [typeTitle, typeTitle, typeDisplay]
+    readonly property var nodeWidths: [226, 262, 300]
+    readonly property var nodeHeights: [90, 104, 120]
     readonly property int characterAnchorWidth: 640
     readonly property int characterAnchorHeight: 560
     readonly property int characterAnchorHandle: 22
@@ -132,7 +134,7 @@ QtObject {
     readonly property int companionTimelineSnapMs: 100
     readonly property int companionFrameWidth: 84
     readonly property int companionFrameImageHeight: 48
-    readonly property int bubbleTextSize: 16
+    readonly property int bubbleTextSize: typeEmphasis
     readonly property int bubbleMaximumWidth: 320
     readonly property int bubbleMaximumLines: 4
     readonly property int bubblePadding: 14

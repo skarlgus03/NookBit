@@ -6,9 +6,9 @@ foreach(qml_file IN LISTS qml_files)
     continue()
   endif()
   file(READ "${qml_file}" source)
-  # 공통 설정·메뉴·강조 버튼은 테마 색상을 다시 직접 적지 않는다.
-  if(qml_name MATCHES "^(SettingsSection|CompactHome|HomeMenuButton|LargeActionButton)\\.qml$"
-      AND source MATCHES "#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]")
+  # 전문 편집기·캐릭터를 포함한 모든 QML은 공통 테마에서만 색상값을 정의한다.
+  if(NOT qml_name STREQUAL "UiTheme.qml"
+      AND source MATCHES "#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]")
     message(FATAL_ERROR "${qml_name}: use UiTheme roles instead of inline colors")
   endif()
   if(source MATCHES "font\\.pixelSize: *[0-9]+")

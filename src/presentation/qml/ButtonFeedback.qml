@@ -9,6 +9,8 @@ Rectangle {
     property bool selected: false
     property color normalColor: button.palette.button
     property color selectedColor: theme.buttonChecked
+    property color hoverColor: theme.buttonHover
+    property bool showBorder: true
     property color idleBorder: theme.buttonBorder
     property bool recentClick: false
     readonly property var theme: UiTheme.colors(button.dark)
@@ -21,10 +23,10 @@ Rectangle {
     color: !button.enabled && !recentClick ? (button.flat ? "transparent" : normalColor)
         : pushed ? (primary ? theme.primaryPressed : theme.buttonPressed)
         : primary ? (button.hovered ? theme.primaryHover : theme.accent)
-        : button.hovered ? theme.buttonHover : chosen ? selectedColor : button.flat ? "transparent" : normalColor
+        : chosen ? selectedColor : button.hovered || button.visualFocus ? hoverColor : button.flat ? "transparent" : normalColor
     opacity: button.enabled || recentClick ? 1 : 0.5
-    border.color: pushed || emphasized ? theme.buttonFocus : button.flat ? "transparent" : idleBorder
-    border.width: pushed || emphasized ? UiMetrics.borderActive : UiMetrics.borderNormal
+    border.color: !showBorder ? "transparent" : pushed || emphasized ? theme.buttonFocus : button.flat ? "transparent" : idleBorder
+    border.width: !showBorder ? 0 : pushed || emphasized ? UiMetrics.borderActive : UiMetrics.borderNormal
     scale: pushed ? UiMetrics.buttonPressedScale : 1
     transform: Translate {
         y: feedback.pushed ? UiMetrics.buttonPressedOffset : 0

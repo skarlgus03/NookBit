@@ -10,9 +10,10 @@ Item {
     required property string message
     property var configuration: ({})
     property bool dark: true
+    readonly property var theme: UiTheme.colors(dark)
     property bool constrainToArea: true
-    readonly property color surfaceColor: dark ? "#263246" : "#f6f8fb"
-    readonly property color edgeColor: dark ? "#718298" : "#a5b3c4"
+    readonly property color surfaceColor: theme.bubbleSurface
+    readonly property color edgeColor: theme.bubbleBorder
     property bool actionAvailable: false
     property string actionText: qsTr("확인")
     signal actionRequested()
@@ -110,7 +111,7 @@ Item {
             maximumLineCount: UiMetrics.bubbleMaximumLines
             elide: Text.ElideRight
             font.pixelSize: UiMetrics.bubbleTextSize
-            color: bubble.customSkin || bubble.dark ? "#edf2f8" : "#273344"
+            color: bubble.customSkin ? UiTheme.dark.text : bubble.theme.text
         }
     }
     Rectangle {
@@ -118,9 +119,9 @@ Item {
         visible: bubble.actionAvailable
         x: bubble.actionArea.x; y: bubble.actionArea.y
         width: bubble.actionArea.width; height: bubble.actionArea.height; radius: 8
-        color: "#33475e"
-        border.color: actionMouse.containsMouse ? "#b6d8c5" : "#718298"
-        Text { anchors.centerIn: parent; text: bubble.actionText; color: "#edf2f8"; font.pixelSize: UiMetrics.bubbleTextSize }
+        color: bubble.theme.bubbleAction
+        border.color: actionMouse.containsMouse ? bubble.theme.buttonFocus : bubble.theme.bubbleBorder
+        Text { anchors.centerIn: parent; text: bubble.actionText; color: bubble.theme.accentText; font.pixelSize: UiMetrics.bubbleTextSize }
         MouseArea {
             id: actionMouse
             anchors.fill: parent

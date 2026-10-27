@@ -39,6 +39,10 @@ int main(int argc, char** argv) {
     std::unique_ptr<QObject> metrics(metricsComponent.create());
     if (!metrics) { std::cerr << metricsComponent.errorString().toStdString(); return 1; }
     engine.rootContext()->setContextProperty(QStringLiteral("UiMetrics"), metrics.get());
+    QQmlComponent themeComponent(&engine, QUrl::fromLocalFile(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/presentation/qml/UiTheme.qml"));
+    std::unique_ptr<QObject> theme(themeComponent.create());
+    if (!theme) { std::cerr << themeComponent.errorString().toStdString(); return 1; }
+    engine.rootContext()->setContextProperty(QStringLiteral("UiTheme"), theme.get());
     QQmlComponent component(&engine, QUrl::fromLocalFile(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/presentation/qml/CharacterBubble.qml"));
     std::unique_ptr<QObject> object(component.createWithInitialProperties({
         {"screenArea", QRectF(0, 0, 800, 600)}, {"anchorPoint", QPointF(200, 300)},

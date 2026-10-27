@@ -2,14 +2,13 @@
 
 The source of truth is `src/presentation/qml/UiMetrics.qml`, a presentation-only QML singleton. Core services and use cases must not depend on it. The native application font also reads `textBody` from this singleton.
 
-Shared colors live separately in `UiTheme.qml`, with light/dark role maps for window,
-surface, text, muted text, borders, navigation and primary actions. Main's palette,
-settings sections, compact home/menu controls, primary buttons and native menus read
-these maps rather than defining their own hex values. App input controls inherit
-the common palette. Theme is presentation-only; no backend dependency is introduced.
-The contract test forbids inline hex colors in the migrated shared components.
-Specialized rule-node, character and legacy page/status colors are not yet fully
-migrated; this is intentionally not a claim that every visual color is centralized.
+Shared colors live separately in `UiTheme.qml`. Light/dark foundation palettes
+derive semantic roles for surfaces, text, borders, blue accents and status feedback.
+All QML pages, rule nodes and default companion bubbles consume these roles; hex
+colors outside `UiTheme.qml` fail the contract test. Rule-node categories retain a
+small shared categorical palette; success/warning/error colors convey state.
+Pack-provided PNG skins are not recolored. App inputs and native menus inherit the
+same palette. Theme is presentation-only; no backend dependency is introduced.
 
 `fontFamily` prefers installed Noto Sans KR; `fontFallback` is Malgun Gothic, followed by the platform's original default. No font files are bundled or downloaded. The application font is inherited by ordinary QML text and native menus/dialogs. `--verify-ui` reports the resolved family so a missing font is not mistaken for a successful substitution.
 
@@ -19,11 +18,11 @@ migrated; this is intentionally not a claim that every visual color is centraliz
 | --- | --- | --- |
 | Body text / standard button | `textBody` | 14 px |
 | Supporting text | `textCaption` | 14 px |
-| Primary action label | `textAction` | 15 px |
+| Primary action label | `textAction` | 14 px |
 | Emphasized content | `textEmphasis` | 16 px |
-| Window title | `textWindowTitle` | 17 px |
-| Section title | `textSectionTitle` | 18 px |
-| Application title | `textAppTitle` | 25 px |
+| Window title | `textWindowTitle` | 20 px |
+| Section title | `textSectionTitle` | 20 px |
+| Application title | `textAppTitle` | 28 px |
 | Page title | `textPageTitle` | 28 px |
 | Standard field / command | `controlHeight` | 40 px |
 | Primary action | `primaryActionHeight` | 46 px |
@@ -31,7 +30,11 @@ migrated; this is intentionally not a claim that every visual color is centraliz
 | Home navigation | `navigationHeight` | 48 px |
 | Window button | `windowButtonSize` | 32 px |
 
-These are initial application decisions, not universal UX standards. Choose a semantic role rather than a token that happens to have the desired number. Body and caption may currently share a size but can be tuned independently later.
+Typography uses only four foundation sizes: `typeBody` (14), `typeEmphasis` (16),
+`typeTitle` (20), and `typeDisplay` (28). Semantic names alias these sizes; change
+the foundation rather than adding intermediate values. Supporting text uses muted
+color, while titles use weight and spacing for hierarchy. These are application
+decisions, not universal UX standards. Choose a semantic role for each use.
 
 Use `AppButton`, `AppComboBox`, `AppTextField`, and `AppSpinBox` for ordinary controls. Specialized themed buttons must also read the shared size tokens. Use `controlPadding`, `buttonPadding`, spacing, radius, and border tokens instead of inline common metrics. Icons use `iconSize`; dropdown indicators use their own shared width and height.
 
@@ -41,11 +44,18 @@ Use `LargeActionButton` for preview/sort and cancel/confirm pairs. It owns their
 
 `ButtonFeedback` is the shared background for `AppButton`, large actions, home menus,
 file-page buttons, navigation and rule-editor commands. State colors live in `UiTheme`:
-normal has a visible border, hover uses a blue tint and stronger outline, press uses
+ordinary commands have a visible border, hover uses a blue tint and stronger outline, press uses
 a deeper tint immediately, and checked/selected state keeps a persistent fill.
 Labels retain contrasting foreground colors, including checked buttons in light mode.
 Disabled controls are muted and cannot accept input. Numeric +/- indicators use the
 same hover/press colors.
+
+Home navigation is borderless: 24 px icon and 16 px label are both left aligned,
+separated by `spaceGroup`, in a 48 px row. Unselected rows have no fill; hover adds a
+neutral surface, and the selected row keeps a subtle blue rounded fill and accent
+foreground. Keyboard focus and press feedback remain visible. Menu command names
+do not include manually appended ellipses; genuine constrained text can still elide
+with a full-text tooltip.
 
 `buttonTransitionMs` (90 ms), `buttonReleaseMs` (120 ms), and `buttonClickPulseMs`
 (130 ms) control response timing. A short click retains its input acknowledgement
@@ -81,7 +91,9 @@ explicit fallback labels. Refresh recalculates the headings, including after und
 
 Not every number is a design token. Window positioning and sizes, canvas coordinates, hit testing, image crop rectangles, animation timing, and ImagePack pivots/scales are feature geometry or data, not shared control metrics. Do not mechanically replace these with unrelated spacing tokens. Character drawing proportions also remain local.
 
-Node text/width/height presets belong to the singleton but remain independent of ordinary form controls. Custom pack-defined bubble geometry remains authoritative; its fallback text uses the shared typography.
+Node text/width/height presets belong to the singleton. Node type presets reuse the
+same four typography sizes without adding arithmetic offsets. Custom pack-defined
+bubble geometry remains authoritative; its fallback text uses shared typography.
 
 ## Verification
 

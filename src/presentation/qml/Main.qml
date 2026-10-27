@@ -66,7 +66,7 @@ ApplicationWindow {
             spacing: UiMetrics.spaceSmall
             Label {
                 text: backgroundTasks.stageLabel
-                color: root.editorDark ? "#edf2f8" : "#253428"
+                color: root.theme.text
                 font.bold: true
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -74,14 +74,14 @@ ApplicationWindow {
             Label {
                 text: backgroundTasks.currentFileName
                 visible: text.length > 0
-                color: root.editorDark ? "#edf2f8" : "#253428"
+                color: root.theme.text
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle
             }
             Label {
                 text: backgroundTasks.filePosition
                 visible: text.length > 0
-                color: root.editorDark ? "#b7c6dc" : "#4b6153"
+                color: root.theme.muted
                 Layout.fillWidth: true
             }
             ProgressBar {
@@ -94,13 +94,13 @@ ApplicationWindow {
             Label {
                 text: backgroundTasks.byteProgressText
                 visible: backgroundTasks.byteProgressKnown
-                color: root.editorDark ? "#edf2f8" : "#253428"
+                color: root.theme.text
                 Layout.fillWidth: true
             }
             Label {
                 text: "복사 후 검증·확정까지 마쳐야 완료돼요."
                 wrapMode: Text.WordWrap
-                color: root.editorDark ? "#b7c6dc" : "#4b6153"
+                color: root.theme.muted
                 font.pixelSize: UiMetrics.textBody
                 Layout.fillWidth: true
             }
@@ -362,8 +362,8 @@ ApplicationWindow {
         parent: extensionWindow.contentItem
         anchors.fill: parent
         visible: root.currentPage !== 0
-        color: root.editorDark ? "#161a22" : "#ffffff"
-        border.color: root.editorDark ? "#3d4757" : "#e1e6ed"
+        color: root.theme.surface
+        border.color: root.theme.border
         radius: UiMetrics.radiusControl
         z: 0
     }
@@ -378,7 +378,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("컴패니언"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인"), qsTr("알림")][root.currentPage]
-                color: root.editorDark ? "#edf2f8" : "#273344"
+                color: root.theme.text
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
             BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
@@ -549,7 +549,7 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("현재 적용 중인 규칙: ") + previewController.activeRuleLabel
-                    color: root.editorDark ? "#b6d8c5" : "#426349"
+                    color: root.theme.success
                     elide: Text.ElideMiddle
                 }
                 AppButton {
@@ -562,7 +562,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: recoveryController.recoveryNotice.length > 0
                 text: recoveryController.recoveryNotice
-                color: root.editorDark ? "#e5bf85" : "#9b5c23"
+                color: root.theme.warning
                 wrapMode: Text.WordWrap
             }
 
@@ -581,9 +581,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 120
                 radius: 18
-                color: dragging ? (root.editorDark ? "#304438" : "#e8f4e5") : root.surfaceColor
+                color: dragging ? (root.theme.menuSelected) : root.surfaceColor
                 border.width: dragging ? 2 : 1
-                border.color: dragging ? "#4d8f57" : root.borderColor
+                border.color: dragging ? root.theme.accent : root.borderColor
 
                 Column {
                     anchors.centerIn: parent
@@ -674,7 +674,7 @@ ApplicationWindow {
                         width: pendingList.width
                         height: 70
                         radius: UiMetrics.radiusPanel
-                        color: !available ? (root.editorDark ? "#4a3033" : "#fff0ec") : index % 2 === 0 ? (root.editorDark ? "#242d3b" : "#f7f9f6") : root.surfaceColor
+                        color: !available ? (root.theme.dangerSurface) : index % 2 === 0 ? (root.theme.alternate) : root.surfaceColor
 
                         RowLayout {
                             anchors.fill: parent
@@ -713,14 +713,14 @@ ApplicationWindow {
                 visible: pendingFiles.unavailableCount > 0
                 text: qsTr("찾을 수 없는 파일 %1개가 있어요. 해당 항목을 목록에서 빼거나 파일을 원래 위치에 돌려놓아 주세요.")
                       .arg(pendingFiles.unavailableCount)
-                color: root.editorDark ? "#ef9c90" : "#b44732"
+                color: root.theme.danger
                 wrapMode: Text.WordWrap
             }
             Label {
                 Layout.fillWidth: true
                 visible: pendingFiles.storageNotice.length > 0
                 text: pendingFiles.storageNotice
-                color: root.editorDark ? "#ef9c90" : "#b44732"
+                color: root.theme.danger
                 wrapMode: Text.WordWrap
             }
 
@@ -799,7 +799,7 @@ ApplicationWindow {
                 text: previewController.message.length > 0
                       ? previewController.message
                       : qsTr("저장된 규칙으로 미리보기를 만듭니다. 편집 중인 초안은 전체 저장 후 적용돼요.")
-                color: root.editorDark ? "#b6d8c5" : "#426349"
+                color: root.theme.success
                 wrapMode: Text.WordWrap
             }
 
@@ -843,8 +843,8 @@ ApplicationWindow {
                             width: previewList.width
                             height: previewRow.implicitHeight + 20
                             radius: UiMetrics.radiusPanel
-                            color: modelData.statusKey === "planned" ? (root.editorDark ? "#25382e" : "#f3f9f2") : (root.editorDark ? "#242d3b" : "#f7f7f4")
-                            border.color: modelData.statusKey === "planned" ? (root.editorDark ? "#4e705a" : "#b9d8b9") : root.borderColor
+                            color: modelData.statusKey === "planned" ? (root.theme.successSurface) : (root.theme.alternate)
+                            border.color: modelData.statusKey === "planned" ? (root.theme.successBorder) : root.borderColor
                             ColumnLayout {
                                 id: previewRow
                                 anchors.left: parent.left
@@ -863,7 +863,7 @@ ApplicationWindow {
                                     Label {
                                         text: modelData.status
                                         font.bold: true
-                                        color: modelData.statusKey === "planned" ? (root.editorDark ? "#92c69f" : "#327542") : (root.editorDark ? "#e5bf85" : "#805b2c")
+                                        color: modelData.statusKey === "planned" ? (root.theme.success) : (root.theme.warning)
                                     }
                                 }
                                 Label {
@@ -900,7 +900,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         visible: previewController.warnings.length > 0
                         text: qsTr("추가 경고: ") + previewController.warnings.join("\n")
-                        color: root.editorDark ? "#e5bf85" : "#9b5c23"
+                        color: root.theme.warning
                         wrapMode: Text.WordWrap
                     }
                 }
@@ -911,7 +911,7 @@ ApplicationWindow {
                 text: pendingFiles.lastMessage.length > 0
                       ? pendingFiles.lastMessage
                       : qsTr("승인 전에는 파일을 이동하지 않습니다.")
-                color: root.editorDark ? "#b6d8c5" : "#426349"
+                color: root.theme.success
                 wrapMode: Text.WordWrap
             }
         }
@@ -1006,7 +1006,7 @@ ApplicationWindow {
             CheckBox { id: previewBubbleToggle; text: qsTr("미리보기 말풍선 표시"); checked: true }
             AppButton {
                 objectName: "characterUserGuideButton"
-                text: qsTr("제작 가이드 저장…")
+                text: qsTr("제작 가이드 저장")
                 onClicked: characterGuideDownload.saveDocument()
             }
             Label {
@@ -1049,7 +1049,7 @@ ApplicationWindow {
                 onActivated: characterSettings.selectPack(currentValue)
             }
             AppButton {
-                text: qsTr("팩 폴더 가져오기…")
+                text: qsTr("팩 폴더 가져오기")
                 enabled: !characterSettings.busy && !companionPreview.dirty
                 onClicked: imagePackFolderDialog.open()
             }
@@ -1060,7 +1060,7 @@ ApplicationWindow {
                 value: characterSettings.userScale
                 onMoved: characterSettings.setUserScale(value)
             }
-            AppButton { text: qsTr("전체 기준점 보정…"); onClicked: characterAnchorDialog.open() }
+            AppButton { text: qsTr("전체 기준점 보정"); onClicked: characterAnchorDialog.open() }
             AppButton { text: qsTr("크기 기본값 (50%)"); onClicked: characterSettings.setUserScale(0.5) }
             Label {
                 Layout.fillWidth: true
@@ -1160,7 +1160,7 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 text: ruleEditor.message
-                color: ruleEditor.dirty ? (root.editorDark ? "#e5bf85" : "#9b5c23") : (root.editorDark ? "#b6d8c5" : "#426349")
+                color: ruleEditor.dirty ? (root.theme.warning) : (root.theme.success)
                 wrapMode: Text.WordWrap
             }
             AppButton {
@@ -1591,7 +1591,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: watchController.statusMessage
                 wrapMode: Text.WordWrap
-                color: root.editorDark ? "#b6d8c5" : "#426349"
+                color: root.theme.success
             }
             RowLayout {
                 AppButton {
@@ -1680,7 +1680,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 text: historyController.historyMessage
                 wrapMode: Text.WordWrap
-                color: root.editorDark ? "#b6d8c5" : "#426349"
+                color: root.theme.success
             }
             AppButton {
                 text: qsTr("목록 새로고침")
@@ -1850,7 +1850,7 @@ ApplicationWindow {
                 text: recoveryController.recoveryMessage
                 visible: !root.inlineRecoveryInspection
                 wrapMode: Text.WordWrap
-                color: root.editorDark ? "#e5bf85" : "#9b5c23"
+                color: root.theme.warning
             }
             RowLayout {
                 objectName: "recoveryInspectionIndicator"
@@ -1919,7 +1919,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     text: modelData.detail
                                     wrapMode: Text.WordWrap
-                                    color: root.editorDark ? "#e5bf85" : "#9b5c23"
+                                    color: root.theme.warning
                                 }
                                 CheckBox {
                                     id: recoveryPathsToggle

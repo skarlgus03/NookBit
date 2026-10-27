@@ -8,14 +8,15 @@ Rectangle {
     required property string stateKey
     required property string message
     property bool dark: false
+    readonly property var theme: UiTheme.colors(dark)
     property var animation: ({})
     property bool playbackEnabled: true
     property real userScale: 0.5
     property point userPivotOffset: Qt.point(0, 0)
     implicitHeight: 156
     radius: 12
-    color: dark ? "#263246" : "#edf2e9"
-    border.color: dark ? "#46566e" : "#cfdbcb"
+    color: theme.surface
+    border.color: theme.border
     Accessible.name: message
 
     ColumnLayout {
@@ -39,8 +40,8 @@ Rectangle {
                 anchors.centerIn: parent
                 visible: !sprite.ready
                 width: 56; height: 48; radius: 17
-                color: badge.stateKey === "working" ? "#91b5db"
-                     : badge.stateKey === "calling" ? "#e9bf7c" : "#a6c1a2"
+                color: badge.stateKey === "working" ? badge.theme.editorAccent
+                     : badge.stateKey === "calling" ? badge.theme.warning : badge.theme.success
                 Row {
                     anchors.centerIn: parent
                     spacing: UiMetrics.spaceGroup
@@ -50,7 +51,7 @@ Rectangle {
                             width: 7
                             height: badge.stateKey === "resting" ? 2 : 8
                             radius: 3
-                            color: "#283b3a"
+                            color: UiTheme.light.text
                         }
                     }
                 }
@@ -58,7 +59,7 @@ Rectangle {
                     anchors.left: parent.right
                     anchors.top: parent.top
                     text: badge.stateKey === "resting" ? "z" : badge.stateKey === "calling" ? "!" : "…"
-                    color: badge.dark ? "#e6edf7" : "#374b3b"
+                    color: badge.theme.text
                     font.bold: true
                 }
             }
@@ -68,7 +69,7 @@ Rectangle {
             text: badge.stateKey === "working" ? qsTr("작업 중")
                 : badge.stateKey === "calling" ? qsTr("말 걸기") : qsTr("휴식")
             horizontalAlignment: Text.AlignHCenter
-            color: badge.dark ? "#edf2f8" : "#253428"
+            color: badge.theme.text
             font.bold: true
         }
         Label {
@@ -77,7 +78,7 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             font.pixelSize: UiMetrics.textCompact
-            color: badge.dark ? "#bdcce0" : "#536854"
+            color: badge.theme.muted
         }
     }
 }

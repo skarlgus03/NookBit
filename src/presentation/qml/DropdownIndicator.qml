@@ -3,7 +3,7 @@ import QtQuick
 // 글꼴 기호 대신 같은 선 모양으로 그리는 공통 드롭다운 화살표.
 Item {
     id: icon
-    property color strokeColor: "#273344"
+    property color strokeColor: UiTheme.light.text
     implicitWidth: UiMetrics.dropdownIconWidth
     implicitHeight: UiMetrics.dropdownIconHeight
     width: implicitWidth

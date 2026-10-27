@@ -40,17 +40,17 @@ Item {
     readonly property color primaryText: theme.text
     readonly property color mutedText: theme.muted
     readonly property color gridColor: theme.editorGrid
-    readonly property color nodeColor: darkMode ? "#252d3b" : "#ffffff"
+    readonly property color nodeColor: theme.nodeSurface
     readonly property color buttonColor: theme.button
     readonly property color buttonFocusColor: theme.buttonFocus
     palette.window: pageColor
     palette.windowText: primaryText
     palette.button: buttonColor
     palette.buttonText: primaryText
-    palette.base: darkMode ? "#252d3b" : "#ffffff"
+    palette.base: theme.nodeSurface
     palette.text: primaryText
     palette.highlight: theme.accent
-    palette.highlightedText: "#ffffff"
+    palette.highlightedText: page.theme.onNode
 
     // 규칙 편집기 버튼도 공통 상태 피드백을 사용하는 버튼.
     component ThemeButton: AppButton {
@@ -531,30 +531,7 @@ Item {
 
     // 종류에 따라 블록의 강조 색을 정하는 함수.
     function colorFor(type) {
-        if (darkMode) {
-            switch (type) {
-            case "start": return "#24624d"
-            case "extension": return "#286c9c"
-            case "size": return "#986126"
-            case "name": return "#7750a2"
-            case "age": return "#237c83"
-            case "otherwise": return "#596575"
-            case "destination": return "#39734c"
-            case "exclude": return "#944b68"
-            }
-            return "#53677e"
-        }
-        switch (type) {
-        case "start": return "#35584a"
-        case "extension": return "#3d7292"
-        case "size": return "#99683f"
-        case "name": return "#756397"
-        case "age": return "#7b7650"
-        case "otherwise": return "#69737b"
-        case "destination": return "#38684c"
-        case "exclude": return "#865b79"
-        }
-        return "#647069"
+        return theme.nodeKinds[type] || theme.nodeKinds.fallback
     }
 
     // 화면의 지정 위치에서 블록 추가 메뉴를 열고 삽입 좌표를 기억하는 함수.
@@ -1007,9 +984,8 @@ Item {
             context.lineTo(x2, y2)
         context.lineWidth = highlighted || tested ? 8 : Math.max(1, (temporary ? 4 : 4.5) * zoom)
         context.lineCap = "round"
-        context.strokeStyle = highlighted ? "#f5c542" : tested ? "#27b9a5"
-            : temporary ? (darkMode ? "#b2c9e6" : "#718e78")
-                        : (darkMode ? "#86aad6" : "#4e765d")
+        context.strokeStyle = highlighted ? theme.edgeDisconnect : tested ? theme.edgeTrace
+            : temporary ? theme.edgePending : theme.edge
         context.stroke()
     }
 
@@ -1240,7 +1216,7 @@ Item {
                                     context.stroke()
                                 }
                                 if (page.snapXActive || page.snapYActive) {
-                                    context.strokeStyle = page.darkMode ? "#6ed5c1" : "#238b79"
+                                    context.strokeStyle = page.theme.snap
                                     context.lineWidth = 2
                                     if (page.snapXActive) {
                                         const guideX = page.screenPoint(page.snapGuideX, 0).x
@@ -1345,15 +1321,14 @@ Item {
                                 scale: page.zoom
                                 transformOrigin: Item.TopLeft
                                 radius: modelData.type === "start" ? height / 2 : 12
-                                color: modelData.type === "start"
-                                       ? (page.darkMode ? "#214b45" : "#e1f2e8") : page.nodeColor
+                                color: modelData.type === "start" ? page.theme.nodeInputSurface : page.nodeColor
                                 opacity: modelData.enabled === false ? 0.55 : 1.0
                                 border.width: page.testTraceBlockIds.includes(modelData.id) ? 4
                                     : modelData.type === "start"
                                     ? (page.selectedIds.includes(modelData.id) ? 5 : 3)
                                     : page.selectedIds.includes(modelData.id) ? 3 : 1
-                                border.color: page.testTraceBlockIds.includes(modelData.id) ? "#27b9a5"
-                                    : modelData.type === "start" ? "#55b89a"
+                                border.color: page.testTraceBlockIds.includes(modelData.id) ? page.theme.edgeTrace
+                                    : modelData.type === "start" ? page.theme.nodeInputBorder
                                     : page.selectedIds.includes(modelData.id)
                                       ? page.colorFor(modelData.type) : page.borderColor
 
@@ -1368,13 +1343,13 @@ Item {
                                         width: 42
                                         height: 42
                                         radius: 21
-                                        color: page.darkMode ? "#55b89a" : "#317b61"
+                                        color: page.theme.nodeInputIcon
                                         anchors.verticalCenter: parent.verticalCenter
                                         Label {
                                             anchors.centerIn: parent
                                             text: "▶"
-                                            font.pixelSize: page.nodeFontSize + UiMetrics.nodeSymbolOffset
-                                            color: "#ffffff"
+                                            font.pixelSize: UiMetrics.nodeSymbolSizes[page.fontPresetIndex]
+                                            color: page.theme.onNode
                                         }
                                     }
                                     Column {
@@ -1383,13 +1358,13 @@ Item {
                                         Label {
                                             text: qsTr("파일 입력")
                                             font.bold: true
-                                            font.pixelSize: page.nodeFontSize + UiMetrics.nodeHeadingOffset
-                                            color: page.darkMode ? "#f2fff9" : "#21523f"
+                                            font.pixelSize: page.nodeFontSize
+                                            color: page.theme.nodeInputText
                                         }
                                         Label {
                                             text: qsTr("모든 분류의 시작점")
-                                            font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
-                                            color: page.darkMode ? "#b7dece" : "#477663"
+                                            font.pixelSize: UiMetrics.nodeCaptionSizes[page.fontPresetIndex]
+                                            color: page.theme.nodeInputMuted
                                         }
                                     }
                                 }
@@ -1409,9 +1384,9 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: page.titleFor(modelData.type)
                                         font.bold: true
-                                        font.pixelSize: page.nodeFontSize + UiMetrics.nodeBadgeOffset
+                                        font.pixelSize: page.nodeFontSize
                                         elide: Text.ElideRight
-                                        color: "#ffffff"
+                                        color: page.theme.onNode
                                     }
                                     Rectangle {
                                         visible: page.orderFor(modelData.id) > 0
@@ -1419,7 +1394,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 25; height: 24
                                         radius: UiMetrics.radiusControl
-                                        color: "#ffffff"
+                                        color: page.theme.onNode
                                         opacity: 0.94
                                         Label {
                                             anchors.centerIn: parent
@@ -1439,12 +1414,12 @@ Item {
                                         width: 43
                                         height: 23
                                         radius: 11
-                                        color: "#ffffff"
+                                        color: page.theme.onNode
                                         Label {
                                             anchors.centerIn: parent
                                             text: qsTr("루트")
                                             font.bold: true
-                                            font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
+                                            font.pixelSize: UiMetrics.nodeCaptionSizes[page.fontPresetIndex]
                                             color: page.colorFor(modelData.type)
                                         }
                                     }
@@ -1473,7 +1448,7 @@ Item {
                                     anchors.bottomMargin: 8
                                     text: modelData.type === "destination" ? qsTr("도착")
                                           : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr("일치 →")
-                                    font.pixelSize: Math.max(UiMetrics.nodeCaptionMinimum, page.nodeFontSize - UiMetrics.nodeCaptionOffset)
+                                    font.pixelSize: UiMetrics.nodeCaptionSizes[page.fontPresetIndex]
                                     font.weight: Font.Medium
                                     color: page.mutedText
                                 }
@@ -1607,7 +1582,7 @@ Item {
                             y: Math.min(page.marqueeStartY, page.marqueeEndY)
                             width: Math.abs(page.marqueeEndX - page.marqueeStartX)
                             height: Math.abs(page.marqueeEndY - page.marqueeStartY)
-                            color: page.darkMode ? "#335b85b8" : "#3380a88a"
+                            color: page.theme.marquee
                             border.color: page.buttonFocusColor
                             border.width: 2
                         }
@@ -1753,7 +1728,7 @@ Item {
                         objectName: "destinationFolderButton"
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "destination"
-                        text: qsTr("폴더 선택…")
+                        text: qsTr("폴더 선택")
                         onClicked: {
                             page.folderTargetId = page.selectedBlock.id
                             destinationFolderDialog.open()
@@ -1771,7 +1746,7 @@ Item {
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "destination" &&
                                  page.selectedBlock.homeRelative === false
-                        text: qsTr("이 외부 폴더 허용…")
+                        text: qsTr("이 외부 폴더 허용")
                         onClicked: {
                             page.updateValue(page.selectedBlock.id, inspectorValue.text)
                             page.folderTargetId = page.selectedBlock.id
@@ -1933,7 +1908,7 @@ Item {
         objectName: "ruleFileMenu"
         anchorButton: jsonFileButton
         MenuAction {
-            text: qsTr("JSON 불러오기…")
+            text: qsTr("JSON 불러오기")
             onClicked: {
                 jsonFileMenu.close()
                 if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
@@ -1942,11 +1917,11 @@ Item {
             }
         }
         MenuAction {
-            text: qsTr("JSON 내보내기…")
+            text: qsTr("JSON 내보내기")
             onClicked: { jsonFileMenu.close(); exportFileDialog.open() }
         }
         MenuAction {
-            text: qsTr("저장본 다시 열기…")
+            text: qsTr("저장본 다시 열기")
             onClicked: { jsonFileMenu.close(); confirmReload.open() }
         }
     }
@@ -1956,7 +1931,7 @@ Item {
         objectName: "ruleEditMenu"
         anchorButton: editMenuButton
         MenuAction {
-            text: qsTr("블록 추가…")
+            text: qsTr("블록 추가")
             onClicked: { editMenu.close(); page.openAddMenu(canvasViewport.width / 2, canvasViewport.height / 2) }
         }
         MenuAction {
@@ -2055,7 +2030,7 @@ Item {
                 ThemeButton {
                     objectName: "rulesUserGuideButton"
                     Layout.fillWidth: true
-                    text: qsTr("AI용 작성 문서 저장…")
+                    text: qsTr("AI용 작성 문서 저장")
                     onClicked: { ruleHelpPanel.close(); rulesGuideDownload.saveDocument() }
                 }
                 Label {
@@ -2293,7 +2268,7 @@ Item {
                 Layout.fillWidth: true
                 visible: page.testError !== ""
                 text: page.testError
-                color: page.darkMode ? "#ffb5ad" : "#a72e2e"
+                color: page.theme.danger
                 wrapMode: Text.WordWrap
             }
             ColumnLayout {
