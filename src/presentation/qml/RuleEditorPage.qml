@@ -5,6 +5,9 @@ import QtQuick.Dialogs
 
 Item {
     id: page
+    required property var controller
+    required property var destinations
+    required property var guideService
     signal openCurrentEditor()
     signal editorDraftReplaced()
 
@@ -233,7 +236,7 @@ Item {
 
     // 현재 편집 초안의 규칙을 노드와 선으로 다시 펼치는 함수.
     function loadGraphFromDraft() {
-        const restored = ruleEditor.graph()
+        const restored = page.controller.graph()
         if (!restored.valid) {
             selectOnly(-1)
             marqueeActive = false
@@ -273,7 +276,7 @@ Item {
             testTraceBlockIds = []
             return
         }
-        const result = ruleEditor.testGraph(blocks, edges,
+        const result = page.controller.testGraph(blocks, edges,
                                             testMode === 0 ? testFileUrl : "",
                                             testNameField.text, testSizeField.text,
                                             testAgeField.text)
@@ -323,12 +326,13 @@ Item {
         objectName: "rulesGuideDownload"
         parent: page
         guideKey: "rules"
+        service: page.guideService
     }
 
     FolderDialog {
         id: destinationFolderDialog
         title: qsTr("목적지 폴더 선택")
-        onAccepted: page.chooseDestinationFolder(destinationSettings.folderPath(selectedFolder))
+        onAccepted: page.chooseDestinationFolder(page.destinations.folderPath(selectedFolder))
     }
     Dialog {
         id: externalDestinationConfirm
@@ -349,7 +353,7 @@ Item {
                 ThemeButton {
                     text: qsTr("허용하고 지정")
                     onClicked: {
-                        if (destinationSettings.allowFolder(page.externalFolder)) {
+                        if (page.destinations.allowFolder(page.externalFolder)) {
                             page.setDestination(page.folderTargetId, page.externalFolder, false)
                             externalDestinationConfirm.close()
                         } else {
@@ -379,11 +383,11 @@ Item {
     }
 
     Connections {
-        target: ruleEditor
+        target: page.controller
         // 규칙 저장 후에는 확정한 그래프의 배치를 남기고 새 저장본을 다시 펼치는 함수.
         function onRulesSaved() {
             if (page.stagedGraph) {
-                const layoutSaved = ruleEditor.saveGraphLayout(page.blocks, page.edges)
+                const layoutSaved = page.controller.saveGraphLayout(page.blocks, page.edges)
                 page.loadGraphFromDraft()
                 page.statusText = layoutSaved
                     ? qsTr("규칙과 노드 위치를 모두 저장했어요.")
@@ -398,15 +402,15 @@ Item {
 
     // 그래프를 검증한 뒤 규칙 초안과 노드 위치를 한 번에 저장하는 함수.
     function saveAll() {
-        if (!ruleEditor.importGraph(blocks, edges)) {
-            statusText = ruleEditor.message
+        if (!page.controller.importGraph(blocks, edges)) {
+            statusText = page.controller.message
             return
         }
         editorDraftReplaced()
         stagedGraph = true
-        if (!ruleEditor.save()) {
+        if (!page.controller.save()) {
             stagedGraph = false
-            statusText = ruleEditor.message
+            statusText = page.controller.message
         }
     }
 
@@ -719,7 +723,7 @@ Item {
     function chooseDestinationFolder(path) {
         const target = blockForId(folderTargetId)
         if (!target) return
-        const relative = destinationSettings.relativeToHome(path)
+        const relative = page.destinations.relativeToHome(path)
         if (target.homeRelative !== false && relative !== "") {
             setDestination(folderTargetId, relative, true)
         } else {
@@ -1054,7 +1058,7 @@ Item {
                 font.bold: true
                 primary: true
                 onClicked: {
-                    if (ruleEditor.dirty || page.oldEditorFormDirty) confirmSave.open()
+                    if (page.controller.dirty || page.oldEditorFormDirty) confirmSave.open()
                     else page.saveAll()
                 }
             }
@@ -1719,9 +1723,9 @@ Item {
                         checked: page.selectedBlock !== null && page.selectedBlock.homeRelative !== false
                         onClicked: {
                             const block = page.selectedBlock
-                            const relative = destinationSettings.relativeToHome(block.value)
+                            const relative = page.destinations.relativeToHome(block.value)
                             page.setDestination(block.id, checked ? (relative || block.value)
-                                : destinationSettings.resolvedPath(block.value, true), checked)
+                                : page.destinations.resolvedPath(block.value, true), checked)
                         }
                     }
                     ThemeButton {
@@ -1737,7 +1741,7 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         visible: page.selectedBlock !== null && page.selectedBlock.type === "destination"
-                        text: visible ? qsTr("실제 경로: %1").arg(destinationSettings.resolvedPath(
+                        text: visible ? qsTr("실제 경로: %1").arg(page.destinations.resolvedPath(
                             page.selectedBlock.value, page.selectedBlock.homeRelative !== false)) : ""
                         color: page.mutedText
                         wrapMode: Text.WrapAnywhere
@@ -1911,7 +1915,7 @@ Item {
             text: qsTr("JSON 불러오기")
             onClicked: {
                 jsonFileMenu.close()
-                if (page.graphDirty || ruleEditor.dirty || page.oldEditorFormDirty)
+                if (page.graphDirty || page.controller.dirty || page.oldEditorFormDirty)
                     confirmImportReplace.open()
                 else importFileDialog.open()
             }
@@ -2347,7 +2351,7 @@ Item {
                     text: qsTr("다시 열기")
                     onClicked: {
                         confirmReload.close()
-                        ruleEditor.reload()
+                        page.controller.reload()
                         page.loadGraphFromDraft()
                         page.editorDraftReplaced()
                     }
@@ -2362,7 +2366,7 @@ Item {
         nameFilters: [qsTr("JSON 파일 (*.json)")]
         fileMode: FileDialog.OpenFile
         onAccepted: {
-            const result = ruleEditor.importJsonFile(selectedFile)
+            const result = page.controller.importJsonFile(selectedFile)
             if (!result.ok) {
                 page.importErrorLocation = result.location
                 page.importErrorReason = result.reason
@@ -2382,7 +2386,7 @@ Item {
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         onAccepted: {
-            const result = ruleEditor.exportGraph(page.blocks, page.edges, selectedFile)
+            const result = page.controller.exportGraph(page.blocks, page.edges, selectedFile)
             if (!result.ok) {
                 page.exportErrorReason = result.error
                 exportErrorDialog.open()

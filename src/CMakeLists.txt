@@ -182,6 +182,19 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
+        presentation/qml/PageSurface.qml
+        presentation/qml/OperationProgressPopup.qml
+        presentation/qml/CollisionSettingsPage.qml
+        presentation/qml/NavigationButton.qml
+        presentation/qml/WatchSettingsPage.qml
+        presentation/qml/HistoryPage.qml
+        presentation/qml/RecoveryPage.qml
+        presentation/qml/CompanionPage.qml
+        presentation/qml/AppSettingsPage.qml
+        presentation/qml/DeveloperToolsPage.qml
+        presentation/qml/LegacyRuleEditorDialog.qml
+        presentation/qml/WatchProposalDialog.qml
+        presentation/qml/SortConfirmationDialog.qml
         presentation/qml/UiMetrics.qml
         presentation/qml/UiTheme.qml
         presentation/qml/GuideDownload.qml

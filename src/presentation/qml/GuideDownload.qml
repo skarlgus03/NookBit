@@ -3,6 +3,7 @@ import QtQuick.Dialogs as NativeDialogs
 
 Item {
     id: download
+    required property var service
     property string guideKey: "rules"
     property string status: ""
     visible: false
@@ -10,8 +11,8 @@ Item {
     // 문서의 기본 이름을 설정하고 저장할 위치를 선택하는 창을 여는 함수.
     function saveDocument() {
         status = ""
-        userGuides.clearError()
-        saveDialog.selectedFile = userGuides.suggestedFile(guideKey)
+        service.clearError()
+        saveDialog.selectedFile = service.suggestedFile(guideKey)
         saveDialog.open()
     }
     // 소유 페이지를 떠날 때 저장하지 않고 파일 선택창만 닫는 함수.
@@ -25,8 +26,8 @@ Item {
         nameFilters: [qsTr("Markdown 문서 (*.md)")]
         defaultSuffix: "md"
         onAccepted: {
-            download.status = userGuides.save(download.guideKey, selectedFile)
-                ? qsTr("문서를 저장했어요.") : userGuides.error
+            download.status = download.service.save(download.guideKey, selectedFile)
+                ? qsTr("문서를 저장했어요.") : download.service.error
         }
     }
 }

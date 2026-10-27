@@ -5,6 +5,10 @@ import QtQuick.Layouts
 // 파일 대기 목록·정리 위치·정리 요청은 홈과 분리된 페이지에서만 표시한다.
 Rectangle {
     id: home
+    required property var controller
+    required property var pending
+    required property var recovery
+    required property var progress
     objectName: "fileSortPage"
     property bool dark: false
     readonly property var theme: UiTheme.colors(dark)
@@ -50,18 +54,18 @@ Rectangle {
     function requestSort() {
         confirmationReturnStep = workflowStep
         manualSortRequested = true
-        previewController.prepareSort()
-        manualSortRequested = backgroundTasks.busy || previewController.awaitingConfirmation
-        if (previewController.awaitingConfirmation) showStep(2)
+        home.controller.prepareSort()
+        manualSortRequested = home.progress.busy || home.controller.awaitingConfirmation
+        if (home.controller.awaitingConfirmation) showStep(2)
     }
     // 최종 확인을 취소하고 준비 전 입력 또는 미리보기로 돌아가는 함수.
     function cancelConfirmation() {
         manualSortRequested = false
-        previewController.cancelSort()
+        home.controller.cancelSort()
         showStep(confirmationReturnStep)
     }
     Connections {
-        target: previewController
+        target: home.controller
         // 이 페이지에서 요청한 수동 정리만 진행 화면으로 연결하는 함수.
         function onSortExecutionStarted() {
             if (!home.manualSortRequested || !home.visible) return
@@ -81,9 +85,9 @@ Rectangle {
         function onPreviewChanged() {
             // 작업 시작 알림과 결과 반영이 끝난 뒤 취소·준비 실패 여부를 확인하는 함수.
             Qt.callLater(function() {
-                if (previewController.awaitingConfirmation && home.manualSortRequested && home.visible)
+                if (home.controller.awaitingConfirmation && home.manualSortRequested && home.visible)
                     home.showStep(2)
-                else if (!backgroundTasks.busy && !previewController.awaitingConfirmation && home.workflowStep < 3) {
+                else if (!home.progress.busy && !home.controller.awaitingConfirmation && home.workflowStep < 3) {
                     if (home.workflowStep === 2) home.showStep(home.confirmationReturnStep)
                     home.manualSortRequested = false
                 }
@@ -142,17 +146,17 @@ Rectangle {
             RowLayout {
                 Label { text: qsTr("대기 목록"); color: home.foreground; font.bold: true }
                 Item { Layout.fillWidth: true }
-                Label { text: qsTr("%1개").arg(pendingFiles.count); color: home.muted }
+                Label { text: qsTr("%1개").arg(home.pending.count); color: home.muted }
             }
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(160, Math.min(240, home.height - 485))
                 color: home.surface; radius: UiMetrics.radiusCard; border.color: home.edge
-                Text { anchors.centerIn: parent; visible: pendingFiles.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: UiMetrics.textBody }
+                Text { anchors.centerIn: parent; visible: home.pending.count === 0; text: qsTr("정리할 파일을 기다리고 있어요"); color: home.muted; font.pixelSize: UiMetrics.textBody }
                 ListView {
                     id: files
                     anchors.fill: parent; anchors.margins: UiMetrics.spaceControl
-                    model: pendingFiles; clip: true; spacing: UiMetrics.spaceExtraSmall
+                    model: home.pending; clip: true; spacing: UiMetrics.spaceExtraSmall
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
                         required property int index
@@ -178,16 +182,16 @@ Rectangle {
                                 Text { Layout.fillWidth: true; text: available ? fileName : qsTr("[없음] %1").arg(fileName); elide: Text.ElideMiddle; color: available ? home.foreground : home.theme.danger; font.pixelSize: UiMetrics.textBody }
                                 Text { Layout.fillWidth: true; text: fullPath; elide: Text.ElideMiddle; color: home.muted; font.pixelSize: UiMetrics.textBody }
                             }
-                            FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: pendingFiles.removeAt(index) }
+                            FlatButton { text: "×"; implicitWidth: UiMetrics.iconButtonSize; Accessible.name: qsTr("목록에서 빼기"); onClicked: home.pending.removeAt(index) }
                         }
                     }
                 }
             }
-            Label { Layout.fillWidth: true; visible: pendingFiles.storageNotice.length > 0; text: pendingFiles.storageNotice; wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: home.pending.storageNotice.length > 0; text: home.pending.storageNotice; wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
             Label { text: qsTr("분류 규칙"); color: home.muted; font.pixelSize: UiMetrics.textBody }
             FlatButton {
                 Layout.fillWidth: true
-                text: previewController.activeRuleLabel + "  ›"
+                text: home.controller.activeRuleLabel + "  ›"
                 contentItem: Text { text: parent.text; elide: Text.ElideMiddle; color: home.foreground; font.pixelSize: UiMetrics.textBody; verticalAlignment: Text.AlignVCenter }
                 onClicked: home.pageRequested(1)
             }
@@ -196,11 +200,11 @@ Rectangle {
                 id: destination
                 objectName: "compactDestinationField"
                 Layout.fillWidth: true
-                text: previewController.defaultDestinationRoot
+                text: home.controller.defaultDestinationRoot
                 placeholderText: qsTr("정리 폴더의 전체 경로")
                 font.pixelSize: UiMetrics.textBody
                 color: home.foreground
-                onTextEdited: previewController.clear()
+                onTextEdited: home.controller.clear()
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -210,9 +214,9 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
                     text: qsTr("결과 미리보기")
-                    enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0
+                    enabled: home.pending.count > 0 && home.pending.unavailableCount === 0
                     // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
-                    onClicked: { previewController.createPreview(destination.text); home.showStep(1) }
+                    onClicked: { home.controller.createPreview(destination.text); home.showStep(1) }
                 }
                 LargeActionButton {
                     objectName: "compactSortButton"
@@ -220,23 +224,23 @@ Rectangle {
                     Layout.preferredWidth: 1
                     primary: true
                     text: qsTr("정리하기")
-                    enabled: pendingFiles.count > 0 && pendingFiles.unavailableCount === 0 && !previewController.awaitingConfirmation
+                    enabled: home.pending.count > 0 && home.pending.unavailableCount === 0 && !home.controller.awaitingConfirmation
                     // 미리보기·준비 후 기존 최종 확인을 거쳐야만 실제 파일 이동을 시작하는 함수.
                     onClicked: {
-                        previewController.createPreview(destination.text)
-                        if (previewController.hasPreview && previewController.hasMovableSteps) home.requestSort()
+                        home.controller.createPreview(destination.text)
+                        if (home.controller.hasPreview && home.controller.hasMovableSteps) home.requestSort()
                     }
                 }
             }
             FlatButton {
                 objectName: "compactUndoButton"
                 text: qsTr("되돌리기")
-                enabled: previewController.canUndo
-                onClicked: previewController.undoLastMove()
+                enabled: home.controller.canUndo
+                onClicked: home.controller.undoLastMove()
             }
-            Label { Layout.fillWidth: true; text: previewController.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
-            Label { Layout.fillWidth: true; visible: pendingFiles.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
-            FlatButton { text: qsTr("중단 작업 확인"); visible: recoveryController.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
+            Label { Layout.fillWidth: true; text: home.controller.message; visible: text.length > 0; wrapMode: Text.Wrap; color: home.muted; font.pixelSize: UiMetrics.textBody }
+            Label { Layout.fillWidth: true; visible: home.pending.unavailableCount > 0; text: qsTr("찾을 수 없는 파일을 목록에서 빼주세요."); wrapMode: Text.Wrap; color: home.theme.danger; font.pixelSize: UiMetrics.textBody }
+            FlatButton { text: qsTr("중단 작업 확인"); visible: home.recovery.recoveryCases.length > 0; onClicked: home.recoveryRequested() }
         }
     }
     DropArea {
@@ -253,7 +257,7 @@ Rectangle {
         // 페이지 어느 위치에 놓아도 파일을 이동하지 않고 대기 목록에 등록하는 함수.
         onDropped: function(event) {
             if (event.hasUrls && (event.supportedActions & Qt.CopyAction)) {
-                for (const url of event.urls) pendingFiles.addUrl(url)
+                for (const url of event.urls) home.pending.addUrl(url)
                 event.accept(Qt.CopyAction)
             } else event.accepted = false
         }
@@ -290,7 +294,7 @@ Rectangle {
         height: home.height
         visible: home.paneVisible(1)
         enabled: home.previewOpen && !home.transitioning
-        controller: previewController
+        controller: home.controller
         dark: home.dark
         onBackRequested: home.showStep(0)
         // 확인한 미리보기를 기존 준비·승인 절차로 전달하는 함수.
@@ -302,11 +306,11 @@ Rectangle {
         height: home.height
         visible: home.paneVisible(2)
         enabled: home.workflowStep === 2 && !home.transitioning
-        controller: previewController
+        controller: home.controller
         dark: home.dark
         onCancelRequested: home.cancelConfirmation()
         // 확인 버튼만 기존 승인·실행 계약을 호출하는 함수.
-        onConfirmRequested: previewController.confirmSort()
+        onConfirmRequested: home.controller.confirmSort()
     }
     Repeater {
         model: [3, 4]
@@ -321,15 +325,15 @@ Rectangle {
             completed: modelData === 4
             success: home.sortSuccess
             resultMessage: home.resultMessage
-            controller: previewController
-            progress: backgroundTasks
+            controller: home.controller
+            progress: home.progress
             dark: home.dark
             onBackRequested: home.showStep(0)
         }
     }
     Shortcut {
         sequence: "Escape"
-        enabled: home.visible && [1, 2, 4].includes(home.workflowStep) && !backgroundTasks.busy
+        enabled: home.visible && [1, 2, 4].includes(home.workflowStep) && !home.progress.busy
         // Esc는 확장 창을 접지 않고 임시 미리보기만 닫는 함수.
         onActivated: home.workflowStep === 2 ? home.cancelConfirmation() : home.showStep(0)
     }
