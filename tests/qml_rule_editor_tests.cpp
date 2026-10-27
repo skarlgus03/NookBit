@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
         for (const char* role : {"accent", "primaryHover", "primaryPressed"})
             expect(contrast(foreground, QColor(colors.value(role).toString())) >= 4.5,
                 "primary button text remains readable in normal/hover/press for both themes");
-        expect(contrast(QColor(colors.value("accentSoftText").toString()), QColor(colors.value("menuSelected").toString())) >= 4.5,
+        expect(contrast(QColor(colors.value("accentSoftText").toString()), QColor(colors.value("navigationSelected").toString())) >= 4.5,
             "selected navigation text contrasts with its soft background");
         for (const QString role : {QStringLiteral("success"), QStringLiteral("warning"), QStringLiteral("danger")})
             expect(contrast(QColor(colors.value(role).toString()), QColor(colors.value(role + "Surface").toString())) >= 4.5,

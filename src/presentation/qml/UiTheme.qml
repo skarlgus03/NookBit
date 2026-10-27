@@ -9,7 +9,7 @@ QtObject {
         text: "#24233a", muted: "#615f78", border: "#e0dfea", grid: "#e6e5ee",
         accent: "#3e3a6e", hover: "#4a4683", pressed: "#2f2c57", onAccent: white,
         accentSoft: "#e6e5f4", focus: "#7a74c4", pressedSoft: "#d3d1ec",
-        navigationHover: "#dedce9", navigationPressed: "#c9c5df",
+        navigationHover: "#dedce9", navigationSelected: "#d4d0e6", navigationPressed: "#c9c5df",
         success: "#28764e", successSoft: "#edf7f0",
         warning: "#946020", warningSoft: "#fff4df",
         danger: "#ac423a", dangerSoft: "#fff0ee"
@@ -41,7 +41,7 @@ QtObject {
             window: p.window, surface: p.surface, alternate: p.raised, home: p.window,
             inspectionVeil: white, text: p.text, contentText: p.text, muted: p.muted, homeMuted: p.muted,
             border: p.border, sectionBorder: p.border, button: p.raised,
-            navigationText: p.text, navigationButton: p.raised, navigationSelected: p.accentSoft,
+            navigationText: p.text, navigationButton: p.raised, navigationSelected: p.navigationSelected || p.accentSoft,
             navigationBorder: p.border, navigationFocus: p.focus,
             navigationActiveText: p.accent,
             navigationHover: p.navigationHover || p.raised,

@@ -88,8 +88,9 @@ foreground. Keyboard focus and press feedback remain visible. Menu command names
 do not include manually appended ellipses; genuine constrained text can still elide
 with a full-text tooltip.
 
-Home uses dedicated `navigationHover` / `navigationPressed` colors. Light mode has
-slightly stronger fills (`#dedce9` / `#c9c5df`); dark mode keeps raised/pressedSoft.
+Home uses dedicated `navigationHover` / `navigationSelected` / `navigationPressed`
+colors. Light fills are `#dedce9` / `#d4d0e6` / `#c9c5df`: selection is stronger than
+hover and softer than pressing. Dark mode keeps raised/accentSoft/pressedSoft.
 
 `buttonTransitionMs` (90 ms) and `buttonReleaseMs` (120 ms) control the hover layer's
 fade in/out. Press state is immediate and ends when the pointer is released; there

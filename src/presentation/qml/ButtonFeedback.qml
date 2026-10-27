@@ -16,7 +16,7 @@ Rectangle {
     readonly property color interactionColor: pushed ? (button.primary ? theme.primaryPressed
         : navigation ? theme.navigationPressed : theme.buttonPressed)
         : button.primary ? theme.primaryHover
-        : chosen ? (navigation ? theme.menuSelected : theme.buttonChecked)
+        : chosen ? (navigation ? theme.navigationSelected : theme.buttonChecked)
         : navigation ? theme.navigationHover : theme.buttonHover
     implicitWidth: UiMetrics.buttonDefaultWidth
     implicitHeight: UiMetrics.controlHeight
