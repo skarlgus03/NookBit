@@ -13,10 +13,11 @@ Rectangle {
     readonly property bool chosen: button.activeSelection
     readonly property bool interactionActive: button.enabled && (pushed || chosen || button.hovered || button.visualFocus)
     readonly property bool outlineActive: button.enabled && (button.visualFocus || (!navigation && (pushed || chosen || button.hovered)))
-    readonly property color interactionColor: pushed ? (button.primary ? theme.primaryPressed : theme.buttonPressed)
+    readonly property color interactionColor: pushed ? (button.primary ? theme.primaryPressed
+        : navigation ? theme.navigationPressed : theme.buttonPressed)
         : button.primary ? theme.primaryHover
         : chosen ? (navigation ? theme.menuSelected : theme.buttonChecked)
-        : navigation ? theme.alternate : theme.buttonHover
+        : navigation ? theme.navigationHover : theme.buttonHover
     implicitWidth: UiMetrics.buttonDefaultWidth
     implicitHeight: UiMetrics.controlHeight
     radius: button.backgroundRadius

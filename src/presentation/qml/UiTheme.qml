@@ -9,6 +9,7 @@ QtObject {
         text: "#24233a", muted: "#615f78", border: "#e0dfea", grid: "#e6e5ee",
         accent: "#3e3a6e", hover: "#4a4683", pressed: "#2f2c57", onAccent: white,
         accentSoft: "#e6e5f4", focus: "#7a74c4", pressedSoft: "#d3d1ec",
+        navigationHover: "#dedce9", navigationPressed: "#c9c5df",
         success: "#28764e", successSoft: "#edf7f0",
         warning: "#946020", warningSoft: "#fff4df",
         danger: "#ac423a", dangerSoft: "#fff0ee"
@@ -43,6 +44,8 @@ QtObject {
             navigationText: p.text, navigationButton: p.raised, navigationSelected: p.accentSoft,
             navigationBorder: p.border, navigationFocus: p.focus,
             navigationActiveText: p.accent,
+            navigationHover: p.navigationHover || p.raised,
+            navigationPressed: p.navigationPressed || p.pressedSoft,
             menuSelected: p.accentSoft, menuBorder: p.border, menuFocus: p.focus,
             accent: p.accent, accentText: p.onAccent, accentSoftText: p.accent, primaryFocus: p.focus,
             buttonHover: p.accentSoft, buttonPressed: p.pressedSoft, buttonChecked: p.accentSoft,
