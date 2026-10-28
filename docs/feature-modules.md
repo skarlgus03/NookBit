@@ -1,7 +1,8 @@
 # Feature modules: boundaries and communication
 
-Status: incremental refactor, 2026-10-28. The pending-queue and classification-query
-seams (steps 1 and 2) are implemented. Module toggles, a module registry and plugin loading remain planned.
+Status: incremental refactor, 2026-10-28. The pending-queue, classification-query
+and integration-adapter seams (steps 1 through 3) are implemented. Module toggles,
+a module registry and plugin loading remain planned.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -38,10 +39,11 @@ owner without becoming one menu button.
 | [Pending queue contracts](../include/nookbit/application/pending_queue.hpp) and [adapter](../src/app/pending_queue_adapter.hpp) | Standard C++ path snapshots and per-path admission receipts; host forwards model changes | Adapter deliberately retains the existing model and its admission policies |
 | [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Owns scanning, pending-path exclusion, readiness and thresholds; uses `IClassificationQuery` | Feature lifecycle is still assembled by the host |
 | [Classification contract](../include/nookbit/application/classification_query.hpp) and [use case](../src/application/use_cases/classify_files_use_case.cpp) | Organizer-side active-rule loading and matching; ordered per-file decisions and content-based rule revision | Still part of the shared app, not a separately enabled module |
-| [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer | Registration and source/delivery adapters are assembled in `main.cpp` |
+| [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer; source/delivery wiring is in FeatureConnections | Controller creation and preference callbacks still belong to current startup wiring |
 | [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | Desktop objects and their connections are assembled unconditionally |
 | [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution | No feature-level startup/disable boundary yet |
-| [Application wiring](../src/presentation/main.cpp) | Watch-to-notification and activity-to-companion bridges already exist | Startup, connections, QML context objects and navigation are not driven by enabled modules |
+| [Integration adapters](../src/app/feature_connections.cpp) | Watch-to-notification, notification-to-companion and file-activity-to-companion bindings have a scoped owner | No feature lifecycle/enablement registry yet |
+| [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
 desktop module host. Do not describe its presence as completed module loading.
@@ -108,6 +110,34 @@ the receiver's owning thread, pass value snapshots across threads and disconnect
 before destroying receivers. File workers never call QML objects. Repeated
 activity/progress replaces current state rather than creating an unbounded queue.
 
+### Current integration adapter
+
+`FeatureConnections` is a host-side QObject, not a core event bus or feature owner.
+Its header depends on the input contracts and forward declarations; concrete
+controller dependencies stay in its implementation. Each binding accepts a target
+QObject lifetime context plus a channel interface. The channel must remain valid
+for that context's lifetime. Current bindings require the bridge, source and target
+to share an owning thread; unsupported cross-thread binding returns an error.
+No new runtime thread, timer or event queue is introduced by this adapter.
+
+Bind notification consumers before connecting Watch: the notification subscription
+does not replay prior deliveries. Watch and work bindings immediately synchronize
+their current state, then forward changes. Existing registration/persistence IDs
+remain `file.offer` / `folder-watch` / `organization-offer`; work still maps
+`file-operations` / `current-operation` to `file.work`. The
+`folderWatchOfferType()` factory centralizes the existing type metadata.
+
+The bridge QObject owns signal subscriptions. Destroying it disconnects routes and
+removes its queued deliveries; guarded source/target pointers prevent queued events
+from dereferencing deleted endpoints. A missing optional companion route does not
+block Watch or notification state. Delivery errors are logged separately from the
+source operation's result. Muting attention never mutes file-work activity.
+
+Disconnecting routes does not resolve source facts or unregister notification
+types. A future lifecycle owner must stop producers and withdraw active state
+while channels are still alive before unloading a feature. Hot unloading and
+module enablement are not implemented by this extraction.
+
 ## Enablement and UI ownership: target behavior
 
 Initially modules are compiled into one app. No DLL discovery or hot unloading is
@@ -169,8 +199,10 @@ The same ownership/request/update rules apply to additions unrelated to companio
    The host wires the query to active rules and the existing engine/hasher. Watch
    retains scanning, file readiness and thresholds. Rule changes invalidate old
    offers; query results never bypass fresh preview or movement approval.
-3. **Integration adapters.** Extract existing notification/activity wiring from
-   `main.cpp`, retaining current channel contracts and stable source/cue IDs.
+3. **Integration adapters: implemented.** `FeatureConnections` owns the existing
+   notification/activity routes outside `main.cpp`, retaining channel contracts,
+   stable source/cue IDs, initial synchronization and ordinary delivery behavior.
+   Main chooses the routes; features do not call peer controllers to render them.
 4. **Host lifecycle and UI contributions.** Introduce explicit ownership and
    registration around working features, initially all enabled.
 5. **Persisted enablement and restart.** Add module management only after disabled
@@ -182,4 +214,7 @@ operation, read/command failure, invalidation during enqueue, per-path partial
 results and real-model admission/persistence behavior. Classification tests cover
 snapshot consistency, matched/excluded/unmatched/folder results, same-version rule
 changes, invalid query responses and failure propagation. Acceptance still only
-enqueues valid paths and leaves original files untouched. Step 3 is next.
+enqueues valid paths and leaves original files untouched. Integration tests also
+cover initial delivery, muting/re-enabling, inspection versus file work, work and
+delivery failures, missing optional consumers, queued-event lifetimes and invalid
+thread binding. Step 4 is next.

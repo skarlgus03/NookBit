@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
+#include "app/feature_connections.hpp"
 #include "application/use_cases/classify_files_use_case.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
@@ -1270,39 +1271,13 @@ int main(int argc, char* argv[]) {
             uiPreferences.sync();
             return nookbit::Result<void>::failure({"notification.save_failed", "알림 설정을 저장하지 못했어요. 이전 설정을 유지해요."});
         });
-    const auto registeredNotice = notifications.registerType({"file.offer", "folder-watch", "폴더 감시",
-        "정리 제안", "감시 폴더에서 정리할 파일이 발견되면 알려줘요.", true});
+    const auto registeredNotice = notifications.registerType(nookbit::folderWatchOfferType());
     if (!registeredNotice) { QTextStream(stderr) << QString::fromStdString(registeredNotice.error().message) << Qt::endl; return EXIT_FAILURE; }
-    nookbit::ICharacterChannel& characterChannel = characterController;
-    // 표시가 허용된 알림을 컴패니언 표현 창구에만 연결하는 조립부 어댑터.
-    QObject::connect(&notifications, &nookbit::NotificationController::notificationChanged, &characterController,
-        [&characterChannel](const QString& typeId, const QString& sourceId, const QString& instanceId,
-            bool active, const QString&, const QString& message) {
-            const auto received = characterChannel.publish({sourceId.toStdString(), (typeId + "/" + instanceId).toStdString(),
-                nookbit::CharacterUpdateKind::Attention, active, message.toStdString(), typeId.toStdString()});
-            if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
-        });
-    // 파일 작업 상태를 공통 입력으로 변환해 인터페이스 창구에 전달하는 함수.
-    const auto reportCharacterActivity = [&characterChannel, &backgroundTasks] {
-        const auto received = characterChannel.publish({"file-operations", "current-operation",
-            nookbit::CharacterUpdateKind::Activity, backgroundTasks.fileWorkActive(), {}, "file.work"});
-        if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
-    };
-    nookbit::INotificationChannel& notificationChannel = notifications;
-    // 감시 기능의 제안 상태를 컴패니언을 모르는 공통 알림 창구로 전달하는 함수.
-    const auto reportWatchNotification = [&notificationChannel, &watchController] {
-        const auto received = notificationChannel.publish({"file.offer", "organization-offer",
-            watchController.proposalVisible(), "정리 제안", "정리할 파일이 있어요!"});
-        if (!received) QTextStream(stderr) << QString::fromStdString(received.error().message) << Qt::endl;
-    };
-    // 작업 상태를 값으로 전달하고 캐릭터가 다른 컨트롤러를 호출하지 않게 연결하는 함수.
-    QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged,
-        &characterController, reportCharacterActivity);
-    // 감시 제안의 생성·수락·나중에 처리 결과를 공통 알림 창구에 전달하는 함수.
-    QObject::connect(&watchController, &nookbit::WatchController::watchChanged,
-        &notifications, reportWatchNotification);
-    reportCharacterActivity();
-    reportWatchNotification();
+    nookbit::FeatureConnections featureConnections;
+    auto connected = featureConnections.notificationsToCompanion(notifications, characterController, characterController);
+    if (connected) connected = featureConnections.workToCompanion(backgroundTasks, characterController, characterController);
+    if (connected) connected = featureConnections.watchToNotifications(watchController, notifications, notifications);
+    if (!connected) { QTextStream(stderr) << QString::fromStdString(connected.error().message) << Qt::endl; return EXIT_FAILURE; }
     // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
     QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
         &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {
