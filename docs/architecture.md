@@ -26,13 +26,17 @@ preferences remain independent from file-work activity. Lifetime guards and
 scoped QObject connections prevent delivery to destroyed endpoints; module
 startup/disable management remains a later step.
 
-NotificationRuntime and FolderWatchRuntime now own the first feature-level object
-groups. Their controllers are destroyed before the callback state, repositories
-and workers they use. Watch timers and delayed startup scans end with their owner;
-saved settings remain intact. Main injects Organizer capabilities, queue endpoints
-and QSettings, then exposes the borrowed controllers to existing UI/connections.
-File Organizer and Companion creation are still inline, and module UI registration
-and enablement remain pending.
+NotificationRuntime, FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime
+now own feature-level object groups. File Organizer owns its queue, rule/query and
+sort/history/recovery assembly; Companion owns its packs, personal edits, placement,
+interaction and motion assembly. Main supplies preferences/paths, injects Organizer
+capabilities into Watch, and exposes borrowed endpoints to QML and integration
+bridges. Internal timers and preference callbacks end with their feature owner.
+File work joins before its dependent repositories/controllers are destroyed; pack
+imports join before their library is destroyed. Saved settings/data remain intact.
+The host still owns tray/window lifecycle and UI registration; module enablement
+and a registry remain pending. See [runtime ownership](feature-modules.md#current-runtime-ownership)
+for lifetime order and verification-mode behavior.
 
 이 문서는 팀원이 기능을 붙일 때 **현재 코드가 어떻게 동작하는지**와 **어떤 방향으로 확장할지**를 구분하기 위한 안내다. 저장소의 코드가 최종 형태라는 뜻은 아니다. 특히 일부 컨트롤러는 아직 구체 구현을 직접 보유하고 있다.
 
@@ -65,7 +69,7 @@ NookBit의 기본 입력은 사용자가 끌어온 파일의 **대기 목록**�
 
 같은 일꾼을 여러 유스케이스가 이용해도 된다. 객체를 유스케이스마다 새로 만들지 공유할지는 상태, 수명, 동시성에 따라 결정한다. **모든 일꾼이 싱글턴이어야 한다는 원칙은 없다.** 반면 SQLite 기록처럼 공유되는 영속 상태는 트랜잭션과 동시 접근을 신중하게 다뤄야 한다. 파일 작업에는 별도 직렬화와 기록 일관성이 필요하다.
 
-Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접 구현하지 않도록 한다. 컨트롤러는 화면 입력을 변환하고 유스케이스를 호출하며 결과를 화면에 돌려준다. 앱 시작 시 실제 객체 연결은 주로 [`main.cpp`](../src/presentation/main.cpp)에 있다. [`CompositionRoot`](../src/app/composition_root.cpp)는 서비스 묶음 검증에 쓰이지만, 현재 데스크톱 연결의 전부를 대신하지는 않는다.
+Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접 구현하지 않도록 한다. 컨트롤러는 화면 입력을 변환하고 유스케이스를 호출하며 결과를 화면에 돌려준다. Feature-internal creation and wiring live in the runtime owners under `src/app/`; [`main.cpp`](../src/presentation/main.cpp) selects cross-feature routes and exposes UI endpoints. [`CompositionRoot`](../src/app/composition_root.cpp)는 서비스 묶음 검증에 쓰이지만, 현재 데스크톱 연결의 전부를 대신하지는 않는다.
 
 2026-10-06 [`PreviewController`](../src/presentation/preview_controller.hpp)와 HistoryController의 Scanner/RuleEngine/Planner/Hasher 보유 및 SafeExecutor 직접 생성을 제거했다. main에서 조립한 IFileOperations 계약을 공유하고 FileOperationService가 요청별 SafeExecutor를 조립한다. 보호 경로와 전송 포트도 화면 밖에서 소유한다. PreviewController의 규칙 저장소 등 일부 구체 저장소 의존은 남아 있다. 이는 우리가 지향하는 “화면은 포트와 유스케이스에 의존” 방향에 남아 있는 결합이다. 새 기능에서 이 패턴을 무작정 복제하지 말고, 기능 경계가 분명할 때 유스케이스/포트로 옮기자. 다만 작은 수정을 위해 대규모 구조 개편을 끼워 넣지는 않는다.
 
@@ -98,7 +102,7 @@ conversion and tests together when changing these semantics.
 
 앱 데이터의 위치는 운영체제의 `QStandardPaths::AppDataLocation` 결과로 정한다. `rules.json`은 활성 규칙, `rule-graph-layout.json`은 그래프 표시 위치, `watch.json`은 감시 설정, `history.sqlite`는 계획·승인·실행 기록이다. 저장소 안의 `resources/rules/default.v3.json`은 첫 실행 기본값이지 사용자 규칙의 실시간 원본이 아니다. 작업 중인 초안과 활성 규칙, SQLite 기록을 혼동하지 않는다.
 
-대기 목록 저장은 `IPendingFilesRepository` 계약과 `JsonPendingFilesRepository` 구현으로 분리한다. `main.cpp`가 복원·목록 변경 신호·저장소를 연결하고 `PendingFilesModel`은 저장소를 모르며 경로와 파일 존재 상태만 표시한다. `pending-files.json` 형식은 `{ "schemaVersion": 1, "paths": ["절대 파일 경로"] }`이며 계획·승인을 담지 않는다. 문서 전체를 검증하고 크기를 16 MiB로 제한하며 저장은 `QSaveFile`의 원자적 교체를 사용한다. 손상된 문서를 읽지 못하면 원본을 보존하고 해당 실행의 자동 저장을 중지한다. 복원은 중복을 제거하되 없어진 경로를 숨기지 않는다. 파일 존재 상태는 주기적으로 확인하며 바뀌면 기존 미리보기를 무효화한다. 재시작 후 실제 이동에는 반드시 새 미리보기와 최종 확인이 필요하다.
+Pending-list persistence uses the `IPendingFilesRepository` contract and `JsonPendingFilesRepository` implementation. `FileOrganizerRuntime` owns restoration, change-signal persistence and the repository; PendingFilesModel only manages paths and availability. The `pending-files.json` format is `{ "schemaVersion": 1, "paths": ["absolute path"] }`, without plans or approvals. Whole-document validation limits it to 16 MiB, and QSaveFile replaces it atomically. A failed restore preserves the original document and disables automatic writes for that run. Restoration deduplicates paths while retaining unavailable entries. Availability polling invalidates stale previews; actual movement still requires a new preview and final confirmation after restart.
 
 ## 기능을 추가할 때
 

@@ -1,9 +1,9 @@
 #include "presentation/pending_files_model.hpp"
-#include "app/pending_queue_adapter.hpp"
 #include "app/feature_connections.hpp"
 #include "app/notification_runtime.hpp"
 #include "app/folder_watch_runtime.hpp"
-#include "application/use_cases/classify_files_use_case.hpp"
+#include "app/file_organizer_runtime.hpp"
+#include "app/companion_runtime.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
@@ -11,29 +11,7 @@
 #include "presentation/recovery_controller.hpp"
 #include "presentation/watch_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
-#include "infrastructure/filesystem/recovery_service.hpp"
-#include "infrastructure/filesystem/file_operation_service.hpp"
-#include "infrastructure/filesystem/windows_staged_copy.hpp"
-#include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
-#include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
-#include "infrastructure/filesystem/windows_transfer_recovery.hpp"
-#include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
-#include "infrastructure/filesystem/safe_executor.hpp"
-#include "infrastructure/configuration/runtime_settings_repository.hpp"
-#include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
-#include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
-#include "application/use_cases/create_preview_use_case.hpp"
-#include "application/use_cases/freeze_preview_use_case.hpp"
-#include "application/use_cases/verify_saved_plan_use_case.hpp"
-#include "application/use_cases/approve_plan_use_case.hpp"
-#include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
-#include "infrastructure/configuration/json_pending_files_repository.hpp"
-#include "infrastructure/filesystem/filesystem_scanner.hpp"
-#include "modules/rules/rule_engine.hpp"
-#include "modules/planner/planner.hpp"
-#include "infrastructure/cryptography/qt_plan_hasher.hpp"
-#include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "infrastructure/persistence_sqlite/sqlite_schema.hpp"
 
 #include <QDir>
@@ -61,8 +39,6 @@
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QSettings>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include "presentation/companion_edit_controller.hpp"
 #include <QSqlQuery>
 #include <QTextStream>
@@ -70,10 +46,8 @@
 #include <QUrl>
 
 #include <cstdlib>
-#include <filesystem>
 #include <algorithm>
 #include <cmath>
-#include "app/thread_local_operations.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "presentation/notification_controller.hpp"
@@ -93,9 +67,6 @@
 #include <QTemporaryDir>
 #include <QSemaphore>
 #include <QJSValue>
-#include "infrastructure/configuration/json_character_presentation.hpp"
-#include "infrastructure/configuration/json_image_pack_loader.hpp"
-#include "infrastructure/configuration/directory_image_pack_library.hpp"
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -866,8 +837,6 @@ int main(int argc, char* argv[]) {
     nookbit::AppLifecycleController appLifecycle;
     nookbit::UserGuideController userGuides;
 
-    nookbit::PendingFilesModel pendingFiles;
-    nookbit::PendingQueueAdapter pendingQueue(pendingFiles);
     const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
@@ -886,365 +855,32 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::JsonPendingFilesRepository pendingStorage(
-        QDir(appData).filePath(QStringLiteral("pending-files.json")));
-    const nookbit::IPendingFilesRepository& pendingRepository = pendingStorage;
-    if (!verifyUi) {
-        const auto restored = pendingRepository.load();
-        if (restored) {
-            QStringList paths;
-            for (const auto& path : restored.value()) paths.append(QString::fromStdWString(path.wstring()));
-            pendingFiles.restorePaths(paths);
-            // 등록·제외·이동 완료로 목록이 바뀔 때 경로만 저장하는 함수.
-            QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
-                             &application, [&pendingFiles, &pendingRepository] {
-                std::vector<std::filesystem::path> paths;
-                for (const auto& path : pendingFiles.filePaths()) paths.emplace_back(path.toStdWString());
-                const auto saved = pendingRepository.save(paths);
-                pendingFiles.setStorageNotice(saved ? QString() :
-                    QStringLiteral("대기 목록을 저장하지 못했어요. 이번 변경은 재시작 후 복원되지 않을 수 있어요: %1")
-                        .arg(QString::fromStdString(saved.error().message)));
-            });
-        } else {
-            pendingFiles.setStorageNotice(QStringLiteral("대기 목록을 복원하지 못했어요. 기존 저장 파일은 보존하며 이번 실행의 목록 변경은 저장하지 않아요: %1")
-                .arg(QString::fromStdString(restored.error().message)));
-        }
-    }
-    QTimer pendingAvailabilityTimer;
-    pendingAvailabilityTimer.setInterval(3000);
-    QObject::connect(&pendingAvailabilityTimer, &QTimer::timeout,
-                     &pendingFiles, &nookbit::PendingFilesModel::refreshAvailability);
-    if (!verifyUi) pendingAvailabilityTimer.start();
-    const auto databasePath = QDir(appData).filePath(QStringLiteral("history.sqlite"));
-    const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
-    nookbit::SqliteTransferJournal transferJournal(databasePath, migrationPath);
-    const auto treeSchema = QStringLiteral(":/nookbit/rules-tree-v3.schema.json");
-    const auto legacyTreeSchema = QStringLiteral(":/nookbit/rules-tree.schema.json");
-    const auto bundledTree = QStringLiteral(":/nookbit/default-v3.json");
-    const auto rulesPath = verifyUi ? bundledTree
-        : QDir(appData).filePath(QStringLiteral("rules.json"));
-    nookbit::JsonRuleSetRepository previewRules(rulesPath, treeSchema, legacyTreeSchema);
-    // 사용자 규칙이 아직 없다면 이전 기본 분류와 같은 v3 규칙을 처음 한 번 저장한다.
-    if (!verifyUi && !QFileInfo::exists(rulesPath)) {
-        nookbit::JsonRuleSetRepository defaults(bundledTree, treeSchema);
-        const auto initial = defaults.load();
-        if (initial) previewRules.save(initial.value());
-    }
-    nookbit::FilesystemScanner previewScanner;
-    nookbit::RuleEngine previewRuleEngine;
-    nookbit::TestRuleUseCase testRule(previewScanner, previewRuleEngine);
-    nookbit::RuleEditorController ruleEditor(
-        previewRules, previewRules, nullptr, &previewRules,
-        verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
-        &previewRules, &testRule, &previewRules);
-    nookbit::WindowsStagedCopy transferCopy;
-    nookbit::Planner previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()), nookbit::CrossVolumeDrafts::Allow);
-    nookbit::QtPlanHasher previewHasher;
-    nookbit::CreatePreviewUseCase createPreview(
-        previewRules, previewScanner, previewPlanner, &previewHasher, &transferCopy);
-    nookbit::SqliteHistoryRepository history(databasePath, migrationPath);
-    nookbit::FreezePreviewUseCase freezePreview(
-        previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy);
-    nookbit::VerifySavedPlanUseCase verifySavedPlan(
-        previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy);
-    nookbit::ApprovePlanUseCase approvePlan(verifySavedPlan, history);
-    nookbit::UserSettings currentSettings;
-    currentSettings.homeRoot = std::filesystem::path(defaultDestination.toStdWString());
-    nookbit::RuntimeSettingsRepository recoverySettings(currentSettings);
-    nookbit::DestinationSettingsController destinationSettings(uiPreferences, defaultDestination, !verifyUi);
-    nookbit::ThreadLocalOperations fileOperations(databasePath, migrationPath, rulesPath, treeSchema, legacyTreeSchema,
-        std::filesystem::path(appData.toStdWString()), recoverySettings);
-    nookbit::BackgroundTaskRunner backgroundTasks;
-    nookbit::PreviewController previewController(
-        pendingFiles,
-        createPreview,
-        freezePreview,
-        verifySavedPlan,
-        approvePlan,
-        history,
-        fileOperations,
-        rulesPath,
-        treeSchema,
-        defaultDestination,
-        nullptr, legacyTreeSchema);
-    if (!verifyUi) {
-        previewController.setCollisionPolicy(uiPreferences.value(
-            QStringLiteral("collisionPolicy"), QStringLiteral("rename")).toString());
-    }
-    QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged,
-                     &application, [&uiPreferences, &previewController, verifyUi] {
-        if (verifyUi) return;
-        // 선택한 공통 충돌 정책을 사용자 설정에 저장하는 함수.
-        uiPreferences.setValue(QStringLiteral("collisionPolicy"), previewController.collisionPolicy());
-        uiPreferences.sync();
-    });
-    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted,
-                     &application, [&uiPreferences, verifyUi](const QString& root) {
-        if (verifyUi) return;
-        // 성공한 미리보기의 목적지만 다음 실행의 기본 경로로 기억하는 함수.
-        uiPreferences.setValue(QStringLiteral("destinationRoot"), root);
-        uiPreferences.sync();
-    });
-    // 화면의 공통 충돌 정책을 코어의 현재 설정 값으로 변환하는 함수.
-    const auto currentPolicy = [&previewController] {
-        const auto key = previewController.collisionPolicy();
-        return key == "abort" ? nookbit::CollisionPolicy::Abort : key == "skip" ? nookbit::CollisionPolicy::Skip : nookbit::CollisionPolicy::Rename;
-    };
-    recoverySettings.setCollisionPolicy(currentPolicy());
-    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted, &application,
-        [&recoverySettings](const QString& root) { recoverySettings.setHomeRoot(std::filesystem::path(root.toStdWString())); });
-    QObject::connect(&previewController, &nookbit::PreviewController::collisionPolicyChanged, &application,
-        [&recoverySettings, &currentPolicy] { recoverySettings.setCollisionPolicy(currentPolicy()); });
-    // 사용자 허용 목록을 실행·복구의 설정 스냅샷에 함께 반영하는 함수.
-    const auto applyDestinationPermissions = [&destinationSettings, &recoverySettings, &previewController] {
-        std::vector<std::filesystem::path> roots;
-        for (const auto& path : destinationSettings.allowedRoots()) roots.emplace_back(path.toStdWString());
-        recoverySettings.setAllowedDestinationRoots(roots);
-        previewController.setAllowedDestinationRoots(std::move(roots));
-    };
-    applyDestinationPermissions();
-    QObject::connect(&destinationSettings, &nookbit::DestinationSettingsController::allowedRootsChanged,
-                     &application, applyDestinationPermissions);
-    QObject::connect(&previewController, &nookbit::PreviewController::destinationRootAccepted,
-                     &destinationSettings, &nookbit::DestinationSettingsController::setHomeRoot);
-    nookbit::RecoveryController recoveryController(history, nullptr, &transferJournal, &fileOperations);
-    nookbit::HistoryController historyController(history, fileOperations);
-    previewController.setTaskRunner(&backgroundTasks);
-    previewController.setSortWorkflow(&fileOperations);
-    historyController.setTaskRunner(&backgroundTasks);
-    recoveryController.setTaskRunner(&backgroundTasks);
-    QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
-                     &previewController, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
-    QObject::connect(&historyController, &nookbit::HistoryController::recoveryRefreshRequested,
-                     &recoveryController, &nookbit::RecoveryController::refreshRecoveryCases);
-    QObject::connect(&previewController, &nookbit::PreviewController::recoveryReconcileRequested,
-                     &recoveryController, &nookbit::RecoveryController::reconcileAndRefreshCases);
-    QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
-                     &previewController, &nookbit::PreviewController::refreshActiveRules);
-    QObject::connect(&recoveryController, &nookbit::RecoveryController::recoveryAttempted, &historyController,
-        [&historyController, &pendingFiles](const QString&) { historyController.refreshHistory(); pendingFiles.refreshAvailability(); });
-    QObject::connect(&recoveryController, &nookbit::RecoveryController::recoveryCompleted, &application,
-        [&history, &pendingFiles, &previewController](const QString& id, const QString& action) {
-            if (action == "rollback") { previewController.refreshLastUndoAfterHistoryRollback(id); return; }
-            const auto plan = history.loadPlan(id.toStdString());
-            if (!plan || plan.value().status != nookbit::PlanStatus::Completed) return;
-            for (int i = pendingFiles.count() - 1; i >= 0; --i) {
-                const std::filesystem::path path(pendingFiles.filePaths()[i].toStdWString());
-                if (std::any_of(plan.value().steps.begin(), plan.value().steps.end(), [&](const nookbit::MoveStep& step) {
-                    return step.status == nookbit::StepStatus::Applied && step.source == path;
-                })) pendingFiles.removeAt(i);
-            }
-        });
-    if (!verifyUi && QFileInfo::exists(databasePath)) {
-        recoveryController.refreshRecoveryCases();
-    }
-    nookbit::ClassifyFilesUseCase classificationQuery(previewRules, previewRuleEngine, previewHasher);
+    nookbit::FileOrganizerRuntime organizer({appData, defaultDestination, verifyUi}, uiPreferences);
+    auto& pendingFiles = organizer.pendingFiles();
+    auto& backgroundTasks = organizer.tasks();
+    auto& previewController = organizer.preview();
+    auto& historyController = organizer.history();
+    auto& recoveryController = organizer.recovery();
+    auto& ruleEditor = organizer.rules();
+    auto& destinationSettings = organizer.destinations();
     nookbit::FolderWatchRuntime folderWatch({QDir(appData).filePath(QStringLiteral("watch.json")),
         QStringLiteral(":/nookbit/watch.schema.json"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), !verifyUi},
-        classificationQuery, pendingQueue, pendingQueue, uiPreferences);
+        organizer.classification(), organizer.pendingPaths(), organizer.pendingCommands(), uiPreferences);
     auto& watchController = folderWatch.controller();
     QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
         &watchController, &nookbit::WatchController::pendingPathsChanged);
-    nookbit::CharacterController characterController;
-    const auto bundledCharacter = QStringLiteral(":/nookbit/character.presentation.json");
-    const auto characterSchema = QStringLiteral(":/nookbit/character-presentation.schema.json");
-    const auto customCharacter = QDir(appData).filePath(QStringLiteral("character.presentation.json"));
-    auto characterPath = !verifyUi && QFileInfo::exists(customCharacter) ? customCharacter : bundledCharacter;
-    auto characterPresentation = nookbit::loadCharacterPresentation(characterPath, characterSchema);
-    if (!characterPresentation && !verifyUi) {
-        QTextStream(stderr) << QString::fromStdString(characterPresentation.error().message) << Qt::endl;
-        characterPath = bundledCharacter;
-        characterPresentation = nookbit::loadCharacterPresentation(bundledCharacter, characterSchema);
+    nookbit::CompanionRuntime companion({appData, QCoreApplication::applicationDirPath(), verifyUi}, uiPreferences, application);
+    if (!companion.startupResult()) {
+        QTextStream(stderr) << QString::fromStdString(companion.startupResult().error().message) << Qt::endl;
+        return EXIT_FAILURE;
     }
-    if (!characterPresentation) return EXIT_FAILURE;
-    const auto characterImageBase = characterPath.startsWith(QStringLiteral(":/"))
-        ? QUrl(QStringLiteral("qrc") + QFileInfo(characterPath).path() + QStringLiteral("/"))
-        : QUrl::fromLocalFile(QFileInfo(characterPath).absolutePath() + QStringLiteral("/"));
-    const auto configuredCharacter = characterController.setPresentation(
-        std::move(characterPresentation.value()), characterImageBase);
-    if (!configuredCharacter) return EXIT_FAILURE;
-    const nookbit::JsonImagePackLoader imagePackLoader;
-    nookbit::DirectoryImagePackLibrary imagePackLibrary(imagePackLoader,
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/test/imagepack.json")),
-        QDir(verifyUi ? QCoreApplication::applicationDirPath() : appData).filePath(
-            verifyUi ? QStringLiteral("verify-unused-imagepacks") : QStringLiteral("imagepacks")),
-        {{"builtin-nmoo", QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("imagepacks/nmoo/imagepack.json"))}});
-    // 임포트 수명은 보관소보다 짧게 유지하고 파일 정리 실행기와 분리한다.
-    nookbit::BackgroundTaskRunner characterImports;
-    nookbit::CharacterSettingsController characterSettings(imagePackLibrary,
-        [&characterController](nookbit::ImagePack pack) {
-            // 값으로 전달된 팩을 캐릭터 표현 창구에 적용하는 함수.
-            return characterController.setImagePack(std::move(pack));
-        }, characterImports);
-    characterSettings.refresh();
-    const auto savedPack = verifyUi ? QString() : uiPreferences.value(QStringLiteral("character/selectedPack")).toString();
-    if (!savedPack.isEmpty() && !characterSettings.selectPack(savedPack))
-        QTextStream(stderr) << characterSettings.status() << Qt::endl;
-    if (characterSettings.selectedKey().isEmpty() && (verifyUi || characterPath == bundledCharacter)) {
-        if (!characterSettings.selectPack(QStringLiteral("builtin")) && verifyUi) return EXIT_FAILURE;
-    }
-    if (!verifyUi) characterSettings.setUserScale(uiPreferences.value(
-        QStringLiteral("character/scales/") + characterSettings.selectedKey(), 0.5).toDouble());
-    // 선택한 팩과 개인 배율을 사용자 설정에서 복원하는 함수.
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &application,
-        [&uiPreferences, &characterSettings, verifyUi](const QString& key) {
-            if (verifyUi) return;
-            characterSettings.setUserScale(uiPreferences.value(QStringLiteral("character/scales/") + key, 0.5).toDouble());
-            uiPreferences.setValue(QStringLiteral("character/selectedPack"), key);
-            uiPreferences.sync();
-        });
-    // 개인 배율 변경만 저장하고 팩 매니페스트는 수정하지 않는 함수.
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::scaleChanged, &application,
-        [&uiPreferences, &characterSettings, verifyUi] {
-            if (verifyUi || characterSettings.selectedKey().isEmpty()) return;
-            uiPreferences.setValue(QStringLiteral("character/scales/") + characterSettings.selectedKey(), characterSettings.userScale());
-            uiPreferences.sync();
-        });
-    // 화면의 작업 표시줄을 제외한 사용 가능 영역을 수집하는 함수.
-    // 팩별 개인 좌표를 복원하며 다른 팩의 보정값을 가져오지 않는 함수.
-    const auto restoreCharacterPlacement = [&uiPreferences, &characterSettings, verifyUi] {
-        const auto prefix = QStringLiteral("character/placement/") + characterSettings.selectedKey();
-        characterSettings.setPlacement(verifyUi ? QPointF() : uiPreferences.value(prefix + "/pivot", QPointF()).toPointF(),
-            verifyUi ? QPointF() : uiPreferences.value(prefix + "/bubble", QPointF()).toPointF());
-    };
-    restoreCharacterPlacement();
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &application,
-        restoreCharacterPlacement);
-    // 적용한 좌표만 개인 설정에 저장하고 팩 파일은 보존하는 함수.
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::placementChanged, &application,
-        [&uiPreferences, &characterSettings, verifyUi] {
-            if (verifyUi || characterSettings.selectedKey().isEmpty()) return;
-            const auto prefix = QStringLiteral("character/placement/") + characterSettings.selectedKey();
-            uiPreferences.setValue(prefix + "/pivot", characterSettings.pivotOffset());
-            uiPreferences.setValue(prefix + "/bubble", characterSettings.bubbleOffset());
-            uiPreferences.sync();
-        });
-    // 저장 위치는 조립부에서 제공하고 편집 담당자는 레지스트리를 직접 알지 않는다.
-    QMap<QString, QVariantMap> verificationEdits;
-    nookbit::CompanionEditController companionEdits(
-        [&characterController](const QVariantMap& edits) { return characterController.validateEdits(edits); },
-        [&characterController](const QVariantMap& edits) { return characterController.setEdits(edits); },
-        [&uiPreferences, &verificationEdits, verifyUi](const QString& key) -> nookbit::Result<QVariantMap> {
-            // 팩별 개인 편집 문서를 읽고 저장 형식을 검증하는 함수.
-            if (verifyUi) return nookbit::Result<QVariantMap>::success(verificationEdits.value(key));
-            const auto bytes = uiPreferences.value(QStringLiteral("character/edits/") + key).toByteArray();
-            if (bytes.isEmpty()) return nookbit::Result<QVariantMap>::success({});
-            const auto document = QJsonDocument::fromJson(bytes);
-            const auto root = document.object();
-            if (!document.isObject() || root.value("schemaVersion").toInt() != 1 || !root.value("edits").isObject())
-                return nookbit::Result<QVariantMap>::failure({"character.invalid_saved_edits", "저장된 컴패니언 편집값을 읽지 못했어요. 팩 기본값을 사용해요."});
-            return nookbit::Result<QVariantMap>::success(root.value("edits").toObject().toVariantMap());
-        },
-        [&uiPreferences, &verificationEdits, verifyUi](const QString& key, const QVariantMap& edits) -> nookbit::Result<void> {
-            // 개인 편집값만 저장하고 저장 오류 시 이전 설정을 복구하는 함수.
-            if (verifyUi) { verificationEdits.insert(key, edits); return nookbit::Result<void>::success(); }
-            const auto path = QStringLiteral("character/edits/") + key;
-            const bool existed = uiPreferences.contains(path);
-            const auto previous = uiPreferences.value(path);
-            const auto document = QJsonDocument::fromVariant(QVariantMap{{"schemaVersion", 1}, {"edits", edits}});
-            uiPreferences.setValue(path, document.toJson(QJsonDocument::Compact));
-            uiPreferences.sync();
-            if (uiPreferences.status() == QSettings::NoError) return nookbit::Result<void>::success();
-            if (existed) uiPreferences.setValue(path, previous); else uiPreferences.remove(path);
-            uiPreferences.sync();
-            return nookbit::Result<void>::failure({"character.save_edits_failed", "컴패니언 편집값을 저장하지 못했어요. 변경 내용은 초안에 남아 있어요."});
-        });
-    companionEdits.loadPack(characterSettings.selectedKey());
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &companionEdits,
-        &nookbit::CompanionEditController::loadPack);
-    const auto characterScreens = [] {
-        QList<QRect> areas;
-        for (const auto* screen : QGuiApplication::screens()) areas.append(screen->availableGeometry());
-        return areas;
-    };
-    const auto screens = characterScreens();
-    const auto initialAnchor = screens.isEmpty() ? QPoint(200, 200)
-        : QPoint(screens.first().right() - 180, screens.first().bottom() - 140);
-    nookbit::CharacterWindowController characterWindow(screens,
-        verifyUi ? initialAnchor : uiPreferences.value(QStringLiteral("character/windowAnchor"), initialAnchor).toPoint(),
-        verifyUi || uiPreferences.value(QStringLiteral("character/windowShown"), true).toBool());
-    // 독립 창 위치와 노출만 사용자 설정에 저장하는 함수.
-    const auto saveCharacterWindow = [&uiPreferences, &characterWindow, verifyUi] {
-        if (verifyUi) return;
-        uiPreferences.setValue(QStringLiteral("character/windowAnchor"), QPoint(characterWindow.anchorX(), characterWindow.anchorY()));
-        uiPreferences.setValue(QStringLiteral("character/windowShown"), characterWindow.shown());
-        uiPreferences.sync();
-    };
-    QTimer characterPositionSave;
-    characterPositionSave.setSingleShot(true);
-    characterPositionSave.setInterval(180);
-    QObject::connect(&characterPositionSave, &QTimer::timeout, &application, saveCharacterWindow);
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::positionChanged, &characterPositionSave,
-        [&characterPositionSave] {
-            // 드래그 중 좌표 변경은 즉시 반영하되 디스크 저장은 잠깐 묶는 함수.
-            characterPositionSave.start();
-        });
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &application, saveCharacterWindow);
-    QObject::connect(&application, &QCoreApplication::aboutToQuit, &application, saveCharacterWindow);
-    // 모니터 추가·제거와 작업 영역 변경 시 보이지 않는 위치를 복원하는 함수.
-    const auto refreshCharacterScreens = [&characterWindow, characterScreens] { characterWindow.setScreens(characterScreens()); };
-    QObject::connect(&application, &QGuiApplication::screenRemoved, &characterWindow, refreshCharacterScreens);
-    QObject::connect(&application, &QGuiApplication::screenAdded, &characterWindow,
-        [&characterWindow, refreshCharacterScreens](QScreen* screen) {
-            // 새 화면의 작업 영역 변경도 같은 위치 복원 창구에 연결하는 함수.
-            QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
-            refreshCharacterScreens();
-        });
-    for (auto* screen : QGuiApplication::screens())
-        QObject::connect(screen, &QScreen::availableGeometryChanged, &characterWindow, refreshCharacterScreens);
-    nookbit::InteractionManager interactionManager;
-    const auto interactionsRegistered = nookbit::registerBasicCompanionInteractions(interactionManager);
-    if (!interactionsRegistered) return EXIT_FAILURE;
-    nookbit::CompanionInteractionController companionInteractions(interactionManager, "primary", [&characterController] {
-        // 입력 당시 기본 행동과 일시 반응을 값으로만 전달하는 함수.
-        return nookbit::InteractionContext{characterController.behaviorId().toStdString(), characterController.reactionId().toStdString()};
-    });
-    QObject::connect(&companionInteractions, &nookbit::CompanionInteractionController::reactionRequested,
-        &characterController, &nookbit::CharacterController::presentInteraction);
-    const auto refreshInteractionTarget = [&companionInteractions, &characterWindow] {
-        // 바탕화면 표시 여부만 입력 가능 상태에 반영하는 함수.
-        companionInteractions.setAvailable(characterWindow.shown());
-    };
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &companionInteractions, refreshInteractionTarget);
-    QObject::connect(&characterSettings, &nookbit::CharacterSettingsController::selected, &companionInteractions,
-        [&companionInteractions](const QString&) {
-            // 새 팩에 이전 상호작용 반응을 이어서 표시하지 않는 함수.
-            companionInteractions.cancel();
-        });
-    refreshInteractionTarget();
-    for (const auto& behavior : {nookbit::CompanionBehavior{"walking.left", "walk.left", 5, {"walk.left"}, {"working", "attention"}},
-                               nookbit::CompanionBehavior{"walking.right", "walk.right", 5, {"walk.right"}, {"working", "attention"}}}) {
-        if (!characterController.registerBehavior(behavior)) return EXIT_FAILURE;
-    }
-    nookbit::IBehaviorChannel& behaviorChannel = characterController;
-    nookbit::CompanionMotionController companionMotion(
-        [&characterController, &characterWindow] {
-            // 컴패니언의 현재 상황과 화면 범위만 모션 모듈에 값으로 전달하는 함수.
-            const auto behavior = characterController.behaviorId();
-            const auto area = characterWindow.screenArea();
-            const bool idleOrWalking = behavior == "resting" || behavior == "walking.left" || behavior == "walking.right";
-            return nookbit::IdleWalkContext{characterWindow.shown() && characterController.canWalk() && idleOrWalking && characterController.reactionId().isEmpty(),
-                static_cast<double>(characterWindow.anchorX()), static_cast<double>(area.left() + 32), static_cast<double>(area.right() - 32)};
-        },
-        [&behaviorChannel, &characterWindow](const nookbit::IdleWalkStep& step) {
-            // 모션 출력만 행동 창구와 창 위치에 연결하고 파일 작업에는 관여하지 않는 함수.
-            const auto accepted = behaviorChannel.publish({"companion.motion", "idle-walk", {step.direction < 0 ? "walk.left" : "walk.right"}, step.walking});
-            if (!accepted) { QTextStream(stderr) << QString::fromStdString(accepted.error().message) << Qt::endl; return; }
-            if (step.move) characterWindow.moveAnchor(static_cast<int>(std::round(step.x)), characterWindow.anchorY());
-        }, !verifyUi && uiPreferences.value(QStringLiteral("character/autonomousWalk"), true).toBool());
-    QObject::connect(&characterController, &nookbit::CharacterController::stateChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
-    QObject::connect(&characterController, &nookbit::CharacterController::reactionChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
-    QObject::connect(&characterController, &nookbit::CharacterController::previewAnimationsChanged, &companionMotion, &nookbit::CompanionMotionController::restart);
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::screenAreaChanged, &companionMotion, &nookbit::CompanionMotionController::refresh);
-    QObject::connect(&companionMotion, &nookbit::CompanionMotionController::enabledChanged, &application,
-        [&uiPreferences, &companionMotion, verifyUi] {
-            // 사용자의 자율 걷기 선택만 자동 저장하는 함수.
-            if (verifyUi) return;
-            uiPreferences.setValue(QStringLiteral("character/autonomousWalk"), companionMotion.enabled());
-            uiPreferences.sync();
-        });
-    companionMotion.refresh();
+    auto& characterController = companion.character();
+    auto& characterSettings = companion.settings();
+    auto& characterWindow = companion.window();
+    auto& companionEdits = companion.edits();
+    auto& companionInteractions = companion.interactions();
+    auto& companionMotion = companion.motion();
+    auto& characterImports = companion.imports();
     nookbit::NotificationRuntime notificationRuntime(uiPreferences, !verifyUi);
     auto& notifications = notificationRuntime.controller();
     const auto registeredNotice = notifications.registerType(nookbit::folderWatchOfferType());
@@ -1387,6 +1023,9 @@ int main(int argc, char* argv[]) {
 
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
+        const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
+        const auto bundledTree = QStringLiteral(":/nookbit/default-v3.json");
+        const auto treeSchema = QStringLiteral(":/nookbit/rules-tree-v3.schema.json");
         if (!verifyBundledHistorySchema(migrationPath)) return EXIT_FAILURE;
         bool compactLayout = false;
         if (!engine.rootObjects().isEmpty()) {

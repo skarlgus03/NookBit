@@ -118,6 +118,10 @@ if(NOOKBIT_BUILD_QT_APP)
       app/notification_runtime.cpp
       app/folder_watch_runtime.hpp
       app/folder_watch_runtime.cpp
+      app/file_organizer_runtime.hpp
+      app/file_organizer_runtime.cpp
+      app/companion_runtime.hpp
+      app/companion_runtime.cpp
       presentation/background_task_runner.hpp
       presentation/character_controller.hpp
       presentation/character_controller.cpp
