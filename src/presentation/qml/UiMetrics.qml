@@ -49,6 +49,8 @@ QtObject {
     readonly property int settingsSectionSpacing: 28
     readonly property int textSettingsGroup: typeBody
     readonly property int collisionChoiceMinHeight: 104
+    readonly property int watchConditionInputWidth: 132
+    readonly property int watchUnitWidth: 84
     readonly property int selectionFadeDuration: 140
     readonly property int buttonDefaultWidth: 100
     readonly property int buttonTransitionMs: 90

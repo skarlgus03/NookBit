@@ -5,14 +5,15 @@ import QtQuick.Controls
 Switch {
     id: control
     property bool dark: false
+    property bool indicatorOnLeft: false
     readonly property var theme: UiTheme.colors(dark)
     implicitHeight: UiMetrics.controlHeight
-    leftPadding: 0
-    rightPadding: UiMetrics.switchWidth + UiMetrics.spaceGroup
+    leftPadding: indicatorOnLeft ? UiMetrics.switchWidth + UiMetrics.spaceGroup : 0
+    rightPadding: indicatorOnLeft ? 0 : UiMetrics.switchWidth + UiMetrics.spaceGroup
     hoverEnabled: true
     font.pixelSize: UiMetrics.textBody
     indicator: Rectangle {
-        x: control.width - width
+        x: control.indicatorOnLeft ? 0 : control.width - width
         y: (control.height - height) / 2
         width: UiMetrics.switchWidth
         height: UiMetrics.switchHeight

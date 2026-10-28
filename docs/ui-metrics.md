@@ -195,6 +195,23 @@ remain local until Save; Check Now still uses the saved configuration. The actio
 row remains below the scrollable form. UI verification scrolls each numeric field
 into view before sending pointer/keyboard events.
 
+Theme choices have an explicit fixed group width and right alignment within their
+card. Settings and Watch now share one window-size key (page 8); page IDs 8/3 remain
+stable, but entering Watch no longer restores the old independent page-3 size.
+`SettingsWorkflow` slides their bodies using `pageSlideDuration`, keeps input locked
+during motion, and supports reverse navigation. Other page sizes remain independent.
+
+The Watch dashboard reads `WatchController.lastEvaluation`: actual eligible count,
+bytes, oldest age, threshold outcome and UTC check time. Missing results show
+"before checking", not manufactured zero readings. It labels the saved-condition
+snapshot separately from the local draft. Save/rule changes invalidate this snapshot.
+Folder browsing only fills the draft path. Recheck presets are 1/5/15 minutes plus
+direct entry (still 1–1440); compact condition inputs use `watchConditionInputWidth`
+and `watchUnitWidth`. Left-indicator switches use the shared `indicatorOnLeft`
+option. Exclusion chips remove only through their close button; long patterns elide
+with a tooltip. Save commits pending typed patterns before calling the existing save
+method, while Reset restores the saved draft. Persistence/evaluation policy is unchanged.
+
 The companion page uses the theme window background with a large preview card and
 separate playback card on the left, and a scrollable surface on the right. The
 settings panel groups pack selection, display, placement and desktop gestures.

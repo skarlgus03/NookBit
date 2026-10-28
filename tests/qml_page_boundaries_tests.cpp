@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
         for (const auto& error : errors) std::cerr << error.toString().toStdString() << '\n';
     });
     auto watch = fake(engine, R"(
+        id: watchStub
         property string folder: "D:/Watch"
         property bool enabled: true
         property bool recursive: false
@@ -76,6 +77,18 @@ int main(int argc, char** argv) {
         property int minimumAgeMinutes: 60
         property string excludePatterns: "*.partial"
         property string statusMessage: ""
+        property var lastEvaluation: ({})
+        signal settingsChanged()
+        property bool rejectSave: false
+        property int saveCalls: 0
+        // 저장 성공 알림과 실패 시 무변경만 재현하는 대역 함수.
+        function saveSettings(folder, enabled, recursive, interval, all, count, minimumCount, size, minimumSize, age, minimumAge, patterns, unit) {
+            ++saveCalls
+            if (rejectSave) return
+            watchStub.rescanIntervalMinutes = interval
+            watchStub.excludePatterns = patterns
+            settingsChanged()
+        }
     )");
     QQuickWindow host;
     host.resize(960, 760);
@@ -371,6 +384,9 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         settingsPage->setProperty("dark", dark);
         settle();
+        auto* themeGroup = find(find, settingsItem, "themeChoiceGroup");
+        expect(themeGroup && qAbs(themeGroup->x() + themeGroup->width() - themeGroup->parentItem()->width()) <= 1,
+            "theme choices remain aligned to the settings card's right edge");
         auto* rename = find(find, settingsItem, "collisionPolicy_rename");
         auto* skip = find(find, settingsItem, "collisionPolicy_skip");
         auto* abort = find(find, settingsItem, "collisionPolicy_abort");
@@ -388,6 +404,37 @@ int main(int argc, char** argv) {
         QMetaObject::invokeMethod(lightChoice, "clicked");
         expect(!uiPreferences->property("darkMode").toBool(), "light choice explicitly selects light mode");
     }
+    // 설정과 감시를 같은 크기에서 왕복하고, 저장 실패가 초안을 지우지 않는지 검사한다.
+    auto flow = create(engine, "SettingsWorkflow", {{"settings", QVariant::fromValue(uiPreferences.get())},
+        {"destinations", QVariant::fromValue(destinationPreferences.get())}, {"sorting", QVariant::fromValue(sortPreferences.get())},
+        {"watch", QVariant::fromValue(watch.get())}, {"active", true}, {"width", 500}, {"height", 520}});
+    if (!flow) return 1;
+    auto* flowItem = qobject_cast<QQuickItem*>(flow.get());
+    flowItem->setParentItem(host.contentItem());
+    flow->setProperty("watchOpen", true);
+    settle(); settle();
+    auto* watchPage = find(find, flowItem, "watchSettingsDialog");
+    auto* watchInput = find(find, flowItem, "watchIntervalSpin");
+    auto* patternInput = find(find, flowItem, "watchPatternInput");
+    if (!watchPage || !watchInput || !patternInput) return 1;
+    expect(watchPage->isVisible() && qAbs(watchPage->x()) < 1 && !flow->property("transitioning").toBool()
+        && flowItem->size() == QSizeF(500, 520), "watch settings slide into the same viewport without resizing it");
+    watchInput->setProperty("value", 17);
+    patternInput->setProperty("text", "*.download");
+    watch->setProperty("rejectSave", true);
+    QMetaObject::invokeMethod(watchPage, "save");
+    expect(watchPage->property("changeCount").toInt() > 0 && watch->property("rescanIntervalMinutes").toInt() != 17,
+        "failed watch saves preserve both input changes and committed pending patterns");
+    watch->setProperty("rejectSave", false);
+    QMetaObject::invokeMethod(watchPage, "save");
+    expect(watchPage->property("changeCount").toInt() == 0 && watch->property("rescanIntervalMinutes").toInt() == 17
+        && watch->property("excludePatterns").toString().contains("*.download"),
+        "successful saves include the last typed pattern and reset the draft baseline");
+    flow->setProperty("watchOpen", false);
+    settle(); settle();
+    auto* returnedSettings = find(find, flowItem, "settingsPage");
+    expect(returnedSettings && returnedSettings->isVisible() && qAbs(returnedSettings->x()) < 1
+        && !watchPage->isVisible() && flowItem->size() == QSizeF(500, 520), "back navigation slides to settings at the same size");
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

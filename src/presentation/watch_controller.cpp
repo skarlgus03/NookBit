@@ -249,6 +249,7 @@ void WatchController::saveSettings(const QString& folder,
     }
     const bool folderChanged = settings_.folder.lexically_normal() != proposed.folder.lexically_normal();
     settings_ = std::move(proposed);
+    lastEvaluation_.clear();
     if (folderChanged || !settings_.enabled) restoreSnoozeUntil(0);
     lastOfferedSignature_.clear();
     clearProposal();
@@ -262,6 +263,7 @@ void WatchController::saveSettings(const QString& folder,
 
 // 저장된 조건으로 감시 폴더를 즉시 읽어 제안 여부를 판단하는 함수.
 void WatchController::checkNow() {
+    lastEvaluation_.clear();
     readinessTimer_.stop();
     const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
     if (snoozedUntilUtcMs_ > nowUtcMs) {
@@ -293,6 +295,13 @@ void WatchController::checkNow() {
         return;
     }
     const auto& evaluation = result.value().evaluation;
+    lastEvaluation_ = {
+        {QStringLiteral("fileCount"), QVariant::fromValue(static_cast<qulonglong>(evaluation.fileCount))},
+        {QStringLiteral("totalBytes"), QVariant::fromValue(static_cast<qulonglong>(evaluation.totalBytes))},
+        {QStringLiteral("oldestAgeMinutes"), QVariant::fromValue(static_cast<qlonglong>(evaluation.oldestAgeMinutes))},
+        {QStringLiteral("shouldOffer"), evaluation.shouldOffer},
+        {QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+    };
     const auto& eligible = result.value().eligibleFiles;
     // 대기 중인 파일이 있을 때만 안정 시간 이후 한 번 더 검사하는 타이머.
     if (settings_.enabled && result.value().nextCheckDelayMs > 0) {
@@ -367,6 +376,7 @@ void WatchController::snoozeProposal() {
 
 // 바뀐 분류 규칙으로 감시 제안을 다시 계산하는 함수.
 void WatchController::rulesChanged() {
+    lastEvaluation_.clear();
     clearProposal();
     lastOfferedSignature_.clear();
     if (settings_.enabled) checkNow();

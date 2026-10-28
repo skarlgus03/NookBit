@@ -154,19 +154,25 @@ ApplicationWindow {
         function commitSize() {
             sizeSaveTimer.stop()
             if (activePage > 0 && !restoringSize)
-                uiSettings.rememberExtensionSize(activePage, width, height)
+                uiSettings.rememberExtensionSize(sizeKey(activePage), width, height)
         }
+        // 설정 안의 감시 화면은 설정 창의 크기를 공유하는 함수.
+        function sizeKey(page) { return page === 3 ? 8 : page }
         // 이전 페이지 크기를 보존한 뒤 새 페이지의 기본값 또는 마지막 크기를 복원하는 함수.
         function activatePage(page) {
+            if (page > 0 && activePage > 0 && sizeKey(page) === sizeKey(activePage)) {
+                activePage = page
+                return
+            }
             commitSize()
             activePage = page
             if (page === 0) return
-            const spec = UiMetrics.extensionDefaults[page]
+            const spec = UiMetrics.extensionDefaults[sizeKey(page)]
             if (!spec) return
             restoringSize = true
             minimumWidth = spec.minWidth
             minimumHeight = spec.minHeight
-            const saved = uiSettings.extensionSize(page, Qt.size(spec.width, spec.height))
+            const saved = uiSettings.extensionSize(sizeKey(page), Qt.size(spec.width, spec.height))
             width = Math.max(minimumWidth, Math.min(saved.width, Screen.desktopAvailableWidth - UiMetrics.spaceSection * 2))
             height = Math.max(minimumHeight, Math.min(saved.height, Screen.desktopAvailableHeight - UiMetrics.spaceSection * 2))
             restoringSize = false
@@ -301,18 +307,22 @@ ApplicationWindow {
         status: notifications.status
         onEnabledRequested: function(typeId, value) { notifications.setEnabled(typeId, value) }
     }
-    AppSettingsPage {
+    SettingsWorkflow {
+        objectName: "settingsWorkflow"
         parent: extensionHost
         anchors.fill: parent
-        visible: root.currentPage === 8
+        visible: root.currentPage === 8 || root.currentPage === 3
+        active: visible
+        watchOpen: root.currentPage === 3
         dark: root.editorDark
         settings: uiSettings
         destinations: destinationSettings
         sorting: previewController
         watch: watchController
         recoveryAvailable: recoveryController.recoveryCases.length > 0
-        onWatchSettingsRequested: root.openWatchSettings()
-        onCollisionSettingsRequested: root.currentPage = 6
+        onWatchRequested: root.openWatchSettings()
+        onSettingsRequested: root.currentPage = 8
+        onCollisionRequested: root.currentPage = 6
         onRecoveryRequested: root.openRecovery()
     }
 
@@ -390,17 +400,6 @@ ApplicationWindow {
         controller: ruleEditor
         busy: backgroundTasks.busy
         dark: root.editorDark
-    }
-
-    WatchSettingsPage {
-        id: watchDialog
-        parent: extensionHost
-        anchors.fill: parent
-        visible: root.currentPage === 3
-        dark: root.editorDark
-        controller: watchController
-        onOpenRequested: root.currentPage = 3
-        onCloseRequested: if (root.currentPage === 3) root.currentPage = 0
     }
 
     WatchProposalDialog {

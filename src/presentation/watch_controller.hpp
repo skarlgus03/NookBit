@@ -9,6 +9,9 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantMap>
+#include <QDir>
+#include <QUrl>
 
 namespace nookbit {
 
@@ -30,6 +33,7 @@ class WatchController final : public QObject {
     Q_PROPERTY(int minimumAgeMinutes READ minimumAgeMinutes NOTIFY settingsChanged)
     Q_PROPERTY(QString excludePatterns READ excludePatterns NOTIFY settingsChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY watchChanged)
+    Q_PROPERTY(QVariantMap lastEvaluation READ lastEvaluation NOTIFY watchChanged)
     Q_PROPERTY(bool proposalVisible READ proposalVisible NOTIFY watchChanged)
     Q_PROPERTY(QString proposalText READ proposalText NOTIFY watchChanged)
     Q_PROPERTY(QStringList proposalFiles READ proposalFiles NOTIFY watchChanged)
@@ -72,6 +76,10 @@ public:
     [[nodiscard]] QString excludePatterns() const;
     /// 최근 감시·검사 결과 문구를 반환하는 함수.
     [[nodiscard]] QString statusMessage() const;
+    /// 마지막 성공 검사의 수치와 시각을 화면에 제공하는 함수.
+    [[nodiscard]] QVariantMap lastEvaluation() const { return lastEvaluation_; }
+    /// 폴더 선택 결과를 저장하지 않고 입력용 로컬 경로로 변환하는 함수.
+    Q_INVOKABLE QString folderPath(const QUrl& url) const { return QDir::cleanPath(url.toLocalFile()); }
     /// 현재 제안이 열려 있는지 반환하는 함수.
     [[nodiscard]] bool proposalVisible() const noexcept;
     /// 현재 제안의 요약 문구를 반환하는 함수.
@@ -133,6 +141,7 @@ private:
     qint64 snoozedUntilUtcMs_{0};
     WatchSettings settings_;
     QString statusMessage_;
+    QVariantMap lastEvaluation_;
     QString proposalText_;
     QStringList proposedFiles_;
     QString lastOfferedSignature_;

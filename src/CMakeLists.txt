@@ -188,6 +188,9 @@ if(NOOKBIT_BUILD_QT_APP)
           presentation/qml/CollisionPolicyPicker.qml
         presentation/qml/NavigationButton.qml
         presentation/qml/WatchSettingsPage.qml
+          presentation/qml/WatchStatusCard.qml
+          presentation/qml/WatchPatternEditor.qml
+          presentation/qml/SettingsWorkflow.qml
         presentation/qml/HistoryPage.qml
           presentation/qml/HistoryTimeline.qml
           presentation/qml/HistoryDetail.qml

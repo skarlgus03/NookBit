@@ -295,6 +295,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
     for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
+        if (page == 3 || page == 8) {
+            QEventLoop navigationFrame;
+            QTimer::singleShot(metrics->property("pageSlideDuration").toInt() + 40, &navigationFrame, &QEventLoop::quit);
+            navigationFrame.exec();
+        }
         auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
         const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
@@ -459,6 +464,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 감시 조건 네 항목에 실제 키 입력 후 Enter로 숫자를 확정하는 검사.
             for (const auto* name : {"watchIntervalSpin", "watchCountSpin", "watchSizeSpin", "watchAgeSpin"}) {
                 auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
+                if (QString::fromLatin1(name) == QStringLiteral("watchIntervalSpin")) {
+                    auto* custom = mainWindow->findChild<QObject*>(QStringLiteral("watchIntervalCustomButton"));
+                    if (!custom || !QMetaObject::invokeMethod(custom, "clicked")) return false;
+                    QCoreApplication::processEvents();
+                }
                 if (!spin || !spin->property("editable").toBool()
                     || spin->height() != metrics->property("controlHeight").toInt()) return false;
                 // 카드 아래의 입력도 실제로 보이는 위치까지 스크롤한 뒤 조작하는 검사.
@@ -495,7 +505,11 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 auto* decrease = spin->findChild<QQuickItem*>(QStringLiteral("spinDecreaseIndicator"));
                 if (!increase || !decrease || increase->width() != metrics->property("numericStepSize").toInt()) return false;
                 click(increase);
-                if (spin->property("value").toInt() != 38) return false;
+                if (spin->property("value").toInt() != 38) {
+                    QTextStream(stderr) << "Watch increase blocked: " << name << " fieldY=" << spin->mapToItem(viewport, QPointF()).y()
+                        << " viewport=" << viewport->height() << " enabled=" << spin->isEnabled() << Qt::endl;
+                    return false;
+                }
                 click(decrease);
                 if (spin->property("value").toInt() != 37) return false;
                 spin->setEnabled(wasEnabled);
@@ -1469,6 +1483,12 @@ int main(int argc, char* argv[]) {
                 window->setProperty("currentPage", 8);
                 QCoreApplication::processEvents();
                 checkLayout(extension->size() == settingsSize && settingsSize != ruleSize, "independent settings size");
+                window->setProperty("currentPage", 3);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == settingsSize, "watch subpage preserves settings window size");
+                window->setProperty("currentPage", 8);
+                QCoreApplication::processEvents();
+                checkLayout(extension->size() == settingsSize, "return from watch preserves settings window size");
                 window->setProperty("currentPage", 0);
                 window->setProperty("currentPage", 1);
                 QCoreApplication::processEvents();

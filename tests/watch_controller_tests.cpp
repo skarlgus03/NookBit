@@ -67,6 +67,11 @@ void testProposalAndPendingOnly() {
                QFile::exists(settingsPath), "editable watch settings should be saved");
     controller.checkNow();
     expect(!controller.proposalVisible(), "one file should not meet a two-file threshold");
+    expect(controller.lastEvaluation().value("fileCount").toULongLong() == 1
+        && controller.lastEvaluation().value("totalBytes").toULongLong() == 11
+        && !controller.lastEvaluation().value("shouldOffer").toBool()
+        && !controller.lastEvaluation().value("checkedAt").toString().isEmpty(),
+        "watch dashboard exposes measured values even before a threshold is met");
     expect(writeFile(second), "second watched file should be written");
     controller.checkNow();
     expect(controller.proposalVisible() && controller.proposalFiles().size() == 2 &&
