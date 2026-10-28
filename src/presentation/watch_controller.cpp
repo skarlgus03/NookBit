@@ -43,12 +43,13 @@ QString snapshotSignature(const std::vector<FileFact>& files) {
 } // namespace
 
 // 대기 목록과 감시 설정·제안 계약을 연결하는 생성자.
-WatchController::WatchController(PendingFilesModel& pendingFiles,
+WatchController::WatchController(IPendingPathsQuery& pendingPaths,
+                                 IEnqueuePendingPaths& pendingCommands,
                                  IWatchSettingsRepository& repository,
                                  IWatchProposalUseCase& evaluateWatchFolder,
                                  QString defaultFolder,
                                  QObject* parent)
-    : QObject(parent), pendingFiles_(pendingFiles),
+    : QObject(parent), pendingPaths_(pendingPaths), pendingCommands_(pendingCommands),
       repository_(repository), evaluateWatchFolder_(evaluateWatchFolder) {
     debounceTimer_.setSingleShot(true);
     debounceTimer_.setInterval(1500);
@@ -61,14 +62,6 @@ WatchController::WatchController(PendingFilesModel& pendingFiles,
     snoozeTimer_.setSingleShot(true);
     snoozeTimer_.setTimerType(Qt::PreciseTimer);
     connect(&snoozeTimer_, &QTimer::timeout, this, &WatchController::checkNow);
-    // 대기 목록이 바뀌면 이전 제안을 닫고 최신 목록으로 조건을 다시 검사하는 함수.
-    connect(&pendingFiles_, &PendingFilesModel::countChanged, this, [this] {
-        const bool recheck = settings_.enabled || proposalVisible_;
-        lastOfferedSignature_.clear();
-        clearProposal();
-        emit watchChanged();
-        if (recheck) debounceTimer_.start();
-    });
     loadSettings(defaultFolder);
     restartMonitoring();
 }
@@ -284,9 +277,14 @@ void WatchController::checkNow() {
     if (settings_.enabled && directoryWatcher_.directories().isEmpty() && QFileInfo(folder()).isDir()) {
         directoryWatcher_.addPath(folder());
     }
-    std::vector<std::filesystem::path> pendingPaths;
-    for (const auto& path : pendingFiles_.filePaths()) pendingPaths.emplace_back(path.toStdWString());
-    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths);
+    const auto pendingPaths = pendingPaths_.pendingPaths();
+    if (!pendingPaths) {
+        clearProposal();
+        statusMessage_ = QStringLiteral("대기 목록을 확인하지 못했어요: %1").arg(QString::fromStdString(pendingPaths.error().message));
+        emit watchChanged();
+        return;
+    }
+    const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths.value());
     if (!result) {
         clearProposal();
         statusMessage_ = QStringLiteral("감시 폴더를 평가하지 못했어요: %1")
@@ -351,13 +349,21 @@ void WatchController::addProposalToPending() {
         emit watchChanged();
         return;
     }
-    const int before = pendingFiles_.count();
-    // 등록 중 countChanged가 제안을 비우므로 복사한 경로 목록을 사용한다.
-    for (const auto& path : files) pendingFiles_.addUrl(QUrl::fromLocalFile(path));
-    const int added = pendingFiles_.count() - before;
+    // 등록 중 변경 알림이 제안을 비우므로 값으로 복사한 경로를 한 번에 요청한다.
+    std::vector<std::filesystem::path> paths;
+    for (const auto& path : files) paths.emplace_back(path.toStdWString());
+    const auto enqueued = pendingCommands_.enqueuePaths(paths);
+    if (!enqueued) {
+        statusMessage_ = QStringLiteral("대기 목록에 등록하지 못했어요: %1").arg(QString::fromStdString(enqueued.error().message));
+        emit watchChanged();
+        return;
+    }
     clearProposal();
     statusMessage_ = QStringLiteral("파일 %1개를 대기 목록에만 담았어요. 이동하려면 미리보기와 승인이 필요해요.")
-                         .arg(added);
+                         .arg(enqueued.value().added.size());
+    if (!enqueued.value().rejected.empty())
+        statusMessage_ += QStringLiteral(" 등록하지 못한 항목 %1개: %2")
+            .arg(enqueued.value().rejected.size()).arg(QString::fromStdString(enqueued.value().rejected.front().error.message));
     emit watchChanged();
 }
 
@@ -372,6 +378,15 @@ void WatchController::dismissProposal() {
 void WatchController::snoozeProposal() {
     if (!proposalVisible_) return;
     restoreSnoozeUntil(QDateTime::currentMSecsSinceEpoch() + proposalSnoozeMs);
+}
+
+// 대기 목록 변경을 받아 제안을 취소하고 필요한 재검사를 예약하는 함수.
+void WatchController::pendingPathsChanged() {
+    const bool recheck = settings_.enabled || proposalVisible_;
+    lastOfferedSignature_.clear();
+    clearProposal();
+    emit watchChanged();
+    if (recheck) debounceTimer_.start();
 }
 
 // 바뀐 분류 규칙으로 감시 제안을 다시 계산하는 함수.

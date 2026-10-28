@@ -1,4 +1,5 @@
 #include "presentation/pending_files_model.hpp"
+#include "app/pending_queue_adapter.hpp"
 #include "infrastructure/configuration/json_pending_files_repository.hpp"
 
 #include <QCoreApplication>
@@ -147,6 +148,36 @@ void testPendingPersistenceFailures() {
     expect(!blocked.save({}), "writing to a directory must report failure");
 }
 
+// 외부 요청도 기존 등록 검사를 사용하고 경로별 결과와 독립적인 조회 값을 반환하는지 검사하는 함수.
+void testPendingQueueAdapter() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "adapter fixture"); return; }
+    QDir root(directory.path());
+    expect(root.mkpath("group") && root.mkpath("bundle/empty"), "adapter folder fixtures");
+    const auto first = std::filesystem::path(directory.filePath("group/first.txt").toStdWString());
+    const auto second = std::filesystem::path(directory.filePath("second.txt").toStdWString());
+    const auto bundle = std::filesystem::path(directory.filePath("bundle").toStdWString());
+    for (const auto& path : {first, second}) {
+        QFile file(QString::fromStdWString(path.wstring()));
+        expect(file.open(QIODevice::WriteOnly) && file.write("source") == 6, "adapter source fixture");
+    }
+    nookbit::PendingFilesModel pending;
+    nookbit::PendingQueueAdapter adapter(pending);
+    const auto result = adapter.enqueuePaths({first, first, first.parent_path(),
+        std::filesystem::path(directory.filePath("missing.txt").toStdWString()), second, bundle, L"relative.txt"});
+    expect(result && result.value().added.size() == 3 && result.value().rejected.size() == 4,
+        "batch records partial success without losing later valid paths");
+    if (!result || result.value().rejected.size() != 4) return;
+    expect(result.value().rejected[0].error.code == "pending.duplicate" &&
+        result.value().rejected[1].error.code == "pending.overlap" &&
+        result.value().rejected[2].error.code == "pending.path_unavailable" &&
+        result.value().rejected[3].error.code == "pending.path_invalid", "rejection reasons remain associated with each input");
+    auto snapshot = adapter.pendingPaths();
+    expect(snapshot && snapshot.value() == result.value().added, "query returns normalized admitted paths");
+    if (snapshot) snapshot.value().clear();
+    expect(pending.count() == 3 && std::filesystem::exists(first) && std::filesystem::exists(second) &&
+        std::filesystem::is_directory(bundle / "empty"), "query values cannot mutate the queue and enqueue never moves sources");
+}
 } // namespace
 
 // 대기 목록 모델 테스트를 실행하는 함수.
@@ -155,6 +186,7 @@ int main(int argc, char* argv[]) {
     testPendingFilesModel();
     testPendingPersistence();
     testPendingPersistenceFailures();
+    testPendingQueueAdapter();
     if (failures == 0) {
         std::cout << "All pending-files-model tests passed.\n";
         return 0;

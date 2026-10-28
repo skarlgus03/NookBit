@@ -1,4 +1,5 @@
 #include "presentation/pending_files_model.hpp"
+#include "app/pending_queue_adapter.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
@@ -864,6 +865,7 @@ int main(int argc, char* argv[]) {
     nookbit::UserGuideController userGuides;
 
     nookbit::PendingFilesModel pendingFiles;
+    nookbit::PendingQueueAdapter pendingQueue(pendingFiles);
     const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
@@ -1042,8 +1044,10 @@ int main(int argc, char* argv[]) {
     nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(
         watchScanner, watchRuleEngine, previewRules);
     nookbit::WatchController watchController(
-        pendingFiles, watchSettings, evaluateWatchFolder,
+        pendingQueue, pendingQueue, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
+        &watchController, &nookbit::WatchController::pendingPathsChanged);
     nookbit::CharacterController characterController;
     const auto bundledCharacter = QStringLiteral(":/nookbit/character.presentation.json");
     const auto characterSchema = QStringLiteral(":/nookbit/character-presentation.schema.json");

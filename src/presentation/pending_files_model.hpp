@@ -4,6 +4,8 @@
 #include <QStringList>
 #include <QUrl>
 #include <QVector>
+#include <nookbit/domain/result.hpp>
+#include <filesystem>
 
 namespace nookbit {
 
@@ -61,6 +63,8 @@ public:
 
     /// 로컬 파일 URL 하나를 원본 변경 없이 대기 목록에 등록하는 함수.
     Q_INVOKABLE void addUrl(const QUrl& url);
+    /// 기존 등록 정책으로 경로를 추가하고 확정 경로 또는 거부 원인을 반환하는 함수.
+    [[nodiscard]] Result<std::filesystem::path> addPath(const std::filesystem::path& path);
 
     /// 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.
     Q_INVOKABLE void removeAt(int index);

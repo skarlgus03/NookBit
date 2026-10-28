@@ -1,4 +1,5 @@
 #include "presentation/pending_files_model.hpp"
+#include "app/pending_queue_adapter.hpp"
 #include "presentation/watch_controller.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
@@ -14,6 +15,7 @@
 #include <QDateTime>
 
 #include <iostream>
+#include <functional>
 
 namespace {
 
@@ -39,6 +41,12 @@ bool writeFile(const QString& path) {
     return file.open(QIODevice::WriteOnly) && file.write("photo bytes") == 11;
 }
 
+// 실제 조립부처럼 목록 변경을 감시 창구로 전달하는 함수.
+void connectPendingChanges(nookbit::PendingFilesModel& pending, nookbit::WatchController& controller) {
+    QObject::connect(&pending, &nookbit::PendingFilesModel::countChanged,
+        &controller, &nookbit::WatchController::pendingPathsChanged);
+}
+
 // 조건 충족 제안은 대기 등록만 하고 같은 상태에서는 반복되지 않는지 검사하는 함수.
 void testProposalAndPendingOnly() {
     QTemporaryDir directory;
@@ -51,6 +59,7 @@ void testProposalAndPendingOnly() {
     const auto settingsPath = directory.filePath(QStringLiteral("watch.json"));
     expect(writeFile(first), "first watched file should be written");
     nookbit::PendingFilesModel pending;
+    nookbit::PendingQueueAdapter queue(pending);
     nookbit::JsonWatchSettingsRepository repository(
         settingsPath, projectPath("schemas/watch.schema.json"));
     nookbit::JsonRuleSetRepository rules(
@@ -60,7 +69,8 @@ void testProposalAndPendingOnly() {
     nookbit::RuleEngine ruleEngine;
     nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, ruleEngine, rules, 0);
     nookbit::WatchController controller(
-        pending, repository, evaluateWatchFolder, folder);
+        queue, queue, repository, evaluateWatchFolder, folder);
+    connectPendingChanges(pending, controller);
     controller.saveSettings(folder, true, false, 10, false,
                             true, 2, false, 1, false, 1, QStringLiteral("*.partial"));
     expect(controller.enabled() && controller.minimumFileCount() == 2 &&
@@ -109,9 +119,11 @@ void testProposalAndPendingOnly() {
     expect(controller.proposalVisible() && controller.proposalFiles().size() == 2,
            "removing a file from pending should make it eligible again");
     nookbit::PendingFilesModel restartedPending;
+    nookbit::PendingQueueAdapter restartedQueue(restartedPending);
     restartedPending.restorePaths(pending.filePaths());
     nookbit::WatchController restarted(
-        restartedPending, repository, evaluateWatchFolder, QString());
+        restartedQueue, restartedQueue, repository, evaluateWatchFolder, QString());
+    connectPendingChanges(restartedPending, restarted);
     expect(restarted.enabled() && restarted.folder() == folder &&
                restarted.minimumFileCount() == 2 && restarted.rescanIntervalMinutes() == 10,
            "watch settings should reload after restarting the controller");
@@ -149,6 +161,7 @@ void testReadinessRetryAndAcceptance() {
     const auto file = directory.filePath(QStringLiteral("download.jpg"));
     expect(writeFile(file), "download test file should be created");
     nookbit::PendingFilesModel pending;
+    nookbit::PendingQueueAdapter queue(pending);
     nookbit::JsonWatchSettingsRepository settings(
         directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
     nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"),
@@ -157,7 +170,8 @@ void testReadinessRetryAndAcceptance() {
     nookbit::RuleEngine engine;
     nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules);
     TimedWatchUseCase timed(evaluate);
-    nookbit::WatchController controller(pending, settings, timed, directory.path());
+    nookbit::WatchController controller(queue, queue, settings, timed, directory.path());
+    connectPendingChanges(pending, controller);
     controller.saveSettings(directory.path(), true, false, 10, false,
                             true, 1, false, 1, false, 1, {});
     controller.checkNow();
@@ -198,6 +212,7 @@ void testSnoozeAndCurrentCandidates() {
     const auto second = directory.filePath(QStringLiteral("second.jpg"));
     expect(writeFile(first), "snooze source should be created");
     nookbit::PendingFilesModel pending;
+    nookbit::PendingQueueAdapter queue(pending);
     nookbit::JsonWatchSettingsRepository settings(
         directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
     nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"),
@@ -206,7 +221,8 @@ void testSnoozeAndCurrentCandidates() {
     nookbit::RuleEngine engine;
     nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
     TimedWatchUseCase timed(evaluate);
-    nookbit::WatchController controller(pending, settings, timed, directory.path());
+    nookbit::WatchController controller(queue, queue, settings, timed, directory.path());
+    connectPendingChanges(pending, controller);
     controller.saveSettings(directory.path(), true, false, 10, false,
                             true, 1, false, 1, false, 1, {});
     controller.checkNow();
@@ -232,8 +248,10 @@ void testSnoozeAndCurrentCandidates() {
            "queue changes must not cancel snooze or trigger scans");
 
     nookbit::PendingFilesModel restoredPending;
+    nookbit::PendingQueueAdapter restoredQueue(restoredPending);
     restoredPending.restorePaths(pending.filePaths());
-    nookbit::WatchController restored(restoredPending, settings, timed, directory.path());
+    nookbit::WatchController restored(restoredQueue, restoredQueue, settings, timed, directory.path());
+    connectPendingChanges(restoredPending, restored);
     restored.restoreSnoozeUntil(savedDeadline);
     restored.checkNow();
     expect(!restored.proposalVisible() && restored.snoozedUntilUtcMs() > 0 && timed.calls == calls,
@@ -294,18 +312,92 @@ void testSnoozeAndCurrentCandidates() {
 void testSizeUnitSettings() {
     QTemporaryDir directory;
     nookbit::PendingFilesModel pending;
+    nookbit::PendingQueueAdapter queue(pending);
     nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
     nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine engine;
     nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
-    nookbit::WatchController controller(pending, repository, evaluate, directory.path());
+    nookbit::WatchController controller(queue, queue, repository, evaluate, directory.path());
+    connectPendingChanges(pending, controller);
     for (const auto* unit : {"KB", "MB", "GB", "MiB"}) {
         controller.saveSettings(directory.path(), false, false, 10, false, false, 1, true, 37, false, 1, {}, QString::fromUtf8(unit));
-        nookbit::WatchController restored(pending, repository, evaluate, directory.path());
+        nookbit::WatchController restored(queue, queue, repository, evaluate, directory.path());
+        connectPendingChanges(pending, restored);
         expect(restored.sizeEnabled() && restored.minimumTotalSize() == 37 && restored.totalSizeUnit() == QString::fromUtf8(unit),
                "controller restores exact size number and selected unit");
     }
+}
+// 화면 모델이 없는 조회·등록 창구로 감시 흐름을 시험하는 대리 객체.
+class FakePendingQueue final : public nookbit::IPendingPathsQuery, public nookbit::IEnqueuePendingPaths {
+public:
+    bool queryFails{false}, enqueueFails{false};
+    std::vector<std::filesystem::path> paths, received;
+    std::function<void()> whileEnqueueing;
+    /// 조회 오류 또는 값 복사본을 반환하는 함수.
+    nookbit::Result<std::vector<std::filesystem::path>> pendingPaths() const override {
+        if (queryFails) return nookbit::Result<std::vector<std::filesystem::path>>::failure({"test.query", "test query failure"});
+        return nookbit::Result<std::vector<std::filesystem::path>>::success(paths);
+    }
+    /// 변경 알림 도중에도 등록 요청의 값과 부분 성공 결과를 유지하는 함수.
+    nookbit::Result<nookbit::PendingEnqueueResult> enqueuePaths(const std::vector<std::filesystem::path>& input) override {
+        if (enqueueFails) return nookbit::Result<nookbit::PendingEnqueueResult>::failure({"test.enqueue", "test enqueue failure"});
+        received = input;
+        if (whileEnqueueing) whileEnqueueing();
+        nookbit::PendingEnqueueResult result;
+        if (!input.empty()) { paths.push_back(input.front()); result.added.push_back(input.front()); }
+        for (std::size_t index = 1; index < input.size(); ++index) result.rejected.push_back({input[index], {"test.rejected", "test rejection"}});
+        return nookbit::Result<nookbit::PendingEnqueueResult>::success(std::move(result));
+    }
+};
+
+class FakeWatchEvaluation final : public nookbit::IWatchProposalUseCase {
+public:
+    int calls{};
+    std::vector<std::filesystem::path> seenPending;
+    nookbit::WatchProposal proposal;
+    /// 전달된 대기 경로를 보관하고 고정된 제안을 반환하는 함수.
+    nookbit::Result<nookbit::WatchProposal> execute(const nookbit::WatchSettings&, std::int64_t,
+        const std::vector<std::filesystem::path>& pending) override {
+        ++calls; seenPending = pending;
+        return nookbit::Result<nookbit::WatchProposal>::success(proposal);
+    }
+};
+
+// 대기 목록 화면 객체 없이도 조회 오류·등록 오류·등록 중 제안 무효화와 부분 성공을 처리하는지 검사하는 함수.
+void testPendingQueueBoundary() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "queue-boundary fixture"); return; }
+    nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
+    FakePendingQueue queue; FakeWatchEvaluation evaluation;
+    for (const auto* name : {"one.jpg", "two.jpg"}) {
+        const auto path = directory.filePath(QString::fromLatin1(name));
+        expect(writeFile(path), "boundary source file");
+        nookbit::FileFact fact; fact.absolutePath = std::filesystem::path(path.toStdWString()); fact.fingerprint.size = 11;
+        evaluation.proposal.eligibleFiles.push_back(fact);
+    }
+    evaluation.proposal.evaluation.shouldOffer = true;
+    evaluation.proposal.evaluation.fileCount = 2;
+    nookbit::WatchController controller(queue, queue, repository, evaluation, directory.path());
+    controller.saveSettings(directory.path(), false, false, 10, false, true, 1, false, 1, false, 1, {});
+    queue.paths = {std::filesystem::path(directory.filePath("already-pending.jpg").toStdWString())};
+    controller.checkNow();
+    expect(controller.proposalVisible() && evaluation.seenPending == queue.paths, "watch reads queue through its query contract");
+    const auto calls = evaluation.calls;
+    queue.queryFails = true; controller.checkNow();
+    expect(!controller.proposalVisible() && evaluation.calls == calls && controller.statusMessage().contains("test query failure"),
+        "query failure withdraws stale offer and does not evaluate with an empty fallback");
+    queue.queryFails = false; controller.pendingPathsChanged(); controller.checkNow();
+    queue.enqueueFails = true; controller.addProposalToPending();
+    expect(controller.proposalVisible() && queue.received.empty() && controller.statusMessage().contains("test enqueue failure"),
+        "command failure is visible and leaves the offer available to retry");
+    queue.enqueueFails = false;
+    queue.whileEnqueueing = [&] { controller.pendingPathsChanged(); };
+    controller.addProposalToPending();
+    expect(queue.received.size() == 2 && !controller.proposalVisible() && controller.statusMessage().contains("test rejection"),
+        "copied proposal survives synchronous invalidation and reports rejected paths");
+    expect(QFile::exists(directory.filePath("one.jpg")) && QFile::exists(directory.filePath("two.jpg")),
+        "accepting an offer never moves the original files");
 }
 } // namespace
 
@@ -316,6 +408,7 @@ int main(int argc, char* argv[]) {
     testReadinessRetryAndAcceptance();
     testSnoozeAndCurrentCandidates();
     testSizeUnitSettings();
+    testPendingQueueBoundary();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;

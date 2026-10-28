@@ -110,21 +110,31 @@ void PendingFilesModel::addUrl(const QUrl& url) {
         setLastMessage(QStringLiteral("컴퓨터에 있는 파일만 추가할 수 있어요."));
         return;
     }
-    const QFileInfo info(url.toLocalFile());
+    (void)addPath(std::filesystem::path(url.toLocalFile().toStdWString()));
+}
+
+// 화면과 외부 기능이 동일한 정책으로 대기 경로를 등록하는 함수.
+Result<std::filesystem::path> PendingFilesModel::addPath(const std::filesystem::path& path) {
+    const auto localPath = QString::fromStdWString(path.wstring());
+    if (!path.is_absolute() || localPath.contains(QChar::Null)) {
+        setLastMessage(QStringLiteral("파일이나 폴더의 전체 경로가 필요해요."));
+        return Result<std::filesystem::path>::failure({"pending.path_invalid", lastMessage_.toStdString()});
+    }
+    const QFileInfo info(localPath);
     if (!info.exists() || (!info.isFile() && !info.isDir()) || info.isSymLink() || QDir(info.absoluteFilePath()).isRoot()) {
         setLastMessage(QStringLiteral("존재하는 파일이나 폴더만 추가할 수 있어요. 바로가기와 드라이브 전체는 제외해요."));
-        return;
+        return Result<std::filesystem::path>::failure({"pending.path_unavailable", lastMessage_.toStdString()});
     }
     const auto fullPath = QDir::cleanPath(info.absoluteFilePath());
     for (const auto& entry : entries_) {
         if (QString::compare(entry.fullPath, fullPath, Qt::CaseInsensitive) == 0) {
             setLastMessage(QStringLiteral("이미 대기 목록에 있는 파일이에요."));
-            return;
+            return Result<std::filesystem::path>::failure({"pending.duplicate", lastMessage_.toStdString()});
         }
         if (fullPath.startsWith(entry.fullPath + "/", Qt::CaseInsensitive) ||
             entry.fullPath.startsWith(fullPath + "/", Qt::CaseInsensitive)) {
             setLastMessage(QStringLiteral("폴더와 그 안의 항목은 함께 등록할 수 없어요. 폴더 전체 또는 내부 항목 중 하나를 선택해 주세요."));
-            return;
+            return Result<std::filesystem::path>::failure({"pending.overlap", lastMessage_.toStdString()});
         }
     }
     const int newRow = entries_.size();
@@ -134,6 +144,7 @@ void PendingFilesModel::addUrl(const QUrl& url) {
     emit countChanged();
     setLastMessage(info.isDir() ? QStringLiteral("폴더 전체를 하나의 대상으로 추가했어요. 내부 항목은 따로 분류하지 않아요.")
                               : QStringLiteral("파일을 대기 목록에 추가했어요. 원본은 그대로 있어요."));
+    return Result<std::filesystem::path>::success(std::filesystem::path(fullPath.toStdWString()));
 }
 
 // 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.

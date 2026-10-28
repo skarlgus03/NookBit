@@ -110,6 +110,7 @@ if(NOOKBIT_BUILD_QT_APP)
 
     qt_add_executable(nookbit
       presentation/main.cpp
+      app/pending_queue_adapter.hpp
       presentation/background_task_runner.hpp
       presentation/character_controller.hpp
       presentation/character_controller.cpp

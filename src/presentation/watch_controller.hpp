@@ -1,8 +1,7 @@
 #pragma once
 
-#include "presentation/pending_files_model.hpp"
-
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/pending_queue.hpp>
 
 #include <QFileSystemWatcher>
 #include <QObject>
@@ -40,7 +39,8 @@ class WatchController final : public QObject {
 
 public:
     /// 대기 목록과 감시 설정·제안 계약을 연결하는 생성자.
-    WatchController(PendingFilesModel& pendingFiles,
+    WatchController(IPendingPathsQuery& pendingPaths,
+                    IEnqueuePendingPaths& pendingCommands,
                     IWatchSettingsRepository& repository,
                     IWatchProposalUseCase& evaluateWatchFolder,
                     QString defaultFolder,
@@ -116,6 +116,8 @@ public:
     Q_INVOKABLE void snoozeProposal();
     /// 분류 규칙 저장 후 이전 제안을 지우고 새 규칙으로 다시 평가하는 함수.
     void rulesChanged();
+    /// 조립부가 전달한 대기 목록 변경으로 오래된 제안을 무효화하는 함수.
+    void pendingPathsChanged();
 
 signals:
     void settingsChanged();
@@ -130,7 +132,8 @@ private:
     /// 사용자에게 표시 중인 제안을 지우는 함수.
     void clearProposal();
 
-    PendingFilesModel& pendingFiles_;
+    IPendingPathsQuery& pendingPaths_;
+    IEnqueuePendingPaths& pendingCommands_;
     IWatchSettingsRepository& repository_;
     IWatchProposalUseCase& evaluateWatchFolder_;
     QFileSystemWatcher directoryWatcher_;

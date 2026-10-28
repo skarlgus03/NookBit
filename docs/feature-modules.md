@@ -1,8 +1,9 @@
 # Feature modules: boundaries and communication
 
-Status: initial design, 2026-10-28. This document records the next incremental
-refactor. It does not claim that module toggles, a module registry or plugin
-loading already exist. Existing behavior remains unchanged in this step.
+Status: incremental refactor, 2026-10-28. The pending-queue seam (step 1) is
+implemented. Module toggles, a module registry and plugin loading remain planned.
+The current adapter reuses the existing queue model; ownership of queue state has
+not yet moved out of the presentation layer.
 
 ## Module units
 
@@ -33,7 +34,8 @@ owner without becoming one menu button.
 
 | Current seam | What exists | Remaining coupling |
 | --- | --- | --- |
-| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase` for evaluation | Includes and holds `PendingFilesModel`; reads it, subscribes to it and adds URLs directly |
+| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase`, `IPendingPathsQuery` and `IEnqueuePendingPaths`; no queue-model dependency | Host still assembles it unconditionally; classification remains inside watch evaluation |
+| [Pending queue contracts](../include/nookbit/application/pending_queue.hpp) and [adapter](../src/app/pending_queue_adapter.hpp) | Standard C++ path snapshots and per-path admission receipts; host forwards model changes | Adapter deliberately retains the existing model and its admission policies |
 | [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Scanner/rule-engine/repository interfaces are injected | Evaluator orchestrates classification itself instead of using a feature-level classification query |
 | [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer | Registration and source/delivery adapters are assembled in `main.cpp` |
 | [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | Desktop objects and their connections are assembled unconditionally |
@@ -133,11 +135,16 @@ The same ownership/request/update rules apply to additions unrelated to companio
 
 ## Incremental implementation order
 
-1. **Pending-queue seam first.** Replace WatchController's direct model dependency
-   with pending-path query/enqueue contracts. Let an outer adapter use the current
-   model so duplicate, overlap, availability and persistence behavior are reused.
-   Forward queue-change notifications in the host. Preserve proposal invalidation
-   and snapshot proposal paths before enqueueing, since queue changes clear offers.
+1. **Pending-queue seam: implemented.** WatchController receives separate query and
+   enqueue interfaces. `PendingQueueAdapter` uses the current model's typed
+   `addPath` result so duplicate, overlap, availability and persistence behavior
+   are reused. Host-side connections forward queue changes. Query failure
+   withdraws stale offers; command failure is displayed without inventing a
+   successful admission. Partial success reports both admitted and rejected paths.
+   Proposal paths are copied before enqueueing because queue changes clear offers.
+   Both adapter methods require the model's owning thread; no worker thread touches
+   the model. Only whole-command failures precede mutation; individual failures are
+   returned as per-path rejections.
 2. **Classification query.** Move active-rule lookup/matching behind an Organizer
    capability. Watch retains scanning, file readiness and threshold decisions.
    Rule changes invalidate old results; query results never bypass fresh preview.
@@ -149,6 +156,7 @@ The same ownership/request/update rules apply to additions unrelated to companio
    startup combinations work. Check missing optional consumers, required-dependency
    reasons, preserved settings/data and absence of timers from inactive features.
 
-Each step is independently reviewable. The first code change should demonstrate
-that Watch no longer includes or holds `PendingFilesModel`, while accepting an
-offer still only enqueues valid paths and leaves original files untouched.
+Each step is independently reviewable. Tests cover queue-model-free WatchController
+operation, read/command failure, invalidation during enqueue, per-path partial
+results and real-model admission/persistence behavior. Accepting an offer still
+only enqueues valid paths and leaves original files untouched. Step 2 is next.
