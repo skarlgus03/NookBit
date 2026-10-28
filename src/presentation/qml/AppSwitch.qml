@@ -18,17 +18,17 @@ Switch {
         width: UiMetrics.switchWidth
         height: UiMetrics.switchHeight
         radius: height / 2
-        color: control.checked ? control.theme.accent : control.theme.muted
+        color: control.checked ? control.theme.switchTrackOn : control.theme.switchTrackOff
         opacity: control.enabled ? 1 : 0.5
-        border.width: control.visualFocus || control.hovered ? UiMetrics.borderActive : 0
-        border.color: control.theme.buttonFocus
+        border.width: control.visualFocus || control.hovered ? UiMetrics.borderActive : control.checked ? 0 : UiMetrics.borderNormal
+        border.color: control.visualFocus || control.hovered ? control.theme.buttonFocus : control.theme.switchBorderOff
         Rectangle {
             width: UiMetrics.switchThumbSize
             height: UiMetrics.switchThumbSize
             radius: width / 2
             x: control.checked ? parent.width - width - (parent.height - height) / 2 : (parent.height - height) / 2
             anchors.verticalCenter: parent.verticalCenter
-            color: control.checked ? control.theme.accentText : control.theme.surface
+            color: control.checked ? control.theme.switchThumbOn : control.theme.switchThumbOff
         }
     }
     contentItem: Text {

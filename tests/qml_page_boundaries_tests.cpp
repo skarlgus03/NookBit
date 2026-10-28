@@ -384,9 +384,19 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         settingsPage->setProperty("dark", dark);
         settle();
-        auto* themeGroup = find(find, settingsItem, "themeChoiceGroup");
-        expect(themeGroup && qAbs(themeGroup->x() + themeGroup->width() - themeGroup->parentItem()->width()) <= 1,
-            "theme choices remain aligned to the settings card's right edge");
+        for (int width : {500, 720}) {
+            settingsItem->setWidth(width);
+            settle();
+            auto* themeGroup = find(find, settingsItem, "themeChoiceGroup");
+            auto* themeCard = themeGroup ? themeGroup->parentItem() : nullptr;
+            while (themeCard && themeCard->objectName() != QStringLiteral("settingsSectionCard")) themeCard = themeCard->parentItem();
+            expect(themeGroup && themeCard
+                && qAbs(themeGroup->mapToItem(themeCard, QPointF(themeGroup->width(), 0)).x()
+                    - (themeCard->width() - metrics->property("spaceSection").toInt())) <= 1,
+                "theme choices remain aligned to the actual card edge at narrow and wide widths");
+        }
+        settingsItem->setWidth(500);
+        settle();
         auto* rename = find(find, settingsItem, "collisionPolicy_rename");
         auto* skip = find(find, settingsItem, "collisionPolicy_skip");
         auto* abort = find(find, settingsItem, "collisionPolicy_abort");

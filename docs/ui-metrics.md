@@ -195,8 +195,13 @@ remain local until Save; Check Now still uses the saved configuration. The actio
 row remains below the scrollable form. UI verification scrolls each numeric field
 into view before sending pointer/keyboard events.
 
-Theme choices have an explicit fixed group width and right alignment within their
-card. Settings and Watch now share one window-size key (page 8); page IDs 8/3 remain
+Theme choices have a fixed group width plus an expanding spacer so the row fills
+the card. Tests compare their position to the actual card edge at 500/720 px widths
+in both themes, rather than merely checking the button group's immediate parent.
+Switches use dedicated `switchTrackOn` / `switchTrackOff` and thumb roles: on uses
+the accent; off uses a neutral gray track, muted thumb and a visible neutral border.
+Track state colors and thumb/track pairs are checked for at least 3:1 contrast.
+Settings and Watch share one window-size key (page 8); page IDs 8/3 remain
 stable, but entering Watch no longer restores the old independent page-3 size.
 `SettingsWorkflow` slides their bodies using `pageSlideDuration`, keeps input locked
 during motion, and supports reverse navigation. Other page sizes remain independent.

@@ -111,6 +111,11 @@ int main(int argc, char** argv) {
             expect(contrast(QColor(colors.value(role).toString()), QColor(colors.value(role + "Surface").toString())) >= 4.5,
                 "semantic status text remains readable on its corresponding background");
         const auto fileTypes = colors.value("fileTypes").toMap();
+        const QColor switchOn(colors.value("switchTrackOn").toString()), switchOff(colors.value("switchTrackOff").toString());
+        expect(contrast(switchOn, switchOff) >= 3.0
+            && contrast(QColor(colors.value("switchThumbOn").toString()), switchOn) >= 3.0
+            && contrast(QColor(colors.value("switchThumbOff").toString()), switchOff) >= 3.0,
+            "switch states and thumb positions remain visually distinct in both themes");
         for (const auto& value : fileTypes) {
             const auto swatch = value.toMap();
             expect(contrast(QColor(swatch.value("foreground").toString()), QColor(swatch.value("background").toString())) >= 4.5,

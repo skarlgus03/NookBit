@@ -66,13 +66,12 @@ ScrollView {
                 Layout.fillWidth: true
                 spacing: UiMetrics.spaceGroup
                 ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 1
                     Layout.minimumWidth: 0
                     spacing: UiMetrics.spaceExtraSmall
                     Label { text: qsTr("테마"); font.pixelSize: UiMetrics.textEmphasis; font.bold: true; color: page.theme.text }
                     Label { text: qsTr("선택은 바로 저장돼요."); font.pixelSize: UiMetrics.textBody; color: page.theme.muted }
                 }
+                Item { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 0 }
                 Rectangle {
                     objectName: "themeChoiceGroup"
                     Layout.alignment: Qt.AlignRight
