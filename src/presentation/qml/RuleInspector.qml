@@ -26,6 +26,7 @@ Frame {
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
     readonly property string valueLabel: selectedType === "destination" ? qsTr("목적지 경로")
         : selectedType === "extension" ? qsTr("확장자") : selectedType === "name" ? qsTr("이름에 포함할 글자")
+        : selectedType === "itemType" ? qsTr("대상 종류")
         : selectedType === "size" ? qsTr("파일 크기") : selectedType === "age" ? qsTr("수정 후 경과일") : qsTr("표시 값")
     padding: UiMetrics.spaceSection
     background: Rectangle {
@@ -112,6 +113,7 @@ Frame {
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
+                         && inspector.selectedType !== "itemType"
                 enabled: visible
                 placeholderText: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
@@ -125,6 +127,16 @@ Frame {
                     if (inspector.editor.selectedBlock)
                         inspector.editor.updateValue(inspector.editor.selectedBlock.id, text);
                 }
+            }
+            AppComboBox {
+                objectName: "ruleItemTypeCombo"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "itemType"
+                textRole: "text"
+                valueRole: "value"
+                model: [{ text: qsTr("파일만"), value: "file" }, { text: qsTr("폴더만"), value: "folder" }]
+                currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.value === "file" ? 0 : 1
+                onActivated: inspector.editor.updateValue(inspector.editor.selectedId, currentValue)
             }
             CheckBox {
                 objectName: "destinationHomeCheck"

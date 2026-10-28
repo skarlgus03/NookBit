@@ -31,7 +31,8 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["extension", "nameContains", "size", "modifiedAgeDays"] },
+        "type": { "enum": ["extension", "nameContains", "size", "modifiedAgeDays", "itemType"] },
+        "kind": { "enum": ["file", "folder"] },
         "values": {
           "type": "array", "minItems": 1, "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-zA-Z0-9]+$" }

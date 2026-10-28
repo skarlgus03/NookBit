@@ -56,6 +56,10 @@ void appendCondition(std::string& output, const RuleCondition& condition) {
 // v3 단일 조건의 종류와 값을 서명 문자열에 추가하는 함수.
 void appendAtomicCondition(std::string& output, const AtomicRuleCondition& condition) {
     appendNumber(output, condition.index());
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
+        appendNumber(output, type->value);
+        return;
+    }
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         appendNumber(output, extension->values.size());
         for (const auto& value : extension->values) append(output, value);

@@ -15,6 +15,10 @@ QtObject {
             hint: qsTr("조건이 맞으면 다음 노드로 진행해요."),
             nodes: [
                 {
+                    type: "itemType",
+                    title: qsTr("대상 종류 (파일 / 폴더)")
+                },
+                {
                     type: "extension",
                     title: qsTr("확장자")
                 },
@@ -216,6 +220,8 @@ QtObject {
 
     // 노드 종류에 맞는 입력값과 비교 방식을 카드에 표시하는 함수.
     function displayValue(block) {
+        if (block.type === "itemType")
+            return block.value === "folder" ? qsTr("폴더만") : qsTr("파일만");
         if (block.type === "size" || block.type === "age") {
             const comparisons = {
                 greaterThan: qsTr("초과"),
@@ -334,6 +340,8 @@ QtObject {
             return qsTr("파일 입력");
         case "extension":
             return qsTr("확장자");
+        case "itemType":
+            return qsTr("대상 종류");
         case "size":
             return qsTr("파일 크기");
         case "name":
@@ -353,6 +361,7 @@ QtObject {
     // 우클릭 메뉴에서 고른 종류의 임시 블록을 기억한 위치에 추가하는 함수.
     function addBlock(type, worldX, worldY) {
         const examples = {
+            itemType: "folder",
             extension: "png, jpg",
             size: "5",
             name: "report",

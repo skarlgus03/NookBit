@@ -313,6 +313,18 @@ int main(int argc, char** argv) {
     call(engine, state.get(), "selectOnly", {1});
     expect(value && !value->isVisible() && inspector->property("selectionKind").toString() == QStringLiteral("시작점"),
         "the unique input node has guidance instead of an editable condition value");
+    call(engine, state.get(), "addBlock", {"itemType", 150, 150});
+    settle();
+    auto* itemType = inspector->findChild<QQuickItem*>("ruleItemTypeCombo");
+    expect(itemType && itemType->isVisible() && itemType->property("currentValue").toString() == "folder"
+        && !value->isVisible() && inspector->property("valueLabel").toString() == QStringLiteral("대상 종류"),
+        "item type condition uses a folder-default dropdown instead of free text");
+    if (itemType) {
+        itemType->setProperty("currentIndex", 0);
+        QMetaObject::invokeMethod(itemType, "activated", Q_ARG(int, 0));
+        const auto selected = state->property("selectedBlock").value<QJSValue>().toVariant().toMap();
+        expect(selected.value("value").toString() == "file", "item type choice updates the selected graph node");
+    }
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

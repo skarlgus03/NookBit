@@ -154,6 +154,12 @@ bool legacyConditionEmpty(const RuleCondition& condition) {
 Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object) {
     const auto type = object.value(QStringLiteral("type")).toString();
     const auto comparison = object.value(QStringLiteral("comparison")).toString();
+    if (type == QStringLiteral("itemType") && object.size() == 2) {
+        const auto kind = object.value(QStringLiteral("kind")).toString();
+        if (kind == QStringLiteral("file") || kind == QStringLiteral("folder"))
+            return Result<AtomicRuleCondition>::success(ItemTypePredicate{
+                kind == QStringLiteral("folder") ? ItemType::Folder : ItemType::File});
+    }
     if (type == QStringLiteral("extension") && object.size() == 2 &&
         object.contains(QStringLiteral("values"))) {
         ExtensionPredicate condition;
@@ -394,6 +400,10 @@ Result<QJsonObject> conditionObject(const RuleCondition& condition) {
 
 // v3 단일 조건 모델을 종류별 JSON 필드로 변환하고 입력값을 검사하는 함수.
 Result<QJsonObject> atomicConditionObject(const AtomicRuleCondition& condition) {
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
+        return Result<QJsonObject>::success(QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("itemType")},
+            {QStringLiteral("kind"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file")}});
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         if (extension->values.empty()) return Result<QJsonObject>::failure({
             "rules.condition_invalid", "Extension condition needs a value."});

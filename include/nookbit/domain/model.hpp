@@ -142,8 +142,11 @@ struct ModifiedAgePredicate {
 };
 
 /// v3 노드는 이 네 조건 중 정확히 하나만 가진다.
+enum class ItemType { File, Folder };
+struct ItemTypePredicate { ItemType value{ItemType::File}; };
+
 using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredicate,
-                                         SizePredicate, ModifiedAgePredicate>;
+                                         SizePredicate, ModifiedAgePredicate, ItemTypePredicate>;
 
 /// 리프 또는 전체 예외가 정한 목적지와 충돌 정책을 표현한다.
 struct RuleDestination {

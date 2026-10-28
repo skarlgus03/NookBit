@@ -8,6 +8,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -632,6 +633,51 @@ void testExternalDestinations() {
     blocks[2] = invalid;
     expect(!editor.importGraph(blocks, edges), "absolute mode rejects relative paths");
 }
+// 파일·폴더 조건의 화면 변환·JSON 왕복·가상/실제 시험과 잘못된 입력 거부를 검사하는 함수.
+void testItemTypeRules() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"), schema);
+    auto initial = defaults.load();
+    if (!initial) { expect(false, "item type fixture"); return; }
+    initial.value().globalOtherwise.reset();
+    expect(active.save(initial.value()).hasValue(), "item type initial rules");
+    nookbit::FilesystemScanner scanner; nookbit::RuleEngine engine; nookbit::TestRuleUseCase tester(scanner, engine);
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, {}, &active, &tester);
+    QVariantList blocks{QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "itemType"}, {"value", "folder"}},
+        QVariantMap{{"id", 3}, {"type", "destination"}, {"value", "Folders"}}};
+    const QVariantList edges{QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 3}}};
+    expect(editor.importGraph(blocks, edges) && editor.save(), "folder-only graph saves");
+    const auto saved = active.load();
+    expect(saved && std::holds_alternative<nookbit::ItemTypePredicate>(*saved.value().nodes[0].atomicCondition) &&
+        std::get<nookbit::ItemTypePredicate>(*saved.value().nodes[0].atomicCondition).value == nookbit::ItemType::Folder,
+        "JSON round trip preserves folder predicate");
+    const auto restored = editor.graph().value("blocks").toList();
+    bool restoredType = false;
+    for (const auto& item : restored) if (item.toMap().value("type") == "itemType")
+        restoredType = item.toMap().value("value") == "folder";
+    expect(restoredType, "graph restores item type as a dedicated condition");
+    const auto folder = editor.testGraph(blocks, edges, {}, "same-name.png", "0", "0", true);
+    const auto file = editor.testGraph(blocks, edges, {}, "same-name.png", "0", "0", false);
+    expect(folder.value("destination") == "Folders" && file.value("outcome") == "unclassified", "virtual test distinguishes file and folder");
+    const auto actualFolder = directory.filePath("actual-folder");
+    expect(QDir().mkpath(actualFolder), "real test folder");
+    const auto actual = editor.testGraph(blocks, edges, QUrl::fromLocalFile(actualFolder), {}, {}, {});
+    expect(actual.value("destination") == "Folders", "real folder metadata is detected automatically");
+    auto invalidBlock = blocks[1].toMap(); invalidBlock["value"] = "both"; blocks[1] = invalidBlock;
+    expect(!editor.importGraph(blocks, edges), "invalid item type is rejected in graph");
+    QFile serialized(directory.filePath("rules.json"));
+    if (serialized.open(QIODevice::ReadOnly)) {
+        auto malformed = QJsonDocument::fromJson(serialized.readAll()).object();
+        auto nodes = malformed.value("nodes").toArray(); auto node = nodes[0].toObject();
+        node["when"] = QJsonObject{{"type", "itemType"}, {"kind", "both"}}; nodes[0] = node; malformed["nodes"] = nodes;
+        QFile badFile(directory.filePath("bad.json")); expect(badFile.open(QIODevice::WriteOnly), "invalid JSON fixture");
+        badFile.write(QJsonDocument(malformed).toJson()); badFile.close();
+        expect(!active.loadFile(std::filesystem::path(badFile.fileName().toStdWString())), "invalid item type rejected on JSON import");
+    }
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -647,5 +693,6 @@ int main(int argc, char* argv[]) {
     testGraphRoundTripAndLayout();
     testSizeUnits();
     testExternalDestinations();
+    testItemTypeRules();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -6,9 +6,12 @@ A directly dropped folder is one classification/move target. Its name, files,
 subfolders and empty directories travel together; children are never individually
 classified. Watching a folder retains the previous file-scanning behavior.
 
-Folder rules currently use name, modified age and fallback destinations. Extension
+Use an `itemType` condition (`kind: folder` or `kind: file`) to select a target kind,
+optionally followed by name or modified-age children. Extension
 and file-size predicates only match files. Folder sizes are not recursively summed
-during scanning. No new rules JSON condition or schema version is introduced.
+during scanning. The additive `itemType` condition uses rules JSON v3; older apps
+without this condition reject it during import. Existing condition indices and
+file-only approval signatures are preserved.
 
 Folder collisions always use Skip, regardless of the file collision setting or
 per-rule policy. A file or directory occupying the destination prevents that folder

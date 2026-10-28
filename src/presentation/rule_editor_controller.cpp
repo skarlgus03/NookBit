@@ -219,6 +219,10 @@ Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks,
                 if (extension.values.empty())
                     return graphError(id, QStringLiteral("확장자를 하나 이상 입력해 주세요."));
                 node.atomicCondition = std::move(extension);
+            } else if (type == QStringLiteral("itemType")) {
+                if (value != QStringLiteral("file") && value != QStringLiteral("folder"))
+                    return graphError(id, QStringLiteral("대상 종류에서 파일 또는 폴더를 선택해 주세요."));
+                node.atomicCondition = ItemTypePredicate{value == QStringLiteral("folder") ? ItemType::Folder : ItemType::File};
             } else if (type == QStringLiteral("name")) {
                 if (value.isEmpty()) return graphError(id, QStringLiteral("포함할 이름을 입력해 주세요."));
                 node.atomicCondition = NameContainsPredicate{value.toStdString()};
@@ -375,7 +379,10 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
         block.insert(QStringLiteral("value"), QStringLiteral("조건 없음"));
     } else if (node.atomicCondition) {
         const auto& condition = *node.atomicCondition;
-        if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+        if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
+            block.insert(QStringLiteral("type"), QStringLiteral("itemType"));
+            block.insert(QStringLiteral("value"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file"));
+        } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
             block.insert(QStringLiteral("type"), QStringLiteral("extension"));
             block.insert(QStringLiteral("value"), extensionText(*extension));
         } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
@@ -545,7 +552,10 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
     };
     if (!node->atomicCondition) return result;
     const auto& condition = *node->atomicCondition;
-    if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
+        result.insert(QStringLiteral("type"), QStringLiteral("itemType"));
+        result.insert(QStringLiteral("value"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file"));
+    } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("extension"));
         result.insert(QStringLiteral("value"), extensionText(*extension));
     } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
@@ -602,6 +612,9 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
                     parsed.values.end()) parsed.values.push_back(converted);
             }
             if (!parsed.values.empty()) condition = std::move(parsed);
+        } else if (type == QStringLiteral("itemType")) {
+            if (value == QStringLiteral("folder") || value == QStringLiteral("file"))
+                condition = ItemTypePredicate{value == QStringLiteral("folder") ? ItemType::Folder : ItemType::File};
         } else if (type == QStringLiteral("nameContains")) {
             if (!value.trimmed().isEmpty())
                 condition = NameContainsPredicate{value.trimmed().toStdString()};
@@ -844,7 +857,7 @@ QVariantMap RuleEditorController::exportGraph(const QVariantList& blocks,
 // 미저장 그래프를 검증한 뒤 선택 파일 또는 가상 파일의 분류 경로만 계산하는 함수.
 QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QVariantList& edges,
                                             const QUrl& fileUrl, const QString& fileName,
-                                            const QString& sizeBytes, const QString& ageDays) const {
+                                            const QString& sizeBytes, const QString& ageDays, bool directory) const {
     if (!loaded_ || !ruleTester_) return {{QStringLiteral("ok"), false},
                           {QStringLiteral("error"), QStringLiteral("규칙을 먼저 불러와 주세요.")}};
     const auto checked = graphRules(blocks, edges);
@@ -872,6 +885,7 @@ QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QV
                         "파일 이름, 크기(B), 수정 후 경과일(0~36500)을 확인해 주세요.")}};
         }
         fact.relativePath = std::filesystem::path(name.toStdWString());
+        fact.fingerprint.directory = directory;
         fact.fingerprint.size = bytes;
         fact.fingerprint.modifiedUtcMs = nowMs - days * 86400000LL;
     }

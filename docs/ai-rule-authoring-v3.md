@@ -12,6 +12,7 @@ Supported `when` objects (use exactly the keys shown for the selected type):
 
 | Purpose | Object | Notes |
 | --- | --- | --- |
+| File or folder | `{"type":"itemType","kind":"folder"}` | `kind` is exactly `file` or `folder`. Selects the whole target, not its contents. |
 | Extension | `{"type":"extension","values":["png","jpg"]}` | Nonempty, unique alphanumeric extensions without leading dots; lower-case is recommended. |
 | Filename contains text | `{"type":"nameContains","text":"Screenshot"}` | Nonempty substring of the full filename, including its extension; ASCII letters are case-insensitive. |
 | File size | `{"type":"size","comparison":"greaterThan","bytes":5000000}` | Integer bytes from 0 to 9007199254740991. Comparisons: `greaterThan`, `atLeast`, `lessThan`, `atMost`. KB=1000, MB=1000000, GB=1000000000; MiB=1048576. Match the user's units exactly. |
@@ -24,9 +25,10 @@ For each destination use `{"base":"home","path":"Pictures/{yyyy}/{MM}","collisio
 ## Evaluation rules
 
 Directly selected folders are single bundles, not recursively classified contents.
-For folders, use `nameContains`, `modifiedAgeDays` or fallback destinations;
-`extension` and `size` predicates never match folders. There is no folder-type
-predicate yet. Folder destination collisions always skip that folder, overriding
+Use `itemType` to select files or folders, then optionally add `nameContains` or
+`modifiedAgeDays` children. `extension` and `size` predicates never match folders.
+For folder-only organization, use an `itemType: folder` root and omit global
+fallbacks that would move files (or explicitly exclude files). Folder destination collisions always skip that folder, overriding
 `collisionPolicy`; files retain the documented policy. Do not invent a folder-size
 or recursive-classification field.
 

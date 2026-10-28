@@ -39,7 +39,7 @@ Dialog {
             return true;
         const saved = page.controller.edit(selectedRulePath, ruleIdField.text, ruleEnabledCheck.checked,
                                            ruleConditionType.currentValue, ruleConditionComparison.currentValue,
-                                           ruleConditionValue.text, ruleSizeUnit.currentValue,
+                                           ruleConditionType.currentValue === "itemType" ? ruleItemType.currentValue : ruleConditionValue.text, ruleSizeUnit.currentValue,
                                            ruleDestinationField.text);
         if (saved)
             ruleFormDirty = false;
@@ -269,6 +269,10 @@ Dialog {
                             {
                                 text: qsTr("수정 후 지난 일수"),
                                 value: "modifiedAgeDays"
+                            },
+                            {
+                                text: qsTr("대상 종류"),
+                                value: "itemType"
                             }
                         ]
                         onCurrentValueChanged: ruleConditionComparison.currentIndex = 0
@@ -311,7 +315,8 @@ Dialog {
                         onActivated: page.ruleFormDirty = true
                     }
                     Label {
-                        text: ruleConditionType.currentValue === "extension" ? qsTr("확장자 (쉼표로 구분)") :
+                        text: ruleConditionType.currentValue === "itemType" ? qsTr("대상 종류") :
+                              ruleConditionType.currentValue === "extension" ? qsTr("확장자 (쉼표로 구분)") :
                                                                                ruleConditionType.currentValue
                                                                                === "nameContains" ? qsTr("이름에 포함할 글자") :
                                                                                                     ruleConditionType.currentValue
@@ -321,6 +326,7 @@ Dialog {
                     }
                     AppTextField {
                         id: ruleConditionValue
+                        visible: ruleConditionType.currentValue !== "itemType"
                         Layout.fillWidth: true
                         enabled: page.selectedRulePath.length > 0 && !page.selectedRuleDetail.otherwise
                         inputMethodHints: ruleConditionType.currentValue === "size" || ruleConditionType.currentValue
@@ -328,6 +334,17 @@ Dialog {
                         placeholderText: ruleConditionType.currentValue === "extension" ? qsTr("예: png, jpg") : qsTr(
                                                                                               "값 입력")
                         onTextEdited: page.ruleFormDirty = true
+                    }
+                    AppComboBox {
+                        id: ruleItemType
+                        Layout.fillWidth: true
+                        visible: ruleConditionType.currentValue === "itemType"
+                        enabled: page.selectedRulePath.length > 0 && !page.selectedRuleDetail.otherwise
+                        textRole: "text"
+                        valueRole: "value"
+                        model: [{ text: qsTr("파일만"), value: "file" }, { text: qsTr("폴더만"), value: "folder" }]
+                        currentIndex: ruleConditionValue.text === "file" ? 0 : 1
+                        onActivated: { ruleConditionValue.text = currentValue; page.ruleFormDirty = true; }
                     }
                     AppComboBox {
                         id: ruleSizeUnit
@@ -376,7 +393,7 @@ Dialog {
                         onClicked: {
                             if (page.controller.edit(page.selectedRulePath, ruleIdField.text, ruleEnabledCheck.checked,
                                                      ruleConditionType.currentValue,
-                                                     ruleConditionComparison.currentValue, ruleConditionValue.text,
+                                                     ruleConditionComparison.currentValue, ruleConditionType.currentValue === "itemType" ? ruleItemType.currentValue : ruleConditionValue.text,
                                                      ruleSizeUnit.currentValue, ruleDestinationField.text))
                                 page.selectRule(page.selectedRulePath);
                         }

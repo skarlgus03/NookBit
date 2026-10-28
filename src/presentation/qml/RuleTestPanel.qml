@@ -105,7 +105,7 @@ Popup {
                 anchors.margins: UiMetrics.spaceCompact
                 Label {
                     Layout.fillWidth: true
-                    text: panel.editor.testFileUrl.toString() === "" ? qsTr("시험할 파일 하나를 여기에 놓거나 선택하세요") :
+                    text: panel.editor.testFileUrl.toString() === "" ? qsTr("시험할 파일이나 폴더 하나를 놓으세요") :
                                                                        panel.editor.testFileUrl.toString()
                     color: panel.primaryText
                     elide: Text.ElideMiddle
@@ -119,7 +119,7 @@ Popup {
                 anchors.fill: parent
                 onDropped: drop => {
                     if (drop.urls.length !== 1) {
-                        panel.editor.testError = qsTr("로컬 파일 하나만 놓아 주세요.");
+                        panel.editor.testError = qsTr("파일이나 폴더 하나만 놓아 주세요.");
                         return;
                     }
                     panel.editor.testFileUrl = drop.urls[0];
@@ -134,7 +134,21 @@ Popup {
             Layout.fillWidth: true
             columns: 2
             Label {
-                text: qsTr("파일 이름")
+                text: qsTr("대상 종류")
+                color: panel.primaryText
+            }
+            AppComboBox {
+                id: testItemType
+                objectName: "ruleTestItemTypeCombo"
+                Layout.fillWidth: true
+                model: [qsTr("파일"), qsTr("폴더")]
+                onActivated: {
+                    panel.editor.testResult = ({});
+                    panel.editor.testTraceBlockIds = [];
+                }
+            }
+            Label {
+                text: qsTr("이름")
                 color: panel.primaryText
             }
             AppTextField {
@@ -149,10 +163,12 @@ Popup {
             }
             Label {
                 text: qsTr("파일 크기 (B)")
+                enabled: testItemType.currentIndex === 0
                 color: panel.primaryText
             }
             AppTextField {
                 id: testSizeField
+                enabled: testItemType.currentIndex === 0
                 Layout.fillWidth: true
                 text: "1048576"
                 inputMethodHints: Qt.ImhDigitsOnly
@@ -243,7 +259,8 @@ Popup {
         }
         const result = panel.controller.testGraph(panel.editor.blocks, panel.editor.edges, panel.editor.testMode === 0
                                                   ? panel.editor.testFileUrl : "", testNameField.text,
-                                                  testSizeField.text, testAgeField.text);
+                                                  testItemType.currentIndex === 1 ? "0" : testSizeField.text, testAgeField.text,
+                                                  testItemType.currentIndex === 1);
         panel.editor.applyTestResult(result);
     }
     Connections {

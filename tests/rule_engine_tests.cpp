@@ -292,6 +292,30 @@ void testAtomicConditionTree() {
            "changing an exclusion must invalidate a saved plan");
 }
 
+// 대상 종류를 구분한 가지에서만 이름 조건이 이어지는지 검사하는 함수.
+void testItemTypeConditions() {
+    nookbit::RuleSet rules;
+    rules.schemaVersion = 3;
+    nookbit::RuleNode folder;
+    folder.id = "folder"; folder.atomicCondition = nookbit::ItemTypePredicate{nookbit::ItemType::Folder};
+    nookbit::RuleNode name;
+    name.id = "name"; name.atomicCondition = nookbit::NameContainsPredicate{"project"};
+    name.destination = nookbit::RuleDestination{L"Projects", std::nullopt};
+    folder.children.push_back(name);
+    nookbit::RuleNode file;
+    file.id = "file"; file.atomicCondition = nookbit::ItemTypePredicate{nookbit::ItemType::File}; file.exclude = true;
+    rules.nodes = {folder, file};
+    nookbit::RuleEngine engine;
+    nookbit::FileFact fact; fact.relativePath = L"project.png"; fact.fingerprint.directory = true;
+    const auto classified = engine.decide(fact, rules, nookbit::MultiMatchPolicy::FirstMatch, 0);
+    expect(classified && classified.value() && classified.value()->destinationRelativePath == L"Projects", "folder type composes with child name");
+    fact.fingerprint.directory = false;
+    const auto excluded = engine.decide(fact, rules, nookbit::MultiMatchPolicy::FirstMatch, 0);
+    expect(excluded && excluded.value() && excluded.value()->excluded, "same-named file follows file branch only");
+    const auto signedFolder = nookbit::PlanSignature::rules(rules);
+    std::get<nookbit::ItemTypePredicate>(*rules.nodes[0].atomicCondition).value = nookbit::ItemType::File;
+    expect(signedFolder != nookbit::PlanSignature::rules(rules), "item type choice affects approval signature");
+}
 } // namespace
 
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
@@ -301,6 +325,7 @@ int main() {
     testUnsafeDestination();
     testOrderedTreeAndOtherwise();
     testAtomicConditionTree();
+    testItemTypeConditions();
     if (failures == 0) {
         std::cout << "All rule-engine tests passed.\n";
         return 0;

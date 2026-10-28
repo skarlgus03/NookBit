@@ -72,7 +72,7 @@ public:
     /// 화면 그래프를 저장하지 않고 실제 파일 또는 가상 메타데이터로 시험하는 함수.
     Q_INVOKABLE QVariantMap testGraph(const QVariantList& blocks, const QVariantList& edges,
                                       const QUrl& fileUrl, const QString& fileName,
-                                      const QString& sizeBytes, const QString& ageDays) const;
+                                      const QString& sizeBytes, const QString& ageDays, bool directory = false) const;
     /// 현재 규칙 초안을 노드와 연결선으로 펼쳐 반환하는 함수.
     Q_INVOKABLE QVariantMap graph() const;
     /// 현재 노드 배치를 분류 규칙과 별도 파일에 저장하는 함수.

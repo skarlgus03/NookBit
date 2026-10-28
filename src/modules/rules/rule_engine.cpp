@@ -101,6 +101,8 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
 // v3 노드의 단일 조건 하나만 파일 정보와 비교하는 함수.
 bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
                    std::int64_t nowUtcMs) {
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
+        return file.fingerprint.directory == (type->value == ItemType::Folder);
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         if (file.fingerprint.directory) return false;
         const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;

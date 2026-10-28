@@ -364,7 +364,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 추가 메뉴가 조건·분기·종착점을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
             const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
             if (groups.size() != 3) return false;
-            const QStringList expectedTypes{"extension", "size", "name", "age", "otherwise", "destination", "exclude"};
+            const QStringList expectedTypes{"itemType", "extension", "size", "name", "age", "otherwise", "destination", "exclude"};
             QStringList actualTypes;
             for (const auto& group : groups) {
                 for (const auto& node : group.toMap().value("nodes").toList())
