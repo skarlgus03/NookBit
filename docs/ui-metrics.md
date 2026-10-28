@@ -178,6 +178,24 @@ presentation-only and reads the filename, never file contents or organizing rule
 
 ## Deliberate exceptions
 
+The companion page uses the theme window background with a large preview card and
+separate playback card on the left, and a scrollable surface on the right. The
+settings panel groups pack selection, display, placement and desktop gestures.
+`AppSwitch` uses `switchWidth` / `switchHeight` / `switchThumbSize`; `AppSlider` uses
+`sliderTrackHeight` / `sliderHandleSize`. Both inherit the shared 40 px control row
+and theme roles, including disabled/focus or press feedback. The pack selector is a
+deliberate 64 px row (`companionPackSelectorHeight`) to accommodate a static 40 px
+portrait (`companionPackPortraitSize`) and wrapped
+pack/version label. It stays locked while frame edits are unsaved.
+
+Preview background dots use `companionPreviewGridSpacing` and the shared border
+color, repainting only on size/theme changes. They do not affect camera coordinates.
+Zoom controls share a small floating surface. Playback controls use shared 40 px
+icon buttons in one row with a `companionPlaybackBadgeHeight` status pill and time
+readout; the existing timeline remains below. Apply/cancel appear during editing or
+while changes remain pending. Desktop scale (10–200%, default 50%) and preview zoom
+remain independent. No pack metadata, pivots, timing or import contracts change.
+
 Not every number is a design token. Window positioning and sizes, canvas coordinates, hit testing, image crop rectangles, animation timing, and ImagePack pivots/scales are feature geometry or data, not shared control metrics. Do not mechanically replace these with unrelated spacing tokens. Character drawing proportions also remain local.
 
 Node text/width/height presets belong to the singleton. Node type presets reuse the

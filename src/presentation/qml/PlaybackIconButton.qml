@@ -6,8 +6,8 @@ AppButton {
     id: control
     required property string kind
     required property string description
-    implicitWidth: UiMetrics.primaryActionHeight
-    implicitHeight: UiMetrics.primaryActionHeight
+    implicitWidth: UiMetrics.controlHeight
+    implicitHeight: UiMetrics.controlHeight
     Accessible.name: description
     ToolTip.visible: hovered
     ToolTip.text: description

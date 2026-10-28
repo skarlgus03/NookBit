@@ -193,6 +193,9 @@ if(NOOKBIT_BUILD_QT_APP)
           presentation/qml/FileTypeBadge.qml
         presentation/qml/RecoveryPage.qml
         presentation/qml/CompanionPage.qml
+          presentation/qml/CompanionSettingsPanel.qml
+          presentation/qml/AppSwitch.qml
+          presentation/qml/AppSlider.qml
         presentation/qml/AppSettingsPage.qml
         presentation/qml/DeveloperToolsPage.qml
         presentation/qml/LegacyRuleEditorDialog.qml

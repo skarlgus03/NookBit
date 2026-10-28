@@ -366,7 +366,6 @@ ApplicationWindow {
         id: characterSettingsDialog
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: UiMetrics.spaceSection
         visible: root.currentPage === 5
         dark: root.editorDark
         character: characterController

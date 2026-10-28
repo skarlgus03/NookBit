@@ -52,9 +52,9 @@ Rectangle {
         })
     readonly property bool dirty: JSON.stringify(drafts) !== JSON.stringify(savedEdits.frames || ({})) || JSON.stringify(durationDrafts) !== JSON.stringify(savedEdits.durations || ({}))
     readonly property bool playbackActive: active && running && !clock.finished && sprite.steps.length > 0
-    color: theme.alternate
+    color: "transparent"
     radius: UiMetrics.radiusPanel
-    border.color: theme.border
+    border.width: 0
     clip: true
 
     // 선택한 프레임에서 재생을 정지하는 함수.
@@ -251,355 +251,457 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: UiMetrics.spaceGroup
-        spacing: UiMetrics.spaceGroup
-        RowLayout {
-            Layout.fillWidth: true
-            Label {
-                text: qsTr("애니메이션")
-                color: pane.theme.text
-            }
-            AppComboBox {
-                id: choice
-                objectName: "companionAnimationChoice"
-                Layout.fillWidth: true
-                model: pane.animations
-                textRole: "label"
-                enabled: !pane.editing
-            }
-            AppButton {
-                visible: pane.allowEditing
-                text: qsTr("편집")
-                checkable: true
-                checked: pane.editing
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("편집 중 ← / →: 이전·다음 프레임 · 편집을 끄면 애니메이션 변경 가능")
-                onClicked: pane.editing = checked
-            }
-            AppButton {
-                visible: pane.editing
-                text: qsTr("기본값")
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("팩 기본값으로 되돌리기")
-                onClicked: pane.resetEdits()
-            }
-            AppButton {
-                objectName: "companionCancelEditsButton"
-                visible: pane.allowEditing
-                text: qsTr("취소")
-                enabled: pane.dirty
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("마지막 적용 상태로 돌아가기")
-                onClicked: {
-                    pane.running = false;
-                    pane.reloadEdits();
-                }
-            }
-            AppButton {
-                objectName: "companionApplyEditsButton"
-                visible: pane.allowEditing
-                text: qsTr("적용")
-                enabled: pane.dirty
-                onClicked: pane.applyRequested({
-                    frames: pane.drafts,
-                    durations: pane.durationDrafts
-                })
-            }
-        }
+        anchors.margins: 0
+        spacing: UiMetrics.spaceSection
         Rectangle {
-            id: stage
-            objectName: "companionPreviewStage"
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: pane.theme.surface
-            border.color: pane.theme.border
-            radius: UiMetrics.radiusPanel
-            clip: true
-            readonly property real frameWidth: sprite.steps.reduce((size, frame) => Math.max(size, frame.region.width / frame.pixelsPerUnit), 1)
-            readonly property real frameHeight: sprite.steps.reduce((size, frame) => Math.max(size, frame.region.height / frame.pixelsPerUnit), 1)
-            readonly property real zoom: Math.max(0.01, Math.min(width * 0.7 / frameWidth, height * 0.7 / frameHeight))
-            // 편집 중에는 이미지 원점을 고정하고 재생 중에는 공통 접점에 맞추는 좌표.
-            readonly property point origin: pane.editing && !pane.running && pane.step.region ? Qt.point((width - pane.step.region.width / pane.step.pixelsPerUnit * zoom) / 2, (height - pane.step.region.height / pane.step.pixelsPerUnit * zoom) / 2) : Qt.point(width / 2 - pane.pivot.x * zoom, height * 0.8 - pane.pivot.y * zoom)
-            Item {
-                id: previewWorld
-                objectName: "companionPreviewWorld"
-                width: stage.width
-                height: stage.height
-                x: pane.viewPanX
-                y: pane.viewPanY
-                scale: pane.viewZoom
-                transformOrigin: Item.Center
-                CharacterSprite {
-                    id: sprite
-                    objectName: "companionPagePreview"
-                    anchors.fill: parent
-                    descriptor: pane.descriptor
-                    playing: false
-                    externallyDriven: true
-                    sequenceIndex: clock.currentIndex
-                    userScale: stage.zoom
-                    anchor: pane.step.pivot ? Qt.point(stage.origin.x + pane.step.pivot.x * userScale, stage.origin.y + pane.step.pivot.y * userScale) : Qt.point(0, 0)
-                }
-                CharacterBubbleView {
-                    id: bubblePreview
-                    objectName: "companionBubblePreview"
-                    visible: pane.showBubble && pane.active
-                    configuration: pane.bubble
-                    dark: pane.dark
-                    message: pane.previewMessage
-                    constrainToArea: false
-                    screenArea: Qt.rect(0, 0, parent.width, parent.height)
-                    anchorPoint: Qt.point(stage.origin.x + (pane.pivot.x + pane.attachment.x) * stage.zoom, stage.origin.y + (pane.pivot.y + pane.attachment.y) * stage.zoom)
-                    x: placementX
-                    y: placementY
-                }
-                Repeater {
-                    model: 2
-                    delegate: Item {
-                        id: handle
-                        required property int index
-                        visible: pane.editing && !pane.running && sprite.metadataValid
-                        readonly property color guide: index === 0 ? pane.theme.pivotGuide : pane.theme.bubbleGuide
-                        x: stage.origin.x + (pane.pivot.x + (index === 1 ? pane.attachment.x : 0)) * stage.zoom
-                        y: stage.origin.y + (pane.pivot.y + (index === 1 ? pane.attachment.y : 0)) * stage.zoom
-                        Rectangle {
-                            x: -handle.x
-                            width: stage.width
-                            height: UiMetrics.borderNormal
-                            color: handle.guide
-                            opacity: 0.35
-                        }
-                        Rectangle {
-                            y: -handle.y
-                            width: UiMetrics.borderNormal
-                            height: stage.height
-                            color: handle.guide
-                            opacity: 0.35
-                        }
-                        AnchorHandle {
-                            id: marker
-                            x: -width / 2
-                            y: -height / 2
-                            scale: 1 / pane.viewZoom
-                            markerColor: handle.guide
-                            backdropColor: pane.theme.surface
-                            diamond: handle.index === 1
-                            description: handle.index === 0 ? qsTr("캐릭터 기준점 · 십자 중심을 드래그") : qsTr("말풍선 부착점 · 십자 중심을 드래그")
-                            // 이미지 논리 좌표로 변환하여 기준점을 이동하는 함수.
-                            onDragged: function (localX, localY) {
-                                const pos = marker.mapToItem(previewWorld, localX, localY);
-                                pane.movePoint(handle.index, (pos.x - stage.origin.x) / stage.zoom, (pos.y - stage.origin.y) / stage.zoom);
-                            }
-                        }
-                    }
-                }
-            }
-            MouseArea {
+            radius: UiMetrics.radiusCard
+            ColumnLayout {
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton | Qt.MiddleButton
-                preventStealing: true
-                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
-                property point startMouse: Qt.point(0, 0)
-                property point startPan: Qt.point(0, 0)
-                // 우클릭 또는 가운데 버튼을 누른 위치에서 화면 이동을 시작하는 함수.
-                onPressed: function (mouse) {
-                    stage.forceActiveFocus();
-                    startMouse = Qt.point(mouse.x, mouse.y);
-                    startPan = Qt.point(pane.viewPanX, pane.viewPanY);
-                }
-                // 캐릭터 좌표를 바꾸지 않고 보기 위치만 이동하는 함수.
-                onPositionChanged: function (mouse) {
-                    if (!pressed)
-                        return;
-                    pane.viewPanX = startPan.x + mouse.x - startMouse.x;
-                    pane.viewPanY = startPan.y + mouse.y - startMouse.y;
-                }
-            }
-            WheelHandler {
-                id: previewWheel
-                target: null
-                blocking: true
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                // 마우스 위치를 유지하며 휠 또는 터치패드로 확대·축소하는 함수.
-                onWheel: function (event) {
-                    const delta = event.angleDelta.y || (event.pixelDelta ? event.pixelDelta.y : 0);
-                    if (delta === 0)
-                        return;
-                    pane.zoomPreview(pane.viewZoom * Math.pow(UiMetrics.companionPreviewZoomStep, delta > 0 ? 1 : -1), previewWheel.point.position.x, previewWheel.point.position.y);
-                }
-            }
-            Rectangle {
-                objectName: "companionCoordinateReadout"
-                anchors.left: parent.left
-                anchors.top: parent.top
                 anchors.margins: UiMetrics.spaceGroup
-                width: Math.min(UiMetrics.companionCoordinateWidth, parent.width - UiMetrics.spaceGroup * 2)
-                height: coordinateLabels.implicitHeight + UiMetrics.spaceControl * 2
-                visible: pane.editing && sprite.metadataValid
-                color: pane.theme.alternate
-                border.color: pane.theme.border
-                radius: UiMetrics.radiusControl
-                Column {
-                    id: coordinateLabels
-                    anchors.fill: parent
-                    anchors.margins: UiMetrics.spaceControl
-                    spacing: UiMetrics.spaceSmall
+                spacing: UiMetrics.spaceGroup
+                RowLayout {
+                    Layout.fillWidth: true
                     Label {
-                        width: parent.width
-                        text: qsTr("%1 · 이미지 좌상단 기준").arg(pane.frameKey)
-                        elide: Text.ElideRight
-                        color: pane.theme.muted
-                        font.pixelSize: UiMetrics.textBody
+                        text: qsTr("애니메이션")
+                        color: pane.theme.text
                     }
-                    Label {
-                        objectName: "companionPivotCoordinates"
-                        text: qsTr("기준점   X %1   Y %2").arg(pane.pivot.x.toFixed(1)).arg(pane.pivot.y.toFixed(1))
-                        color: pane.theme.pivotGuide
-                        font.pixelSize: UiMetrics.textBody
-                        font.bold: true
+                    AppComboBox {
+                        id: choice
+                        objectName: "companionAnimationChoice"
+                        Layout.fillWidth: true
+                        model: pane.animations
+                        textRole: "label"
+                        enabled: !pane.editing
                     }
-                    Label {
-                        objectName: "companionAttachmentCoordinates"
-                        text: qsTr("말풍선   X %1   Y %2").arg((pane.pivot.x + pane.attachment.x).toFixed(1)).arg((pane.pivot.y + pane.attachment.y).toFixed(1))
-                        color: pane.theme.bubbleGuide
-                        font.pixelSize: UiMetrics.textBody
-                        font.bold: true
+                    AppButton {
+                        visible: pane.allowEditing
+                        text: pane.editing ? qsTr("편집 종료") : qsTr("프레임 편집")
+                        appearance: AppButton.Soft
+                        dark: pane.dark
+                        checkable: true
+                        checked: pane.editing
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("편집 중 ← / →: 이전·다음 프레임 · 편집을 끄면 애니메이션 변경 가능")
+                        onClicked: pane.editing = checked
                     }
-                    Row {
-                        spacing: UiMetrics.spaceSmall
-                        AppButton {
-                            text: qsTr("좌표 입력")
-                            enabled: !pane.running && sprite.ready
-                            onClicked: coordinateEditor.open()
+                    AppButton {
+                        visible: pane.editing
+                        text: qsTr("기본값")
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("팩 기본값으로 되돌리기")
+                        onClicked: pane.resetEdits()
+                    }
+                    AppButton {
+                        objectName: "companionCancelEditsButton"
+                        visible: pane.allowEditing && (pane.editing || pane.dirty)
+                        text: qsTr("취소")
+                        enabled: pane.dirty
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("마지막 적용 상태로 돌아가기")
+                        onClicked: {
+                            pane.running = false;
+                            pane.reloadEdits();
                         }
-                        AppButton {
-                            text: qsTr("프레임 정렬")
-                            enabled: !pane.running && sprite.ready
-                            onClicked: alignmentMenu.open()
-                            Menu {
-                                id: alignmentMenu
-                                MenuItem {
-                                    text: qsTr("현재 기준점을 전체 프레임에 복사")
-                                    onTriggered: pane.alignFrames(0)
+                    }
+                    AppButton {
+                        objectName: "companionApplyEditsButton"
+                        primary: true
+                        visible: pane.allowEditing && (pane.editing || pane.dirty)
+                        text: qsTr("적용")
+                        enabled: pane.dirty
+                        onClicked: pane.applyRequested({
+                                                           frames: pane.drafts,
+                                                           durations: pane.durationDrafts
+                                                       })
+                    }
+                }
+                Rectangle {
+                    id: stage
+                    objectName: "companionPreviewStage"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: pane.theme.window
+                    radius: UiMetrics.radiusControl
+                    clip: true
+                    Canvas {
+                        id: previewGrid
+                        anchors.fill: parent
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        Connections {
+                            target: pane
+                            // 테마가 바뀌면 고정 배경 점만 다시 그리는 함수.
+                            function onThemeChanged() {
+                                previewGrid.requestPaint();
+                            }
+                        }
+                        // 표시 배율·팩 데이터와 독립적인 점 배경을 그리는 함수.
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            ctx.reset();
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.fillStyle = pane.theme.border;
+                            const gap = UiMetrics.companionPreviewGridSpacing;
+                            for (let x = gap / 2; x < width; x += gap)
+                                for (let y = gap / 2; y < height; y += gap)
+                                    ctx.fillRect(x, y, UiMetrics.borderNormal, UiMetrics.borderNormal);
+                        }
+                    }
+                    readonly property real frameWidth: sprite.steps.reduce((size, frame) => Math.max(size,
+                                                                                                     frame.region.width
+                                                                                                     / frame.pixelsPerUnit),
+                    1)
+                    readonly property real frameHeight: sprite.steps.reduce((size, frame) => Math.max(size,
+                                                                                                      frame.region.height
+                                                                                                      / frame.pixelsPerUnit),
+                    1)
+                    readonly property real zoom: Math.max(0.01, Math.min(width * 0.7 / frameWidth, height * 0.7
+                                                                         / frameHeight))
+
+                    // 편집 중에는 이미지 원점을 고정하고 재생 중에는 공통 접점에 맞추는 좌표.
+                    readonly property point origin: pane.editing && !pane.running && pane.step.region ? Qt.point((width
+                                                                                                                  - pane.step.region.width
+                                                                                                                  / pane.step.pixelsPerUnit
+                                                                                                                  * zoom) / 2,
+                                                                                                                 (height - pane.step.region.height
+                                                                                                                  / pane.step.pixelsPerUnit
+                                                                                                                  * zoom) / 2) :
+                                                                                                        Qt.point(width
+                                                                                                                 / 2 - pane.pivot.x
+                                                                                                                 * zoom, height
+                                                                                                                 * 0.8 - pane.pivot.y
+                                                                                                                 * zoom)
+                    Item {
+                        id: previewWorld
+                        objectName: "companionPreviewWorld"
+                        width: stage.width
+                        height: stage.height
+                        x: pane.viewPanX
+                        y: pane.viewPanY
+                        scale: pane.viewZoom
+                        transformOrigin: Item.Center
+                        CharacterSprite {
+                            id: sprite
+                            objectName: "companionPagePreview"
+                            anchors.fill: parent
+                            descriptor: pane.descriptor
+                            playing: false
+                            externallyDriven: true
+                            sequenceIndex: clock.currentIndex
+                            userScale: stage.zoom
+                            anchor: pane.step.pivot ? Qt.point(stage.origin.x + pane.step.pivot.x * userScale,
+                                                               stage.origin.y + pane.step.pivot.y * userScale) :
+                                                      Qt.point(0, 0)
+                        }
+                        CharacterBubbleView {
+                            id: bubblePreview
+                            objectName: "companionBubblePreview"
+                            visible: pane.showBubble && pane.active
+                            configuration: pane.bubble
+                            dark: pane.dark
+                            message: pane.previewMessage
+                            constrainToArea: false
+                            screenArea: Qt.rect(0, 0, parent.width, parent.height)
+                            anchorPoint: Qt.point(stage.origin.x + (pane.pivot.x + pane.attachment.x) * stage.zoom,
+                                                  stage.origin.y + (pane.pivot.y + pane.attachment.y) * stage.zoom)
+                            x: placementX
+                            y: placementY
+                        }
+                        Repeater {
+                            model: 2
+                            delegate: Item {
+                                id: handle
+                                required property int index
+                                visible: pane.editing && !pane.running && sprite.metadataValid
+                                readonly property color guide: index === 0 ? pane.theme.pivotGuide :
+                                                                             pane.theme.bubbleGuide
+                                x: stage.origin.x + (pane.pivot.x + (index === 1 ? pane.attachment.x : 0)) * stage.zoom
+                                y: stage.origin.y + (pane.pivot.y + (index === 1 ? pane.attachment.y : 0)) * stage.zoom
+                                Rectangle {
+                                    x: -handle.x
+                                    width: stage.width
+                                    height: UiMetrics.borderNormal
+                                    color: handle.guide
+                                    opacity: 0.35
                                 }
-                                MenuItem {
-                                    text: qsTr("현재 말풍선 위치를 전체 프레임에 복사")
-                                    onTriggered: pane.alignFrames(1)
+                                Rectangle {
+                                    y: -handle.y
+                                    width: UiMetrics.borderNormal
+                                    height: stage.height
+                                    color: handle.guide
+                                    opacity: 0.35
                                 }
-                                MenuItem {
-                                    text: qsTr("두 점 모두 전체 프레임에 복사")
-                                    onTriggered: pane.alignFrames(2)
-                                }
-                                MenuSeparator {}
-                                MenuItem {
-                                    text: qsTr("현재 두 점을 정수 좌표로 맞추기")
-                                    onTriggered: pane.setCoordinates(Math.round(pane.pivot.x), Math.round(pane.pivot.y), Math.round(pane.pivot.x + pane.attachment.x), Math.round(pane.pivot.y + pane.attachment.y))
+                                AnchorHandle {
+                                    id: marker
+                                    x: -width / 2
+                                    y: -height / 2
+                                    scale: 1 / pane.viewZoom
+                                    markerColor: handle.guide
+                                    backdropColor: pane.theme.surface
+                                    diamond: handle.index === 1
+                                    description: handle.index === 0 ? qsTr("캐릭터 기준점 · 십자 중심을 드래그") : qsTr(
+                                                                          "말풍선 부착점 · 십자 중심을 드래그")
+                                    // 이미지 논리 좌표로 변환하여 기준점을 이동하는 함수.
+                                    onDragged: function (localX, localY) {
+                                        const pos = marker.mapToItem(previewWorld, localX, localY);
+                                        pane.movePoint(handle.index, (pos.x - stage.origin.x) / stage.zoom, (pos.y
+                                                                                                             - stage.origin.y)
+                                                       / stage.zoom);
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
-            CompanionCoordinateEditor {
-                id: coordinateEditor
-                parent: stage
-                pivot: Qt.point(pane.pivot.x, pane.pivot.y)
-                attachment: Qt.point(pane.pivot.x + pane.attachment.x, pane.pivot.y + pane.attachment.y)
-                onSubmitted: function (px, py, ax, ay) {
-                    pane.setCoordinates(px, py, ax, ay);
-                }
-                onClosed: stage.forceActiveFocus()
-            }
-            Row {
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: UiMetrics.spaceGroup
-                spacing: UiMetrics.spaceSmall
-                AppButton {
-                    implicitWidth: UiMetrics.controlHeight
-                    text: "−"
-                    onClicked: pane.zoomPreview(pane.viewZoom / UiMetrics.companionPreviewZoomStep, stage.width / 2, stage.height / 2)
-                }
-                AppButton {
-                    text: Math.round(pane.viewZoom * 100) + "%"
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("클릭: 보기 초기화 · 휠: 확대·축소 · 우클릭/가운데 드래그: 화면 이동")
-                    onClicked: pane.resetPreview()
-                }
-                AppButton {
-                    implicitWidth: UiMetrics.controlHeight
-                    text: "+"
-                    onClicked: pane.zoomPreview(pane.viewZoom * UiMetrics.companionPreviewZoomStep, stage.width / 2, stage.height / 2)
-                }
-                AppButton {
-                    text: qsTr("전체 보기")
-                    onClicked: pane.fitPreview()
-                }
-            }
-            Rectangle {
-                id: savedNotice
-                objectName: "companionSavedNotice"
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.margins: UiMetrics.spaceGroup
-                width: savedNoticeText.implicitWidth + UiMetrics.spaceSection * 2
-                height: UiMetrics.controlHeight
-                radius: UiMetrics.radiusControl
-                color: pane.theme.accent
-                opacity: 0
-                visible: opacity > 0
-                Label {
-                    id: savedNoticeText
-                    anchors.centerIn: parent
-                    text: qsTr("저장되었습니다.")
-                    color: pane.theme.accentText
-                    font.pixelSize: UiMetrics.textBody
-                }
-            }
-            SequentialAnimation {
-                id: saveNoticeAnimation
-                PropertyAction {
-                    target: savedNotice
-                    property: "opacity"
-                    value: 0
-                }
-                NumberAnimation {
-                    target: savedNotice
-                    property: "opacity"
-                    to: 1
-                    duration: UiMetrics.transientNoticeFadeMs
-                }
-                PauseAnimation {
-                    duration: UiMetrics.transientNoticeHoldMs
-                }
-                NumberAnimation {
-                    target: savedNotice
-                    property: "opacity"
-                    to: 0
-                    duration: UiMetrics.transientNoticeFadeMs
-                }
-            }
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.margins: UiMetrics.spaceGroup
-                height: errorLabel.implicitHeight + UiMetrics.spaceControl * 2
-                visible: pane.editStatus.length > 0
-                color: pane.theme.surface
-                border.color: pane.theme.border
-                radius: UiMetrics.radiusControl
-                Label {
-                    id: errorLabel
-                    anchors.fill: parent
-                    anchors.margins: UiMetrics.spaceControl
-                    text: pane.editStatus
-                    color: pane.theme.text
-                    wrapMode: Text.Wrap
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.RightButton | Qt.MiddleButton
+                        preventStealing: true
+                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+                        property point startMouse: Qt.point(0, 0)
+                        property point startPan: Qt.point(0, 0)
+                        // 우클릭 또는 가운데 버튼을 누른 위치에서 화면 이동을 시작하는 함수.
+                        onPressed: function (mouse) {
+                            stage.forceActiveFocus();
+                            startMouse = Qt.point(mouse.x, mouse.y);
+                            startPan = Qt.point(pane.viewPanX, pane.viewPanY);
+                        }
+                        // 캐릭터 좌표를 바꾸지 않고 보기 위치만 이동하는 함수.
+                        onPositionChanged: function (mouse) {
+                            if (!pressed)
+                                return;
+                            pane.viewPanX = startPan.x + mouse.x - startMouse.x;
+                            pane.viewPanY = startPan.y + mouse.y - startMouse.y;
+                        }
+                    }
+                    WheelHandler {
+                        id: previewWheel
+                        target: null
+                        blocking: true
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        // 마우스 위치를 유지하며 휠 또는 터치패드로 확대·축소하는 함수.
+                        onWheel: function (event) {
+                            const delta = event.angleDelta.y || (event.pixelDelta ? event.pixelDelta.y : 0);
+                            if (delta === 0)
+                                return;
+                            pane.zoomPreview(pane.viewZoom * Math.pow(UiMetrics.companionPreviewZoomStep, delta > 0 ? 1 : -1),
+                                             previewWheel.point.position.x, previewWheel.point.position.y);
+                        }
+                    }
+                    Rectangle {
+                        objectName: "companionCoordinateReadout"
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.margins: UiMetrics.spaceGroup
+                        width: Math.min(UiMetrics.companionCoordinateWidth, parent.width - UiMetrics.spaceGroup * 2)
+                        height: coordinateLabels.implicitHeight + UiMetrics.spaceControl * 2
+                        visible: pane.editing && sprite.metadataValid
+                        color: pane.theme.alternate
+                        border.color: pane.theme.border
+                        radius: UiMetrics.radiusControl
+                        Column {
+                            id: coordinateLabels
+                            anchors.fill: parent
+                            anchors.margins: UiMetrics.spaceControl
+                            spacing: UiMetrics.spaceSmall
+                            Label {
+                                width: parent.width
+                                text: qsTr("%1 · 이미지 좌상단 기준").arg(pane.frameKey)
+                                elide: Text.ElideRight
+                                color: pane.theme.muted
+                                font.pixelSize: UiMetrics.textBody
+                            }
+                            Label {
+                                objectName: "companionPivotCoordinates"
+                                text: qsTr("기준점   X %1   Y %2").arg(pane.pivot.x.toFixed(1)).arg(pane.pivot.y.toFixed(
+                                                                                                     1))
+
+                                color: pane.theme.pivotGuide
+                                font.pixelSize: UiMetrics.textBody
+                                font.bold: true
+                            }
+                            Label {
+                                objectName: "companionAttachmentCoordinates"
+                                text: qsTr("말풍선   X %1   Y %2").arg((pane.pivot.x + pane.attachment.x).toFixed(1)).arg((
+                                                                                                                           pane.pivot.y
+                                                                                                                           + pane.attachment.y).toFixed(
+                                                                                                                           1))
+                                color: pane.theme.bubbleGuide
+                                font.pixelSize: UiMetrics.textBody
+                                font.bold: true
+                            }
+                            Row {
+                                spacing: UiMetrics.spaceSmall
+                                AppButton {
+                                    text: qsTr("좌표 입력")
+                                    enabled: !pane.running && sprite.ready
+                                    onClicked: coordinateEditor.open()
+                                }
+                                AppButton {
+                                    text: qsTr("프레임 정렬")
+                                    enabled: !pane.running && sprite.ready
+                                    onClicked: alignmentMenu.open()
+                                    Menu {
+                                        id: alignmentMenu
+                                        MenuItem {
+                                            text: qsTr("현재 기준점을 전체 프레임에 복사")
+                                            onTriggered: pane.alignFrames(0)
+                                        }
+                                        MenuItem {
+                                            text: qsTr("현재 말풍선 위치를 전체 프레임에 복사")
+                                            onTriggered: pane.alignFrames(1)
+                                        }
+                                        MenuItem {
+                                            text: qsTr("두 점 모두 전체 프레임에 복사")
+                                            onTriggered: pane.alignFrames(2)
+                                        }
+                                        MenuSeparator {}
+                                        MenuItem {
+                                            text: qsTr("현재 두 점을 정수 좌표로 맞추기")
+                                            onTriggered: pane.setCoordinates(Math.round(pane.pivot.x), Math.round(
+                                                                                 pane.pivot.y), Math.round(pane.pivot.x
+                                                                                                           + pane.attachment.x),
+                                                                             Math.round(pane.pivot.y
+                                                                                        + pane.attachment.y))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    CompanionCoordinateEditor {
+                        id: coordinateEditor
+                        parent: stage
+                        pivot: Qt.point(pane.pivot.x, pane.pivot.y)
+                        attachment: Qt.point(pane.pivot.x + pane.attachment.x, pane.pivot.y + pane.attachment.y)
+                        onSubmitted: function (px, py, ax, ay) {
+                            pane.setCoordinates(px, py, ax, ay);
+                        }
+                        onClosed: stage.forceActiveFocus()
+                    }
+                    Rectangle {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: UiMetrics.spaceGroup
+                        width: zoomActions.implicitWidth + UiMetrics.spaceExtraSmall * 2
+                        height: UiMetrics.controlHeight + UiMetrics.spaceExtraSmall * 2
+                        color: pane.theme.surface
+                        radius: UiMetrics.radiusControl
+                        border.color: pane.theme.border
+                        RowLayout {
+                            id: zoomActions
+                            anchors.centerIn: parent
+                            spacing: 0
+                            AppButton {
+                                implicitWidth: UiMetrics.controlHeight
+                                flat: true
+                                dark: pane.dark
+                                text: "−"
+                                Accessible.name: qsTr("미리보기 축소")
+                                onClicked: pane.zoomPreview(pane.viewZoom / UiMetrics.companionPreviewZoomStep,
+                                                            stage.width / 2, stage.height / 2)
+                            }
+                            AppButton {
+                                text: Math.round(pane.viewZoom * 100) + "%"
+                                flat: true
+                                dark: pane.dark
+                                ToolTip.visible: hovered
+                                ToolTip.text: qsTr("클릭: 보기 초기화 · 휠: 확대·축소 · 우클릭/가운데 드래그: 화면 이동")
+                                onClicked: pane.resetPreview()
+                            }
+                            AppButton {
+                                implicitWidth: UiMetrics.controlHeight
+                                flat: true
+                                dark: pane.dark
+                                text: "+"
+                                Accessible.name: qsTr("미리보기 확대")
+                                onClicked: pane.zoomPreview(pane.viewZoom * UiMetrics.companionPreviewZoomStep,
+                                                            stage.width / 2, stage.height / 2)
+                            }
+                            AppButton {
+                                implicitWidth: UiMetrics.controlHeight
+                                flat: true
+                                dark: pane.dark
+                                Accessible.name: qsTr("캐릭터와 말풍선 전체 보기")
+                                ToolTip.visible: hovered
+                                ToolTip.text: Accessible.name
+                                contentItem: NavigationIcon {
+                                    kind: "fit"
+                                    strokeColor: pane.theme.text
+                                }
+                                onClicked: pane.fitPreview()
+                            }
+                        }
+                    }
+                    Rectangle {
+                        id: savedNotice
+                        objectName: "companionSavedNotice"
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: UiMetrics.spaceGroup
+                        width: savedNoticeText.implicitWidth + UiMetrics.spaceSection * 2
+                        height: UiMetrics.controlHeight
+                        radius: UiMetrics.radiusControl
+                        color: pane.theme.accent
+                        opacity: 0
+                        visible: opacity > 0
+                        Label {
+                            id: savedNoticeText
+                            anchors.centerIn: parent
+                            text: qsTr("저장되었습니다.")
+                            color: pane.theme.accentText
+                            font.pixelSize: UiMetrics.textBody
+                        }
+                    }
+                    SequentialAnimation {
+                        id: saveNoticeAnimation
+                        PropertyAction {
+                            target: savedNotice
+                            property: "opacity"
+                            value: 0
+                        }
+                        NumberAnimation {
+                            target: savedNotice
+                            property: "opacity"
+                            to: 1
+                            duration: UiMetrics.transientNoticeFadeMs
+                        }
+                        PauseAnimation {
+                            duration: UiMetrics.transientNoticeHoldMs
+                        }
+                        NumberAnimation {
+                            target: savedNotice
+                            property: "opacity"
+                            to: 0
+                            duration: UiMetrics.transientNoticeFadeMs
+                        }
+                    }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: UiMetrics.spaceGroup
+                        height: errorLabel.implicitHeight + UiMetrics.spaceControl * 2
+                        visible: pane.editStatus.length > 0
+                        color: pane.theme.surface
+                        border.color: pane.theme.border
+                        radius: UiMetrics.radiusControl
+                        Label {
+                            id: errorLabel
+                            anchors.fill: parent
+                            anchors.margins: UiMetrics.spaceControl
+                            text: pane.editStatus
+                            color: pane.theme.text
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
             }
         }
         CompanionPlayback {
+            dark: pane.dark
             objectName: "companionPlaybackSection"
             Layout.fillWidth: true
             steps: sprite.steps

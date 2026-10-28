@@ -327,6 +327,36 @@ int main(int argc, char** argv) {
     }
     historyDetail->setProperty("busy", true);
     expect(!find(find, detailItem, "historyUndoButton")->isEnabled(), "history cannot issue a second undo while file work is busy");
+    // 팩 선택 잠금과 개인 크기 표시가 미리보기 UI와 독립적으로 유지되는지 검사한다.
+    auto companionSettings = fake(engine, R"(
+        property var packs: [{key: "nmoo", label: "Nmoo - Idle & Walk · 0.3.1"}]
+        property string selectedKey: "nmoo"
+        property bool busy: false
+        property real userScale: 0.5
+        property string status: ""
+    )");
+    auto placement = fake(engine, "property bool shown: true");
+    auto motion = fake(engine, "property bool enabled: true");
+    if (!companionSettings || !placement || !motion) return 1;
+    auto companionPanel = create(engine, "CompanionSettingsPanel", {{"settings", QVariant::fromValue(companionSettings.get())},
+        {"placement", QVariant::fromValue(placement.get())}, {"motion", QVariant::fromValue(motion.get())},
+        {"canWalk", true}, {"width", 320}, {"height", 600}});
+    if (!companionPanel) return 1;
+    auto* panelItem = qobject_cast<QQuickItem*>(companionPanel.get());
+    panelItem->setParentItem(host.contentItem());
+    auto* pack = find(find, panelItem, "companionPackChoice");
+    auto* scale = find(find, panelItem, "companionDisplayScale");
+    if (!pack || !scale) return 1;
+    for (bool dark : {false, true}) {
+        companionPanel->setProperty("dark", dark);
+        settle();
+        expect(pack->property("currentIndex").toInt() == 0 && pack->isEnabled()
+            && scale->property("value").toDouble() == 0.5,
+            "companion panel reads the applied pack and desktop scale in both themes");
+        companionPanel->setProperty("dirty", true);
+        expect(!pack->isEnabled(), "unsaved frame edits prevent replacing the applied pack");
+        companionPanel->setProperty("dirty", false);
+    }
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

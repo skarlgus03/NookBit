@@ -139,6 +139,15 @@ QtObject {
     readonly property int transientNoticeFadeMs: 160
     readonly property int transientNoticeHoldMs: 1400
     readonly property int companionSettingsWidth: 320
+    readonly property int companionPackSelectorHeight: 64
+    readonly property int companionPackPortraitSize: 40
+    readonly property int companionPlaybackBadgeHeight: 28
+    readonly property int companionPreviewGridSpacing: 20
+    readonly property int switchWidth: 44
+    readonly property int switchHeight: 26
+    readonly property int switchThumbSize: 20
+    readonly property int sliderTrackHeight: 4
+    readonly property int sliderHandleSize: 20
     readonly property int companionTimelineHeight: 160
     readonly property int companionTimelineRulerHeight: 32
     readonly property int companionTimelineKeySize: 10
