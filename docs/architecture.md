@@ -1,5 +1,9 @@
 # NookBit 설계와 확장 원칙
 
+Feature-module ownership, communication contracts, disabled-state behavior and
+the incremental refactor plan are recorded in [Feature modules](feature-modules.md).
+The plan distinguishes existing interfaces from module lifecycle work not yet implemented.
+
 이 문서는 팀원이 기능을 붙일 때 **현재 코드가 어떻게 동작하는지**와 **어떤 방향으로 확장할지**를 구분하기 위한 안내다. 저장소의 코드가 최종 형태라는 뜻은 아니다. 특히 일부 컨트롤러는 아직 구체 구현을 직접 보유하고 있다.
 
 ## 제품의 기본 흐름
@@ -41,9 +45,18 @@ Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접
 
 전체 중단 복구도 main이 조립한 `IInterruptedOperations`를 RecoveryController에 주입한다. 컨트롤러는 표시 스냅샷과 확인 상태만 관리하고, 전체 검사/재개/되돌리기 일꾼을 생성하지 않는다. 구형 v1의 기록 확인을 위한 기존 Scanner/Hasher 의존은 호환 경로에 남아 있다. 공유 복구 서비스는 OperationMutex로 직렬화하고 실제 현재 설정·규칙을 다시 검사한다. 시작 시 자동 파일 작업·기록 정합화는 하지 않는다.
 
-주력 형식은 v3 트리다. 일반 노드 한 개는 확장자·이름 포함·크기·수정 후 경과일 가운데 **한 종류의 조건**만 검사한다. 자식으로 내려갈수록 조건이 AND로 누적된다. 같은 부모의 형제는 순서가 곧 우선순위이며 첫 일치 가지만 선택한다. 아래 단계가 빗나가도 상위 형제로 되돌아가지 않는다. 그 높이의 `otherwise`로 예외를 처리할 수 있고, 전체 `globalOtherwise`는 명시적 제외보다 우선하지 않는다. 리프는 목적지 또는 명시적 제외로 끝나야 한다.
+The primary rules format is the v3 tree. Each ordinary node checks one condition:
+item type (file/folder), extension, name substring, file size or modified age.
+Nested conditions compose as AND; the first matching sibling wins without
+backtracking. Local `otherwise` branches and a global fallback remain separate;
+explicit exclusion takes precedence. Every leaf has a destination or exclusion.
 
-목적지는 정리 루트 기준 상대 경로여야 한다. 절대 경로·상위 경로 탈출을 허용하지 않는다. 자세한 필드와 검증 제약은 [v3 설명](rule-tree-v3.md), [AI 작성 규격](ai-rule-authoring-v3.md), [Schema](../schemas/rules-tree-v3.schema.json)를 따른다. 코드에서 이 의미를 바꾸면 문서·Schema·변환·테스트를 함께 바꿔야 한다.
+Destinations can be relative to the configured organizing root or absolute inside
+separately user-approved external roots. Rules do not grant external-path access;
+parent traversal remains invalid. See the [v3 notes](rule-tree-v3.md),
+[current authoring contract](ai-rule-authoring-v3.md) and
+[schema](../schemas/rules-tree-v3.schema.json). Update documentation, schema,
+conversion and tests together when changing these semantics.
 
 ## 안전과 데이터 소유
 
