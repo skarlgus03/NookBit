@@ -71,6 +71,26 @@ add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progres
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Qml Quick)
+  add_executable(nookbit_feature_runtime_tests
+    feature_runtime_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/notification_runtime.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/folder_watch_runtime.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/notification_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/notification_controller.cpp)
+  set_target_properties(nookbit_feature_runtime_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_feature_runtime_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_feature_runtime_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_compile_features(nookbit_feature_runtime_tests PRIVATE cxx_std_20)
+  target_link_libraries(nookbit_feature_runtime_tests PRIVATE nookbit_filesystem nookbit_json_config Qt6::Core)
+  if(MSVC)
+    target_compile_options(nookbit_feature_runtime_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_feature_runtime_tests COMMAND nookbit_feature_runtime_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_feature_runtime_tests PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_feature_connections_tests
     feature_connections_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/feature_connections.cpp

@@ -1,6 +1,8 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
 #include "app/feature_connections.hpp"
+#include "app/notification_runtime.hpp"
+#include "app/folder_watch_runtime.hpp"
 #include "application/use_cases/classify_files_use_case.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
@@ -20,14 +22,12 @@
 #include "infrastructure/configuration/runtime_settings_repository.hpp"
 #include <nookbit/application/resume_interrupted_transfer_use_case.hpp>
 #include "infrastructure/persistence_sqlite/sqlite_transfer_journal.hpp"
-#include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
 #include "application/use_cases/approve_plan_use_case.hpp"
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
-#include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "infrastructure/configuration/json_pending_files_repository.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "modules/rules/rule_engine.hpp"
@@ -1038,16 +1038,11 @@ int main(int argc, char* argv[]) {
     if (!verifyUi && QFileInfo::exists(databasePath)) {
         recoveryController.refreshRecoveryCases();
     }
-    nookbit::JsonWatchSettingsRepository watchSettings(
-        QDir(appData).filePath(QStringLiteral("watch.json")),
-        QStringLiteral(":/nookbit/watch.schema.json"));
-    nookbit::FilesystemScanner watchScanner;
     nookbit::ClassifyFilesUseCase classificationQuery(previewRules, previewRuleEngine, previewHasher);
-    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(
-        watchScanner, classificationQuery);
-    nookbit::WatchController watchController(
-        pendingQueue, pendingQueue, watchSettings, evaluateWatchFolder,
-        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    nookbit::FolderWatchRuntime folderWatch({QDir(appData).filePath(QStringLiteral("watch.json")),
+        QStringLiteral(":/nookbit/watch.schema.json"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), !verifyUi},
+        classificationQuery, pendingQueue, pendingQueue, uiPreferences);
+    auto& watchController = folderWatch.controller();
     QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
         &watchController, &nookbit::WatchController::pendingPathsChanged);
     nookbit::CharacterController characterController;
@@ -1250,27 +1245,8 @@ int main(int argc, char* argv[]) {
             uiPreferences.sync();
         });
     companionMotion.refresh();
-    // 알림 표시 설정만 저장하며 감시 기능이나 작업 기록에는 관여하지 않는 창구.
-    QMap<QString, bool> verificationNotificationFlags;
-    nookbit::NotificationController notifications(
-        [&uiPreferences, &verificationNotificationFlags, verifyUi](const QString& id, bool fallback) {
-            // 등록된 알림 종류의 사용자 표시 설정을 읽는 함수.
-            return verifyUi ? verificationNotificationFlags.value(id, fallback)
-                : uiPreferences.value(QStringLiteral("notifications/types/") + id + "/enabled", fallback).toBool();
-        },
-        [&uiPreferences, &verificationNotificationFlags, verifyUi](const QString& id, bool value) -> nookbit::Result<void> {
-            // 표시 설정만 저장하고 실패하면 기존 설정을 보존하는 함수.
-            if (verifyUi) { verificationNotificationFlags.insert(id, value); return nookbit::Result<void>::success(); }
-            const auto key = QStringLiteral("notifications/types/") + id + "/enabled";
-            const bool existed = uiPreferences.contains(key);
-            const auto previous = uiPreferences.value(key);
-            uiPreferences.setValue(key, value);
-            uiPreferences.sync();
-            if (uiPreferences.status() == QSettings::NoError) return nookbit::Result<void>::success();
-            if (existed) uiPreferences.setValue(key, previous); else uiPreferences.remove(key);
-            uiPreferences.sync();
-            return nookbit::Result<void>::failure({"notification.save_failed", "알림 설정을 저장하지 못했어요. 이전 설정을 유지해요."});
-        });
+    nookbit::NotificationRuntime notificationRuntime(uiPreferences, !verifyUi);
+    auto& notifications = notificationRuntime.controller();
     const auto registeredNotice = notifications.registerType(nookbit::folderWatchOfferType());
     if (!registeredNotice) { QTextStream(stderr) << QString::fromStdString(registeredNotice.error().message) << Qt::endl; return EXIT_FAILURE; }
     nookbit::FeatureConnections featureConnections;
@@ -1278,20 +1254,6 @@ int main(int argc, char* argv[]) {
     if (connected) connected = featureConnections.workToCompanion(backgroundTasks, characterController, characterController);
     if (connected) connected = featureConnections.watchToNotifications(watchController, notifications, notifications);
     if (!connected) { QTextStream(stderr) << QString::fromStdString(connected.error().message) << Qt::endl; return EXIT_FAILURE; }
-    // 제안 대기 시각을 같은 감시 폴더에 한해 사용자 설정에 저장하는 함수.
-    QObject::connect(&watchController, &nookbit::WatchController::snoozeDeadlineChanged,
-        &application, [&uiPreferences, &watchController, verifyUi](qint64 deadline) {
-            if (verifyUi) return;
-            uiPreferences.setValue(QStringLiteral("watchSnoozeFolder"), watchController.folder());
-            uiPreferences.setValue(QStringLiteral("watchSnoozeUntilUtcMs"), deadline);
-            uiPreferences.sync();
-        });
-    if (!verifyUi && QString::compare(
-            QDir::cleanPath(uiPreferences.value(QStringLiteral("watchSnoozeFolder")).toString()),
-            QDir::cleanPath(watchController.folder()), Qt::CaseInsensitive) == 0) {
-        watchController.restoreSnoozeUntil(
-            uiPreferences.value(QStringLiteral("watchSnoozeUntilUtcMs"), 0).toLongLong());
-    }
     QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
                      &watchController, &nookbit::WatchController::rulesChanged);
     QQmlApplicationEngine engine;

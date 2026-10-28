@@ -3,6 +3,8 @@
 Status: incremental refactor, 2026-10-28. The pending-queue, classification-query
 and integration-adapter seams (steps 1 through 3) are implemented. Module toggles,
 a module registry and plugin loading remain planned.
+Step 4 has started with scoped Notification and Folder Watch runtimes. Organizer
+and Companion ownership groups and UI-contribution registration remain pending.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -39,10 +41,12 @@ owner without becoming one menu button.
 | [Pending queue contracts](../include/nookbit/application/pending_queue.hpp) and [adapter](../src/app/pending_queue_adapter.hpp) | Standard C++ path snapshots and per-path admission receipts; host forwards model changes | Adapter deliberately retains the existing model and its admission policies |
 | [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Owns scanning, pending-path exclusion, readiness and thresholds; uses `IClassificationQuery` | Feature lifecycle is still assembled by the host |
 | [Classification contract](../include/nookbit/application/classification_query.hpp) and [use case](../src/application/use_cases/classify_files_use_case.cpp) | Organizer-side active-rule loading and matching; ordered per-file decisions and content-based rule revision | Still part of the shared app, not a separately enabled module |
-| [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer; source/delivery wiring is in FeatureConnections | Controller creation and preference callbacks still belong to current startup wiring |
+| [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer; source/delivery wiring is in FeatureConnections | NotificationRuntime owns controller creation and enabled-preference callbacks; type registration is still selected by the host |
 | [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | Desktop objects and their connections are assembled unconditionally |
 | [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution | No feature-level startup/disable boundary yet |
 | [Integration adapters](../src/app/feature_connections.cpp) | Watch-to-notification, notification-to-companion and file-activity-to-companion bindings have a scoped owner | No feature lifecycle/enablement registry yet |
+| [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence | Injected Organizer capabilities and application preferences remain host-owned |
+| [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and persistent or transient enabled preferences | Module enablement and registration ordering remain host responsibilities |
 | [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
@@ -138,6 +142,46 @@ types. A future lifecycle owner must stop producers and withdraw active state
 while channels are still alive before unloading a feature. Hot unloading and
 module enablement are not implemented by this extraction.
 
+### Current runtime ownership
+
+The first ownership groups use ordinary C++ composition, not a plugin framework:
+
+```text
+Host-owned classification / pending-queue capabilities / preferences
+  -> FolderWatchRuntime
+       settings repository -> scanner -> evaluation -> controller and timers
+  -> NotificationRuntime
+       enabled-preference callbacks -> controller and notification center
+  -> FeatureConnections (subscribes to the exposed controller/channel endpoints)
+```
+
+Members are declared in dependency order and destroyed in reverse: a controller
+dies before its evaluator, scanner, settings connection or callback state. The
+runtimes do not take ownership of injected capabilities or QSettings; the host
+must keep these alive longer. QObject members make the owners noncopyable and
+nonmovable, which also keeps callbacks capturing their owner stable. Controller
+accessors return borrowed references valid only for that runtime's lifetime.
+
+Folder Watch keeps existing `watch.json` behavior and the existing
+`watchSnoozeFolder` / `watchSnoozeUntilUtcMs` preference keys. Snooze is restored
+only for the same watched folder; its persistence connection uses the owned
+controller's QObject lifetime. Destruction removes watchers, timers and pending
+startup checks through controller destruction; it does not erase settings or
+enqueue/move files. Classification and pending-queue dependencies remain interfaces.
+
+NotificationRuntime retains `notifications/types/<id>/enabled` and the existing
+rollback-on-save-failure behavior. Its transient mode replaces only notification
+preferences with an in-memory map. FolderWatchRuntime's `persistSnooze: false`
+only disables snooze preference reads/writes; its explicitly supplied watch JSON
+repository remains separate. These are existing verification-mode behaviors, not
+new module-enable switches. Construction still honors the saved watch-monitoring
+setting; the app currently constructs both runtimes on every ordinary startup.
+
+Host-created integration bridges and QML endpoints must be released before their
+runtime owners. Current main declares the bridges and QML engine after the owners,
+so normal stack destruction follows that ordering. This incremental change does
+not register/remove navigation entries or implement live unloading.
+
 ## Enablement and UI ownership: target behavior
 
 Initially modules are compiled into one app. No DLL discovery or hot unloading is
@@ -203,8 +247,10 @@ The same ownership/request/update rules apply to additions unrelated to companio
    notification/activity routes outside `main.cpp`, retaining channel contracts,
    stable source/cue IDs, initial synchronization and ordinary delivery behavior.
    Main chooses the routes; features do not call peer controllers to render them.
-4. **Host lifecycle and UI contributions.** Introduce explicit ownership and
-   registration around working features, initially all enabled.
+4. **Host lifecycle and UI contributions: in progress.** NotificationRuntime and
+   FolderWatchRuntime own their internal objects and preference connections.
+   Organizer and Companion ownership groups are still to be extracted. Then
+   introduce owned UI contributions, initially with all modules enabled.
 5. **Persisted enablement and restart.** Add module management only after disabled
    startup combinations work. Check missing optional consumers, required-dependency
    reasons, preserved settings/data and absence of timers from inactive features.
@@ -217,4 +263,7 @@ changes, invalid query responses and failure propagation. Acceptance still only
 enqueues valid paths and leaves original files untouched. Integration tests also
 cover initial delivery, muting/re-enabling, inspection versus file work, work and
 delivery failures, missing optional consumers, queued-event lifetimes and invalid
-thread binding. Step 4 is next.
+thread binding. Runtime tests cover destruction of exposed controllers, preserved
+settings, transient-mode isolation, failed preference writes, same-folder snooze
+restoration and cancellation of delayed watch scans after owner destruction.
+Step 4 continues with the remaining ownership groups and UI registration.

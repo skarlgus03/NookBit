@@ -26,6 +26,14 @@ preferences remain independent from file-work activity. Lifetime guards and
 scoped QObject connections prevent delivery to destroyed endpoints; module
 startup/disable management remains a later step.
 
+NotificationRuntime and FolderWatchRuntime now own the first feature-level object
+groups. Their controllers are destroyed before the callback state, repositories
+and workers they use. Watch timers and delayed startup scans end with their owner;
+saved settings remain intact. Main injects Organizer capabilities, queue endpoints
+and QSettings, then exposes the borrowed controllers to existing UI/connections.
+File Organizer and Companion creation are still inline, and module UI registration
+and enablement remain pending.
+
 이 문서는 팀원이 기능을 붙일 때 **현재 코드가 어떻게 동작하는지**와 **어떤 방향으로 확장할지**를 구분하기 위한 안내다. 저장소의 코드가 최종 형태라는 뜻은 아니다. 특히 일부 컨트롤러는 아직 구체 구현을 직접 보유하고 있다.
 
 ## 제품의 기본 흐름
