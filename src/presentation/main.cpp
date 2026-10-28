@@ -443,15 +443,16 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         }
         if (page == 8) {
             auto* themeSwitch = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalDarkModeSwitch"));
+            auto* lightButton = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalLightModeButton"));
             const bool initial = mainWindow->property("editorDark").toBool();
-            if (!themeSwitch) return false;
-            click(themeSwitch);
+            if (!themeSwitch || !lightButton) return false;
+            click(initial ? lightButton : themeSwitch);
             if (mainWindow->property("editorDark").toBool() == initial || rules->property("darkMode").toBool() == initial) return false;
             // 네이티브 메뉴와 QML 창이 같은 테마 색상표를 사용하는지 검사한다.
             const auto themeColors = mainWindow->property("theme").value<QJSValue>().toVariant().toMap();
             if (QGuiApplication::palette().color(QPalette::Window) != QColor(themeColors.value("window").toString()) ||
                 QGuiApplication::palette().color(QPalette::Text) != QColor(themeColors.value("text").toString())) return false;
-            click(themeSwitch);
+            click(initial ? themeSwitch : lightButton);
             if (mainWindow->property("editorDark").toBool() != initial) return false;
         }
         if (page == 3) {
@@ -460,6 +461,15 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
                 if (!spin || !spin->property("editable").toBool()
                     || spin->height() != metrics->property("controlHeight").toInt()) return false;
+                // 카드 아래의 입력도 실제로 보이는 위치까지 스크롤한 뒤 조작하는 검사.
+                auto* scroll = mainWindow->findChild<QQuickItem*>(QStringLiteral("watchSettingsScroll"));
+                auto* viewport = scroll ? scroll->property("contentItem").value<QQuickItem*>() : nullptr;
+                if (!viewport) return false;
+                const auto contentY = viewport->property("contentY").toDouble();
+                const auto fieldY = spin->mapToItem(viewport, QPointF()).y() + contentY;
+                viewport->setProperty("contentY", std::clamp(fieldY - metrics->property("spaceGroup").toInt(), 0.0,
+                    std::max(0.0, viewport->property("contentHeight").toDouble() - viewport->height())));
+                QCoreApplication::processEvents();
                 const bool wasEnabled = spin->isEnabled();
                 spin->setEnabled(true);
                 auto* editor = qobject_cast<QQuickItem*>(spin->property("contentItem").value<QObject*>());
@@ -494,18 +504,18 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
         if (page == 8) {
-            // 설정 제목과 구분선이 세 그룹에 같은 규격으로 배치되는지 검사한다.
+            // 설정 제목과 카드가 세 그룹에 같은 규격으로 배치되는지 검사한다.
             auto* settings = mainWindow->findChild<QObject*>(QStringLiteral("settingsPage"));
             if (!settings) return false;
             const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
-            const auto dividers = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionDivider"));
-            if (titles.size() != 3 || dividers.size() != 3) return false;
+            const auto cards = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionCard"));
+            if (titles.size() != 3 || cards.size() != 3) return false;
             for (auto* title : titles) {
-                if (title->property("font").value<QFont>().pixelSize() != metrics->property("textSectionTitle").toInt() ||
+                if (title->property("font").value<QFont>().pixelSize() != metrics->property("textSettingsGroup").toInt() ||
                     !title->isVisible() || title->height() <= 0) return false;
             }
-            for (auto* divider : dividers) {
-                if (!divider->isVisible() || divider->height() != metrics->property("borderNormal").toInt() || divider->width() <= 0) return false;
+            for (auto* card : cards) {
+                if (!card->isVisible() || card->height() <= 0 || card->width() <= 0) return false;
             }
         }
         if (page == 11) {

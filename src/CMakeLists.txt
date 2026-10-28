@@ -185,6 +185,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/PageSurface.qml
         presentation/qml/OperationProgressPopup.qml
         presentation/qml/CollisionSettingsPage.qml
+          presentation/qml/CollisionPolicyPicker.qml
         presentation/qml/NavigationButton.qml
         presentation/qml/WatchSettingsPage.qml
         presentation/qml/HistoryPage.qml

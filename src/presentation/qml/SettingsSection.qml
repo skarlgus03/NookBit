@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 설정 항목을 큰 제목·구분선·본문 여백으로 나누는 공통 섹션.
+// 설정 항목을 작은 그룹 제목과 공통 카드로 구분하는 섹션.
 ColumnLayout {
     id: section
     property string title: ""
@@ -14,20 +14,24 @@ ColumnLayout {
             objectName: "settingsSectionTitle"
             Layout.fillWidth: true
             text: section.title
-            font.pixelSize: UiMetrics.textSectionTitle
+            font.pixelSize: UiMetrics.textSettingsGroup
             font.weight: UiMetrics.groupTitleWeight
-            color: UiTheme.colors(section.dark).contentText
+            color: UiTheme.colors(section.dark).muted
         },
         Rectangle {
-            objectName: "settingsSectionDivider"
+            objectName: "settingsSectionCard"
             Layout.fillWidth: true
-            implicitHeight: UiMetrics.borderNormal
-            color: UiTheme.colors(section.dark).sectionBorder
-        },
-        ColumnLayout {
-            id: body
-            Layout.fillWidth: true
-            spacing: UiMetrics.spaceGroup
+            implicitHeight: body.implicitHeight + UiMetrics.spaceSection * 2
+            radius: UiMetrics.radiusCard
+            color: UiTheme.colors(section.dark).surface
+            ColumnLayout {
+                id: body
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: UiMetrics.spaceSection
+                spacing: UiMetrics.spaceGroup
+            }
         }
     ]
 }

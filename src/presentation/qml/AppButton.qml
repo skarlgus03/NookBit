@@ -8,6 +8,7 @@ Button {
     enum Appearance { Standard, Navigation, Menu, Surface, Soft }
     property bool dark: Window.window ? Window.window.palette.window.hslLightness < 0.5 : false
     property bool primary: false
+    property bool destructive: false
     property bool selected: false
     property int appearance: AppButton.Standard
     property bool accentOutline: false
@@ -15,6 +16,7 @@ Button {
     readonly property var buttonTheme: UiTheme.colors(control.dark)
     readonly property bool activeSelection: selected || checked || highlighted
     readonly property color buttonForeground: !enabled ? buttonTheme.muted : primary ? buttonTheme.accentText
+        : destructive ? buttonTheme.danger
         : appearance === AppButton.Soft ? buttonTheme.accentSoftText
         : appearance === AppButton.Navigation && activeSelection ? buttonTheme.navigationActiveText : buttonTheme.text
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset, UiMetrics.buttonMinWidth,

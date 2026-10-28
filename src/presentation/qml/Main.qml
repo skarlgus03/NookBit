@@ -272,7 +272,6 @@ ApplicationWindow {
     CollisionSettingsPage {
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: UiMetrics.pageInset
         visible: root.currentPage === 6
         dark: root.editorDark
         controller: previewController
@@ -305,11 +304,12 @@ ApplicationWindow {
     AppSettingsPage {
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: UiMetrics.editorInset
         visible: root.currentPage === 8
         dark: root.editorDark
         settings: uiSettings
         destinations: destinationSettings
+        sorting: previewController
+        watch: watchController
         recoveryAvailable: recoveryController.recoveryCases.length > 0
         onWatchSettingsRequested: root.openWatchSettings()
         onCollisionSettingsRequested: root.currentPage = 6
@@ -396,7 +396,6 @@ ApplicationWindow {
         id: watchDialog
         parent: extensionHost
         anchors.fill: parent
-        anchors.margins: UiMetrics.spaceSection
         visible: root.currentPage === 3
         dark: root.editorDark
         controller: watchController

@@ -357,6 +357,37 @@ int main(int argc, char** argv) {
         expect(!pack->isEnabled(), "unsaved frame edits prevent replacing the applied pack");
         companionPanel->setProperty("dirty", false);
     }
+    // 설정 카드가 작은 창에서도 같은 폭으로 놓이고 기존 설정 창구에만 값을 전달하는 검사.
+    auto uiPreferences = fake(engine, "property bool darkMode: false");
+    auto destinationPreferences = fake(engine, "property var allowedRoots: []");
+    auto sortPreferences = fake(engine, "property string collisionPolicy: \"rename\"");
+    if (!uiPreferences || !destinationPreferences || !sortPreferences) return 1;
+    auto settingsPage = create(engine, "AppSettingsPage", {{"settings", QVariant::fromValue(uiPreferences.get())},
+        {"destinations", QVariant::fromValue(destinationPreferences.get())}, {"sorting", QVariant::fromValue(sortPreferences.get())},
+        {"watch", QVariant::fromValue(watch.get())}, {"width", 500}, {"height", 520}});
+    if (!settingsPage) return 1;
+    auto* settingsItem = qobject_cast<QQuickItem*>(settingsPage.get());
+    settingsItem->setParentItem(host.contentItem());
+    for (bool dark : {false, true}) {
+        settingsPage->setProperty("dark", dark);
+        settle();
+        auto* rename = find(find, settingsItem, "collisionPolicy_rename");
+        auto* skip = find(find, settingsItem, "collisionPolicy_skip");
+        auto* abort = find(find, settingsItem, "collisionPolicy_abort");
+        if (!rename || !skip || !abort) return 1;
+        expect(std::abs(rename->width() - skip->width()) <= 1 && std::abs(skip->width() - abort->width()) <= 1
+            && abort->mapToItem(settingsItem, QPointF(abort->width(), 0)).x() <= settingsItem->width(),
+            "collision choices have equal widths and fit a narrow settings page in both themes");
+        QMetaObject::invokeMethod(skip, "clicked");
+        expect(sortPreferences->property("collisionPolicy").toString() == "skip", "collision choice updates the injected setting");
+        auto* darkChoice = find(find, settingsItem, "globalDarkModeSwitch");
+        auto* lightChoice = find(find, settingsItem, "globalLightModeButton");
+        if (!darkChoice || !lightChoice) return 1;
+        QMetaObject::invokeMethod(darkChoice, "clicked");
+        expect(uiPreferences->property("darkMode").toBool(), "dark choice explicitly selects dark mode");
+        QMetaObject::invokeMethod(lightChoice, "clicked");
+        expect(!uiPreferences->property("darkMode").toBool(), "light choice explicitly selects light mode");
+    }
     expect(cleanBindings, "pages must load without application globals or binding errors");
     return failures ? 1 : 0;
 }

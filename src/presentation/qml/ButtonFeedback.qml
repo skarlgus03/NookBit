@@ -15,8 +15,9 @@ Rectangle {
     readonly property bool interactionActive: button.enabled && (pushed || chosen || button.hovered || button.visualFocus)
     readonly property bool outlineActive: button.enabled && (button.visualFocus || (!navigation && (pushed || chosen || button.hovered)))
     readonly property color interactionColor: pushed ? (button.primary ? theme.primaryPressed
-        : navigation ? theme.navigationPressed : soft ? theme.softButtonPressed : theme.buttonPressed)
+        : button.destructive ? theme.dangerSurface : navigation ? theme.navigationPressed : soft ? theme.softButtonPressed : theme.buttonPressed)
         : button.primary ? theme.primaryHover
+        : button.destructive ? theme.dangerSurface
         : chosen ? (navigation ? theme.navigationSelected : theme.buttonChecked)
         : navigation ? theme.navigationHover : soft ? theme.softButtonHover : theme.buttonHover
     implicitWidth: UiMetrics.buttonDefaultWidth
@@ -25,7 +26,7 @@ Rectangle {
     color: button.primary && button.enabled ? theme.accent : borderless ? "transparent"
         : soft ? theme.softButton : button.appearance === AppButton.Surface ? theme.surface : theme.button
     opacity: button.enabled ? 1 : 0.5
-    border.color: outlineActive ? theme.buttonFocus : borderless ? "transparent"
+    border.color: outlineActive ? (button.destructive ? theme.danger : theme.buttonFocus) : borderless ? "transparent"
         : button.accentOutline ? theme.editorAccent : theme.buttonBorder
     border.width: outlineActive ? UiMetrics.borderActive : borderless ? 0 : UiMetrics.borderNormal
     Rectangle {

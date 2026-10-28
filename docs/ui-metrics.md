@@ -178,6 +178,23 @@ presentation-only and reads the filename, never file contents or organizing rule
 
 ## Deliberate exceptions
 
+Settings use `SettingsSection`: a `textSettingsGroup` (14 px) muted heading over a
+surface card with shared 16 px padding and 12 px gaps. Theme selection explicitly
+chooses light/dark instead of toggling the selected option. The sorting card shows
+the current watch folder/conditions and three equal-width collision policy choices.
+`CollisionPolicyPicker` is reused by the legacy detail page; its minimum card height
+is `collisionChoiceMinHeight` (104 px), growing for wrapped descriptions.
+Recovery warnings appear only when actual cases exist and request the existing
+inspection screen. Allowed external paths keep full-text tooltips and the original
+revoke action. Revoke uses `AppButton.destructive`, which derives foreground,
+hover/press surface and focus outline from the shared danger roles.
+
+Watch settings use the same cards and `AppSwitch` controls. Each numeric field
+retains its range, keyboard editing, and checked-condition enablement. Draft edits
+remain local until Save; Check Now still uses the saved configuration. The action
+row remains below the scrollable form. UI verification scrolls each numeric field
+into view before sending pointer/keyboard events.
+
 The companion page uses the theme window background with a large preview card and
 separate playback card on the left, and a scrollable surface on the right. The
 settings panel groups pack selection, display, placement and desktop gestures.
