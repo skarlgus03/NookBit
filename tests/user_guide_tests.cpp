@@ -1,6 +1,7 @@
 #include "presentation/user_guide_controller.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
+#include "modules/rules/rule_engine.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDir>
@@ -8,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <iostream>
 
 // 내장 사용자 문서의 저장·오류와 실제로 읽히는 최소 캐릭터팩 예제를 검사하는 함수.
@@ -18,7 +20,8 @@ int main(int argc, char** argv) {
     nookbit::UserGuideController guides;
     for (const auto& kind : {QStringLiteral("rules"), QStringLiteral("character")}) {
         const auto text = guides.text(kind);
-        if (text.isEmpty() || !text.startsWith("# ")) return 1;
+        if (text.isEmpty() || !text.startsWith("# ") || !text.contains("Standalone authoring contract")) return 1;
+        if (QRegularExpression(QStringLiteral("[\\x{1100}-\\x{11FF}\\x{3130}-\\x{318F}\\x{AC00}-\\x{D7AF}]")).match(text).hasMatch()) return 1;
         const auto destination = directory.filePath(kind + ".md");
         if (!guides.save(kind, QUrl::fromLocalFile(destination))) return 1;
         QFile saved(destination);
@@ -32,15 +35,30 @@ int main(int argc, char** argv) {
     // 규칙 다운로드가 일반 사용 설명이 아닌 독립적인 AI 작성 계약인지 확인한다.
     const auto rules = guides.text("rules");
     if (!rules.contains("Standalone authoring contract") || rules.contains("](../")) return 1;
-    const auto ruleBegin = rules.indexOf("```json\n") + 8;
-    const auto ruleEnd = rules.indexOf("```", ruleBegin);
-    if (ruleBegin < 8 || ruleEnd < ruleBegin) return 1;
-    QFile ruleFile(directory.filePath("rules.json"));
-    if (!ruleFile.open(QIODevice::WriteOnly)) return 1;
-    ruleFile.write(rules.mid(ruleBegin, ruleEnd - ruleBegin).toUtf8());
-    ruleFile.close();
-    nookbit::JsonRuleSetRepository ruleRepository(ruleFile.fileName(), QStringLiteral(":/nookbit/rules-tree-v3.schema.json"));
-    if (!ruleRepository.load()) return 1;
+    int ruleCursor = 0, ruleExampleCount = 0;
+    bool checkedFolderExample = false;
+    while ((ruleCursor = rules.indexOf("```json\n", ruleCursor)) >= 0) {
+        const auto ruleBegin = ruleCursor + 8;
+        const auto ruleEnd = rules.indexOf("```", ruleBegin);
+        if (ruleEnd < ruleBegin) return 1;
+        QFile ruleFile(directory.filePath(QStringLiteral("rules-%1.json").arg(++ruleExampleCount)));
+        if (!ruleFile.open(QIODevice::WriteOnly)) return 1;
+        ruleFile.write(rules.mid(ruleBegin, ruleEnd - ruleBegin).toUtf8()); ruleFile.close();
+        nookbit::JsonRuleSetRepository ruleRepository(ruleFile.fileName(), QStringLiteral(":/nookbit/rules-tree-v3.schema.json"));
+        const auto loaded = ruleRepository.load();
+        if (!loaded) { std::cerr << loaded.error().message; return 1; }
+        if (loaded.value().id == "folders-only") {
+            nookbit::RuleEngine engine;
+            nookbit::FileFact target; target.relativePath = L"same-name.png"; target.fingerprint.directory = true;
+            const auto folder = engine.decide(target, loaded.value(), nookbit::MultiMatchPolicy::FirstMatch, 0);
+            target.fingerprint.directory = false;
+            const auto file = engine.decide(target, loaded.value(), nookbit::MultiMatchPolicy::FirstMatch, 0);
+            if (!folder || !folder.value() || folder.value()->destinationRelativePath != L"Folders" || !file || file.value()) return 1;
+            checkedFolderExample = true;
+        }
+        ruleCursor = ruleEnd + 3;
+    }
+    if (ruleExampleCount < 2 || !checkedFolderExample) return 1;
     const auto character = guides.text("character");
     const auto begin = character.indexOf("```json\n") + 8;
     const auto end = character.indexOf("```", begin);

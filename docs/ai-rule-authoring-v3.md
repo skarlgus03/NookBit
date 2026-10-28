@@ -1,5 +1,10 @@
 # NookBit rule-tree v3: AI authoring contract
 
+Contract revision: 2026-10-28. Instructions are in English; preserve user-supplied
+folder names, filename substrings and paths in their original language. This
+document works as a standalone attachment; no conversation history, model-specific
+memory, skill, API connection or MCP server is required to generate the JSON.
+
 Standalone authoring contract for an LLM generating `nookbit_rules.json`. No other document is required. Output **one JSON object only**: no Markdown fence, comments, explanations, UI graph coordinates, or extra fields. If the request is ambiguous or unsupported, ask a concise clarification instead of inventing syntax. Import in NookBit validates the result; saving and file-move approval are separate actions.
 
 ## Output shape
@@ -7,6 +12,8 @@ Standalone authoring contract for an LLM generating `nookbit_rules.json`. No oth
 The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
 
 Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain exactly one `when` condition. An else node has `"otherwise": true` instead of `when`; at most one else node is allowed in each sibling array. Put it last for readability. A node either has a nonempty `children` array, is a leaf with `destination`, or is a leaf with `"exclude": true`. An internal node must not have `destination` or `exclude`. A leaf must not omit its terminal action, even if `globalOtherwise` exists. Do not add unlisted fields.
+
+Use at most 1000 rule nodes, with root depth 0 and maximum nesting depth 32.
 
 Supported `when` objects (use exactly the keys shown for the selected type):
 
@@ -80,6 +87,36 @@ A file over 20 MiB is handled first; smaller PNG/JPG screenshots go to `Pictures
   ]
 }
 ```
+
+## Complete folder-only example
+
+For a folder-only request, use the following complete example instead of adding
+a broad name/date rule that could also match files. With no other root rules or
+`globalOtherwise`, files remain unclassified and stay in place. A nested name or
+modified-age node can refine the folder branch. Selecting a folder never
+reclassifies the files inside it.
+
+```json
+{
+  "schemaVersion": 3,
+  "ruleSetId": "folders-only",
+  "version": "2026-10-28T00:00:00Z",
+  "nodes": [
+    {
+      "id": "folders",
+      "enabled": true,
+      "when": { "type": "itemType", "kind": "folder" },
+      "destination": { "base": "home", "path": "Folders", "collisionPolicy": "skip" }
+    }
+  ]
+}
+```
+
+Use `"kind":"file"` for a file-only branch. Other active branches and a global
+fallback can still match targets outside that branch; an `itemType` condition is
+local to its branch, not a document-wide filter. Add an explicit file exclusion
+if files must stay in place despite a global fallback. Folder collisions always
+skip the occupied folder even if another collision policy was requested.
 
 ## Prompt to pair with this contract
 

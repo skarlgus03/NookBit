@@ -49,7 +49,7 @@ private:
     /// 임의 파일 접근 없이 두 사용자 가이드만 읽도록 리소스 경로를 고르는 함수.
     static QString resourcePath(const QString& kind) {
         if (kind == "rules") return QStringLiteral(":/nookbit/guides/rules-ai.md");
-        if (kind == "character") return QStringLiteral(":/nookbit/guides/character.ko.md");
+        if (kind == "character") return QStringLiteral(":/nookbit/guides/character.md");
         return {};
     }
     QString error_;
