@@ -23,6 +23,13 @@ For each destination use `{"base":"home","path":"Pictures/{yyyy}/{MM}","collisio
 
 ## Evaluation rules
 
+Directly selected folders are single bundles, not recursively classified contents.
+For folders, use `nameContains`, `modifiedAgeDays` or fallback destinations;
+`extension` and `size` predicates never match folders. There is no folder-type
+predicate yet. Folder destination collisions always skip that folder, overriding
+`collisionPolicy`; files retain the documented policy. Do not invent a folder-size
+or recursive-classification field.
+
 At each level, NookBit checks enabled ordinary siblings in array order and selects the **first** matching condition. If none matches, it selects the enabled `otherwise` sibling, if any. It then repeats this process among the selected node's children. Parent and child conditions therefore compose as AND. Once a sibling is selected, a miss among its children does **not** retry later siblings of the parent. A local `otherwise` child can catch that miss. If no child matches and `globalOtherwise` is absent, the file remains unclassified. Disabled nodes are ignored.
 
 Put more specific or higher-priority rules before broad ones. For example, a root “over 20 MiB” rule before a root “PNG/JPG” rule sends a 25 MiB PNG to the large-files destination. To express “PNG/JPG over 5 MiB,” use an extension node with a size child (or the reverse), not two conditions inside one node. Do not invent unsupported conditions such as creation date, regex, MIME type, or arbitrary expressions.

@@ -66,7 +66,7 @@ Result<void> WindowsFileMover::moveMatchingNoReplace(const std::filesystem::path
             return Result<void>::failure({"move.path_invalid", "Alternate streams and path traversal are not supported."});
     }
     const HANDLE raw = CreateFileW(source.c_str(), DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
-        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (raw == INVALID_HANDLE_VALUE) return systemFailure("move.source_open_failed", GetLastError());
     const auto close = [](void* handle) { CloseHandle(handle); };
     std::unique_ptr<void, decltype(close)> protectedSource(raw, close);
@@ -76,9 +76,11 @@ Result<void> WindowsFileMover::moveMatchingNoReplace(const std::filesystem::path
     const auto size = (static_cast<uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
     const auto ticks = (static_cast<uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime;
     const auto modified = static_cast<int64_t>(ticks / 10000ULL) - 11644473600000LL;
-    if ((info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) || info.nNumberOfLinks != 1 ||
+    if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+        bool(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != expected.directory ||
+        (!expected.directory && info.nNumberOfLinks != 1) ||
         std::to_string(info.dwVolumeSerialNumber) != *expected.volumeId || std::to_string(id) != *expected.fileId ||
-        size != expected.size || modified != expected.modifiedUtcMs)
+        (!expected.directory && size != expected.size) || modified != expected.modifiedUtcMs)
         return Result<void>::failure({"move.source_changed", "Source identity, size, modified time or supported file type changed."});
     const auto parent = prepareParent(destination);
     if (!parent) return parent;

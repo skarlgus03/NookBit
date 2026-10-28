@@ -66,6 +66,7 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
         ? utf8Path(path.extension()) : file.extension;
     extension = normalizedExtension(std::move(extension));
     if (!rule.extensions.empty()) {
+        if (file.fingerprint.directory) return false;
         const bool found = std::any_of(rule.extensions.begin(), rule.extensions.end(),
             [&extension](const std::string& allowed) {
                 return normalizedExtension(allowed) == extension;
@@ -78,9 +79,11 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
             [&fileName](const std::string& glob) { return matchesGlob(glob, fileName); });
         if (!found) return false;
     }
+    if (file.fingerprint.directory && (rule.minimumBytes || rule.maximumBytes)) return false;
     if (rule.minimumBytes && file.fingerprint.size < *rule.minimumBytes) return false;
     if (rule.maximumBytes && file.fingerprint.size > *rule.maximumBytes) return false;
     if constexpr (requires { rule.greaterThanBytes; }) {
+        if (file.fingerprint.directory && rule.greaterThanBytes) return false;
         if (rule.greaterThanBytes && file.fingerprint.size <= *rule.greaterThanBytes) return false;
     }
 
@@ -99,6 +102,7 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
 bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
                    std::int64_t nowUtcMs) {
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
+        if (file.fingerprint.directory) return false;
         const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
         const auto actual = normalizedExtension(file.extension.empty()
             ? utf8Path(path.extension()) : file.extension);
@@ -116,6 +120,7 @@ bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
         return actual.find(expected) != std::string::npos;
     }
     if (const auto* size = std::get_if<SizePredicate>(&condition)) {
+        if (file.fingerprint.directory) return false;
         const auto actual = file.fingerprint.size;
         switch (size->comparison) {
         case SizeComparison::GreaterThan: return actual > size->bytes;

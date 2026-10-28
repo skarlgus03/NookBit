@@ -77,7 +77,7 @@ public:
             if (!acquired) return Result<OperationPlan>::failure(acquired.error());
             Session session(*this);
             auto saved = Result<OperationPlan>::success(plan);
-            if (frozen) for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+            if (frozen) for (const auto& step : plan.steps) if (!step.fingerprint.directory && step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
                 const auto supported = session.copy.preflightSource(step.source);
                 if (!supported) return Result<OperationPlan>::failure(supported.error());
                 if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)
@@ -85,7 +85,7 @@ public:
             }
             if (!frozen) {
                 auto draft = plan;
-                for (auto& step : draft.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+                for (auto& step : draft.steps) if (!step.fingerprint.directory && step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
                     const auto supported = session.copy.preflightSource(step.source);
                     if (!supported) return Result<OperationPlan>::failure(supported.error());
                     if (supported.value()) step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
@@ -125,7 +125,7 @@ public:
             Session session(*this);
             setup.stop();
             TimingStage preflight("source_support_check");
-            for (const auto& step : plan.steps) if (step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
+            for (const auto& step : plan.steps) if (!step.fingerprint.directory && step.status != StepStatus::Skipped && step.movement && step.movement->strategy == MoveStrategy::VerifiedCopy) {
                 const auto supported = session.copy.preflightSource(step.source);
                 if (!supported) return Result<void>::failure(supported.error());
                 if (supported.value() && step.movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone)

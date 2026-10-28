@@ -162,7 +162,8 @@ Result<std::int64_t> modifiedUtcMs(const std::filesystem::path& path) {
 Result<FileFact> readFileFact(const std::filesystem::path& path,
                               const std::filesystem::path& relativePath) {
     std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
+    const bool directory = std::filesystem::is_directory(path, error);
+    const auto size = directory ? 0 : std::filesystem::file_size(path, error);
     if (error) {
         return Result<FileFact>::failure({
             "scan.metadata_unavailable", "Cannot read file size: " + utf8Path(path),
@@ -173,13 +174,14 @@ Result<FileFact> readFileFact(const std::filesystem::path& path,
     FileFact fact;
     fact.absolutePath = path;
     fact.relativePath = relativePath;
-    fact.extension = utf8Path(path.extension());
+    fact.extension = directory ? std::string{} : utf8Path(path.extension());
+    fact.fingerprint.directory = directory;
     fact.fingerprint.size = size;
     fact.fingerprint.modifiedUtcMs = modified.value();
 #ifdef _WIN32
     const HANDLE handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                      nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+                                      nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         return Result<FileFact>::failure({
             "scan.identity_unavailable", "Cannot identify selected file: " + utf8Path(path),
@@ -296,7 +298,9 @@ Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
         for (const auto& selected : request.selectedFiles) {
             const auto path = selected.lexically_normal();
             if (!seenFiles.insert(pathKey(path)).second) continue;
-            auto checked = validatePath(path, false);
+            std::error_code typeError;
+            const bool directory = std::filesystem::is_directory(path, typeError);
+            auto checked = validatePath(path, directory);
             if (!checked) return Result<ScanSnapshot>::failure(checked.error());
             auto fact = readFileFact(path, path.filename());
             if (!fact) return Result<ScanSnapshot>::failure(fact.error());

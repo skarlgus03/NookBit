@@ -149,6 +149,8 @@ Result<InterruptedPlanInspection> InspectInterruptedPlanUseCase::inspectPlan(con
     } else report.interruptedStatus = plan.status == PlanStatus::Completed ? PlanStatus::Executing :
         plan.status == PlanStatus::RolledBack ? PlanStatus::RollingBack : plan.status;
     std::vector<Error> globalReasons;
+    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) { return step.fingerprint.directory; }))
+        globalReasons.push_back({"recovery.folder_manual_review", "Interrupted folder moves require manual review. Preserve the source, destination and .nookbit-folder temporary copy; automatic resume is disabled."});
     if (PlanSignature::isMetadataRenamePlan(plan)) globalReasons.push_back({"recovery.metadata_unsupported", "Interrupted metadata-only renames require manual review; automatic resume/rollback is not yet supported."});
     if (!report.planIntact) globalReasons.push_back({"recovery.plan_untrusted", "Plan signature, paths or fingerprint evidence are invalid; files were not inspected."});
     if (!report.interruptedStatus) globalReasons.push_back({"recovery.origin_unknown", "The interrupted execution direction is unknown."});

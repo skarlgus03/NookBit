@@ -108,6 +108,7 @@ std::optional<CollisionPolicy> parseCollisionPolicy(const QString& text) {
 QString fingerprintJson(const FileFingerprint& fingerprint) {
     QJsonObject object;
     object.insert(QStringLiteral("size"), QString::number(fingerprint.size));
+    if (fingerprint.directory) object.insert(QStringLiteral("directory"), true);
     object.insert(QStringLiteral("modifiedUtcMs"), QString::number(fingerprint.modifiedUtcMs));
     if (fingerprint.volumeId) object.insert(QStringLiteral("volumeId"),
                                               QString::fromStdString(*fingerprint.volumeId));
@@ -124,6 +125,8 @@ std::optional<FileFingerprint> parseFingerprint(const QString& text) {
     bool sizeOk = false;
     bool modifiedOk = false;
     FileFingerprint fingerprint;
+    if (object.contains(QStringLiteral("directory")) && !object.value(QStringLiteral("directory")).isBool()) return std::nullopt;
+    fingerprint.directory = object.value(QStringLiteral("directory")).toBool(false);
     fingerprint.size = object.value(QStringLiteral("size")).toString().toULongLong(&sizeOk);
     fingerprint.modifiedUtcMs = object.value(QStringLiteral("modifiedUtcMs"))
                                     .toString().toLongLong(&modifiedOk);

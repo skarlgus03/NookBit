@@ -21,12 +21,13 @@ QVariant PendingFilesModel::data(const QModelIndex& index, int role) const {
     if (role == FileNameRole) return entry.fileName;
     if (role == FullPathRole) return entry.fullPath;
     if (role == AvailableRole) return entry.available;
+    if (role == DirectoryRole) return QFileInfo(entry.fullPath).isDir();
     return {};
 }
 
 // QML에서 사용할 역할 이름을 반환하는 함수.
 QHash<int, QByteArray> PendingFilesModel::roleNames() const {
-    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}};
+    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}, {DirectoryRole, "directory"}};
 }
 
 // 현재 대기 중인 파일 개수를 반환하는 함수.
@@ -71,7 +72,7 @@ void PendingFilesModel::restorePaths(const QStringList& paths) {
                 break;
             }
         }
-        if (!duplicate) restored.push_back({info.fileName(), fullPath, info.exists() && info.isFile()});
+        if (!duplicate) restored.push_back({info.fileName(), fullPath, info.exists() && (info.isFile() || info.isDir()) && !info.isSymLink()});
     }
     beginResetModel();
     entries_ = std::move(restored);
@@ -87,7 +88,7 @@ void PendingFilesModel::refreshAvailability() {
     for (int row = 0; row < entries_.size(); ++row) {
         auto& entry = entries_[row];
         const QFileInfo info(entry.fullPath);
-        const bool available = info.exists() && info.isFile();
+        const bool available = info.exists() && (info.isFile() || info.isDir()) && !info.isSymLink();
         if (entry.available == available) continue;
         entry.available = available;
         changed = true;
@@ -110,8 +111,8 @@ void PendingFilesModel::addUrl(const QUrl& url) {
         return;
     }
     const QFileInfo info(url.toLocalFile());
-    if (!info.exists() || !info.isFile()) {
-        setLastMessage(QStringLiteral("폴더나 존재하지 않는 파일은 추가할 수 없어요."));
+    if (!info.exists() || (!info.isFile() && !info.isDir()) || info.isSymLink() || QDir(info.absoluteFilePath()).isRoot()) {
+        setLastMessage(QStringLiteral("존재하는 파일이나 폴더만 추가할 수 있어요. 바로가기와 드라이브 전체는 제외해요."));
         return;
     }
     const auto fullPath = QDir::cleanPath(info.absoluteFilePath());
@@ -120,13 +121,19 @@ void PendingFilesModel::addUrl(const QUrl& url) {
             setLastMessage(QStringLiteral("이미 대기 목록에 있는 파일이에요."));
             return;
         }
+        if (fullPath.startsWith(entry.fullPath + "/", Qt::CaseInsensitive) ||
+            entry.fullPath.startsWith(fullPath + "/", Qt::CaseInsensitive)) {
+            setLastMessage(QStringLiteral("폴더와 그 안의 항목은 함께 등록할 수 없어요. 폴더 전체 또는 내부 항목 중 하나를 선택해 주세요."));
+            return;
+        }
     }
     const int newRow = entries_.size();
     beginInsertRows({}, newRow, newRow);
     entries_.push_back({info.fileName(), fullPath});
     endInsertRows();
     emit countChanged();
-    setLastMessage(QStringLiteral("파일을 대기 목록에 추가했어요. 원본은 그대로 있어요."));
+    setLastMessage(info.isDir() ? QStringLiteral("폴더 전체를 하나의 대상으로 추가했어요. 내부 항목은 따로 분류하지 않아요.")
+                              : QStringLiteral("파일을 대기 목록에 추가했어요. 원본은 그대로 있어요."));
 }
 
 // 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.

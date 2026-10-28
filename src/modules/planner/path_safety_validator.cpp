@@ -121,18 +121,24 @@ Result<void> PathSafetyValidator::validateMove(
     }
 
     if (!appDataRoot.empty() &&
-        (isWithin(source, appDataRoot) || isWithin(destination, appDataRoot))) {
+        (isWithin(source, appDataRoot) || isWithin(destination, appDataRoot) || isWithin(appDataRoot, source))) {
         return Result<void>::failure({
             "path.app_data_protected",
             "Application data paths cannot be organized.",
         });
     }
 
-    if (normalizedAbsolute(source) == normalizedAbsolute(destination)) {
+    if (isDriveRoot(source) || isWithin(destination, source)) {
         return Result<void>::failure({
             "path.same_source_and_destination",
             "Source and destination refer to the same path.",
         });
+    }
+
+    for (const auto& selected : selectedFiles) {
+        if (!sameSelectedPath(source, selected) &&
+            (isWithin(source, selected) || isWithin(selected, source) || isWithin(destination, selected)))
+            return Result<void>::failure({"path.overlapping_selection", "Selected folders and their contents cannot be moved independently in one plan."});
     }
 
     return Result<void>::success();

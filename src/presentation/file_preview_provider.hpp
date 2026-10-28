@@ -33,7 +33,8 @@ public:
                 }
             }
         }
-        return icons_.requestImage(QString::fromUtf8(QUrl::toPercentEncoding(info.fileName())), size, target);
+        return icons_.requestImage(info.isDir() ? QStringLiteral("__folder__")
+            : QString::fromUtf8(QUrl::toPercentEncoding(info.fileName())), size, target);
     }
 private:
     FileIconProvider icons_;

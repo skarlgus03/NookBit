@@ -124,7 +124,7 @@ Item {
                 Item { Layout.fillWidth: true }
                 Label {
                     visible: input.pending.count > 0
-                    text: qsTr("이 창 어디든 파일을 놓으세요")
+                    text: qsTr("파일이나 폴더를 놓으세요")
                     color: input.theme.muted
                     font.pixelSize: UiMetrics.textBody
                 }
@@ -144,7 +144,7 @@ Item {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: qsTr("파일을 끌어놓아 시작하세요")
+                    text: qsTr("파일이나 폴더를 끌어놓으세요")
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: UiMetrics.textEmphasis
                     font.bold: true
@@ -177,6 +177,7 @@ Item {
                     required property string fileName
                     required property string fullPath
                     required property bool available
+                    required property bool directory
                     readonly property string extension: fileName.lastIndexOf(".") > 0 ? fileName.slice(fileName.lastIndexOf(".") + 1).toUpperCase() : ""
                     width: files.width - UiMetrics.spaceGroup
                     height: UiMetrics.pendingRowHeight
@@ -219,7 +220,7 @@ Item {
                     }
                     Label {
                         Layout.preferredWidth: UiMetrics.pendingTypeWidth
-                        text: extension.length > 0 ? extension : qsTr("파일")
+                        text: directory ? qsTr("폴더") : (extension.length > 0 ? extension : qsTr("파일"))
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignRight

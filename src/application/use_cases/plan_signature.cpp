@@ -168,7 +168,7 @@ bool PlanSignature::isMetadataRenamePlan(const OperationPlan& plan) {
 bool PlanSignature::isFreshVerifiedCopyPlan(const OperationPlan& plan) {
     return plan.formatVersion == 2 && !plan.steps.empty() &&
         std::all_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) {
-            return step.status == StepStatus::Planned && step.movement &&
+            return !step.fingerprint.directory && step.status == StepStatus::Planned && step.movement &&
                 step.movement->strategy == MoveStrategy::VerifiedCopy;
         });
 }
@@ -269,6 +269,7 @@ std::string PlanSignature::planContents(const OperationPlan& plan) {
         appendOptionalString(output, step.fingerprint.volumeId);
         appendOptionalString(output, step.fingerprint.fileId);
         appendOptionalString(output, step.fingerprint.sha256);
+        if (step.fingerprint.directory) append(output, "directory-bundle-v1");
         append(output, step.matchedRuleId);
         append(output, step.reason);
         appendNumber(output, step.collisionPolicy);

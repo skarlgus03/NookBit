@@ -20,6 +20,7 @@ public:
         FileNameRole = Qt::UserRole + 1,
         FullPathRole,
         AvailableRole,
+        DirectoryRole,
     };
 
     /// 비어 있는 대기 목록을 생성하는 생성자.

@@ -7,6 +7,7 @@
 #include "infrastructure/diagnostics/operation_timing.hpp"
 #include <nookbit/application/operation_progress.hpp>
 #include "infrastructure/filesystem/windows_file_mover.hpp"
+#include "infrastructure/filesystem/windows_directory_mover.hpp"
 #include "modules/planner/path_safety_validator.hpp"
 
 #include <algorithm>
@@ -98,7 +99,7 @@ Result<void> SafeExecutor::execute(
         return executeMetadataSteps(saved, selectedFiles, settings.value());
     }
     const bool hasCopy = saved.formatVersion == 2 && std::any_of(saved.steps.begin(), saved.steps.end(), [](const MoveStep& item) {
-        return item.status != StepStatus::Skipped && item.movement && item.movement->strategy == MoveStrategy::VerifiedCopy;
+        return !item.fingerprint.directory && item.status != StepStatus::Skipped && item.movement && item.movement->strategy == MoveStrategy::VerifiedCopy;
     });
     if (hasCopy && (!transfers_ || (!reversals_ && std::count_if(saved.steps.begin(), saved.steps.end(), [](const MoveStep& item) {
         return item.status != StepStatus::Skipped;
@@ -195,6 +196,7 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
     const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps, bool sourceContentAtCopyOpen) {
     const auto& plan = saved;
     OperationProgressScope::begin(OperationPhase::CheckingSource, steps.size());
+    int folderFailures = 0;
     std::size_t fileIndex = 0;
     for (const auto* step : steps) {
         OperationProgressScope::file(++fileIndex, steps.size(), step->source);
@@ -242,6 +244,35 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             return Result<void>::failure({
                 "execute.batch_rolled_back", "A source changed; earlier moves were undone and this source was not moved.",
             });
+        }
+        if (step->fingerprint.directory) {
+            // 폴더별 실패를 기록하고 나머지 대상의 처리를 계속한다.
+            const bool copy = step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
+            auto moved = copy ? WindowsDirectoryMover::move(step->source, step->destination, step->fingerprint, scanner_, hasher_)
+                              : WindowsFileMover::moveNoReplace(step->source, step->destination);
+            if (!moved) {
+                const auto source = probeFile(scanner_, step->source, step->fingerprint, &hasher_);
+                const auto destination = probeFile(scanner_, step->destination, step->fingerprint, &hasher_);
+                if (source != FileProbe::Matches || destination == FileProbe::Matches || destination == FileProbe::Unavailable ||
+                    moved.error().code == "folder.cleanup_needs_review" || moved.error().code.starts_with("folder.committed_")) {
+                    const auto marked = markNeedsRecovery(plan.id);
+                    return marked ? moved : marked;
+                }
+                const auto failed = history_.appendEvent(StepStatusChanged{plan.id, step->id, StepStatus::Failed, moved.error()});
+                if (!failed) return failed;
+                ++folderFailures;
+                continue;
+            }
+            if (probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing ||
+                probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches) {
+                const auto marked = markNeedsRecovery(plan.id);
+                return marked ? Result<void>::failure({"folder.needs_review", "Folder move needs manual review; copies were preserved."}) : marked;
+            }
+            const auto applied = history_.appendEvent(StepStatusChanged{plan.id, step->id, StepStatus::Applied});
+            if (!applied) { const auto marked = markNeedsRecovery(plan.id); return marked ? applied : marked; }
+            appliedSteps.push_back(step);
+            OperationProgressScope::fileCompleted();
+            continue;
         }
         if (saved.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
             static std::atomic<std::uint64_t> attemptCounter{0};
@@ -322,17 +353,19 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
     if (!currentPlan) return Result<void>::failure(currentPlan.error());
     // 마지막 복사 단계가 이미 원자적으로 전체 완료를 기록했다면 중복하지 않는다.
     if (currentPlan.value().status == PlanStatus::Completed) return Result<void>::success();
-    auto completed = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Completed});
+    auto completed = history_.appendEvent(PlanStatusChanged{plan.id, folderFailures ? PlanStatus::Failed : PlanStatus::Completed});
     if (!completed) {
         return Result<void>::failure({
             "execute.needs_recovery", "File moved, but recording plan completion failed.",
         });
     }
-    return Result<void>::success();
+    return folderFailures ? Result<void>::failure({"execute.partial_failure", "Some folders could not move; see per-item history."}) : Result<void>::success();
 }
 
 // 복구 선택을 기록하기 전에 서비스 구성과 보호 범위를 읽기 전용으로 검사하는 함수.
 Result<void> SafeExecutor::verifyRecoverySupport(const OperationPlan& plan, RecoveryAction action) {
+    if (std::any_of(plan.steps.begin(), plan.steps.end(), [](const MoveStep& step) { return step.fingerprint.directory; }))
+        return Result<void>::failure({"recovery.folder_manual_review", "Interrupted folder moves require manual review; automatic restart is disabled."});
     if ((action != RecoveryAction::Resume && action != RecoveryAction::Rollback) ||
         !PlanSignature::validateFormat(plan) || !PlanSignature::validateMovementScope(plan) ||
         !PlanSignature::isSha256Hex(plan.planHash) || plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan)))
@@ -416,7 +449,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
     bool duringExecution) {
     OperationProgressScope::begin(OperationPhase::Restoring, applied.size());
     const bool hasCopy = plan.formatVersion == 2 && std::any_of(applied.begin(), applied.end(), [](const MoveStep* step) {
-        return step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
+        return !step->fingerprint.directory && step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy;
     });
     if (hasCopy && !reversals_) return Result<void>::failure({"rollback.transfer_executor_required", "Copy rollback requires reverse-transfer services."});
     const auto movement = verifyMovement(plan);
@@ -431,7 +464,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
         return Result<void>::failure({"rollback.no_steps", "There are no applied files to undo."});
     }
     for (const auto* step : applied) {
-        const bool copyStep = plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy;
+        const bool copyStep = !step->fingerprint.directory && plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy;
         Result<void> reverseReady = Result<void>::success();
         if (copyStep) reverseReady = reversals_->verifyRollback(plan.id, step->id);
         if ((!PlanSignature::isMetadataRenamePlan(plan) && (!step->fingerprint.sha256 ||
@@ -461,7 +494,7 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
         const auto* step = *iterator;
         OperationProgressScope::file(++fileIndex, applied.size(), step->destination);
         OperationProgressScope::phase(OperationPhase::Restoring);
-        if (plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
+        if (!step->fingerprint.directory && plan.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
             static std::atomic<std::uint64_t> reverseCounter{0};
             const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
             const auto attemptId = "rollback-" + std::to_string(stamp) + "-" + std::to_string(++reverseCounter);
@@ -497,7 +530,13 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
                 "rollback.needs_recovery", "A file changed during undo; review is required.",
             });
         }
-        auto moved = PlanSignature::isMetadataRenamePlan(plan)
+        auto moved = step->fingerprint.directory && step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy
+            ? [&]() {
+                auto current = scanFingerprint(scanner_, step->destination, &hasher_);
+                if (!current) return Result<void>::failure(current.error());
+                return WindowsDirectoryMover::move(step->destination, step->source, current.value(), scanner_, hasher_);
+            }()
+            : PlanSignature::isMetadataRenamePlan(plan)
             ? WindowsFileMover::moveMatchingNoReplace(step->destination, step->source, step->fingerprint)
             : WindowsFileMover::moveNoReplace(step->destination, step->source);
         if (!moved ||

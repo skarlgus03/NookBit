@@ -9,7 +9,7 @@ namespace {
 
 // 파일 내용 해싱 전후에 같은 파일 정보인지 확인하는 함수.
 bool sameMetadata(const FileFingerprint& left, const FileFingerprint& right) {
-    return left.size == right.size && left.modifiedUtcMs == right.modifiedUtcMs &&
+    return left.directory == right.directory && left.size == right.size && left.modifiedUtcMs == right.modifiedUtcMs &&
            left.volumeId == right.volumeId && left.fileId == right.fileId;
 }
 
@@ -40,6 +40,12 @@ void inheritMetadataRenamePolicy(OperationPlan& current, const OperationPlan& re
             step.movement && reference.steps[i].movement && step.movement->strategy == MoveStrategy::VerifiedCopy &&
             reference.steps[i].movement->preservation == PreservationPolicy::LocalNtfsBasicWithZone)
             step.movement->preservation = PreservationPolicy::LocalNtfsBasicWithZone;
+        // 승인 뒤 생긴 폴더 이름 충돌은 전체 계획을 무효화하지 않고 실행 시 해당 폴더만 실패시킨다.
+        if (step.fingerprint.directory && reference.steps[i].fingerprint.directory &&
+            step.source == reference.steps[i].source && step.destination == reference.steps[i].destination &&
+            step.collisionPolicy == CollisionPolicy::Skip && step.status == StepStatus::Skipped &&
+            reference.steps[i].status == StepStatus::Planned)
+            step.status = StepStatus::Planned;
     }
 }
 

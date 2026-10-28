@@ -24,7 +24,8 @@ public:
 
     /// 파일 이름에서 종류를 구해 캐시 또는 시스템 아이콘을 반환하는 함수.
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override {
-        const auto suffix = QFileInfo(QUrl::fromPercentEncoding(id.toUtf8())).suffix().toLower().left(64);
+        const auto suffix = id == "__folder__" ? QStringLiteral("__folder__")
+            : QFileInfo(QUrl::fromPercentEncoding(id.toUtf8())).suffix().toLower().left(64);
         QImage image;
         {
             QMutexLocker lock(&mutex_);
@@ -49,7 +50,8 @@ private:
         const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         const auto name = suffix.isEmpty() ? QStringLiteral("file") : QStringLiteral("file.") + suffix;
         SHFILEINFOW info{};
-        const auto result = SHGetFileInfoW(reinterpret_cast<const wchar_t*>(name.utf16()), FILE_ATTRIBUTE_NORMAL,
+        const auto result = SHGetFileInfoW(reinterpret_cast<const wchar_t*>(name.utf16()),
+            suffix == "__folder__" ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL,
             &info, sizeof(info), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
         QImage image;
         if (result && info.hIcon) image = QImage::fromHICON(info.hIcon);

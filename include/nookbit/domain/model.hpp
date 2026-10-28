@@ -63,6 +63,8 @@ struct FileFingerprint {
     std::optional<std::string> volumeId;
     std::optional<std::string> fileId;
     std::optional<std::string> sha256;
+    // 폴더는 내부 파일을 개별 분류하지 않는 하나의 이동 대상이다.
+    bool directory{false};
 };
 
 struct FileFact {

@@ -46,11 +46,16 @@ void testPendingFilesModel() {
     model.addUrl(QUrl(QStringLiteral("https://example.com/file.pdf")));
     expect(model.count() == 1, "remote URLs should not enter the pending list");
     model.addUrl(QUrl::fromLocalFile(directory.path()));
-    expect(model.count() == 1, "a folder should not enter the file-only pending list");
+    expect(model.count() == 1, "a parent folder must not overlap its already queued child");
 
     model.removeAt(0);
     expect(model.count() == 0, "remove should clear only the pending entry");
     expect(QFile::exists(path), "removing an entry must leave the original file intact");
+    model.addUrl(QUrl::fromLocalFile(directory.path()));
+    expect(model.count() == 1 && model.data(model.index(0), nookbit::PendingFilesModel::DirectoryRole).toBool(),
+           "a folder is one typed pending target");
+    model.addUrl(QUrl::fromLocalFile(path));
+    expect(model.count() == 1, "a child must not be added after its parent folder");
 }
 
 // 목록을 재시작 복원하고 없는 파일·중복·빈 목록을 안전하게 처리하는지 검사하는 함수.

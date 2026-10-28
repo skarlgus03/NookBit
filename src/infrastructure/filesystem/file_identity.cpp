@@ -7,6 +7,10 @@ namespace nookbit {
 
 // 실행 계획의 파일 ID·크기·수정 시각과 현재 파일이 같은지 검사하는 함수.
 bool sameFingerprint(const FileFingerprint& expected, const FileFingerprint& actual) {
+    if (expected.directory != actual.directory) return false;
+    // 볼륨 간 복사된 폴더는 객체 ID가 달라지므로 승인된 전체 묶음의 내용으로 비교한다.
+    if (expected.directory && expected.sha256)
+        return expected.sha256 == actual.sha256;
     return expected.volumeId && expected.fileId && actual.volumeId && actual.fileId &&
            expected.volumeId == actual.volumeId && expected.fileId == actual.fileId &&
            expected.size == actual.size && expected.modifiedUtcMs == actual.modifiedUtcMs &&
@@ -50,7 +54,7 @@ FileProbe probeFile(IScanner& scanner,
     if (error) return FileProbe::Unavailable;
     if (!std::filesystem::exists(status)) return FileProbe::Missing;
     if (std::filesystem::is_symlink(status) ||
-        !std::filesystem::is_regular_file(status)) return FileProbe::Unavailable;
+        (!std::filesystem::is_regular_file(status) && !std::filesystem::is_directory(status))) return FileProbe::Unavailable;
     auto fingerprint = scanFingerprint(scanner, path, expected.sha256 ? hasher : nullptr);
     if (!fingerprint) return FileProbe::Unavailable;
     return sameFingerprint(expected, fingerprint.value())

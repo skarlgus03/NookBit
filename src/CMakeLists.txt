@@ -56,6 +56,7 @@ add_library(nookbit_filesystem STATIC
   infrastructure/filesystem/recovery_service.cpp
   infrastructure/filesystem/interrupted_operation_recovery_service.cpp
   infrastructure/filesystem/windows_file_mover.cpp
+  infrastructure/filesystem/windows_directory_mover.cpp
   infrastructure/filesystem/windows_staged_copy.cpp
   infrastructure/filesystem/transfer_recovery_service.cpp
   infrastructure/filesystem/safe_executor.cpp

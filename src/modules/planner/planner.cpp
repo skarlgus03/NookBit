@@ -152,7 +152,9 @@ Result<OperationPlan> Planner::buildPlan(
             });
         }
 
-        const auto policy = chosen.collisionPolicy.value_or(settings.defaultCollisionPolicy);
+        // 폴더끼리의 병합·자동 이름 변경은 하지 않고 해당 폴더만 제외한다.
+        const auto policy = file.fingerprint.directory ? CollisionPolicy::Skip
+            : chosen.collisionPolicy.value_or(settings.defaultCollisionPolicy);
         std::error_code existenceError;
         auto resolved = CollisionResolver::resolve(requestedDestination, policy,
             [&reservedDestinations, &existenceError](const std::filesystem::path& candidate) {
