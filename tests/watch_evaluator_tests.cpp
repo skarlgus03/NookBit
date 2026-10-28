@@ -51,27 +51,30 @@ public:
     }
 };
 
-/// 이미지 파일만 분류된 것으로 돌려주는 규칙 판별기.
-class FakeRuleEngine final : public nookbit::IRuleEngine {
+/// 규칙 저장소나 판단기 없이 감시의 분류 조회 경계만 시험하는 대리 객체.
+class FakeClassificationQuery final : public nookbit::IClassificationQuery {
 public:
-    // 테스트용 JPG 파일에만 분류 결정을 반환하는 함수.
-    [[nodiscard]] nookbit::Result<std::optional<nookbit::RuleDecision>> decide(
-        const nookbit::FileFact& file, const nookbit::RuleSet&,
-        nookbit::MultiMatchPolicy, std::int64_t) const override {
-        if (file.extension != ".jpg") {
-            return nookbit::Result<std::optional<nookbit::RuleDecision>>::success(std::nullopt);
+    bool fail{false}, excluded{false}, wrongCount{false}, wrongPath{false};
+    std::string revision{"rules-a"};
+    mutable std::vector<nookbit::FileFact> received;
+    mutable std::int64_t receivedTime{};
+    // 입력 경로와 시각을 보관하고 JPG만 분류하거나 잘못된 응답을 재현하는 함수.
+    nookbit::Result<nookbit::ClassificationSnapshot> classify(
+        const std::vector<nookbit::FileFact>& files, std::int64_t nowUtcMs) const override {
+        received = files; receivedTime = nowUtcMs;
+        if (fail) return nookbit::Result<nookbit::ClassificationSnapshot>::failure({"test.classification_failed", "Classification unavailable."});
+        nookbit::ClassificationSnapshot result; result.rulesRevision = revision;
+        for (const auto& file : files) {
+            std::optional<nookbit::RuleDecision> decision;
+            if (file.extension == ".jpg") {
+                decision = nookbit::RuleDecision{"photos", L"Pictures", "Matched", std::nullopt};
+                decision->excluded = excluded;
+            }
+            result.files.push_back({file.absolutePath, decision});
         }
-        return nookbit::Result<std::optional<nookbit::RuleDecision>>::success(
-            nookbit::RuleDecision{"photos", L"Pictures", "Matched", std::nullopt});
-    }
-};
-
-/// 테스트용 규칙 묶음을 제공하는 저장소.
-class FakeRules final : public nookbit::IRuleSetRepository {
-public:
-    // 외부 파일 없이 테스트 규칙 묶음을 반환하는 함수.
-    [[nodiscard]] nookbit::Result<nookbit::RuleSet> load() const override {
-        return nookbit::Result<nookbit::RuleSet>::success({"test", "1"});
+        if (wrongCount) result.files.push_back({L"C:/unrequested.jpg", std::nullopt});
+        if (wrongPath && !result.files.empty()) result.files.front().source = L"C:/unrequested.jpg";
+        return nookbit::Result<nookbit::ClassificationSnapshot>::success(std::move(result));
     }
 };
 
@@ -109,18 +112,19 @@ void testConditions() {
     expect(!duplicate.hasValue(), "duplicate conditions should be rejected");
 }
 
-// 유스케이스가 포트로만 스캔·규칙 조회·판단을 요청하는지 검사하는 함수.
+// 감시가 후보만 분류 조회에 넘기고 결과·오류·식별값을 사용하는지 검사하는 함수.
 void testWatchUseCase() {
     FakeScanner scanner;
-    FakeRuleEngine rulesEngine;
-    FakeRules rules;
-    nookbit::EvaluateWatchFolderUseCase useCase(scanner, rulesEngine, rules, 0);
+    FakeClassificationQuery classification;
+    nookbit::EvaluateWatchFolderUseCase useCase(scanner, classification, 0);
     nookbit::WatchSettings settings;
     settings.folder = L"C:/fake/Downloads";
     settings.recursive = true;
     settings.excludePatterns = {"*.partial"};
     settings.conditions = {{nookbit::WatchConditionType::FileCount, 1}};
     const auto result = useCase.execute(settings, 60000);
+    expect(classification.received.size() == 2 && classification.receivedTime == 60000 &&
+        result && result.value().rulesRevision == "rules-a", "watch forwards facts/time and carries the query rule revision");
     expect(result.hasValue() && result.value().evaluation.shouldOffer &&
                result.value().eligibleFiles.size() == 1 && result.value().warnings.size() == 1,
            "watch use case should offer only classified files and preserve scan warnings");
@@ -130,6 +134,8 @@ void testWatchUseCase() {
            "watch use case should pass folder options through the scanner port");
     const auto pendingPhoto = useCase.execute(settings, 60000,
         {L"C:/fake/Downloads/./photo.jpg"});
+    expect(classification.received.size() == 1 && classification.received[0].extension == ".txt",
+        "pending paths are removed before classification is requested");
     expect(pendingPhoto.hasValue() && pendingPhoto.value().eligibleFiles.empty() &&
                !pendingPhoto.value().evaluation.shouldOffer &&
                pendingPhoto.value().evaluation.fileCount == 0 &&
@@ -151,6 +157,19 @@ void testWatchUseCase() {
     const auto failed = useCase.execute(settings, 60000);
     expect(!failed.hasValue() && failed.error().code == "test.scan_failed",
            "watch use case should return scanner failures unchanged");
+    scanner.fail = false;
+    classification.fail = true;
+    const auto unavailable = useCase.execute(settings, 60000);
+    expect(!unavailable && unavailable.error().code == "test.classification_failed", "classification failure is not an unmatched result");
+    classification.fail = false; classification.excluded = true;
+    const auto excluded = useCase.execute(settings, 60000);
+    expect(excluded && excluded.value().eligibleFiles.empty(), "explicit exclusions never contribute to an offer");
+    classification.excluded = false; classification.wrongCount = true;
+    expect(!useCase.execute(settings, 60000), "unexpected result count is rejected");
+    classification.wrongCount = false; classification.wrongPath = true;
+    expect(!useCase.execute(settings, 60000), "results for unrequested paths are rejected");
+    classification.wrongPath = false; classification.revision.clear();
+    expect(!useCase.execute(settings, 60000), "a missing rule revision is rejected");
 }
 
 // 관찰 시각을 직접 넘겨 다운로드 대기와 변경·재등장 경계값을 검사하는 함수.
@@ -202,9 +221,8 @@ void testFileReadiness() {
 // 안정 대기 중인 파일이 조건 계산에 들어가지 않고 검사 실패 후 새로 관찰되는지 검사하는 함수.
 void testStableWatchUseCase() {
     FakeScanner scanner;
-    FakeRuleEngine engine;
-    FakeRules rules;
-    nookbit::EvaluateWatchFolderUseCase useCase(scanner, engine, rules);
+    FakeClassificationQuery classification;
+    nookbit::EvaluateWatchFolderUseCase useCase(scanner, classification);
     nookbit::WatchSettings settings;
     settings.folder = L"C:/fake/Downloads";
     settings.conditions = {{nookbit::WatchConditionType::FileCount, 1}};
@@ -226,6 +244,12 @@ void testStableWatchUseCase() {
     const auto switched = useCase.execute(settings, 200000);
     expect(switched && !switched.value().evaluation.shouldOffer,
            "switching watched folders must reset observations");
+    classification.fail = true;
+    expect(!useCase.execute(settings, 210000), "classification failure propagates during stability observation");
+    classification.fail = false;
+    const auto afterQueryFailure = useCase.execute(settings, 240000);
+    expect(afterQueryFailure && !afterQueryFailure.value().evaluation.shouldOffer,
+        "a failed classification query invalidates previous readiness evidence");
 }
 
 // 선택 단위의 정확한 바이트 경계와 이전 MiB 계산을 검사하는 함수.

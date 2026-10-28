@@ -8,6 +8,7 @@ add_library(nookbit_core STATIC
   application/use_cases/prepare_transfer_plan_use_case.cpp
   application/use_cases/verify_saved_plan_use_case.cpp
   application/use_cases/evaluate_watch_folder_use_case.cpp
+  application/use_cases/classify_files_use_case.cpp
   application/use_cases/test_rule_use_case.cpp
   application/use_cases/transfer_validation.cpp
   application/use_cases/commit_transfer_copy_use_case.cpp

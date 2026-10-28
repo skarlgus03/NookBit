@@ -1,7 +1,7 @@
 # Feature modules: boundaries and communication
 
-Status: incremental refactor, 2026-10-28. The pending-queue seam (step 1) is
-implemented. Module toggles, a module registry and plugin loading remain planned.
+Status: incremental refactor, 2026-10-28. The pending-queue and classification-query
+seams (steps 1 and 2) are implemented. Module toggles, a module registry and plugin loading remain planned.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -34,9 +34,10 @@ owner without becoming one menu button.
 
 | Current seam | What exists | Remaining coupling |
 | --- | --- | --- |
-| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase`, `IPendingPathsQuery` and `IEnqueuePendingPaths`; no queue-model dependency | Host still assembles it unconditionally; classification remains inside watch evaluation |
+| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase`, `IPendingPathsQuery` and `IEnqueuePendingPaths`; no queue-model dependency | Host still assembles it unconditionally |
 | [Pending queue contracts](../include/nookbit/application/pending_queue.hpp) and [adapter](../src/app/pending_queue_adapter.hpp) | Standard C++ path snapshots and per-path admission receipts; host forwards model changes | Adapter deliberately retains the existing model and its admission policies |
-| [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Scanner/rule-engine/repository interfaces are injected | Evaluator orchestrates classification itself instead of using a feature-level classification query |
+| [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Owns scanning, pending-path exclusion, readiness and thresholds; uses `IClassificationQuery` | Feature lifecycle is still assembled by the host |
+| [Classification contract](../include/nookbit/application/classification_query.hpp) and [use case](../src/application/use_cases/classify_files_use_case.cpp) | Organizer-side active-rule loading and matching; ordered per-file decisions and content-based rule revision | Still part of the shared app, not a separately enabled module |
 | [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer | Registration and source/delivery adapters are assembled in `main.cpp` |
 | [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | Desktop objects and their connections are assembled unconditionally |
 | [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution | No feature-level startup/disable boundary yet |
@@ -70,6 +71,24 @@ User accepts -> Organizer enqueue command -> pending queue
 User confirms a fresh plan -> existing approved file-operation workflow
 File-operation activity -> host adapter -> Companion visual state
 ```
+
+`ClassificationSnapshot` identifies one loaded rules copy and returns one result
+per input in the same order, echoing each source path. No decision means unmatched;
+`decision.excluded` means explicit exclusion; other decisions are matched results.
+The query reads active rules once per batch, uses FirstMatch (the previous watch
+policy), and returns a SHA-256 of their canonical representation. It uses supplied
+metadata and time; it never scans, hashes file contents, creates plans, writes
+history or executes operations. Empty candidate batches still identify active rules.
+Matched destinations are classification decisions, not proof that a path is allowed
+or a file can currently move; the ordinary preview/approval checks remain required.
+
+Watch rejects missing revisions and mismatched result counts/paths. Read or query
+failure is an error, not an empty successful classification, and resets readiness
+evidence. Physical file readiness stays with Watch. Rules revisions participate in
+offer identity; a dismissed offer can reappear when rules change, even if file
+metadata and the rules' human-readable version text are unchanged. Acceptance
+rechecks that revision and asks for a fresh confirmation if it changed. These are
+in-memory proposal values; rule JSON, watch settings and approval formats do not change.
 
 The publisher knows a contract, not a specific consumer. The host supplies
 implementations and translates between contracts where needed. Calling a narrow
@@ -145,9 +164,11 @@ The same ownership/request/update rules apply to additions unrelated to companio
    Both adapter methods require the model's owning thread; no worker thread touches
    the model. Only whole-command failures precede mutation; individual failures are
    returned as per-path rejections.
-2. **Classification query.** Move active-rule lookup/matching behind an Organizer
-   capability. Watch retains scanning, file readiness and threshold decisions.
-   Rule changes invalidate old results; query results never bypass fresh preview.
+2. **Classification query: implemented.** `ClassifyFilesUseCase` provides the
+   Organizer capability. Watch has no rule-repository or rule-engine dependency.
+   The host wires the query to active rules and the existing engine/hasher. Watch
+   retains scanning, file readiness and thresholds. Rule changes invalidate old
+   offers; query results never bypass fresh preview or movement approval.
 3. **Integration adapters.** Extract existing notification/activity wiring from
    `main.cpp`, retaining current channel contracts and stable source/cue IDs.
 4. **Host lifecycle and UI contributions.** Introduce explicit ownership and
@@ -158,5 +179,7 @@ The same ownership/request/update rules apply to additions unrelated to companio
 
 Each step is independently reviewable. Tests cover queue-model-free WatchController
 operation, read/command failure, invalidation during enqueue, per-path partial
-results and real-model admission/persistence behavior. Accepting an offer still
-only enqueues valid paths and leaves original files untouched. Step 2 is next.
+results and real-model admission/persistence behavior. Classification tests cover
+snapshot consistency, matched/excluded/unmatched/folder results, same-version rule
+changes, invalid query responses and failure propagation. Acceptance still only
+enqueues valid paths and leaves original files untouched. Step 3 is next.

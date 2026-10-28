@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
+#include "application/use_cases/classify_files_use_case.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
@@ -1040,9 +1041,9 @@ int main(int argc, char* argv[]) {
         QDir(appData).filePath(QStringLiteral("watch.json")),
         QStringLiteral(":/nookbit/watch.schema.json"));
     nookbit::FilesystemScanner watchScanner;
-    nookbit::RuleEngine watchRuleEngine;
+    nookbit::ClassifyFilesUseCase classificationQuery(previewRules, previewRuleEngine, previewHasher);
     nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(
-        watchScanner, watchRuleEngine, previewRules);
+        watchScanner, classificationQuery);
     nookbit::WatchController watchController(
         pendingQueue, pendingQueue, watchSettings, evaluateWatchFolder,
         QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));

@@ -51,6 +51,7 @@ struct WatchProposal {
     std::vector<Error> warnings;
     std::size_t waitingFileCount{0};
     int nextCheckDelayMs{0};
+    std::string rulesRevision;
 };
 
 } // namespace nookbit

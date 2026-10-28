@@ -22,9 +22,11 @@ int thresholdFor(const WatchSettings& settings, WatchConditionType type) {
     return found == settings.conditions.end() ? 0 : found->threshold;
 }
 
-// 감시 폴더의 분류 가능 파일 상태를 중복 제안 방지용 해시로 만드는 함수.
-QString snapshotSignature(const std::vector<FileFact>& files) {
+// 규칙 식별값과 분류 가능 파일 상태를 중복 제안 방지용 해시로 만드는 함수.
+QString snapshotSignature(const std::vector<FileFact>& files, const std::string& rulesRevision) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(QByteArray::fromStdString(rulesRevision));
+    hash.addData("\0", 1);
     for (const auto& file : files) {
         hash.addData(QString::fromStdWString(file.absolutePath.wstring()).toUtf8());
         hash.addData("\0", 1);
@@ -199,6 +201,7 @@ void WatchController::clearProposal() {
     proposalVisible_ = false;
     proposalText_.clear();
     proposedFiles_.clear();
+    proposalRulesRevision_.clear();
 }
 
 // 화면에서 고른 폴더와 조건을 검증해 저장하는 함수.
@@ -318,7 +321,7 @@ void WatchController::checkNow() {
         emit watchChanged();
         return;
     }
-    const auto signature = snapshotSignature(eligible);
+    const auto signature = snapshotSignature(eligible, result.value().rulesRevision);
     if (signature == lastOfferedSignature_) {
         statusMessage_ = QStringLiteral("조건 충족: 같은 파일 상태에 대해서는 이미 제안했어요.");
         emit watchChanged();
@@ -331,6 +334,7 @@ void WatchController::checkNow() {
             QString::fromStdWString(file.absolutePath.wstring())));
     }
     proposalVisible_ = true;
+    proposalRulesRevision_ = QString::fromStdString(result.value().rulesRevision);
     proposalText_ = QStringLiteral("분류 가능한 파일 %1개가 설정한 조건에 닿았어요. 정리 대기 목록에 담을까요? 실제 이동은 별도 승인 후에만 합니다.")
                         .arg(eligible.size());
     statusMessage_ = QStringLiteral("감시 조건이 충족돼 정리를 제안했어요. 파일은 이동하지 않았어요.");
@@ -341,11 +345,12 @@ void WatchController::checkNow() {
 void WatchController::addProposalToPending() {
     if (!proposalVisible_) return;
     const auto files = proposedFiles_;
+    const auto rulesRevision = proposalRulesRevision_;
     // 수락 직전에도 다시 검사해 전송이 재개된 파일이나 바뀐 제안을 등록하지 않는다.
     checkNow();
     if (!proposalVisible_) return;
-    if (proposedFiles_ != files) {
-        statusMessage_ = QStringLiteral("제안 파일이 바뀌었어요. 새 제안을 확인해 주세요.");
+    if (proposedFiles_ != files || proposalRulesRevision_ != rulesRevision) {
+        statusMessage_ = QStringLiteral("제안 파일이나 분류 규칙이 바뀌었어요. 새 제안을 확인해 주세요.");
         emit watchChanged();
         return;
     }

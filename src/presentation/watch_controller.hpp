@@ -147,6 +147,7 @@ private:
     QVariantMap lastEvaluation_;
     QString proposalText_;
     QStringList proposedFiles_;
+    QString proposalRulesRevision_;
     QString lastOfferedSignature_;
     bool proposalVisible_{false};
 };

@@ -2,6 +2,8 @@
 #include "app/pending_queue_adapter.hpp"
 #include "presentation/watch_controller.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
+#include "application/use_cases/classify_files_use_case.hpp"
+#include "infrastructure/cryptography/qt_plan_hasher.hpp"
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
@@ -67,7 +69,9 @@ void testProposalAndPendingOnly() {
         projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine ruleEngine;
-    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, ruleEngine, rules, 0);
+    nookbit::QtPlanHasher classificationHasher;
+    nookbit::ClassifyFilesUseCase classification(rules, ruleEngine, classificationHasher);
+    nookbit::EvaluateWatchFolderUseCase evaluateWatchFolder(scanner, classification, 0);
     nookbit::WatchController controller(
         queue, queue, repository, evaluateWatchFolder, folder);
     connectPendingChanges(pending, controller);
@@ -168,7 +172,9 @@ void testReadinessRetryAndAcceptance() {
         projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine engine;
-    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules);
+    nookbit::QtPlanHasher classificationHasher;
+    nookbit::ClassifyFilesUseCase classification(rules, engine, classificationHasher);
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, classification);
     TimedWatchUseCase timed(evaluate);
     nookbit::WatchController controller(queue, queue, settings, timed, directory.path());
     connectPendingChanges(pending, controller);
@@ -219,7 +225,9 @@ void testSnoozeAndCurrentCandidates() {
         projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine engine;
-    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
+    nookbit::QtPlanHasher classificationHasher;
+    nookbit::ClassifyFilesUseCase classification(rules, engine, classificationHasher);
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, classification, 0);
     TimedWatchUseCase timed(evaluate);
     nookbit::WatchController controller(queue, queue, settings, timed, directory.path());
     connectPendingChanges(pending, controller);
@@ -317,7 +325,9 @@ void testSizeUnitSettings() {
     nookbit::JsonRuleSetRepository rules(projectPath("resources/rules/default.example.json"), projectPath("schemas/rules.schema.json"));
     nookbit::FilesystemScanner scanner;
     nookbit::RuleEngine engine;
-    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, engine, rules, 0);
+    nookbit::QtPlanHasher classificationHasher;
+    nookbit::ClassifyFilesUseCase classification(rules, engine, classificationHasher);
+    nookbit::EvaluateWatchFolderUseCase evaluate(scanner, classification, 0);
     nookbit::WatchController controller(queue, queue, repository, evaluate, directory.path());
     connectPendingChanges(pending, controller);
     for (const auto* unit : {"KB", "MB", "GB", "MiB"}) {
@@ -399,6 +409,33 @@ void testPendingQueueBoundary() {
     expect(QFile::exists(directory.filePath("one.jpg")) && QFile::exists(directory.filePath("two.jpg")),
         "accepting an offer never moves the original files");
 }
+// 파일 집합이 같아도 규칙 변경 뒤에는 제안을 새로 확인해야 하는지 검사하는 함수.
+void testProposalRuleRevision() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "revision fixture"); return; }
+    const auto path = directory.filePath("same.jpg");
+    expect(writeFile(path), "revision source file");
+    FakePendingQueue queue; FakeWatchEvaluation evaluation;
+    nookbit::FileFact file; file.absolutePath = std::filesystem::path(path.toStdWString());
+    evaluation.proposal.eligibleFiles = {file};
+    evaluation.proposal.evaluation.shouldOffer = true;
+    evaluation.proposal.evaluation.fileCount = 1;
+    evaluation.proposal.rulesRevision = "rules-a";
+    nookbit::JsonWatchSettingsRepository repository(directory.filePath("watch.json"), projectPath("schemas/watch.schema.json"));
+    nookbit::WatchController controller(queue, queue, repository, evaluation, directory.path());
+    controller.saveSettings(directory.path(), false, false, 10, false, true, 1, false, 1, false, 1, {});
+    controller.checkNow(); controller.dismissProposal();
+    evaluation.proposal.rulesRevision = "rules-b";
+    controller.checkNow();
+    expect(controller.proposalVisible(), "new rules allow a fresh offer even for unchanged files");
+    evaluation.proposal.rulesRevision = "rules-c";
+    controller.addProposalToPending();
+    expect(controller.proposalVisible() && queue.received.empty() && controller.statusMessage().contains(QStringLiteral("분류 규칙")),
+        "acceptance recheck detects changed rules and does not enqueue the old offer");
+    controller.addProposalToPending();
+    expect(!controller.proposalVisible() && queue.received.size() == 1 && QFile::exists(path),
+        "confirming the fresh offer only enqueues and leaves its source untouched");
+}
 } // namespace
 
 // 폴더 감시 컨트롤러 테스트를 실행하는 함수.
@@ -409,6 +446,7 @@ int main(int argc, char* argv[]) {
     testSnoozeAndCurrentCandidates();
     testSizeUnitSettings();
     testPendingQueueBoundary();
+    testProposalRuleRevision();
     if (failures == 0) {
         std::cout << "All watch controller tests passed.\n";
         return 0;

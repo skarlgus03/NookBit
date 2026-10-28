@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
+#include "application/use_cases/classify_files_use_case.hpp"
 #include "presentation/preview_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "presentation/history_controller.hpp"
@@ -491,7 +492,8 @@ void testWatchedFilesUseNormalSortWorkflow() {
     expect(preview.hasPreview(), "manual first file should have a draft");
     nookbit::JsonWatchSettingsRepository watchSettings(
         directory.filePath(QStringLiteral("watch.json")), projectPath("schemas/watch.schema.json"));
-    nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, workflow.ruleEngine, workflow.rules, 0);
+    nookbit::ClassifyFilesUseCase classification(workflow.rules, workflow.ruleEngine, workflow.hasher);
+    nookbit::EvaluateWatchFolderUseCase evaluate(workflow.scanner, classification, 0);
     nookbit::PendingQueueAdapter pendingQueue(pending);
     nookbit::WatchController watch(pendingQueue, pendingQueue, watchSettings, evaluate, incoming);
     QObject::connect(&pending, &nookbit::PendingFilesModel::countChanged,
