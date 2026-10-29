@@ -4,8 +4,9 @@ Status: incremental refactor, 2026-10-29. The pending-queue, classification-quer
 and integration-adapter seams (steps 1 through 3) are implemented. Module toggles,
 a module-enable registry and plugin loading remain planned.
 Step 4 now has scoped runtimes for Notifications, Folder Watch, File Organizer
-and Companion. Companion management-page/menu registration is implemented;
-other feature UI contributions and enablement remain pending.
+and Companion. Companion management-page/menu registration, an explicit desktop
+renderer contribution and a scoped tray action are implemented. Other feature UI
+contributions and enablement remain pending.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -49,7 +50,7 @@ owner without becoming one menu button.
 | [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence | Injected Organizer capabilities and application preferences remain host-owned |
 | [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and persistent or transient enabled preferences | Module enablement and registration ordering remain host responsibilities |
 | [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner | Queue state still resides in the existing model; module UI registration remains host-owned |
-| [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; registers its management page/menu | Desktop QML window, tray integration and feature-to-feature routes remain host-owned |
+| [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; supplies management-page/menu, desktop renderer and tray contributions | Host still chooses construction, attention actions, cross-feature routes and application exit policy |
 | [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped Companion management-page metadata, borrowed page inputs, generic menu rendering and QML loading | Other pages remain host-declared; this is not module enablement or live unloading |
 | [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
 
@@ -211,9 +212,11 @@ that runner's join. A settings controller may be destroyed before the import run
 import work only borrows the still-live library, and its QPointer-guarded UI
 completion is discarded. Screen/application connections and position-save timers
 have feature-owned QObject contexts. `startupResult()` reports an unusable required
-presentation/default verification pack to the host. The host still creates QML
-windows, exposes borrowed desktop endpoints, combines task busy state for application exit,
-and chooses notification/activity routes. Companion owns no file-operation worker.
+presentation/default verification pack to the host. The host loads the supplied
+desktop renderer, combines task busy state for application exit, and chooses
+notification/activity routes. The renderer receives explicit borrowed inputs;
+individual Companion controllers are no longer QML context globals. Companion
+owns no file-operation worker.
 
 The existing verification mode uses bundled rules, skips queue restoration/saving
 and availability polling, and ignores personal Companion preferences. Companion
@@ -245,11 +248,44 @@ The host resolves the extension title from registration and rejects missing rout
 returning to home if an open registered page disappears. The stable-ID route lookup
 is also used by the existing desktop Companion settings action.
 
-This step deliberately leaves the desktop character window, tray actions, portrait
-summary and their borrowed context endpoints in the host. It does not provide a
-working app startup without Companion yet. Other modules' menus/pages remain
-host-declared, and all runtimes are still constructed normally. Runtime enablement
-and restart handling follow after these remaining contributions are extracted.
+### Companion desktop renderer and tray contribution
+
+`CompanionRuntime::desktopUi()` supplies a bundled DesktopCompanion QML URL and
+explicit character/settings/placement/interactions/motion inputs. As with page
+inputs, these are borrowed: the host must destroy QML before the runtime and keep
+its preferences/application alive longer. A failed startup returns an empty
+contribution. This descriptor is separate from UiPageRegistry; a desktop renderer
+does not need a navigation route or menu title. No generic plugin registry is added.
+
+RegisteredDesktopHost loads that optional descriptor and forwards theme, attention
+availability, state commit, developer preview and outward requests. An empty
+descriptor creates no window; clearing it destroys the renderer, character and
+bubble windows and their QML timers. This is a rendering-boundary contract, not
+permission to unload the runtime during active work. The host still controls safe
+shutdown ordering and module changes remain restart-based.
+
+DesktopCompanion owns the actual CharacterWindow bindings, visual bounds, gestures,
+scale/placement, bubble preview and reaction gating. It knows no watch controller,
+notification center or file-operation runner. Attention activation only emits a
+request; Main chooses whether the current folder-watch offer is actionable and
+opens the existing proposal UI. The settings request carries `companion.settings`.
+The home portrait reads the renderer's summary, with an empty fallback; the developer
+preview button is unavailable without a renderer. Closing the main window still
+commits desktop position and leaves the companion running through the tray policy.
+
+`createTrayAction()` returns a host-owned scoped CompanionTrayAction. It owns its
+QAction and synchronizes the existing visibility controller in both directions.
+Destroying the contribution removes only its menu entry. If the feature endpoint
+dies first, the entry is removed and disabled; if the external menu dies first,
+QPointer guards permit later feature/binding teardown. Ordinary shutdown releases
+the contribution before the menu and runtime. The system-tray icon, open/exit
+actions, exit-while-busy policy and application lifecycle remain host-owned.
+Qt Widgets was already used by the app; this adds no new distribution dependency.
+
+This does not yet provide a working module-disable startup: Main still constructs
+Companion and selects its integration routes, and other features' menus/pages remain
+host-declared. Runtime enablement and restart handling follow after these remaining
+contributions are extracted.
 
 ## Enablement and UI ownership: target behavior
 
@@ -318,9 +354,9 @@ The same ownership/request/update rules apply to additions unrelated to companio
    Main chooses the routes; features do not call peer controllers to render them.
 4. **Host lifecycle and UI contributions: in progress.** NotificationRuntime,
    FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime own their internal
-   objects and preference connections. Companion management page/menu registration
-   is implemented; next extract the remaining feature contributions, initially
-   with all modules enabled.
+   objects and preference connections. Companion supplies its management page/menu,
+   desktop renderer and scoped tray action; next extract the remaining feature
+   contributions, initially with all modules enabled.
 5. **Persisted enablement and restart.** Add module management only after disabled
    startup combinations work. Check missing optional consumers, required-dependency
    reasons, preserved settings/data and absence of timers from inactive features.
@@ -346,4 +382,11 @@ independent owner lifetimes, actual Companion input registration, and failed-sta
 non-registration. QML boundary tests cover explicit page inputs, live theme,
 open/close routing, retained drafts, missing-registration cleanup and menu removal;
 the app smoke test exercises the registered Companion page and existing editor.
+Desktop-boundary tests cover absence/creation/removal of both independent windows,
+explicit inputs, theme and attention updates, reaction gating, stable settings
+requests, visibility cancellation, preview and pending-position commit without app
+globals. Tray tests cover both-direction visibility updates and teardown in binding-,
+feature- and menu-first order. Runtime tests check the desktop descriptor inputs and
+failed-startup non-contribution. Existing app smoke tests retain gestures, anchors,
+bubbles, editing and close-to-tray checks.
 Step 4 continues with the remaining UI contributions.

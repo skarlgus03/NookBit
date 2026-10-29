@@ -1,5 +1,6 @@
 #include "app/companion_runtime.hpp"
 #include "app/ui_page_registry.hpp"
+#include "app/companion_tray_action.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
@@ -257,6 +258,23 @@ CompanionRuntime::CompanionRuntime(CompanionRuntimeConfig config, QSettings& pre
 CompanionRuntime::~CompanionRuntime() = default;
 // 시작 실패를 호스트가 표시하고 종료할 수 있도록 반환하는 함수.
 const Result<void>& CompanionRuntime::startupResult() const { return state_->result; }
+// 바탕화면 표시기가 전역 컨트롤러 이름 없이 자체 입력만 사용하도록 반환하는 함수.
+QVariantMap CompanionRuntime::desktopUi() {
+    if (!startupResult()) return {};
+    return {{"id", QStringLiteral("companion.desktop")},
+        {"source", QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/DesktopCompanion.qml"))},
+        {"properties", QVariantMap{
+            {"character", QVariant::fromValue(static_cast<QObject*>(&character()))},
+            {"settings", QVariant::fromValue(static_cast<QObject*>(&settings()))},
+            {"placement", QVariant::fromValue(static_cast<QObject*>(&window()))},
+            {"interactions", QVariant::fromValue(static_cast<QObject*>(&interactions()))},
+            {"motion", QVariant::fromValue(static_cast<QObject*>(&motion()))}}}};
+}
+// 파일 정리나 종료 정책과 독립된 컴패니언 표시 메뉴를 만드는 함수.
+std::unique_ptr<CompanionTrayAction> CompanionRuntime::createTrayAction(QMenu& menu) {
+    if (!startupResult()) return {};
+    return std::make_unique<CompanionTrayAction>(menu, window());
+}
 // 관리 페이지의 실제 입력은 이 기능이 선택하고 호스트에는 등록 정보만 전달하는 함수.
 Result<void> CompanionRuntime::registerUi(UiPageRegistry& registry) {
     if (!startupResult()) return startupResult();

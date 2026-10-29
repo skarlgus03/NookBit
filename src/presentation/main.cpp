@@ -5,6 +5,7 @@
 #include "app/file_organizer_runtime.hpp"
 #include "app/companion_runtime.hpp"
 #include "app/ui_page_registry.hpp"
+#include "app/companion_tray_action.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
@@ -896,7 +897,6 @@ int main(int argc, char* argv[]) {
     auto& characterWindow = companion.window();
     auto& companionEdits = companion.edits();
     auto& companionInteractions = companion.interactions();
-    auto& companionMotion = companion.motion();
     auto& characterImports = companion.imports();
     nookbit::NotificationRuntime notificationRuntime(uiPreferences, !verifyUi);
     auto& notifications = notificationRuntime.controller();
@@ -956,18 +956,14 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
     engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
     engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
-    engine.rootContext()->setContextProperty(QStringLiteral("characterController"), &characterController);
     engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
-    engine.rootContext()->setContextProperty(QStringLiteral("companionInteractions"), &companionInteractions);
-    engine.rootContext()->setContextProperty(QStringLiteral("companionMotion"), &companionMotion);
-    engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
-    engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("destinationSettings"), &destinationSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     engine.rootContext()->setContextProperty(QStringLiteral("userGuides"), &userGuides);
     engine.rootContext()->setContextProperty(QStringLiteral("uiPages"), &uiPages);
+    engine.rootContext()->setContextProperty(QStringLiteral("companionDesktop"), companion.desktopUi());
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -976,12 +972,10 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection);
     engine.loadFromModule(QStringLiteral("NookBit"), QStringLiteral("Main"));
 
-    // 트레이 요청을 화면·캐릭터 상태에 연결하는 일은 조립부에서만 처리한다.
+    // 호스트는 공통 트레이 동작을 만들고 컴패니언의 메뉴 기여 수명만 보관한다.
     QMenu trayMenu;
     auto* openAction = trayMenu.addAction(QStringLiteral("NookBit 열기"));
-    auto* characterAction = trayMenu.addAction(QStringLiteral("캐릭터 표시"));
-    characterAction->setCheckable(true);
-    characterAction->setChecked(characterWindow.shown());
+    auto companionTray = companion.createTrayAction(trayMenu);
     trayMenu.addSeparator();
     auto* exitAction = trayMenu.addAction(QStringLiteral("완전 종료"));
     QSystemTrayIcon tray(application.windowIcon());
@@ -989,12 +983,6 @@ int main(int argc, char* argv[]) {
     tray.setContextMenu(&trayMenu);
     QObject::connect(openAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::openWindow);
     QObject::connect(exitAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::requestExit);
-    QObject::connect(characterAction, &QAction::triggered, &characterWindow, &nookbit::CharacterWindowController::setShown);
-    QObject::connect(&characterWindow, &nookbit::CharacterWindowController::visibilityChanged, &trayMenu,
-        [&characterWindow, characterAction] {
-            // 캐릭터 설정과 트레이 메뉴의 표시 상태를 일치시키는 함수.
-            characterAction->setChecked(characterWindow.shown());
-        });
     QObject::connect(&tray, &QSystemTrayIcon::activated, &appLifecycle,
         [&appLifecycle](QSystemTrayIcon::ActivationReason reason) {
             // 왼쪽 클릭 또는 더블클릭으로 숨긴 메인 창을 복원하는 함수.

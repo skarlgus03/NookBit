@@ -36,8 +36,12 @@ File work joins before its dependent repositories/controllers are destroyed; pac
 imports join before their library is destroyed. Saved settings/data remain intact.
 CompanionRuntime now registers its management page and menu in UiPageRegistry.
 The generic page host receives explicit feature inputs, keeps drafts while hidden,
-and uses shared theme/navigation services. Main still owns desktop/tray integration
-and other pages; whole-module enablement and remaining UI contributions are pending.
+and uses shared theme/navigation services. DesktopCompanion now owns the independent
+character-window bindings; Main loads its explicit descriptor instead of publishing
+individual Companion controller globals. A scoped CompanionTrayAction owns the
+visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
+action selection and other pages; whole-module enablement and remaining UI
+contributions are pending.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

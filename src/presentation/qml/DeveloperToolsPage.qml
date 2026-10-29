@@ -9,6 +9,7 @@ ScrollView {
     required property var pending
     required property var recovery
     property bool dark: false
+    property bool bubbleTestAvailable: false
     readonly property var theme: UiTheme.colors(dark)
     signal bubbleTestRequested
     signal legacyEditorRequested
@@ -33,6 +34,7 @@ ScrollView {
             }
             AppButton {
                 text: qsTr("말풍선 배치 테스트")
+                enabled: page.bubbleTestAvailable
                 onClicked: {
                     page.bubbleTestRequested();
                 }

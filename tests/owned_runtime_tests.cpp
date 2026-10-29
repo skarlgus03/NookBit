@@ -168,6 +168,16 @@ void testCompanionOwnership(QGuiApplication& app) {
         expect(runtime.startupResult().hasValue(), "companion restores bundled presentation and pack");
         expect(runtime.registerUi(pages).hasValue() && pages.pageId("companion.settings") == 5, "companion registers its own management page");
         expect(!runtime.registerUi(pages), "same companion page cannot be registered twice");
+        const auto desktop = runtime.desktopUi();
+        const auto desktopInputs = desktop.value("properties").toMap();
+        expect(desktop.value("id").toString() == "companion.desktop"
+            && desktop.value("source").toUrl().scheme() == "qrc"
+            && desktopInputs.value("character").value<QObject*>() == &runtime.character()
+            && desktopInputs.value("settings").value<QObject*>() == &runtime.settings()
+            && desktopInputs.value("placement").value<QObject*>() == &runtime.window()
+            && desktopInputs.value("motion").value<QObject*>() == &runtime.motion()
+            && desktopInputs.value("interactions").value<QObject*>() == &runtime.interactions(),
+            "desktop contribution supplies its source and explicit feature inputs");
         const auto inputs = pages.page(5).value("properties").toMap();
         expect(inputs.value("character").value<QObject*>() == &runtime.character()
             && inputs.value("settings").value<QObject*>() == &runtime.settings()
@@ -233,6 +243,7 @@ void testCompanionOwnership(QGuiApplication& app) {
         nookbit::CompanionRuntime broken({directory.path(), directory.path(), true}, preferences, app);
         expect(!broken.startupResult(), "missing required verification pack is a reported startup failure");
         expect(!broken.registerUi(pages) && pages.pages().isEmpty(), "failed companion startup contributes no page");
+        expect(broken.desktopUi().isEmpty(), "failed companion startup contributes no desktop renderer");
     }
 }
 }

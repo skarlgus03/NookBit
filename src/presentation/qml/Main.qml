@@ -7,38 +7,30 @@ ApplicationWindow {
     id: root
     font.pixelSize: UiMetrics.textBody
     // 트레이 종료에서도 마지막 캐릭터 위치와 열린 페이지 크기를 저장하는 함수.
-    function commitCharacterPosition() { desktopPet.commitPosition(); extensionWindow.commitSize() }
+    function commitCharacterPosition() { desktopUiHost.commitState(); extensionWindow.commitSize() }
     // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
     onClosing: function(close) {
         close.accepted = false
-        desktopPet.commitPosition()
-        extensionWindow.commitSize()
+        root.commitCharacterPosition()
         appLifecycle.closeWindow()
     }
-    CharacterWindow {
-        id: desktopPet
-        placement: characterWindow
-        descriptor: characterController.animation
-        bubbleSettings: characterController.bubble
+    RegisteredDesktopHost {
+        id: desktopUiHost
+        contribution: companionDesktop
         dark: root.editorDark
-        message: characterController.message
-        interactions: companionInteractions
-        onGestureHeldChanged: companionMotion.setPointerHeld(gestureHeld)
-        onVisualBoundsUpdated: function(left, right) { companionMotion.setVisualBounds(left, right) }
-        userScale: characterSettings.userScale
-        userPivotOffset: characterSettings.pivotOffset
-        userBubbleOffset: characterSettings.bubbleOffset
-        actionAvailable: characterController.reactionId === "" && notifications.activeTypes.includes("file.offer") && !backgroundTasks.busy
-        onActionRequested: {
-            if (characterController.reactionId !== "" || !notifications.activeTypes.includes("file.offer") || !watchController.proposalVisible || backgroundTasks.busy) return
+        attentionActionAvailable: notifications.activeTypes.includes("file.offer") && watchController.proposalVisible && !backgroundTasks.busy
+        // 알림의 실제 확인 동작은 기능 사이 연결을 맡는 호스트에서 선택한다.
+        onAttentionRequested: {
+            if (!attentionActionAvailable) return
             appLifecycle.openWindow()
             watchProposalDialog.open()
         }
-        onSettingsRequested: {
-            root.showNormal()
-            root.raise()
-            root.requestActivate()
-            root.openCharacterSettings()
+        // 등록되지 않은 설정 페이지는 열지 않고 정상 페이지를 메인 창과 함께 복원한다.
+        onPageRequested: function(pageId) {
+            const page = uiPages.pageId(pageId)
+            if (page === 0) return
+            appLifecycle.openWindow()
+            root.currentPage = page
         }
     }
     OperationProgressPopup {
@@ -125,7 +117,7 @@ ApplicationWindow {
         pendingCount: pendingFiles.count
         watchEnabled: watchController.enabled
         watchFolder: watchController.folder
-        companionDescriptor: characterController.animation
+        companionDescriptor: desktopUiHost.summary
         registeredPages: uiPages.pages
         navigationEnabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         currentPage: root.currentPage
@@ -350,7 +342,8 @@ ApplicationWindow {
         controller: previewController
         pending: pendingFiles
         recovery: recoveryController
-        onBubbleTestRequested: { characterWindow.setShown(true); desktopPet.testBubble() }
+        bubbleTestAvailable: desktopUiHost.item !== null
+        onBubbleTestRequested: desktopUiHost.preview()
         onLegacyEditorRequested: ruleDialog.open()
         onRulesRequested: root.currentPage = 1
         onRecoveryRequested: root.openRecovery()

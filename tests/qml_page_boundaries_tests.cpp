@@ -118,6 +118,98 @@ RegisteredPageHost {
     expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 5,
         "removing registration removes its home entry");
 }
+
+// 전역 컴패니언 이름 없이 표시기를 생성하고 요청과 종료를 전달하는지 검사하는 함수.
+void testDesktopContribution(QQmlEngine& engine) {
+    auto character = fake(engine, R"(
+        property var animation: ({})
+        property var bubble: ({})
+        property string message: "Hello"
+        property string reactionId: ""
+    )");
+    auto settings = fake(engine, R"(
+        property real userScale: 0.5
+        property point pivotOffset: Qt.point(0, 0)
+        property point bubbleOffset: Qt.point(0, 0)
+    )");
+    auto placement = fake(engine, R"(
+        property bool shown: true
+        property int anchorX: 400
+        property int anchorY: 400
+        property rect screenArea: Qt.rect(0, 0, 1000, 800)
+        function setShown(value) { shown = value }
+        function moveAnchor(x, y) { anchorX = x; anchorY = y }
+    )");
+    auto interactions = fake(engine, R"(
+        property int cancels: 0
+        function cancel() { ++cancels }
+    )");
+    auto motion = fake(engine, R"(
+        property bool held: false
+        property int boundsUpdates: 0
+        function setPointerHeld(value) { held = value }
+        function setVisualBounds(left, right) { ++boundsUpdates }
+    )");
+    if (!character || !settings || !placement || !interactions || !motion) return;
+    QQmlComponent component(&engine);
+    component.setData(R"(import QtQuick
+RegisteredDesktopHost {
+    property int attentionCount: 0
+    property string requestedPage: ""
+    onAttentionRequested: ++attentionCount
+    onPageRequested: function(pageId) { requestedPage = pageId }
+})", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/DesktopHostHarness.qml")));
+    const auto initialWindows = QGuiApplication::allWindows().size();
+    std::unique_ptr<QObject> owner(component.createWithInitialProperties({{"contribution", QVariantMap{}}}));
+    if (!owner) { expect(false, "create desktop host"); std::cerr << component.errorString().toStdString(); return; }
+    expect(owner->property("item").value<QObject*>() == nullptr && QGuiApplication::allWindows().size() == initialWindows,
+        "absent contribution creates no desktop or bubble window");
+    QMetaObject::invokeMethod(owner.get(), "commitState");
+    QMetaObject::invokeMethod(owner.get(), "preview");
+    const QVariantMap inputs{{"character", QVariant::fromValue(character.get())}, {"settings", QVariant::fromValue(settings.get())},
+        {"placement", QVariant::fromValue(placement.get())}, {"interactions", QVariant::fromValue(interactions.get())},
+        {"motion", QVariant::fromValue(motion.get())}};
+    owner->setProperty("contribution", QVariantMap{{"source", QUrl::fromLocalFile(
+        QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/DesktopCompanion.qml"))}, {"properties", inputs}});
+    settle();
+    QPointer<QQuickWindow> pet = owner->findChild<QQuickWindow*>("desktopCharacterWindow");
+    QPointer<QQuickWindow> bubble = owner->findChild<QQuickWindow*>("characterBubbleWindow");
+    expect(pet && bubble && pet->isVisible() && pet->transientParent() == nullptr,
+        "explicit inputs create an independent companion and bubble");
+    if (!pet || !bubble) return;
+    expect(motion->property("boundsUpdates").toInt() > 0, "renderer bounds reach the feature motion input");
+    owner->setProperty("dark", true);
+    owner->setProperty("attentionActionAvailable", true);
+    expect(pet->property("dark").toBool() && bubble->property("dark").toBool() && pet->property("actionAvailable").toBool(),
+        "live theme and host attention availability reach the renderer");
+    QMetaObject::invokeMethod(pet, "actionRequested");
+    expect(owner->property("attentionCount").toInt() == 1, "available attention requests reach host without executing file work");
+    character->setProperty("reactionId", "petting");
+    QMetaObject::invokeMethod(pet, "actionRequested");
+    expect(owner->property("attentionCount").toInt() == 1, "interaction reaction blocks attention activation");
+    character->setProperty("reactionId", "");
+    owner->setProperty("attentionActionAvailable", false);
+    QMetaObject::invokeMethod(pet, "actionRequested");
+    expect(owner->property("attentionCount").toInt() == 1, "unavailable attention does not invoke host action");
+    QMetaObject::invokeMethod(pet, "settingsRequested");
+    expect(owner->property("requestedPage").toString() == "companion.settings", "settings request uses stable feature page ID");
+    placement->setProperty("shown", false);
+    expect(!pet->isVisible() && interactions->property("cancels").toInt() > 0, "hiding cancels feature input without closing app");
+    QMetaObject::invokeMethod(owner.get(), "preview");
+    expect(pet->isVisible() && pet->property("testingBubble").toBool(), "development preview stays inside contributed renderer");
+    const int originalX = placement->property("anchorX").toInt();
+    pet->setX(pet->x() + 12);
+    QMetaObject::invokeMethod(owner.get(), "commitState");
+    expect(placement->property("anchorX").toInt() == originalX + 12, "host shutdown commits actual pending window movement");
+    owner->setProperty("contribution", QVariantMap{});
+    settle();
+    expect(pet.isNull() && bubble.isNull() && QGuiApplication::allWindows().size() == initialWindows,
+        "removing contribution destroys both independent windows and their timers");
+    character->setProperty("message", "After renderer destruction");
+    placement->setProperty("shown", false);
+    motion->setProperty("held", false);
+    settle();
+}
 }
 
 // 입력 초안의 독립성과 페이지 소유 확인창의 종료를 앱 조립부 없이 검사하는 함수.
@@ -168,6 +260,7 @@ int main(int argc, char** argv) {
     host.resize(960, 760);
     host.show();
     testRegisteredPageHost(engine, host);
+    testDesktopContribution(engine);
     if (!watch) return 1;
     const QVariantMap watchInputs{{"controller", QVariant::fromValue(watch.get())}, {"visible", false},
         {"width", 900}, {"height", 700}};

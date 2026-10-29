@@ -70,7 +70,23 @@ add_test(NAME nookbit_operation_timing_tests COMMAND nookbit_operation_timing_te
 add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progress_tests)
 
 if(TARGET nookbit_json_config)
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Qml Quick)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Widgets Qml Quick)
+  add_executable(nookbit_companion_tray_tests companion_tray_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.hpp
+    ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_window_controller.hpp)
+  set_target_properties(nookbit_companion_tray_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_companion_tray_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_features(nookbit_companion_tray_tests PRIVATE cxx_std_20)
+  target_link_libraries(nookbit_companion_tray_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+  if(MSVC)
+    target_compile_options(nookbit_companion_tray_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_companion_tray_tests COMMAND nookbit_companion_tray_tests)
+  set_tests_properties(nookbit_companion_tray_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  if(WIN32)
+    set_tests_properties(nookbit_companion_tray_tests PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_ui_page_registry_tests ui_page_registry_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.hpp
     ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.cpp)
@@ -90,6 +106,8 @@ if(TARGET nookbit_json_config)
     ${PROJECT_SOURCE_DIR}/resources/config.qrc
     ${PROJECT_SOURCE_DIR}/src/app/file_organizer_runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/app/companion_runtime.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.hpp
+    ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.hpp
     ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp
@@ -119,7 +137,7 @@ if(TARGET nookbit_json_config)
   target_include_directories(nookbit_owned_runtime_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(nookbit_owned_runtime_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   target_compile_features(nookbit_owned_runtime_tests PRIVATE cxx_std_20)
-  target_link_libraries(nookbit_owned_runtime_tests PRIVATE nookbit_filesystem nookbit_json_config nookbit_history Qt6::Core Qt6::Sql Qt6::Gui)
+  target_link_libraries(nookbit_owned_runtime_tests PRIVATE nookbit_filesystem nookbit_json_config nookbit_history Qt6::Core Qt6::Sql Qt6::Gui Qt6::Widgets)
   if(MSVC)
     target_compile_options(nookbit_owned_runtime_tests PRIVATE /W4 /permissive- /utf-8)
   endif()
