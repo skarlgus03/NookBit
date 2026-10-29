@@ -6,7 +6,7 @@ The plan distinguishes existing interfaces from module lifecycle work not yet im
 
 The first feature-module seam is implemented: WatchController queries pending
 paths through `IPendingPathsQuery` and registers accepted proposals through
-`IEnqueuePendingPaths`. A host-owned `PendingQueueAdapter` reuses the current
+`IEnqueuePendingPaths`. An Organizer-owned `PendingQueueAdapter` reuses the current
 model's admission rules; host connections forward queue changes. WatchController
 does not include or hold PendingFilesModel. Queue state is still owned by that
 model, so this is an incremental boundary rather than a completed backend rewrite.
@@ -34,8 +34,11 @@ capabilities into Watch, and exposes borrowed endpoints to QML and integration
 bridges. Internal timers and preference callbacks end with their feature owner.
 File work joins before its dependent repositories/controllers are destroyed; pack
 imports join before their library is destroyed. Saved settings/data remain intact.
-The host still owns tray/window lifecycle and UI registration; module enablement
-and a registry remain pending. See [runtime ownership](feature-modules.md#current-runtime-ownership)
+CompanionRuntime now registers its management page and menu in UiPageRegistry.
+The generic page host receives explicit feature inputs, keeps drafts while hidden,
+and uses shared theme/navigation services. Main still owns desktop/tray integration
+and other pages; whole-module enablement and remaining UI contributions are pending.
+See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 
 이 문서는 팀원이 기능을 붙일 때 **현재 코드가 어떻게 동작하는지**와 **어떤 방향으로 확장할지**를 구분하기 위한 안내다. 저장소의 코드가 최종 형태라는 뜻은 아니다. 특히 일부 컨트롤러는 아직 구체 구현을 직접 보유하고 있다.

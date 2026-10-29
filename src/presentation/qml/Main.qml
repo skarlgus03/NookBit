@@ -52,6 +52,11 @@ ApplicationWindow {
         y: extensionHost.y + (extensionHost.height - height) / 2
     }
     property int currentPage: 0
+    readonly property var hostPageTitles: ({1: qsTr("분류 규칙"), 3: qsTr("폴더 감시 설정"),
+        4: qsTr("작업 기록"), 6: qsTr("이름 충돌 설정"), 7: qsTr("파일 정리"),
+        8: qsTr("설정"), 9: qsTr("개발 도구"), 10: qsTr("중단 작업 확인"), 11: qsTr("알림")})
+    // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
+    function pageAvailable(page) { return page === 0 || hostPageTitles[page] !== undefined || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
     readonly property bool inlineRecoveryInspection: currentPage === 10 && backgroundTasks.busy && !backgroundTasks.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && fileSortPane.manualSortRequested
@@ -62,6 +67,12 @@ ApplicationWindow {
     onCurrentPageChanged: {
         // 예전 독립 미리보기 번호는 파일 정리로 돌려 빈 페이지를 만들지 않는다.
         if (currentPage === 2) { currentPage = 7; return }
+        if (!pageAvailable(currentPage)) currentPage = 0
+    }
+    Connections {
+        target: uiPages
+        // 없어진 페이지 번호로 빈 서브창이 남지 않게 홈으로 복귀하는 함수.
+        function onPagesChanged() { if (!root.pageAvailable(root.currentPage)) root.currentPage = 0 }
     }
     readonly property bool editorDark: uiSettings.darkMode
     readonly property var theme: UiTheme.colors(editorDark)
@@ -95,8 +106,8 @@ ApplicationWindow {
     }
     // 캐릭터 설정을 오른쪽 확장 영역에 여는 함수.
     function openCharacterSettings() {
-        currentPage = 5
-        characterSettingsDialog.open()
+        const page = uiPages.pageId("companion.settings")
+        if (page !== 0) currentPage = page
     }
 
     width: homeWidth
@@ -115,6 +126,7 @@ ApplicationWindow {
         watchEnabled: watchController.enabled
         watchFolder: watchController.folder
         companionDescriptor: characterController.animation
+        registeredPages: uiPages.pages
         navigationEnabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
         currentPage: root.currentPage
         width: root.homeWidth
@@ -240,7 +252,7 @@ ApplicationWindow {
             anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
-                text: ["", qsTr("분류 규칙"), qsTr("분류 결과"), qsTr("폴더 감시 설정"), qsTr("작업 기록"), qsTr("컴패니언"), qsTr("이름 충돌 설정"), qsTr("파일 정리"), qsTr("설정"), qsTr("개발 도구"), qsTr("중단 작업 확인"), qsTr("알림")][root.currentPage]
+                text: uiPages.page(root.currentPage).title || root.hostPageTitles[root.currentPage] || ""
                 color: root.theme.text
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
@@ -372,20 +384,19 @@ ApplicationWindow {
         }
     }
 
-    CompanionPage {
-        id: characterSettingsDialog
+    Repeater {
         parent: extensionHost
-        anchors.fill: parent
-        visible: root.currentPage === 5
-        dark: root.editorDark
-        character: characterController
-        settings: characterSettings
-        placement: characterWindow
-        motion: companionMotion
-        edits: companionEdits
-        guideService: userGuides
-        onOpenRequested: root.currentPage = 5
-        onCloseRequested: if (root.currentPage === 5) root.currentPage = 0
+        model: uiPages.pages
+        delegate: RegisteredPageHost {
+            required property var modelData
+            registration: modelData
+            anchors.fill: parent
+            selected: root.currentPage === modelData.page
+            dark: root.editorDark
+            guideService: userGuides
+            onPageRequested: function(page) { root.currentPage = page }
+            onCloseRequested: function(page) { if (root.currentPage === page) root.currentPage = 0 }
+        }
     }
 
     SortConfirmationDialog {

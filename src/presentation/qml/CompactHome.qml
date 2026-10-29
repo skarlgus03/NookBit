@@ -12,6 +12,7 @@ Rectangle {
     property bool watchEnabled: false
     property string watchFolder: ""
     property var companionDescriptor: ({})
+    property var registeredPages: []
     property int currentPage: 0
     readonly property int selectedPage: [3, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
     signal pageRequested(int page)
@@ -21,6 +22,18 @@ Rectangle {
     signal closeRequested()
     readonly property var theme: UiTheme.colors(dark)
     readonly property color foreground: theme.text
+    // 기존 메뉴와 모듈이 등록한 메뉴를 같은 순서 규격으로 합치는 함수형 바인딩.
+    readonly property var navigationEntries: {
+        const entries = [
+            {label: qsTr("파일 정리"), page: 7, icon: "folder", section: qsTr("파일 관리"), order: 10},
+            {label: qsTr("분류 규칙"), page: 1, icon: "rules", section: "", order: 20},
+            {label: qsTr("작업 기록"), page: 4, icon: "history", section: "", order: 30},
+            {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱"), order: 50},
+            {label: qsTr("알림"), page: 11, icon: "notifications", section: "", order: 60}
+        ]
+        for (let i = 0; i < registeredPages.length; ++i) entries.push(registeredPages[i])
+        return entries.sort((left, right) => left.order - right.order || left.page - right.page)
+    }
     color: theme.home
     radius: UiMetrics.radiusControl
     border.color: theme.border
@@ -66,14 +79,7 @@ Rectangle {
                     onSortRequested: home.pageRequested(7)
                 }
                 Repeater {
-                    model: [
-                        {label: qsTr("파일 정리"), page: 7, icon: "folder", section: qsTr("파일 관리")},
-                        {label: qsTr("분류 규칙"), page: 1, icon: "rules", section: ""},
-                        {label: qsTr("작업 기록"), page: 4, icon: "history", section: ""},
-                        {label: qsTr("컴패니언"), page: 5, icon: "companion", section: qsTr("컴패니언")},
-                        {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱")},
-                        {label: qsTr("알림"), page: 11, icon: "notifications", section: ""}
-                    ]
+                    model: home.navigationEntries
                     delegate: ColumnLayout {
                         required property var modelData
                         Layout.fillWidth: true

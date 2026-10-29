@@ -4,6 +4,7 @@
 #include "app/folder_watch_runtime.hpp"
 #include "app/file_organizer_runtime.hpp"
 #include "app/companion_runtime.hpp"
+#include "app/ui_page_registry.hpp"
 #include "presentation/file_icon_provider.hpp"
 #include "presentation/file_preview_provider.hpp"
 #include "presentation/preview_controller.hpp"
@@ -67,6 +68,15 @@
 #include <QTemporaryDir>
 #include <QSemaphore>
 #include <QJSValue>
+
+// 리피터·로더의 화면 자식도 객체 소유 트리와 무관하게 찾는 자동 검사용 함수.
+static QQuickItem* findVisualItem(QQuickItem* item, const QString& name) {
+    if (!item) return nullptr;
+    if (item->objectName() == name) return item;
+    for (auto* child : item->childItems())
+        if (auto* found = findVisualItem(child, name)) return found;
+    return nullptr;
+}
 
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
@@ -869,9 +879,16 @@ int main(int argc, char* argv[]) {
     auto& watchController = folderWatch.controller();
     QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
         &watchController, &nookbit::WatchController::pendingPathsChanged);
+    // 아직 호스트가 제공하는 페이지 번호는 기능 등록에서 재사용하지 않는다.
+    nookbit::UiPageRegistry uiPages({1, 2, 3, 4, 6, 7, 8, 9, 10, 11});
     nookbit::CompanionRuntime companion({appData, QCoreApplication::applicationDirPath(), verifyUi}, uiPreferences, application);
     if (!companion.startupResult()) {
         QTextStream(stderr) << QString::fromStdString(companion.startupResult().error().message) << Qt::endl;
+        return EXIT_FAILURE;
+    }
+    const auto companionUi = companion.registerUi(uiPages);
+    if (!companionUi) {
+        QTextStream(stderr) << QString::fromStdString(companionUi.error().message) << Qt::endl;
         return EXIT_FAILURE;
     }
     auto& characterController = companion.character();
@@ -944,13 +961,13 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("companionInteractions"), &companionInteractions);
     engine.rootContext()->setContextProperty(QStringLiteral("companionMotion"), &companionMotion);
     engine.rootContext()->setContextProperty(QStringLiteral("characterSettings"), &characterSettings);
-    engine.rootContext()->setContextProperty(QStringLiteral("companionEdits"), &companionEdits);
     engine.rootContext()->setContextProperty(QStringLiteral("characterWindow"), &characterWindow);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("destinationSettings"), &destinationSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     engine.rootContext()->setContextProperty(QStringLiteral("userGuides"), &userGuides);
+    engine.rootContext()->setContextProperty(QStringLiteral("uiPages"), &uiPages);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -1185,8 +1202,10 @@ int main(int argc, char* argv[]) {
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryDialog"));
         QObject* recoveryConfirmDialog = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
-        QObject* characterSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterSettingsDialog"));
+        auto* companionExtension = engine.rootObjects().isEmpty() ? nullptr
+            : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("extensionWindow"));
+        QObject* characterSettingsDialog = findVisualItem(companionExtension ? companionExtension->contentItem() : nullptr,
+            QStringLiteral("characterSettingsDialog"));
         auto* desktopCharacter = engine.rootObjects().isEmpty() ? nullptr
             : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("desktopCharacterWindow"));
         QObject* desktopSprite = desktopCharacter
@@ -1194,8 +1213,8 @@ int main(int argc, char* argv[]) {
         auto* characterBubble = desktopCharacter
             ? desktopCharacter->findChild<QQuickWindow*>(QStringLiteral("characterBubbleWindow")) : nullptr;
         // 인터넷 없이 두 제작 문서를 읽고 직접 저장 창구로 제공하는지 검사한다.
-        auto* characterGuide = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterGuideDownload"));
+        auto* characterGuide = characterSettingsDialog
+            ? characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterGuideDownload")) : nullptr;
         const bool guideReady = !userGuides.text("rules").isEmpty() && !userGuides.text("character").isEmpty() &&
             characterGuide && characterGuide->property("guideKey").toString() == "character" &&
             characterGuide->findChild<QObject*>(QStringLiteral("guideSaveDialog"));
@@ -1326,9 +1345,9 @@ int main(int argc, char* argv[]) {
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
                            engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
-                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")) != nullptr &&
-                           QMetaObject::invokeMethod(engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "open") &&
-                           QMetaObject::invokeMethod(engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "close") &&
+                           characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterAnchorEditor")) != nullptr &&
+                           QMetaObject::invokeMethod(characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "open") &&
+                           QMetaObject::invokeMethod(characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "close") &&
                            QMetaObject::invokeMethod(engine.rootObjects().first(), "openCharacterSettings") &&
                            QMetaObject::invokeMethod(characterSettingsDialog, "open") &&
                            characterSettingsDialog->property("opened").toBool() &&

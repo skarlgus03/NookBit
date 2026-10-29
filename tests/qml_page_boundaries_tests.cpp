@@ -9,6 +9,9 @@
 #include <QImage>
 #include <QTemporaryDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QPointer>
+#include <QJSValue>
 #include <memory>
 #include <iostream>
 
@@ -43,6 +46,77 @@ std::unique_ptr<QObject> fake(QQmlEngine& engine, const QByteArray& source) {
     std::unique_ptr<QObject> result(component.create());
     if (!result) { ++failures; std::cerr << component.errorString().toStdString(); }
     return result;
+}
+
+// 등록된 화면이 전역 기능 이름 없이 입력·테마·열기 요청을 받는지 검사하는 함수.
+void testRegisteredPageHost(QQmlEngine& engine, QQuickWindow& window) {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "registered-page fixture"); return; }
+    const auto source = directory.filePath("Probe.qml");
+    QFile file(source);
+    if (!file.open(QIODevice::WriteOnly)) { expect(false, "create registered-page probe"); return; }
+    file.write(R"(import QtQuick
+Item {
+    objectName: "registeredPageProbe"
+    required property var service
+    required property var guideService
+    property bool dark: false
+    property int draft: 0
+    signal openRequested()
+    signal closeRequested()
+})");
+    file.close();
+    auto service = fake(engine, "property string token: 'feature-input'");
+    if (!service) return;
+    const QVariantMap registration{{"page", 37}, {"source", QUrl::fromLocalFile(source)},
+        {"properties", QVariantMap{{"service", QVariant::fromValue(service.get())}}}};
+    QQmlComponent component(&engine);
+    component.setData(R"(import QtQuick
+RegisteredPageHost {
+    property int openedRoute: 0
+    property int closedRoute: 0
+    onPageRequested: function(page) { openedRoute = page }
+    onCloseRequested: function(page) { closedRoute = page }
+})", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/RegisteredHostHarness.qml")));
+    std::unique_ptr<QObject> owner(component.createWithInitialProperties({{"registration", registration},
+        {"guideService", QVariant::fromValue(service.get())}, {"width", 500}, {"height", 400}}));
+    if (!owner) { expect(false, "create registered-page host"); std::cerr << component.errorString().toStdString(); return; }
+    qobject_cast<QQuickItem*>(owner.get())->setParentItem(window.contentItem());
+    QPointer<QObject> probe = owner->findChild<QObject*>("registeredPageProbe");
+    expect(probe && !probe->property("visible").toBool(), "registered page loads hidden before selection");
+    if (!probe) return;
+    expect(probe->property("service").value<QObject*>() == service.get()
+        && probe->property("guideService").value<QObject*>() == service.get(), "feature and host inputs injected explicitly");
+    owner->setProperty("selected", true);
+    probe->setProperty("draft", 42);
+    owner->setProperty("dark", true);
+    expect(probe->property("visible").toBool() && probe->property("dark").toBool(), "selection and live theme reach registered page");
+    QMetaObject::invokeMethod(probe, "openRequested");
+    QMetaObject::invokeMethod(probe, "closeRequested");
+    expect(owner->property("openedRoute").toInt() == 37 && owner->property("closedRoute").toInt() == 37,
+        "page requests are routed through its registration instead of a feature-specific host branch");
+    owner->setProperty("selected", false);
+    owner->setProperty("selected", true);
+    expect(probe && probe->property("draft").toInt() == 42, "ordinary navigation retains the page draft");
+    owner->setProperty("registration", QVariantMap{});
+    settle();
+    expect(probe.isNull() && owner->property("item").value<QObject*>() == nullptr,
+        "missing registration releases its loaded page");
+
+    auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 660}});
+    if (!home) return;
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 5,
+        "unregistered companion has no hardcoded home menu entry");
+    auto menuEntry = registration;
+    menuEntry.insert("label", "Companion"); menuEntry.insert("icon", "companion");
+    menuEntry.insert("section", "Companion"); menuEntry.insert("order", 40);
+    home->setProperty("registeredPages", QVariantList{menuEntry});
+    const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
+    expect(entries.size() == 6 && entries[3].toMap().value("page").toInt() == 37,
+        "registered menu is placed between file tools and app settings");
+    home->setProperty("registeredPages", QVariantList{});
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 5,
+        "removing registration removes its home entry");
 }
 }
 
@@ -93,6 +167,7 @@ int main(int argc, char** argv) {
     QQuickWindow host;
     host.resize(960, 760);
     host.show();
+    testRegisteredPageHost(engine, host);
     if (!watch) return 1;
     const QVariantMap watchInputs{{"controller", QVariant::fromValue(watch.get())}, {"visible", false},
         {"width", 900}, {"height", 700}};

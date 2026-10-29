@@ -122,6 +122,8 @@ if(NOOKBIT_BUILD_QT_APP)
       app/file_organizer_runtime.cpp
       app/companion_runtime.hpp
       app/companion_runtime.cpp
+      app/ui_page_registry.hpp
+      app/ui_page_registry.cpp
       presentation/background_task_runner.hpp
       presentation/character_controller.hpp
       presentation/character_controller.cpp
@@ -210,6 +212,7 @@ if(NOOKBIT_BUILD_QT_APP)
           presentation/qml/FileTypeBadge.qml
         presentation/qml/RecoveryPage.qml
         presentation/qml/CompanionPage.qml
+        presentation/qml/RegisteredPageHost.qml
           presentation/qml/CompanionSettingsPanel.qml
           presentation/qml/AppSwitch.qml
           presentation/qml/AppSlider.qml

@@ -1,4 +1,5 @@
 #include "app/companion_runtime.hpp"
+#include "app/ui_page_registry.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "presentation/character_controller.hpp"
 #include "presentation/character_settings_controller.hpp"
@@ -256,6 +257,19 @@ CompanionRuntime::CompanionRuntime(CompanionRuntimeConfig config, QSettings& pre
 CompanionRuntime::~CompanionRuntime() = default;
 // 시작 실패를 호스트가 표시하고 종료할 수 있도록 반환하는 함수.
 const Result<void>& CompanionRuntime::startupResult() const { return state_->result; }
+// 관리 페이지의 실제 입력은 이 기능이 선택하고 호스트에는 등록 정보만 전달하는 함수.
+Result<void> CompanionRuntime::registerUi(UiPageRegistry& registry) {
+    if (!startupResult()) return startupResult();
+    const auto title = QCoreApplication::translate("CompanionUi", "컴패니언");
+    return registry.addPage({QStringLiteral("companion.settings"), QStringLiteral("companion"), 5,
+        title, QStringLiteral("companion"), title, 40,
+        QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/CompanionPage.qml")),
+        {{"character", QVariant::fromValue(static_cast<QObject*>(&character()))},
+         {"settings", QVariant::fromValue(static_cast<QObject*>(&settings()))},
+         {"placement", QVariant::fromValue(static_cast<QObject*>(&window()))},
+         {"motion", QVariant::fromValue(static_cast<QObject*>(&motion()))},
+         {"edits", QVariant::fromValue(static_cast<QObject*>(&edits()))}}}, state_->connections);
+}
 // 소유한 characterController 창구를 빌려주는 함수.
 CharacterController& CompanionRuntime::character() { return state_->characterController; }
 // 소유한 characterSettings 창구를 빌려주는 함수.

@@ -71,11 +71,27 @@ add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progres
 
 if(TARGET nookbit_json_config)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Qml Quick)
+  add_executable(nookbit_ui_page_registry_tests ui_page_registry_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.hpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.cpp)
+  set_target_properties(nookbit_ui_page_registry_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_ui_page_registry_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_features(nookbit_ui_page_registry_tests PRIVATE cxx_std_20)
+  target_link_libraries(nookbit_ui_page_registry_tests PRIVATE nookbit_core Qt6::Core)
+  if(MSVC)
+    target_compile_options(nookbit_ui_page_registry_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_ui_page_registry_tests COMMAND nookbit_ui_page_registry_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_ui_page_registry_tests PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_owned_runtime_tests
     owned_runtime_tests.cpp
     ${PROJECT_SOURCE_DIR}/resources/config.qrc
     ${PROJECT_SOURCE_DIR}/src/app/file_organizer_runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/app/companion_runtime.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.hpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/pending_files_model.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/preview_controller.hpp

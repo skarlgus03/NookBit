@@ -1,5 +1,6 @@
 #include "app/file_organizer_runtime.hpp"
 #include "app/companion_runtime.hpp"
+#include "app/ui_page_registry.hpp"
 #include <nookbit/application/pending_queue.hpp>
 #include "presentation/pending_files_model.hpp"
 #include "presentation/preview_controller.hpp"
@@ -161,9 +162,18 @@ void testCompanionOwnership(QGuiApplication& app) {
     QPointer<nookbit::CompanionInteractionController> interactions;
     QPointer<nookbit::CompanionMotionController> motion;
     QPointer<nookbit::BackgroundTaskRunner> imports;
+    nookbit::UiPageRegistry pages({1, 7, 8});
     {
         nookbit::CompanionRuntime runtime({directory.path(), resources}, preferences, app);
         expect(runtime.startupResult().hasValue(), "companion restores bundled presentation and pack");
+        expect(runtime.registerUi(pages).hasValue() && pages.pageId("companion.settings") == 5, "companion registers its own management page");
+        expect(!runtime.registerUi(pages), "same companion page cannot be registered twice");
+        const auto inputs = pages.page(5).value("properties").toMap();
+        expect(inputs.value("character").value<QObject*>() == &runtime.character()
+            && inputs.value("settings").value<QObject*>() == &runtime.settings()
+            && inputs.value("placement").value<QObject*>() == &runtime.window()
+            && inputs.value("motion").value<QObject*>() == &runtime.motion()
+            && inputs.value("edits").value<QObject*>() == &runtime.edits(), "page inputs come from the owning feature");
         character = &runtime.character(); settings = &runtime.settings(); window = &runtime.window();
         editor = &runtime.edits(); interactions = &runtime.interactions(); motion = &runtime.motion(); imports = &runtime.imports();
         expect(settings->selectedKey() == "builtin" && settings->userScale() == 0.75 && !window->shown() && !motion->enabled(),
@@ -179,6 +189,7 @@ void testCompanionOwnership(QGuiApplication& app) {
     }
     expect(character.isNull() && settings.isNull() && window.isNull() && editor.isNull() && interactions.isNull() && motion.isNull() && imports.isNull(),
         "all Companion endpoints die with owner");
+    expect(pages.pages().isEmpty(), "companion destruction removes page and menu metadata before borrowed endpoints expire");
     QCoreApplication::processEvents();
     const auto keys = preferences.allKeys();
     const auto savedScale = preferences.value("character/scales/builtin");
@@ -221,6 +232,7 @@ void testCompanionOwnership(QGuiApplication& app) {
     {
         nookbit::CompanionRuntime broken({directory.path(), directory.path(), true}, preferences, app);
         expect(!broken.startupResult(), "missing required verification pack is a reported startup failure");
+        expect(!broken.registerUi(pages) && pages.pages().isEmpty(), "failed companion startup contributes no page");
     }
 }
 }
