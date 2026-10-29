@@ -159,6 +159,9 @@ void testDesktopContribution(QQmlEngine& engine) {
     )");
     auto interactions = fake(engine, R"(
         property int cancels: 0
+        property var menuActions: [{id: "companion.feed", label: "Feed", enabled: true}]
+        property string invoked: ""
+        function invoke(id, x, y) { invoked = id; return true }
         function cancel() { ++cancels }
     )");
     auto motion = fake(engine, R"(
@@ -210,6 +213,25 @@ RegisteredDesktopHost {
     expect(owner->property("attentionCount").toInt() == 1, "unavailable attention does not invoke host action");
     QMetaObject::invokeMethod(pet, "settingsRequested");
     expect(owner->property("requestedPage").toString() == "companion.settings", "settings request uses stable feature page ID");
+    QPointer<QObject> feed = pet->findChild<QObject*>("companionAction_companion.feed");
+    auto* contextSettings = pet->findChild<QObject*>("companionContextSettings");
+    auto* contextMenu = pet->findChild<QObject*>("companionContextMenu");
+    expect(feed && contextSettings && contextMenu, "desktop menu combines contributed actions and stable settings entry");
+    if (feed && contextSettings && contextMenu) {
+        QMetaObject::invokeMethod(contextMenu, "open");
+        settle();
+        expect(contextMenu->property("visible").toBool() && pet->property("gestureHeld").toBool() && motion->property("held").toBool(),
+            "open context menu holds autonomous movement until dismissed");
+        QMetaObject::invokeMethod(contextMenu, "close");
+        settle();
+        QMetaObject::invokeMethod(feed, "triggered");
+        expect(interactions->property("invoked") == "companion.feed", "menu invokes generic interaction ID");
+        QMetaObject::invokeMethod(contextSettings, "triggered");
+        expect(owner->property("requestedPage").toString() == "companion.settings", "settings remains reachable through context menu");
+        interactions->setProperty("menuActions", QVariantList{});
+        settle();
+        expect(feed.isNull() && contextSettings, "removing a contributed action removes its item without removing settings");
+    }
     placement->setProperty("shown", false);
     expect(!pet->isVisible() && interactions->property("cancels").toInt() > 0, "hiding cancels feature input without closing app");
     QMetaObject::invokeMethod(owner.get(), "preview");

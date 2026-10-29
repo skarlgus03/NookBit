@@ -90,6 +90,10 @@ are not supported.
 - Optional bindings can target actual application cues such as `file.offer` and
   `file.work`. An unbound cue uses the relevant fallback state. Inventing a cue
   name in JSON does not add a feature or cause that cue to be emitted.
+- The optional feeding module emits `interact.feed` for 2,400 ms. Bind that cue
+  to an authored eating animation if available; otherwise normal fallback artwork
+  is used with the feeding message. No new top-level field or schema version is
+  needed. Feeding is started by the desktop right-click menu, not by pack data.
 - Autonomous walking requires both `walk.left` and `walk.right`. If both bind to
   the same animation, it is treated as a left-facing original and mirrored about
   the pivot when facing right. Different animations use their own artwork without

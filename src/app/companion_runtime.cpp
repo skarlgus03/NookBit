@@ -219,6 +219,8 @@ struct CompanionRuntime::State {
         if (!interactionsRegistered) return interactionsRegistered;
         QObject::connect(&companionInteractions, &CompanionInteractionController::reactionRequested,
             &characterController, &CharacterController::presentInteraction);
+        QObject::connect(&characterController, &CharacterController::stateChanged, &companionInteractions, &CompanionInteractionController::refreshContext);
+        QObject::connect(&characterController, &CharacterController::reactionChanged, &companionInteractions, &CompanionInteractionController::refreshContext);
         const auto refreshInteractionTarget = [this] {
             // 바탕화면 표시 여부만 입력 가능 상태에 반영하는 함수.
             companionInteractions.setAvailable(characterWindow.shown());
@@ -298,6 +300,8 @@ CharacterWindowController& CompanionRuntime::window() { return state_->character
 CompanionEditController& CompanionRuntime::edits() { return state_->companionEdits; }
 // 소유한 companionInteractions 창구를 빌려주는 함수.
 CompanionInteractionController& CompanionRuntime::interactions() { return state_->companionInteractions; }
+// 효과 구현이나 캐릭터 표현을 넘기지 않고 등록 계약만 반환하는 함수.
+IInteractionRegistry& CompanionRuntime::interactionRegistry() { return state_->interactionManager; }
 // 소유한 companionMotion 창구를 빌려주는 함수.
 CompanionMotionController& CompanionRuntime::motion() { return state_->companionMotion; }
 // 소유한 characterImports 창구를 빌려주는 함수.

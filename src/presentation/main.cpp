@@ -910,7 +910,7 @@ int main(int argc, char* argv[]) {
     // 자동 검사는 개인 모듈 설정을 읽거나 쓰지 않고 기존 전체 기능 기준을 유지한다.
     const auto loadedFeatures = verifyUi && !verifyFeaturePreferences
         ? nookbit::Result<nookbit::FeatureSelection>::success({}) : featurePreferences.load();
-    const auto savedFeatures = loadedFeatures ? loadedFeatures.value() : nookbit::FeatureSelection{false, false, false, false};
+    const auto savedFeatures = loadedFeatures ? loadedFeatures.value() : nookbit::FeatureSelection{false, false, false, false, false};
     const auto selectedFeatures = nookbit::parseFeatureSelection(verifyFeaturePreferences ? QStringList{} : arguments, savedFeatures);
     auto startup = nookbit::resolveFeatureStartup(selectedFeatures.value());
     const auto featureLoadError = loadedFeatures ? QString() : QString::fromStdString(loadedFeatures.error().message);
@@ -1092,7 +1092,12 @@ int main(int argc, char* argv[]) {
         auto* window = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QQuickWindow*>(engine.rootObjects().first());
         bool valid = window && featureBindingsClean && !features.busy();
         valid = valid && bool(organizer) == startup.active.organizer && bool(folderWatch) == startup.active.watch
-            && bool(notificationRuntime) == startup.active.notifications && bool(companion) == startup.active.companion;
+            && bool(notificationRuntime) == startup.active.notifications && bool(companion) == startup.active.companion
+            && bool(features.feeding()) == startup.active.feeding;
+        if (companion) {
+            const auto actions = companion->interactions().menuActions();
+            valid = valid && actions.size() == (startup.active.feeding ? 1 : 0);
+        }
         const int expectedPages = (organizer ? 5 : 0) + (folderWatch ? 1 : 0)
             + (notificationRuntime ? 1 : 0) + (companion ? 1 : 0);
         valid = valid && uiPages.pages().size() == expectedPages;
@@ -1103,6 +1108,7 @@ int main(int argc, char* argv[]) {
             && present("watchSettingsDialog") == startup.active.watch && present("settingsWatchButton") == startup.active.watch
             && present("watchProposalDialog") == startup.active.watch && present("notificationSettingsPage") == startup.active.notifications
             && present("desktopCharacterWindow") == startup.active.companion && present("homeCompanionSprite") == startup.active.companion;
+        valid = valid && present("companionAction_companion.feed") == startup.active.feeding;
         int companionActions{};
         for (auto* action : trayMenu.actions()) if (action->objectName() == "companionVisibilityAction") ++companionActions;
         valid = valid && companionActions == (startup.active.companion ? 1 : 0);
@@ -1145,7 +1151,8 @@ int main(int argc, char* argv[]) {
         }
         valid = valid && featureBindingsClean;
         QTextStream(stdout) << "Feature startup: organizer=" << startup.active.organizer << " watch=" << startup.active.watch
-            << " notifications=" << startup.active.notifications << " companion=" << startup.active.companion << " valid=" << valid << Qt::endl;
+            << " notifications=" << startup.active.notifications << " companion=" << startup.active.companion
+            << " feeding=" << startup.active.feeding << " valid=" << valid << Qt::endl;
         return valid ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.

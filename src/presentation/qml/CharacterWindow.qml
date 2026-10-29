@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 
 // 파일 작업과 별개로 캐릭터 표현 값만 재생하는 투명 독립 창.
 Window {
@@ -18,7 +19,7 @@ Window {
     readonly property var currentAttachment: sprite.renderedStep.attachment || bubbleSettings.attachment || ({x: 0, y: -120})
     readonly property point bubbleOffset: Qt.point(currentAttachment.x, currentAttachment.y)
     readonly property bool mirrored: sprite.renderedMirrorX
-    readonly property bool gestureHeld: gestureInput.tracking
+    readonly property bool gestureHeld: gestureInput.tracking || actionMenu.opened
     signal visualBoundsUpdated(real left, real right)
     property bool actionAvailable: false
     property bool testingBubble: false
@@ -43,6 +44,7 @@ Window {
     // 숨겨질 때 진행 중 입력과 반응을 함께 정리하는 함수.
     onVisibleChanged: {
         if (!visible && interactions) {
+            if (actionMenu) actionMenu.close()
             interactions.cancel()
             gestureInput.tracking = false
             gestureInput.gestureKind = ""
@@ -141,7 +143,8 @@ Window {
                 if (tracking) pet.interactions.cancel()
                 tracking = false
                 gestureKind = ""
-                pet.settingsRequested()
+                actionMenu.contact = contactPoint(mouse)
+                actionMenu.popup(mouse.x, mouse.y)
                 return
             }
             pressScreen = mapToGlobal(mouse.x, mouse.y)
@@ -185,6 +188,48 @@ Window {
             if (tracking) pet.interactions.cancel()
             tracking = false
             gestureKind = ""
+        }
+    }
+    Menu {
+        id: actionMenu
+        objectName: "companionContextMenu"
+        parent: pet.contentItem
+        property point contact: Qt.point(0, 0)
+        readonly property var actions: pet.interactions ? (pet.interactions.menuActions || []) : []
+        // 지원되는 Qt에서는 투명 캐릭터 창 경계에 메뉴가 잘리지 않도록 별도 팝업을 사용한다.
+        Component.onCompleted: if ("popupType" in actionMenu) actionMenu.popupType = Popup.Window
+        width: Math.min(UiMetrics.companionMenuWidth, pet.width)
+        padding: UiMetrics.spaceExtraSmall
+        font.pixelSize: UiMetrics.textBody
+        palette.text: UiTheme.colors(pet.dark).text
+        palette.windowText: UiTheme.colors(pet.dark).text
+        palette.highlight: UiTheme.colors(pet.dark).accent
+        palette.highlightedText: UiTheme.colors(pet.dark).accentText
+        background: Rectangle {
+            radius: UiMetrics.radiusControl
+            color: UiTheme.colors(pet.dark).surface
+            border.width: UiMetrics.borderNormal
+            border.color: UiTheme.colors(pet.dark).border
+        }
+        Instantiator {
+            model: actionMenu.actions
+            delegate: MenuItem {
+                required property var modelData
+                objectName: "companionAction_" + modelData.id
+                text: modelData.label
+                enabled: modelData.enabled
+                height: UiMetrics.controlHeight
+                onTriggered: pet.interactions.invoke(modelData.id, actionMenu.contact.x, actionMenu.contact.y)
+            }
+            onObjectAdded: (index, object) => actionMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => actionMenu.removeItem(object)
+        }
+        MenuSeparator { visible: actionMenu.actions.length > 0 }
+        MenuItem {
+            objectName: "companionContextSettings"
+            text: qsTr("컴패니언 설정")
+            height: UiMetrics.controlHeight
+            onTriggered: pet.settingsRequested()
         }
     }
     Timer {

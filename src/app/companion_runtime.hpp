@@ -17,6 +17,7 @@ class CompanionMotionController;
 class BackgroundTaskRunner;
 class UiPageRegistry;
 class CompanionTrayAction;
+class IInteractionRegistry;
 
 struct CompanionRuntimeConfig {
     QString appData;
@@ -50,6 +51,8 @@ public:
     CompanionEditController& edits();
     /// 클릭·드래그 등 입력 창구를 반환하는 함수.
     CompanionInteractionController& interactions();
+    /// 선택적 상호작용 모듈에 처리기 등록 창구만 빌려주는 함수.
+    IInteractionRegistry& interactionRegistry();
     /// 자율 걷기 창구를 반환하는 함수.
     CompanionMotionController& motion();
     /// 파일 작업과 별개인 팩 가져오기 실행기를 반환하는 함수.

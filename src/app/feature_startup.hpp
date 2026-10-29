@@ -9,7 +9,8 @@ struct FeatureSelection {
     bool watch{true};
     bool notifications{true};
     bool companion{true};
-    /// 네 기능의 요청값이 모두 같은지 비교하는 연산자.
+    bool feeding{true};
+    /// 기능의 요청값이 모두 같은지 비교하는 연산자.
     bool operator==(const FeatureSelection&) const = default;
 };
 struct FeatureStartupPlan {

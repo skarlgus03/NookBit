@@ -30,8 +30,8 @@ void testPreferences() {
     nookbit::FeaturePreferences preferences(settings);
     expect(preferences.load() && preferences.load().value() == nookbit::FeatureSelection{}, "first run enables all features");
     expect(!settings.contains("modules/selection"), "loading defaults does not persist a selection");
-    for (int mask = 0; mask < 16; ++mask) {
-        const nookbit::FeatureSelection selected{bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8)};
+    for (int mask = 0; mask < 32; ++mask) {
+        const nookbit::FeatureSelection selected{bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8), bool(mask & 16)};
         expect(bool(preferences.save(selected)), "save selection");
         QSettings reopened(path, QSettings::IniFormat);
         const auto restored = nookbit::FeaturePreferences(reopened).load();
@@ -46,6 +46,16 @@ void testPreferences() {
     expect(overridden && !nookbit::resolveFeatureStartup(overridden.value()).active.watch && !overridden.value().companion,
         "CLI disables overlay saved preferences without enabling other modules");
     expect(settings.value("modules/selection") == before, "CLI overlay never saves temporary choices");
+    for (bool companion : {false, true}) {
+        const auto legacy = QByteArray(R"({"schemaVersion":1,"enabled":{"file-organizer":true,"folder-watch":true,"notifications":true,"companion":)")
+            + (companion ? "true" : "false") + "}}";
+        settings.setValue("modules/selection", legacy);
+        const auto loaded = preferences.load();
+        expect(loaded && loaded.value().feeding == companion && loaded.value().companion == companion
+            && settings.value("modules/selection").toByteArray() == legacy, "legacy four-feature selection follows Companion without overwriting bytes");
+    }
+    settings.setValue("modules/selection", QByteArray(R"({"schemaVersion":1,"enabled":{"file-organizer":true,"folder-watch":true,"notifications":true,"companion":true,"companion-feeding":"false"}})"));
+    expect(!preferences.load(), "invalid optional feeding value rejected");
     for (const QByteArray invalid : {QByteArray("not-json"), QByteArray("{}"),
             QByteArray(R"({"schemaVersion":2,"enabled":{}})"),
             QByteArray(R"({"schemaVersion":1,"enabled":{"file-organizer":"false","folder-watch":true,"notifications":true,"companion":true}})")}) {
@@ -91,13 +101,13 @@ void testController() {
     const int previousWrites = writes;
     controller.setEnabled("typo", false);
     expect(controller.modules() == before && writes == previousWrites, "unknown ID cannot change choices");
-    nookbit::FeatureSettingsController recovery({false,false,false,false}, {false,false,false,false}, false,
+    nookbit::FeatureSettingsController recovery({false,false,false,false,false}, {false,false,false,false,false}, false,
         [](auto) { return nookbit::Result<void>::success(); }, "Unreadable settings");
     recovery.setEnabled("companion", true);
     recovery.discard();
     expect(!recovery.status().isEmpty() && !recovery.dirty(), "discard keeps invalid-settings repair guidance visible");
     expect(recovery.canSave() && recovery.save() && !recovery.canSave(), "explicit save can repair unreadable preferences");
-    nookbit::FeatureSettingsController temporary({}, {false,false,false,false}, true,
+    nookbit::FeatureSettingsController temporary({}, {false,false,false,false,false}, true,
         [](auto) { return nookbit::Result<void>::success(); });
     expect(temporary.sessionOverride() && temporary.restartRequired() && !temporary.dirty(), "temporary flags are distinct from saved settings");
 }

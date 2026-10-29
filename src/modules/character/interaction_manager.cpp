@@ -27,16 +27,38 @@ Result<InteractionReaction> execute(const InteractionManager::Handler& handler, 
     try { return handler(request); }
     catch (...) { return Result<InteractionReaction>::failure({"interaction.handler_failed", "Interaction handler failed."}); }
 }
+// 가능 조건의 예외는 실행 불가로 취급해 메뉴 조회와 입력 모두를 보호하는 함수.
+bool permitted(const InteractionManager::CanInvoke& check, const InteractionContext& context) {
+    if (!check) return true;
+    try { return check(context); } catch (...) { return false; }
+}
 }
 // 종류별 처리기를 등록하고 중복으로 덮어쓰지 않는 함수.
-Result<void> InteractionManager::registerType(InteractionType type, Handler handler) {
+Result<void> InteractionManager::registerType(InteractionType type, Handler handler, CanInvoke canInvoke) {
     if (!validId(type.id) || !validId(type.sourceId) || type.name.empty() || !handler ||
-        (type.mode != InteractionMode::Once && type.mode != InteractionMode::Continuous))
+        (type.mode != InteractionMode::Once && type.mode != InteractionMode::Continuous) || (type.inMenu && type.mode != InteractionMode::Once))
         return Result<void>::failure({"interaction.invalid_type", "Invalid interaction type."});
     if (types_.contains(type.id)) return Result<void>::failure({"interaction.duplicate_type", "Interaction type is already registered."});
     const auto id = type.id;
-    types_.emplace(id, Entry{std::move(type), std::move(handler)});
+    types_.emplace(id, Entry{std::move(type), std::move(handler), std::move(canInvoke)});
     return Result<void>::success();
+}
+// 등록 소유자가 사라지기 전에 그 종류의 연속 입력을 정리하는 함수.
+void InteractionManager::unregisterType(const std::string& id) {
+    const auto found = types_.find(id);
+    if (found == types_.end()) return;
+    for (const auto& [targetId, target] : targets_)
+        if (target.session && target.session->typeId == id) cancel(targetId);
+    types_.erase(found);
+}
+// 메뉴 종류를 하드코딩하지 않고 등록된 단발 동작과 가능 상태를 계산하는 함수.
+std::vector<InteractionMenuAction> InteractionManager::menuActions(const std::string& targetId, const InteractionContext& context) const {
+    const auto target = targets_.find(targetId);
+    const bool available = target != targets_.end() && target->second.available && !target->second.session;
+    std::vector<InteractionMenuAction> result;
+    for (const auto& [id, entry] : types_)
+        if (entry.type.inMenu && entry.enabled) result.push_back({entry.type, available && permitted(entry.canInvoke, context)});
+    return result;
 }
 // 하나의 대상을 숨기거나 제거할 때만 그 대상의 입력을 취소하는 함수.
 void InteractionManager::setTargetAvailable(const std::string& id, bool available) {
@@ -79,6 +101,8 @@ InteractionOutcome InteractionManager::submit(const InteractionRequest& input) {
     if ((type->second.type.mode == InteractionMode::Once && input.phase != InteractionPhase::Invoke) ||
         (type->second.type.mode == InteractionMode::Continuous && input.phase == InteractionPhase::Invoke))
         return reject("interaction.invalid_phase");
+    if ((input.phase == InteractionPhase::Invoke || input.phase == InteractionPhase::Begin)
+        && !permitted(type->second.canInvoke, input.context)) return reject("interaction.not_available");
     auto request = input;
     if (starts) {
         if (state.session) return reject("interaction.target_busy");

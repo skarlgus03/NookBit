@@ -172,7 +172,7 @@ Rectangle {
             Heading { text: qsTr("바탕화면에서") }
             Label {
                 Layout.fillWidth: true
-                text: qsTr("클릭: 반응\n드래그: 이동\nShift + 드래그: 쓰다듬기\n우클릭: 설정")
+                text: qsTr("클릭: 반응\n드래그: 이동\nShift + 드래그: 쓰다듬기\n우클릭: 상호작용 · 설정 메뉴")
                 font.pixelSize: UiMetrics.textBody
                 color: panel.theme.muted
                 lineHeight: 1.5

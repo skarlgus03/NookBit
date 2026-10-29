@@ -525,6 +525,24 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_executable(nookbit_feeding_interaction_tests feeding_interaction_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/companion_feeding_runtime.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/companion_interaction_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/companion_interaction_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/character_controller.cpp)
+  set_target_properties(nookbit_feeding_interaction_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_feeding_interaction_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_feeding_interaction_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_feeding_interaction_tests PRIVATE nookbit_json_config Qt6::Core)
+  if(MSVC)
+    target_compile_options(nookbit_feeding_interaction_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_feeding_interaction_tests COMMAND nookbit_feeding_interaction_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_feeding_interaction_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_history_search_tests history_search_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.hpp
     ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.cpp
@@ -576,10 +594,10 @@ if(TARGET nookbit_json_config)
       ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
   endif()
   # 활성 요청의 모든 조합을 사용자 설정과 분리된 실제 앱으로 시작해 검사한다.
-  foreach(mask RANGE 0 15)
+  foreach(mask RANGE 0 31)
     set(feature_arguments --verify-feature-startup)
     set(feature_bit 1)
-    foreach(feature file-organizer folder-watch notifications companion)
+    foreach(feature file-organizer folder-watch notifications companion companion-feeding)
       math(EXPR feature_enabled "${mask} & ${feature_bit}")
       if(NOT feature_enabled)
         list(APPEND feature_arguments "--disable-feature=${feature}")

@@ -25,8 +25,10 @@ Result<FeatureSelection> FeaturePreferences::load() const {
     const auto enabled = root.value("enabled").toObject();
     for (const auto* id : {"file-organizer", "folder-watch", "notifications", "companion"})
         if (!enabled.value(id).isBool()) return invalidSelection();
+    if (enabled.contains("companion-feeding") && !enabled.value("companion-feeding").isBool()) return invalidSelection();
     return Result<FeatureSelection>::success({enabled.value("file-organizer").toBool(), enabled.value("folder-watch").toBool(),
-        enabled.value("notifications").toBool(), enabled.value("companion").toBool()});
+        enabled.value("notifications").toBool(), enabled.value("companion").toBool(),
+        enabled.contains("companion-feeding") ? enabled.value("companion-feeding").toBool() : enabled.value("companion").toBool()});
 }
 // 단일 문서로 저장하여 선택 일부만 바뀌는 것을 피하고 쓰기 오류를 보고하는 함수.
 Result<void> FeaturePreferences::save(FeatureSelection selection) {
@@ -34,7 +36,7 @@ Result<void> FeaturePreferences::save(FeatureSelection selection) {
     const auto previous = settings_.value(selectionKey);
     const auto document = QJsonDocument(QJsonObject{{"schemaVersion", 1}, {"enabled", QJsonObject{
         {"file-organizer", selection.organizer}, {"folder-watch", selection.watch},
-        {"notifications", selection.notifications}, {"companion", selection.companion}}}});
+        {"notifications", selection.notifications}, {"companion", selection.companion}, {"companion-feeding", selection.feeding}}}});
     settings_.setValue(selectionKey, document.toJson(QJsonDocument::Compact));
     settings_.sync();
     if (settings_.status() == QSettings::NoError) return Result<void>::success();

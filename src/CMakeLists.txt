@@ -34,6 +34,7 @@ add_library(nookbit_core STATIC
   modules/character/image_pack.cpp
   modules/character/behavior_manager.cpp
   modules/character/interaction_manager.cpp
+  modules/feeding/feeding_interaction.cpp
   modules/character/idle_walk_state.cpp
   modules/notifications/notification_center.cpp
   modules/planner/collision_resolver.cpp
@@ -122,6 +123,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/feature_settings_controller.cpp
       app/feature_runtime_host.hpp
       app/feature_runtime_host.cpp
+      app/companion_feeding_runtime.hpp
+      app/companion_feeding_runtime.cpp
       app/notification_runtime.hpp
       app/notification_runtime.cpp
       app/folder_watch_runtime.hpp

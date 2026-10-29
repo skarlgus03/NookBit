@@ -11,6 +11,7 @@ class FileOrganizerRuntime;
 class FolderWatchRuntime;
 class NotificationRuntime;
 class CompanionRuntime;
+class CompanionFeedingRuntime;
 struct FeatureRuntimeConfig {
     QString appData;
     QString defaultDestination;
@@ -41,6 +42,8 @@ public:
     NotificationRuntime* notifications() const;
     /// 활성 컴패니언을 빌려주며 비활성 상태에는 nullptr를 반환하는 함수.
     CompanionRuntime* companion() const;
+    /// 활성 먹이 주기 모듈을 빌려주며 비활성 상태에는 nullptr를 반환하는 함수.
+    CompanionFeedingRuntime* feeding() const;
 signals:
     void busyChanged();
 private:

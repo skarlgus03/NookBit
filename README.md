@@ -1,5 +1,10 @@
 # NookBit
 
+The optional **먹이 주기** module adds a short reaction to the companion's
+right-click menu. It uses existing artwork when no `interact.feed` animation is
+provided. Module management can disable it on the next launch. See
+[feeding behavior and extension boundaries](docs/companion-feeding.md).
+
 Feature-module design: [ownership, communication and incremental migration](docs/feature-modules.md).
 Use **모듈 관리** on the home menu to select features, then **저장**.
 Exit using the tray's **완전 종료** and launch again to apply the saved selection;

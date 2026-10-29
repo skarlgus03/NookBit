@@ -3,6 +3,7 @@
 #include "app/folder_watch_runtime.hpp"
 #include "app/notification_runtime.hpp"
 #include "app/companion_runtime.hpp"
+#include "app/companion_feeding_runtime.hpp"
 #include "app/feature_connections.hpp"
 #include "app/ui_page_registry.hpp"
 #include "presentation/pending_files_model.hpp"
@@ -18,6 +19,7 @@ struct FeatureRuntimeHost::State {
     std::unique_ptr<FolderWatchRuntime> watch;
     std::unique_ptr<NotificationRuntime> notifications;
     std::unique_ptr<CompanionRuntime> companion;
+    std::unique_ptr<CompanionFeedingRuntime> feeding;
     FeatureConnections routes;
     QObject connections;
     Result<void> result{Result<void>::success()};
@@ -28,6 +30,8 @@ struct FeatureRuntimeHost::State {
         const auto active = plan.active;
         if (active.watch && !active.organizer)
             return Result<void>::failure({"feature.invalid_plan", "Folder Watch requires File Organizer."});
+        if (active.feeding && !active.companion)
+            return Result<void>::failure({"feature.invalid_plan", "Feeding requires Companion."});
         if (active.organizer) {
             organizer = std::make_unique<FileOrganizerRuntime>(FileOrganizerRuntimeConfig{
                 config.appData, config.defaultDestination, config.verifyUi}, preferences);
@@ -60,6 +64,10 @@ struct FeatureRuntimeHost::State {
             const auto added = companion->registerUi(pages);
             if (!added) return added;
             QObject::connect(&companion->imports(), &BackgroundTaskRunner::busyChanged, &connections, [&host] { emit host.busyChanged(); });
+        }
+        if (active.feeding) {
+            feeding = std::make_unique<CompanionFeedingRuntime>(companion->interactionRegistry());
+            if (!feeding->startupResult()) return feeding->startupResult();
         }
         // 표현 구독을 먼저 연결한 뒤 감시의 현재 사실을 발행하는 함수형 조립 순서.
         if (notifications && companion) {
@@ -100,4 +108,6 @@ FolderWatchRuntime* FeatureRuntimeHost::watch() const { return state_->watch.get
 NotificationRuntime* FeatureRuntimeHost::notifications() const { return state_->notifications.get(); }
 // 활성 컴패니언의 수명 안에서만 사용할 포인터를 반환하는 함수.
 CompanionRuntime* FeatureRuntimeHost::companion() const { return state_->companion.get(); }
+// 등록 소유 모듈을 빌려주며 컴패니언보다 먼저 해제하는 함수.
+CompanionFeedingRuntime* FeatureRuntimeHost::feeding() const { return state_->feeding.get(); }
 }

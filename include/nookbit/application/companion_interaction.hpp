@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 #include <variant>
+#include <functional>
+#include <vector>
 
 namespace nookbit {
 enum class InteractionMode { Once, Continuous };
@@ -16,6 +18,7 @@ struct InteractionType {
     std::string sourceId;
     std::string name;
     InteractionMode mode{InteractionMode::Once};
+    bool inMenu{false};
 };
 struct InteractionContext {
     std::string behaviorId;
@@ -53,5 +56,21 @@ public:
     virtual ~IInteractionChannel() = default;
     /// 상호작용 요청을 처리하고 수락·종료·거절 결과를 반환하는 함수.
     [[nodiscard]] virtual InteractionOutcome submit(const InteractionRequest& request) = 0;
+};
+/// 모듈은 처리기와 가능 조건만 등록하며 표현 담당자를 소유하지 않는다.
+class IInteractionRegistry {
+public:
+    using Handler = std::function<Result<InteractionReaction>(const InteractionRequest&)>;
+    using CanInvoke = std::function<bool(const InteractionContext&)>;
+    /// 외부 소유 등록 창구를 안전하게 해제하는 소멸자.
+    virtual ~IInteractionRegistry() = default;
+    /// 입력 종류·효과·현재 상황에서의 실행 조건을 등록하는 함수.
+    virtual Result<void> registerType(InteractionType type, Handler handler, CanInvoke canInvoke = {}) = 0;
+    /// 해당 종류의 세션을 취소하고 등록을 제거하는 함수.
+    virtual void unregisterType(const std::string& id) = 0;
+};
+struct InteractionMenuAction {
+    InteractionType type;
+    bool enabled{false};
 };
 }

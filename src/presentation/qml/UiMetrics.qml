@@ -66,6 +66,7 @@ QtObject {
     readonly property int historyFooterHeight: 76
     readonly property int historyTypeTileSize: 36
     readonly property int windowButtonSize: 32
+    readonly property int companionMenuWidth: 220
     readonly property int iconButtonSize: 32
     readonly property int buttonMinWidth: 80
     readonly property int dropdownMinWidth: 120

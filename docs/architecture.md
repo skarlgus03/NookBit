@@ -1,5 +1,9 @@
 # NookBit 설계와 확장 원칙
 
+The optional [feeding feature](companion-feeding.md) borrows only the interaction
+registration capability. Its scoped owner registers a handler and menu metadata;
+Companion owns generic input/rendering and the host enforces the dependency.
+
 History search uses a separate read-only `IHistoryQuery` capability. The host
 injects it alongside history persistence and file operations; SQL queries do not
 scan live files. Filtered pagination and full-plan undo scope are documented in
@@ -63,7 +67,7 @@ distinguishes normal extension pages from settings-detail placement so Watch has
 only one editor instance. Main retains source facts and attention selection,
 general settings/developer UI, and progress/approval integration. Organizer-owned
 host widgets and the home portrait are loaded only with their feature.
-FeatureRuntimeHost conditionally creates the four runtimes; disabling Organizer
+FeatureRuntimeHost conditionally creates the selected runtimes; disabling Organizer
 also leaves Watch inactive with an explicit dependency reason. Notifications and
 Companion are independent optional consumers. Temporary `--disable-feature=<id>`
 options overlay the saved choices for one run without saving those overrides.
@@ -71,7 +75,7 @@ The host-owned module page edits a separate draft and persists requested selecti
 through FeaturePreferences at `modules/selection`. The current runtimes remain
 unchanged until a full exit and fresh launch. Saved-disabled features retain their
 own settings/data. Invalid module preferences start no features and leave module
-management accessible for explicit repair. All 16 requested startup combinations,
+management accessible for explicit repair. All 32 requested startup combinations,
 saved-state startup cases and QML binding warnings are checked with isolated data.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.

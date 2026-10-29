@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QTimer>
+#include <QVariantList>
 #include <functional>
 
 namespace nookbit {
@@ -11,6 +12,7 @@ class CompanionInteractionController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool active READ active NOTIFY interactionChanged)
     Q_PROPERTY(QString lastReason READ lastReason NOTIFY interactionChanged)
+    Q_PROPERTY(QVariantList menuActions READ menuActions NOTIFY interactionChanged)
 public:
     using ReadContext = std::function<InteractionContext()>;
     /// 효과 관리자와 현재 상황 조회 창구를 주입하는 생성자.
@@ -19,6 +21,10 @@ public:
     bool active() const { return session_.has_value(); }
     /// 최근 거절 이유 코드를 반환하는 함수.
     QString lastReason() const { return lastReason_; }
+    /// 현재 대상에 등록된 메뉴 동작과 실행 가능 상태를 반환하는 함수.
+    QVariantList menuActions() const;
+    /// 외부 상황이 바뀌면 메뉴의 실행 가능 상태를 다시 알리는 함수.
+    void refreshContext() { emit interactionChanged(); }
     /// 단발 상호작용을 요청하는 함수.
     Q_INVOKABLE bool invoke(const QString& typeId, double x, double y);
     /// 연속 입력을 시작하는 함수.

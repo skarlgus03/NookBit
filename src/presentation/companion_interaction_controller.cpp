@@ -1,5 +1,6 @@
 #include "presentation/companion_interaction_controller.hpp"
 #include <QThread>
+#include <QVariantMap>
 #include <utility>
 
 namespace nookbit {
@@ -8,6 +9,13 @@ CompanionInteractionController::CompanionInteractionController(InteractionManage
     ReadContext context, QObject* parent) : QObject(parent), manager_(manager), targetId_(std::move(targetId)), context_(std::move(context)) {
     reactionDeadline_.setSingleShot(true);
     connect(&reactionDeadline_, &QTimer::timeout, this, &CompanionInteractionController::clearReaction);
+}
+// 등록 모듈의 이름과 조건을 화면 값으로 바꾸며 처리기를 직접 실행하지 않는 함수.
+QVariantList CompanionInteractionController::menuActions() const {
+    QVariantList result;
+    for (const auto& action : manager_.menuActions(targetId_, context_()))
+        result.append(QVariantMap{{"id", QString::fromStdString(action.type.id)}, {"label", QString::fromStdString(action.type.name)}, {"enabled", action.enabled}});
+    return result;
 }
 // 단발 요청은 세션을 만들지 않고 즉시 처리하는 함수.
 bool CompanionInteractionController::invoke(const QString& typeId, double x, double y) {
@@ -43,9 +51,11 @@ bool CompanionInteractionController::deliver(const InteractionRequest& request) 
     const auto outcome = manager_.submit(request);
     lastReason_ = QString::fromStdString(outcome.reason);
     if (outcome.status == InteractionStatus::Rejected) {
-        manager_.cancel(targetId_);
-        session_.reset();
-        clearReaction();
+        if (session_) {
+            manager_.cancel(targetId_);
+            session_.reset();
+            clearReaction();
+        }
         emit interactionChanged();
         return false;
     }
@@ -78,5 +88,6 @@ void CompanionInteractionController::setAvailable(bool available) {
     if (QThread::currentThread() != thread()) return;
     if (!available) cancel();
     manager_.setTargetAvailable(targetId_, available);
+    emit interactionChanged();
 }
 }

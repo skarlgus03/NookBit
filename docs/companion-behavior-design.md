@@ -1,5 +1,10 @@
 # 알림 · Interact · 행동 계약
 
+The optional [feeding module](companion-feeding.md) registers a one-shot handler
+and context-menu metadata through `IInteractionRegistry`. The existing input
+controller submits its ID and owns reaction expiry; the feature does not call a
+renderer or file worker. Right-click now opens interaction actions and settings.
+
 ## 범위와 현재 구현
 
 알림은 공통 창구의 등록·발생 상태·표시 허용 정책과 간단한 설정 페이지까지 구현한다.

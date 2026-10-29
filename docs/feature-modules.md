@@ -30,6 +30,7 @@ Modules can use separate instances of the same stateless worker implementation.
 | `folder-watch` | Watched paths, timers, file readiness, thresholds, proposals and snooze state | Watch configuration, current proposal, accept/dismiss/snooze actions | `file-organizer` |
 | `notifications` | Type registration, active notification facts, per-type delivery preferences, notification settings | Existing `INotificationChannel`, notification delivery updates | None |
 | `companion` | Pack library, desktop companion, preview/editor, visual behavior, interactions and personal overrides | Existing `ICharacterChannel`, interaction/behavior capabilities | None |
+| `companion-feeding` | One-shot feeding handler and its scoped registration | `companion.feed` interaction / `interact.feed` presentation cue | `companion` |
 
 The host owns startup/shutdown, module enablement preferences, shared UI theme and
 metrics, navigation registration, tray/window lifecycle and integration adapters.
@@ -432,7 +433,7 @@ action. General settings and the application lifecycle remain available, includi
 when every feature is disabled. Existing feature data is retained for reactivation.
 
 On first launch, all features are enabled. The host-owned **모듈 관리** page stays
-available even with every feature disabled. Its four switches edit a draft;
+available even with every feature disabled. Its five switches edit a draft;
 **저장** persists the requested selection and **변경 취소** restores the saved draft.
 Each row distinguishes the current runtime state from the effective next-launch
 state. A requested Watch remains remembered when Organizer blocks it, with an
@@ -448,11 +449,13 @@ the existing task-exit protection and avoiding overlapping app instances.
 `modules/selection`, separate from all feature-specific keys/files:
 
 ```json
-{"schemaVersion":1,"enabled":{"file-organizer":true,"folder-watch":true,"notifications":true,"companion":true}}
+{"schemaVersion":1,"enabled":{"file-organizer":true,"folder-watch":true,"notifications":true,"companion":true,"companion-feeding":true}}
 ```
 
-The entire document must have version 1 and actual Boolean values for all four
-known feature IDs; documents over 16 KiB are rejected. A missing key uses the
+The document must have version 1 and actual Boolean values for the original four
+feature IDs; documents over 16 KiB are rejected. Feeding is an additive optional
+Boolean key: when absent in old documents it follows the saved Companion flag.
+A missing selection document uses the
 first-launch defaults without writing them. An unreadable/invalid document starts
 no features, leaves the original stored value intact, and exposes repair guidance
 in settings and module management. An explicit save can replace that value.
@@ -473,7 +476,7 @@ For one run, overlay the saved choices with repeatable command-line disables:
 .\nookbit.exe --disable-feature=all
 ```
 
-IDs are `file-organizer`, `folder-watch`, `notifications` and `companion`.
+IDs are `file-organizer`, `folder-watch`, `notifications`, `companion` and `companion-feeding`.
 Unknown or empty IDs fail before runtime creation. These options only disable
 features from the saved baseline; they never enable a saved-disabled feature.
 They do not save a module preference. The next launch without options uses the
@@ -493,13 +496,13 @@ feature endpoints; connection adapters die before Companion/Notifications/Watch,
 and Watch dies before Organizer. Existing runner destructors join work before
 their dependencies disappear. No new thread or saved format is introduced.
 
-CTest exercises all 16 requested combinations through the real app using
+CTest exercises all 32 requested combinations through the real app using
 `--verify-feature-startup`. Each case uses temporary data and INI preferences,
 disables automatic scanning, and checks runtime/page/window/tray presence, absent
 notification sources, dependency messages, stale routes and QML binding warnings.
 The normal all-enabled UI smoke test remains separate and ignores personal module
 choices. Selection tests also cover invalid/repeated options and dependency state.
-Preference/controller tests cover all 16 save/reopen combinations, invalid documents,
+Preference/controller tests cover all 32 save/reopen combinations, invalid documents,
 failed saves, draft discard, CLI overlays, preserved unrelated preferences and
 immutable current state. Four `--verify-feature-preferences` app cases seed only a
 temporary INI and exercise the real preference-loading path, module switches/save,

@@ -21,6 +21,8 @@ QVariantList FeatureSettingsController::modules() const {
         draft_.watch && !draft_.organizer ? tr("파일 정리가 필요해요. 현재 선택으로 저장하면 폴더 감시도 시작하지 않아요.") : QString());
     append("notifications", tr("알림"), tr("기능에서 보내는 알림과 종류별 표시 설정"), draft_.notifications, plan.active.notifications, active_.notifications);
     append("companion", tr("컴패니언"), tr("바탕화면 컴패니언, 캐릭터 팩과 애니메이션 편집"), draft_.companion, plan.active.companion, active_.companion);
+    append("companion-feeding", tr("먹이 주기"), tr("컴패니언 우클릭 메뉴에서 짧은 먹기 반응을 보여줘요."), draft_.feeding, plan.active.feeding, active_.feeding,
+        draft_.feeding && !draft_.companion ? tr("컴패니언이 필요해요. 현재 선택으로 저장하면 먹이 주기도 시작하지 않아요.") : QString());
     return result;
 }
 // 화면의 모듈 선택을 바꾸고 잘못된 식별자는 저장되지 않게 거부하는 함수.
@@ -30,6 +32,7 @@ void FeatureSettingsController::setEnabled(const QString& id, bool enabled) {
     else if (id == "folder-watch") selected = &draft_.watch;
     else if (id == "notifications") selected = &draft_.notifications;
     else if (id == "companion") selected = &draft_.companion;
+    else if (id == "companion-feeding") selected = &draft_.feeding;
     if (!selected) { status_ = tr("알 수 없는 모듈이에요."); emit changed(); return; }
     if (*selected == enabled) return;
     *selected = enabled;

@@ -221,8 +221,8 @@ The main menu's Companion page opens in the shared extension window, independent
 of general app settings. Its left-hand preview plays the selected pack without
 moving the desktop companion; the scrollable right-hand controls retain pack import,
 selection, personal scale and placement editing. Preview scale fits the available
-space and is not the personal desktop scale. Desktop right-click opens the same
-page. This UI separation does not introduce a module/plugin lifecycle.
+space and is not the personal desktop scale. Desktop right-click opens an
+interaction menu with a settings entry for the same page.
 
 Choose a local folder containing `imagepack.json` and its declared PNG assets.
 `IImagePackLibrary` separates storage from playback. `DirectoryImagePackLibrary`
@@ -265,7 +265,7 @@ Available screen rectangles are injected by the composition root. Saved anchors
 are clamped to the nearest available screen after startup or monitor changes;
 this protects the anchor, not the entirety of an arbitrarily large pose.
 QSettings stores `character/windowAnchor` and `character/windowShown`. Dragging
-uses the operating system's window move operation. Right-click opens settings;
+uses the operating system's window move operation. Right-click opens the interaction/settings menu;
 closing the character hides only that window. Closing the main window hides it
 when the system tray is available; organization work and character playback
 continue. The tray's explicit exit closes both after active operations finish.
