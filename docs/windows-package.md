@@ -1,7 +1,36 @@
 # Windows runtime packaging
 
 Build with `cmake --build --preset package-release`. The package is generated at
-`out/package/NookBit-Release`; zip the whole directory for distribution.
+`out/package/NookBit-Release`.
+
+## Versioned test archive
+
+Run `cmake --build --preset archive-release` to update the package and create:
+
+- `out/package/NookBit-0.1.0-alpha.1-Windows-x64.zip`
+- The matching `.zip.sha256` checksum file.
+
+The ZIP contains the entire `NookBit-Release` directory, including `nookbit.exe`,
+the deployed runtime, bundled packs, `README.txt` quick-start instructions and
+`version.json`. Extract everything before launching the executable. Personal
+preferences, imported packs, pending files and history are stored outside the
+application directory and are not added by the packaging target.
+
+The core version is `project(VERSION ...)` in the root CMakeLists.txt;
+`NOOKBIT_PRERELEASE` defaults to `alpha.1`. They form one display version used by
+Qt application metadata, Settings > Information, Windows executable properties,
+package metadata, instructions and the archive filename. `nookbit.exe --version`
+prints the same value without loading personal settings or starting features.
+For a stable build, configure `-DNOOKBIT_PRERELEASE=`; for a later test build,
+set the next identifier before building. Do not reuse a published version for
+different contents. This target creates local artifacts; it does not create a
+Git tag, publish a GitHub release or upload any files.
+
+The archive is written to a temporary file before replacing a previous local ZIP.
+Its SHA-256 file is generated after success. To inspect it on Windows, use
+`Get-FileHash <archive.zip> -Algorithm SHA256` and compare with the `.sha256` text.
+Creating the ZIP does not perform a fresh test run; run the relevant CTest checks
+before sharing it. A clean-machine/native-desktop test still needs a tester.
 
 `NOOKBIT_COMPACT_PACKAGE` defaults to ON and affects only that package, not the
 installed Qt SDK or the development build's runtime. `windeployqt` still discovers
@@ -49,3 +78,15 @@ compatibility libraries and the VC redistributable account for much of the
 remaining size and are deliberately retained. The local archive
 `out/package/NookBit-Release-compact.zip` is a snapshot; recreate it after rebuilding
 the package before distributing a later version.
+
+## Local test archive (2026-10-29)
+
+`0.1.0-alpha.1` contains 250 ZIP entries and is about 69.1 MiB compressed.
+The application-version, UI smoke, QML page-boundary, UI metric and saved-all-off
+startup checks passed. The ZIP was extracted into a fresh verification directory;
+its checksum, manifest, native file version and command-line version matched.
+The extracted app passed isolated feature startup with the Qt SDK removed from
+PATH and no external Qt/QML plugin-path overrides. No pending-list, watch settings,
+database, timing log or PDB files were found in the archive. The temporary extracted
+directory was removed after verification. This is local test packaging; no GitHub
+release has been published by these build targets.

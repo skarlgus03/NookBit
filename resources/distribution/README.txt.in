@@ -1,0 +1,34 @@
+NookBit @NOOKBIT_VERSION@ - Windows x64 test build
+================================================
+
+Quick start
+1. Extract the entire ZIP to a writable folder.
+2. Open NookBit-Release, then double-click nookbit.exe.
+3. Keep the DLLs, qml, plugins and imagepacks beside the executable.
+   Qt and development tools do not need to be installed separately.
+4. If Windows reports a missing Microsoft Visual C++ runtime, run the included
+   vc_redist.x64.exe, then start NookBit again.
+
+First use
+- File sorting: choose an organizing destination, add sample files, and inspect
+  the preview before confirming a move. Undo is available for completed moves.
+- Companion: open the Companion page and choose "Nmoo - Idle & Walk" to try the
+  included character. No personal imported packs are included in this ZIP.
+- Module management: select features, save, exit fully from the system tray,
+  and launch again. Saving does not change currently running features.
+- Closing the main window usually keeps NookBit running in the system tray.
+  Choose the tray's Exit command to stop it completely.
+- The application version is shown in Settings. The executable's Windows file
+  properties and version.json report the same version.
+
+Personal data and updates
+The distribution does not include the developer's personal settings, rules,
+history or pending files. Each Windows user has their own settings. Application
+data is stored under %APPDATA%\NookBitProject\NookBit, and UI/module preferences
+use Windows user settings. A fresh installation starts with the bundled defaults.
+Close NookBit fully before replacing its application folder with an update.
+
+Feedback
+Report the version, the steps you followed, what you expected, and what happened.
+A screenshot can help with visual issues. Do not send private files or personal
+history unless they are actually needed to reproduce the issue.

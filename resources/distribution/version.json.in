@@ -1,0 +1,7 @@
+{
+  "application": "NookBit",
+  "version": "@NOOKBIT_VERSION@",
+  "platform": "windows",
+  "architecture": "x64",
+  "configuration": "Release"
+}

@@ -13,6 +13,7 @@ Item {
     property var organizerContribution: ({})
     property bool dark: false
     property var startupMessages: []
+    property string applicationVersion: ""
     readonly property bool transitioning: slide.running
     property real slidePosition: detailOpen ? 1 : 0
     signal settingsRequested()
@@ -31,6 +32,7 @@ Item {
         settings: workflow.settings
         organizerContribution: workflow.organizerContribution
         startupMessages: workflow.startupMessages
+        applicationVersion: workflow.applicationVersion
         watchContribution: workflow.watchContribution
         dark: workflow.dark
         onRouteRequested: function(route) { workflow.routeRequested(route) }

@@ -86,9 +86,15 @@ cmake --preset release -DCMAKE_PREFIX_PATH="C:/Qt/6.11.2/msvc2022_64"
 cmake --build --preset release
 ctest --preset release
 cmake --build --preset package-release
+cmake --build --preset archive-release
 ```
 
 Release 빌드·테스트는 `out/build/release`에, 실행 파일과 Qt 런타임은 `out/package/NookBit-Release`에 모인다. `out/package/NookBit-Release/nookbit.exe`를 더블클릭하면 실행된다. 폴더 전체가 필요하므로 exe만 옮기지 않는다. 패키지에는 테스트 실행 파일, 정적 라이브러리, 컴파일 중간 파일을 포함하지 않는다. Windows 패키징에는 Qt의 `windeployqt`가 필요하다.
+
+`archive-release` also creates `out/package/NookBit-0.1.0-alpha.1-Windows-x64.zip`
+and a SHA-256 checksum beside it. The ZIP includes quick-start instructions and
+bundled character packs. The shared application version appears in Settings and
+Windows file properties. See [versioning and archive details](docs/windows-package.md#versioned-test-archive).
 
 Debug와 Release는 같은 사용자 설정·규칙·기록을 읽는다. 비교 테스트는 한 앱씩 실행한다. Release에는 개발용 고정 목적지 경로를 지정하지 않으며 저장된 정리 위치를 사용한다. 이 실행 폴더는 로컬 테스트용 구성으로, 외부 배포 전 라이선스 고지·설치 방식은 별도로 준비한다.
 

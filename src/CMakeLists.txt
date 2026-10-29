@@ -198,6 +198,7 @@ if(NOOKBIT_BUILD_QT_APP)
     target_include_directories(nookbit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     file(TO_CMAKE_PATH "${NOOKBIT_DEV_DESTINATION_ROOT}" NOOKBIT_DEV_DESTINATION_PATH)
     target_compile_definitions(nookbit PRIVATE
+      NOOKBIT_VERSION_STRING="${NOOKBIT_VERSION}"
       NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
 
     set_source_files_properties(presentation/qml/UiMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -317,6 +318,10 @@ if(NOOKBIT_BUILD_QT_APP)
         HINTS "${Qt6_DIR}/../../../bin")
     endif()
     if(NOOKBIT_WINDEPLOYQT)
+      configure_file("${PROJECT_SOURCE_DIR}/resources/distribution/README.txt.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/distribution/README.txt" @ONLY)
+      configure_file("${PROJECT_SOURCE_DIR}/resources/distribution/version.json.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/distribution/version.json" @ONLY)
       add_custom_target(nookbit_package
         COMMAND "${CMAKE_COMMAND}"
           "-DNOOKBIT_EXECUTABLE=$<TARGET_FILE:nookbit>"
@@ -327,9 +332,18 @@ if(NOOKBIT_BUILD_QT_APP)
           "-DNOOKBIT_COMPACT_PACKAGE=${NOOKBIT_COMPACT_PACKAGE}"
           "-DNOOKBIT_TEST_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/test"
           "-DNOOKBIT_NMOO_PACK=${PROJECT_SOURCE_DIR}/resources/imagepacks/nmoo"
+          "-DNOOKBIT_PACKAGE_INFO=${CMAKE_CURRENT_BINARY_DIR}/distribution"
           -P "${PROJECT_SOURCE_DIR}/cmake/package_windows.cmake"
         DEPENDS nookbit
         COMMENT "Packaging the NookBit Windows runtime"
+        VERBATIM)
+      add_custom_target(nookbit_archive
+        COMMAND "${CMAKE_COMMAND}"
+          "-DNOOKBIT_PACKAGE_DIR=${PROJECT_SOURCE_DIR}/out/package/NookBit-$<CONFIG>"
+          "-DNOOKBIT_VERSION=${NOOKBIT_VERSION}"
+          -P "${PROJECT_SOURCE_DIR}/cmake/archive_windows.cmake"
+        DEPENDS nookbit_package
+        COMMENT "Creating the versioned NookBit Windows ZIP and checksum"
         VERBATIM)
       add_custom_command(TARGET nookbit POST_BUILD
         COMMAND "${NOOKBIT_WINDEPLOYQT}"

@@ -525,6 +525,15 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_test(NAME nookbit_application_version COMMAND nookbit --version)
+  string(REPLACE "." "\\." nookbit_version_pattern "${NOOKBIT_VERSION}")
+  set_tests_properties(nookbit_application_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "NookBit ${nookbit_version_pattern}"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  if(WIN32)
+    set_tests_properties(nookbit_application_version PROPERTIES ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
+  endif()
   add_executable(nookbit_feature_settings_tests feature_settings_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/feature_startup.cpp
     ${PROJECT_SOURCE_DIR}/src/app/feature_preferences.cpp

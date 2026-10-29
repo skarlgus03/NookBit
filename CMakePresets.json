@@ -42,6 +42,11 @@
       "name": "package-release",
       "configurePreset": "release",
       "targets": ["nookbit_package"]
+    },
+    {
+      "name": "archive-release",
+      "configurePreset": "release",
+      "targets": ["nookbit_archive"]
     }
   ],
   "testPresets": [

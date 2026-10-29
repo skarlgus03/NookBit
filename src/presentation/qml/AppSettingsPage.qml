@@ -10,6 +10,7 @@ ScrollView {
     property var organizerContribution: ({})
     property bool dark: false
     property var startupMessages: []
+    property string applicationVersion: ""
     readonly property var theme: UiTheme.colors(dark)
     signal routeRequested(int page)
     objectName: "settingsPage"
@@ -93,6 +94,21 @@ ScrollView {
             leadingEntry: page.watchContribution.source ? watchEntry : null
             dark: page.dark
             onRouteRequested: function(route) { page.routeRequested(route) }
+        }
+        SettingsSection {
+            Layout.fillWidth: true
+            title: qsTr("정보")
+            dark: page.dark
+            Label {
+                objectName: "applicationVersionLabel"
+                Layout.fillWidth: true
+                text: "NookBit " + page.applicationVersion
+                textFormat: Text.PlainText
+                font.pixelSize: UiMetrics.textEmphasis
+                font.bold: true
+                color: page.theme.text
+                wrapMode: Text.Wrap
+            }
         }
     }
     Component {

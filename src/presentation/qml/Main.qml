@@ -325,6 +325,7 @@ ApplicationWindow {
         settings: uiSettings
         organizerContribution: organizerSettings
         startupMessages: featureStartupMessages
+        applicationVersion: Qt.application.version
         watchContribution: watchSettingsEntry
         onSettingsRequested: root.currentPage = 8
         onRouteRequested: function(route) { root.openPage(route) }

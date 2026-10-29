@@ -1,2 +1,31 @@
 // Windows Explorer에서 실행 파일 자체의 아이콘을 표시하는 내장 리소스.
+#include <winver.h>
 IDI_NOOKBIT ICON "@PROJECT_SOURCE_DIR@/resources/icons/nookbit.ico"
+
+// 앱 화면·배포 파일명과 같은 버전을 Windows 파일 속성에도 표시한다.
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS @NOOKBIT_VERSION_FLAGS@
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "NookBit desktop organizer\0"
+            VALUE "FileVersion", "@NOOKBIT_VERSION@\0"
+            VALUE "InternalName", "nookbit\0"
+            VALUE "OriginalFilename", "nookbit.exe\0"
+            VALUE "ProductName", "NookBit\0"
+            VALUE "ProductVersion", "@NOOKBIT_VERSION@\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

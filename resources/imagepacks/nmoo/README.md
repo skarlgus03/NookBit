@@ -1,24 +1,25 @@
-# Nmoo 서 있기 이미지팩
+# Nmoo ImagePack
 
-사용자가 직접 그린 두 PNG를 수정 없이 사용하는 ImagePack v1입니다.
+The bundled pack is named **Nmoo - Idle & Walk**. Its own version is recorded in
+`imagepack.json`; it is independent of the NookBit application version.
 
-## 사용
+## Use
 
-NookBit의 캐릭터 설정에서 **팩 폴더 가져오기…**를 누르고 이 폴더
-(`D:\NookBit\resources\imagepacks\nmoo`)를 선택합니다.
-가져온 `Nmoo - Standing` 팩을 선택하고 캐릭터 표시를 켜세요.
-개인 크기는 앱에서 조절하며, 처음에는 100%를 권장합니다.
-기존 앱으로 가져올 수 있어 재빌드할 필요가 없습니다.
+Open the Companion page and select **Nmoo - Idle & Walk** in the pack list.
+The installed application includes this folder at `imagepacks/nmoo` beside the
+executable. You can also use the pack-import command to import a separate copy.
+An imported personal copy is not automatically replaced when this bundled pack
+is updated. Selection, size, placement and frame edits remain personal settings.
 
-## 표현
+## Animation data
 
-- 눈 뜨기 3,000ms → 눈 감기 150ms 반복.
-- 두 PNG 모두 원본 1024×1024 RGBA. 자르기·리사이즈·그림 보정 없음.
-- 기준 캔버스 256×256, 원본 4픽셀당 표시 1단위, 부드러운 축소.
-- 두 프레임 공통 발밑 피벗: 원본 (512, 1000), 표시 단위 (128, 250).
-- 말풍선은 앱 기본 스킨 사용. 부착 위치는 실제 표시 후 조정 가능.
-- 아직 호출/작업 전용 그림이 없으므로 필수 resting/calling/working을
-  모두 같은 서 있기 애니메이션에 연결합니다. 파일 작업 로직은 바꾸지 않습니다.
-- 앱의 기본 테스트 팩을 교체하거나 개인 선택 설정을 강제로 변경하지 않습니다.
+- `standing`: eyes open for 3,000 ms, then closed for 150 ms, looping.
+- `walk`: frames 1, 2, 3, 2 at 140 ms per step, looping.
+- `notice`: a single notice frame with a 1,000 ms duration, looping.
+- Resting uses `standing`; calling and file offers use `notice`; left/right
+  walking use `walk`. Working currently falls back to `standing`.
 
-원본: `nmoo-Photoroom.png`, `nmoo_2-Photoroom.png` (사용자 제공).
+The manifest is authoritative for frame geometry, individual pivots, display
+scale, filtering, cue bindings and speech-bubble attachment defaults. App-level
+walking and interactions decide when and where to move; this pack only provides
+visual frames. It does not execute file operations.

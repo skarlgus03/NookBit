@@ -525,12 +525,14 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
         if (page == 8) {
-            // 설정 제목과 카드가 세 그룹에 같은 규격으로 배치되는지 검사한다.
+            // 버전 정보가 추가된 네 설정 그룹이 같은 규격으로 배치되는지 검사한다.
             auto* settings = findUiChild<QObject*>(mainWindow, QStringLiteral("settingsPage"));
             if (!settings) return false;
             const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
             const auto cards = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionCard"));
-            if (titles.size() != 3 || cards.size() != 3) return false;
+            if (titles.size() != 4 || cards.size() != 4) return false;
+            auto* version = findUiChild<QObject*>(settings, QStringLiteral("applicationVersionLabel"));
+            if (!version || version->property("text").toString() != "NookBit " + QCoreApplication::applicationVersion()) return false;
             for (auto* title : titles) {
                 if (title->property("font").value<QFont>().pixelSize() != metrics->property("textSettingsGroup").toInt() ||
                     !title->isVisible() || title->height() <= 0) return false;
@@ -861,7 +863,12 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(NOOKBIT_VERSION_STRING));
     const auto arguments = QCoreApplication::arguments();
+    if (arguments.contains(QStringLiteral("--version"))) {
+        QTextStream(stdout) << "NookBit " << QCoreApplication::applicationVersion() << Qt::endl;
+        return EXIT_SUCCESS;
+    }
     const bool verifyFeaturePreferences = arguments.contains(QStringLiteral("--verify-feature-preferences"));
     const bool verifyFeatures = verifyFeaturePreferences || arguments.contains(QStringLiteral("--verify-feature-startup"));
     const bool verifyUi = verifyFeatures || arguments.contains(QStringLiteral("--verify-ui"));
@@ -1103,6 +1110,8 @@ int main(int argc, char* argv[]) {
             window->setProperty("currentPage", 8);
             QCoreApplication::processEvents();
             valid = valid && present("settingsPage") && present("globalDarkModeSwitch");
+            auto* versionLabel = findUiChild<QObject*>(window, "applicationVersionLabel");
+            valid = valid && versionLabel && versionLabel->property("text").toString() == "NookBit " + QCoreApplication::applicationVersion();
             valid = valid && present("featureStartupMessage") == !startup.messages.isEmpty();
             window->setProperty("currentPage", 12);
             QCoreApplication::processEvents();
