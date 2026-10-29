@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/nookbit/fonts">
+    <file alias="NookBitUISans-Regular.otf">fonts/NookBitUISans-Regular.otf</file>
+    <file alias="NookBitUISans-Medium.otf">fonts/NookBitUISans-Medium.otf</file>
+    <file alias="NookBitUISans-Bold.otf">fonts/NookBitUISans-Bold.otf</file>
+  </qresource>
+</RCC>

@@ -3,8 +3,13 @@ import QtQuick
 
 // 화면 부품의 역할별 공통 규격. 캔버스 좌표·창 배치·캐릭터 팩 데이터는 포함하지 않는다.
 QtObject {
-    readonly property string fontFamily: "Noto Sans KR"
+    readonly property string fontFamily: "NookBit UI Sans"
     readonly property string fontFallback: "Malgun Gothic"
+    readonly property list<string> fontFiles: [
+        ":/nookbit/fonts/NookBitUISans-Regular.otf",
+        ":/nookbit/fonts/NookBitUISans-Medium.otf",
+        ":/nookbit/fonts/NookBitUISans-Bold.otf"
+    ]
     readonly property int bodyWeight: Font.Normal
     // 시작 조립부가 초기화하며 모든 창이 공유하는 실제 글꼴. 독립 화면 검사도 같은 기본 규격을 쓴다.
     property font applicationFont: Qt.font({family: fontFamily, styleName: "", pixelSize: textBody, weight: bodyWeight})

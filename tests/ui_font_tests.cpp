@@ -9,6 +9,9 @@
 #include <QTextStream>
 #include <QTextLayout>
 #include <QGlyphRun>
+#include <QImage>
+#include <QPainter>
+#include <array>
 #include <memory>
 
 // 잘못된 시스템 스타일을 주입해도 공통 글꼴과 페이지 제목 굵기가 유지되는지 검사하는 함수.
@@ -26,6 +29,7 @@ int main(int argc, char** argv) {
     QQmlComponent metricsComponent(&engine, QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/UiMetrics.qml")));
     std::unique_ptr<QObject> metrics(metricsComponent.create());
     if (!metrics) return 1;
+    if (!nookbit::loadApplicationUiFonts(*metrics)) return 1;
     const auto font = nookbit::applicationUiFont(*metrics);
     if (!font.styleName().isEmpty() || font.weight() != metrics->property("bodyWeight").toInt()
         || font.pixelSize() != metrics->property("textBody").toInt() || font.italic()) return 1;
@@ -90,16 +94,42 @@ ApplicationWindow {
             const auto runs = layout.glyphRuns();
             if (runs.isEmpty()) return 1;
             for (const auto& run : runs) {
-                if (run.rawFont().familyName() != font.families().first() || run.rawFont().weight() != expectedWeight) return 1;
+                const auto raw = run.rawFont();
+                if (raw.familyName() != font.families().first() || raw.weight() != expectedWeight
+                    || !raw.fontTable("fvar").isEmpty()) return 1;
             }
         }
     }
-#ifdef Q_OS_WIN
-    // 나중에 로드한 페이지까지 운영체제 렌더러가 적용되는지 확인한다.
+    // 나중에 로드한 페이지도 확대 가능한 기본 렌더러를 사용하는지 확인한다.
     for (auto* label : {body, title, loaded}) {
-        if (label->property("renderType").toInt() != QQuickWindow::NativeTextRendering) return 1;
+        if (label->property("renderType").toInt() != QQuickWindow::QtTextRendering) return 1;
     }
-#endif
+    // 메타데이터만 바뀌고 실제 획은 같은 굵기로 그려지는 문제도 검출한다.
+    std::array<quint64, 3> ink{};
+    const std::array<QFont::Weight, 3> weights{QFont::Normal, QFont::Medium, QFont::Bold};
+    for (std::size_t i = 0; i < weights.size(); ++i) {
+        auto sampleFont = font;
+        sampleFont.setWeight(weights[i]);
+        sampleFont.setPixelSize(48);
+        const auto raw = QRawFont::fromFont(sampleFont);
+        if (!raw.fontTable("fvar").isEmpty() || raw.weight() != weights[i]) return 1;
+        QImage image(1000, 100, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        {
+            QPainter painter(&image);
+            painter.setFont(sampleFont);
+            painter.setPen(Qt::white);
+            painter.drawText(image.rect(), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("모듈 관리 파일 정리 NookBit"));
+        }
+        for (int y = 0; y < image.height(); ++y) {
+            const auto* pixels = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+            for (int x = 0; x < image.width(); ++x) ink[i] += qAlpha(pixels[x]);
+        }
+    }
+    if (!(ink[0] > 0 && ink[0] < ink[1] && ink[1] < ink[2])) {
+        QTextStream(stderr) << "Static font raster weights are not distinct: " << ink[0] << ", " << ink[1] << ", " << ink[2] << Qt::endl;
+        return 1;
+    }
     app.setFont(font);
     QTextStream(stdout) << "UI font family and regular/bold weights remain stable across windows and loaders." << Qt::endl;
     return 0;

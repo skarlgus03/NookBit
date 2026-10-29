@@ -9,14 +9,15 @@ Font tests inject a Thin named style/weight axis and verify stable regular/bold
 selection across separate windows and loader-created content, without displaying
 the test windows.
 
-On Windows, startup also selects Qt Quick's NativeTextRendering before creating
-any text items. The inheritance-only change did not resolve the reported thin
-text on the user's machine. Native rendering bypasses the GPU distance-field
-text path while keeping the same family and role sizes/weights; it is a rendering
-workaround, not a confirmed diagnosis of a Qt bug. Font tests check Korean glyph
-runs and the renderer used by labels created in both windows and a Loader.
-Transformed text may look less sharp at non-integer canvas zoom levels with native
-rendering; visual verification on the affected machine remains necessary.
+The NativeTextRendering experiment worsened text on the affected machine and was
+reverted. Qt's default scalable text renderer is retained. The application now
+embeds static Noto Sans KR faces under the private family `NookBit UI Sans` and
+registers them before creating controls. It no longer selects the installed
+variable font by name. Roles and sizes are unchanged. Font tests verify actual
+Korean glyph runs use this private family, static font tables and the expected
+weights. See [font provenance and reproduction](../resources/fonts/README.md).
+The exact cause of the original intermittent rendering issue was not reproduced;
+visual verification on the affected machine remains necessary.
 
 The optional [feeding feature](companion-feeding.md) borrows only the interaction
 registration capability. Its scoped owner registers a handler and menu metadata;

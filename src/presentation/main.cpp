@@ -967,6 +967,10 @@ int main(int argc, char* argv[]) {
         QTextStream(stderr) << "Cannot load shared UI metrics." << Qt::endl;
         return EXIT_FAILURE;
     }
+    if (!nookbit::loadApplicationUiFonts(*uiMetrics)) {
+        QTextStream(stderr) << "Cannot load bundled UI fonts." << Qt::endl;
+        return EXIT_FAILURE;
+    }
     const auto baseFont = nookbit::applicationUiFont(*uiMetrics);
     application.setFont(baseFont);
     uiMetrics->setProperty("applicationFont", baseFont);

@@ -171,6 +171,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/rule_editor_controller.hpp
       presentation/rule_editor_controller.cpp
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
+      ${PROJECT_SOURCE_DIR}/resources/fonts.qrc
     )
     set_target_properties(nookbit PROPERTIES AUTORCC ON)
     if(WIN32)

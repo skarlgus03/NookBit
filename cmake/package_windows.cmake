@@ -14,6 +14,8 @@ if(NOT EXISTS "${NOOKBIT_TEST_PACK}/imagepack.json" OR NOT EXISTS "${NOOKBIT_TES
 endif()
 file(COPY_FILE "${NOOKBIT_EXECUTABLE}" "${NOOKBIT_PACKAGE_DIR}/nookbit.exe" ONLY_IF_DIFFERENT)
 file(COPY "${NOOKBIT_PACKAGE_INFO}/README.txt" "${NOOKBIT_PACKAGE_INFO}/version.json" DESTINATION "${NOOKBIT_PACKAGE_DIR}")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../resources/fonts/OFL.txt"
+  "${NOOKBIT_PACKAGE_DIR}/licenses/NotoSansKR-OFL.txt" COPYONLY)
 file(COPY "${NOOKBIT_TEST_PACK}/" DESTINATION "${NOOKBIT_PACKAGE_DIR}/imagepacks/test")
 if(NOT EXISTS "${NOOKBIT_NMOO_PACK}/imagepack.json")
   message(FATAL_ERROR "The bundled Nmoo ImagePack is missing.")
