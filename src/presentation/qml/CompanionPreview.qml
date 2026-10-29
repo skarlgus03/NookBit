@@ -12,6 +12,8 @@ Rectangle {
     required property var theme
     property bool dark: false
     property bool active: false
+    readonly property bool displayActive: active && visible && pane.Window.window !== null
+        && pane.Window.window.visible && pane.Window.window.visibility !== Window.Minimized
     property bool showBubble: true
     property bool running: true
     property bool editing: false
@@ -56,7 +58,7 @@ Rectangle {
         const durations = JSON.stringify(savedEdits.durations || ({}));
         return frames !== JSON.stringify(drafts) || durations !== JSON.stringify(durationDrafts);
     }
-    readonly property bool playbackActive: active && running && !clock.finished && sprite.steps.length > 0
+    readonly property bool playbackActive: displayActive && running && !clock.finished && sprite.steps.length > 0
     color: "transparent"
     radius: UiMetrics.radiusPanel
     border.width: 0
@@ -233,14 +235,14 @@ Rectangle {
         objectName: "companionPreviousFrameShortcut"
         sequence: "Left"
         context: Qt.WindowShortcut
-        enabled: pane.active && pane.editing && !pane.typing && !coordinateEditor.opened
+        enabled: pane.displayActive && pane.editing && !pane.typing && !coordinateEditor.opened
         onActivated: pane.selectFrame(sprite.sequenceIndex - 1)
     }
     Shortcut {
         objectName: "companionNextFrameShortcut"
         sequence: "Right"
         context: Qt.WindowShortcut
-        enabled: pane.active && pane.editing && !pane.typing && !coordinateEditor.opened
+        enabled: pane.displayActive && pane.editing && !pane.typing && !coordinateEditor.opened
         onActivated: pane.selectFrame(sprite.sequenceIndex + 1)
     }
 
@@ -248,7 +250,7 @@ Rectangle {
         id: clock
         objectName: "companionPlaybackClock"
         steps: sprite.steps
-        playing: pane.active && pane.running
+        playing: pane.displayActive && pane.running
         ready: sprite.ready
         loop: !!pane.descriptor.loop
         onFrameChanging: sprite.retainedStep = sprite.renderedStep
@@ -404,7 +406,7 @@ Rectangle {
                         CharacterBubbleView {
                             id: bubblePreview
                             objectName: "companionBubblePreview"
-                            visible: pane.showBubble && pane.active
+                            visible: pane.showBubble && pane.displayActive
                             configuration: pane.bubble
                             dark: pane.dark
                             message: pane.previewMessage

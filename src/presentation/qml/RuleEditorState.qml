@@ -673,14 +673,19 @@ QtObject {
         return true;
     }
 
+    // 입력을 잃거나 페이지를 떠날 때 임시 연결만 취소하고 저장된 선은 보존하는 함수.
+    function cancelConnection() {
+        connectingFrom = -1;
+        draggingConnection = false;
+        repaintRequested();
+    }
+
     // 출력점에서 놓은 위치에 입력점이 있으면 두 블록을 연결하는 함수.
     function finishConnectionAt(x, y) {
         if (connectingFrom < 0)
             return;
         const sourceId = connectingFrom;
-        connectingFrom = -1;
-        draggingConnection = false;
-        repaintRequested();
+        cancelConnection();
         for (const block of blocks) {
             if (block.type !== "start" && Math.abs(x - block.x) < 28 && Math.abs(y - (block.y + blockHeight / 2))
                     < 28) {

@@ -277,6 +277,7 @@ Rectangle {
     // 페이지를 떠날 때 추가 메뉴만 닫는 함수.
     function dismissTransientUi() {
         addNodeMenu.close();
+        editor.cancelConnection();
     }
     Connections {
         target: canvas.editor

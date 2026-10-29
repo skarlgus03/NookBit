@@ -263,6 +263,7 @@ Rectangle {
         border.width: modelData.type === "start" ? 3 : 2
         border.color: blockCard.colorFor(modelData.type)
         MouseArea {
+            objectName: "ruleOutputPort_" + modelData.id
             anchors.fill: parent
             anchors.margins: -12
             preventStealing: true
@@ -289,6 +290,7 @@ Rectangle {
                 const point = blockCard.editor.worldPoint(screen.x, screen.y);
                 blockCard.editor.finishConnectionAt(point.x, point.y);
             }
+            onCanceled: blockCard.editor.cancelConnection()
         }
     }
     // 노드 종류에 맞는 기능 색상을 공통 테마에서 읽는 함수.

@@ -234,6 +234,21 @@ int main(int argc, char** argv) {
     auto* addMenu = canvas->findChild<QObject*>("addNodeMenu");
     expect(addMenu && !addMenu->property("visible").toBool() && state->property("panX").toInt() == 40
         && state->property("panY").toInt() == 25, "right drag pans without opening the add menu");
+    auto card = create(engine, "RuleNodeCard", {{"editor", QVariant::fromValue(state.get())},
+        {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))}, {"modelData", list(state.get(), "blocks").first()}});
+    if (!card) return 1;
+    auto* outputPort = card->findChild<QObject*>("ruleOutputPort_1");
+    if (!outputPort) return 1;
+    state->setProperty("connectingFrom", 1);
+    state->setProperty("draggingConnection", true);
+    QMetaObject::invokeMethod(outputPort, "canceled");
+    expect(state->property("connectingFrom").toInt() == -1 && !state->property("draggingConnection").toBool()
+        && list(state.get(), "edges") == initialEdges, "lost pointer grab cancels only the temporary wire");
+    state->setProperty("connectingFrom", 1);
+    state->setProperty("draggingConnection", true);
+    call(engine, canvas.get(), "dismissTransientUi");
+    expect(state->property("connectingFrom").toInt() == -1 && !state->property("draggingConnection").toBool(),
+        "leaving the canvas cancels an unfinished connection");
 
     QQmlComponent stub(&engine);
     stub.setData(R"(import QtQuick

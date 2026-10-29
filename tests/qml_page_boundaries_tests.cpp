@@ -309,6 +309,48 @@ RegisteredDialogHost {
 }
 }
 
+// 숨김·최소화가 페이지 선택과 별개로 미리보기 타이머를 멈추고 복원하는지 검사하는 함수.
+static void testPreviewWindowVisibility(QQmlEngine& engine, const QVariant& theme) {
+    QTemporaryDir directory;
+    QImage frame(32, 32, QImage::Format_ARGB32_Premultiplied);
+    frame.fill(Qt::blue);
+    if (!directory.isValid() || !frame.save(directory.filePath("frame.png"))) {
+        expect(false, "create preview visibility fixture"); return;
+    }
+    const QVariantMap step{{"frameId", "idle-1"}, {"source", QUrl::fromLocalFile(directory.filePath("frame.png"))},
+        {"imageWidth", 32}, {"imageHeight", 32}, {"region", QVariantMap{{"x", 0}, {"y", 0}, {"width", 32}, {"height", 32}}},
+        {"pivot", QVariantMap{{"x", 16}, {"y", 30}}}, {"pixelsPerUnit", 1}, {"durationMs", 60000}};
+    const QVariantList animations{QVariantMap{{"label", "idle"}, {"descriptor", QVariantMap{{"id", "idle"},
+        {"loop", true}, {"steps", QVariantList{step}}}}}};
+    QQuickWindow window;
+    window.resize(900, 700);
+    auto preview = create(engine, "CompanionPreview", {{"animations", animations}, {"bubble", QVariantMap{}},
+        {"theme", theme}, {"active", true}, {"width", 900}, {"height", 700}});
+    if (!preview) return;
+    qobject_cast<QQuickItem*>(preview.get())->setParentItem(window.contentItem());
+    window.show();
+    settle();
+    auto* clock = preview->findChild<QObject*>("companionPlaybackClock");
+    if (!clock) { expect(false, "preview clock exists"); return; }
+    settle();
+    expect(preview->property("displayActive").toBool() && clock->property("positionMs").toDouble() > 0,
+        "a visible selected preview advances");
+    window.hide();
+    const auto hiddenPosition = clock->property("positionMs").toDouble();
+    settle();
+    expect(preview->property("visible").toBool() && !preview->property("displayActive").toBool()
+        && clock->property("positionMs").toDouble() == hiddenPosition && preview->property("running").toBool(),
+        "hidden window pauses the clock without discarding the playback request");
+    window.showNormal();
+    settle();
+    expect(clock->property("positionMs").toDouble() > hiddenPosition, "restoring the window resumes from the paused time");
+    window.showMinimized();
+    const auto minimizedPosition = clock->property("positionMs").toDouble();
+    settle();
+    expect(!preview->property("displayActive").toBool() && clock->property("positionMs").toDouble() == minimizedPosition,
+        "minimized preview cannot keep its timer running");
+}
+
 // 입력 초안의 독립성과 페이지 소유 확인창의 종료를 앱 조립부 없이 검사하는 함수.
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
@@ -357,6 +399,7 @@ int main(int argc, char** argv) {
     QQuickWindow host;
     host.resize(960, 760);
     host.show();
+    testPreviewWindowVisibility(engine, theme->property("light").value<QJSValue>().toVariant());
     testRegisteredPageHost(engine, host);
     testDesktopContribution(engine);
     testProposalContribution(engine, host);

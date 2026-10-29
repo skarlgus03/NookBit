@@ -16,7 +16,7 @@ AppButton {
             id: symbol
             anchors.centerIn: parent
             width: UiMetrics.iconSize; height: width
-            readonly property color ink: control.enabled ? control.palette.buttonText : control.palette.disabled.buttonText
+            readonly property color ink: control.buttonForeground
             onInkChanged: requestPaint()
             Connections {
                 target: control
