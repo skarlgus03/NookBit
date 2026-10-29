@@ -810,41 +810,77 @@ Result<OperationPlan> SqliteHistoryRepository::loadPlan(const PlanId& planId) co
 
 // 최근 실행 작업의 상태와 파일 수를 최신순으로 읽는 함수.
 Result<std::vector<PlanHistoryEntry>> SqliteHistoryRepository::recentPlans(int limit) const {
-    if (limit < 1 || limit > 100) {
-        return Result<std::vector<PlanHistoryEntry>>::failure({
-            "history.limit_invalid", "History limit must be between 1 and 100.",
-        });
+    HistorySearch query;
+    query.limit = limit;
+    const auto page = searchHistory(query);
+    if (!page) return Result<std::vector<PlanHistoryEntry>>::failure(page.error());
+    std::vector<PlanHistoryEntry> entries;
+    for (const auto& entry : page.value().entries) entries.push_back(entry.plan);
+    return Result<std::vector<PlanHistoryEntry>>::success(std::move(entries));
+}
+
+// 전체 기록에서 일치 작업을 찾고 마지막 정렬 위치 뒤의 한 페이지만 반환하는 함수.
+Result<HistorySearchPage> SqliteHistoryRepository::searchHistory(const HistorySearch& search) const {
+    const auto validTime = [](const std::string& value) {
+        return QDateTime::fromString(QString::fromStdString(value), Qt::ISODateWithMs).isValid();
+    };
+    if (search.limit < 1 || search.limit > 100 || search.text.size() > 4096 || search.text.find('\0') != std::string::npos
+        || (search.fromUtc && !validTime(*search.fromUtc)) || (search.untilUtc && !validTime(*search.untilUtc))
+        || (search.after && (!validTime(search.after->activityUtc) || search.after->planId.empty()))
+        || (search.fromUtc && search.untilUtc && QDateTime::fromString(QString::fromStdString(*search.fromUtc), Qt::ISODateWithMs)
+            >= QDateTime::fromString(QString::fromStdString(*search.untilUtc), Qt::ISODateWithMs)))
+        return Result<HistorySearchPage>::failure({"history.query_invalid", "Invalid history search range, text, page size or cursor."});
+    QString statusCondition;
+    switch (search.result) {
+    case HistoryResultFilter::All: statusCondition = "1"; break;
+    case HistoryResultFilter::Completed: statusCondition = "status = 'completed'"; break;
+    case HistoryResultFilter::RolledBack: statusCondition = "status = 'rolled_back'"; break;
+    case HistoryResultFilter::Problem: statusCondition = "status IN ('failed','executing','rolling_back','needs_recovery')"; break;
+    default: return Result<HistorySearchPage>::failure({"history.query_invalid", "Invalid history result filter."});
     }
-    auto opened = ensureOpen();
-    if (!opened) return Result<std::vector<PlanHistoryEntry>>::failure(opened.error());
+    if (search.order != HistoryOrder::Newest && search.order != HistoryOrder::Oldest)
+        return Result<HistorySearchPage>::failure({"history.query_invalid", "Invalid history sort order."});
+    const auto opened = ensureOpen();
+    if (!opened) return Result<HistorySearchPage>::failure(opened.error());
+    // instr는 %, _와 따옴표를 검색 문법이 아닌 실제 파일명 문자로 처리한다.
+    const auto term = QString::fromStdString(search.text).trimmed().replace('\\', '/').toLower();
+    const auto direction = search.order == HistoryOrder::Newest ? QStringLiteral("DESC") : QStringLiteral("ASC");
+    const auto comparison = search.order == HistoryOrder::Newest ? QStringLiteral("<") : QStringLiteral(">");
+    const auto sql = QStringLiteral(
+        "WITH summary AS (SELECT p.id,p.status,"
+        "COALESCE((SELECT MAX(e.occurred_at) FROM events e WHERE e.plan_id=p.id),p.created_at) AS activity,"
+        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id=p.id AND s.status!='skipped') AS files,"
+        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id=p.id AND s.status='applied') AS applied,"
+        "CASE WHEN :term='' THEN 0 ELSE (SELECT COUNT(*) FROM steps s WHERE s.plan_id=p.id AND "
+        "(instr(lower(replace(s.source_path,char(92),'/')),:term)>0 OR "
+        "instr(lower(replace(s.destination_path,char(92),'/')),:term)>0)) END AS matches "
+        "FROM plans p WHERE p.status IN ('executing','completed','rolling_back','rolled_back','needs_recovery','failed')) "
+        "SELECT id,activity,status,files,applied,matches FROM summary WHERE (%1) AND (:term='' OR matches>0) "
+        "AND (:from='' OR julianday(activity)>=julianday(:from)) AND (:until='' OR julianday(activity)<julianday(:until)) "
+        "AND (:cursor='' OR activity %2 :cursor OR (activity=:cursor AND id %2 :cursorId)) "
+        "ORDER BY activity %3,id %3 LIMIT :limit").arg(statusCondition, comparison, direction);
     QSqlQuery query(database_);
-    query.prepare(QStringLiteral(
-        "SELECT p.id, COALESCE((SELECT MAX(e.occurred_at) FROM events e WHERE e.plan_id = p.id), "
-        "p.created_at), p.status, "
-        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id = p.id AND s.status != 'skipped'), "
-        "(SELECT COUNT(*) FROM steps s WHERE s.plan_id = p.id AND s.status = 'applied') "
-        "FROM plans p WHERE p.status IN "
-        "('executing', 'completed', 'rolling_back', 'rolled_back', 'needs_recovery', 'failed') "
-        "ORDER BY 2 DESC, p.id DESC LIMIT ?"));
-    query.addBindValue(limit);
-    if (!query.exec()) {
-        return Result<std::vector<PlanHistoryEntry>>::failure({
-            "history.recent_select_failed", query.lastError().text().toStdString(),
-        });
-    }
-    std::vector<PlanHistoryEntry> result;
+    query.prepare(sql);
+    query.bindValue(":term", term);
+    query.bindValue(":from", search.fromUtc ? QString::fromStdString(*search.fromUtc) : QStringLiteral(""));
+    query.bindValue(":until", search.untilUtc ? QString::fromStdString(*search.untilUtc) : QStringLiteral(""));
+    query.bindValue(":cursor", search.after ? QString::fromStdString(search.after->activityUtc) : QStringLiteral(""));
+    query.bindValue(":cursorId", search.after ? QString::fromStdString(search.after->planId) : QStringLiteral(""));
+    query.bindValue(":limit", search.limit + 1);
+    if (!query.exec()) return Result<HistorySearchPage>::failure({"history.search_failed", query.lastError().text().toStdString()});
+    HistorySearchPage page;
     while (query.next()) {
-        const auto status = parsePlanStatus(query.value(2).toString());
-        if (!status) {
-            return Result<std::vector<PlanHistoryEntry>>::failure({
-                "history.corrupt_plan", "A saved plan has an invalid status.",
-            });
+        if (page.entries.size() == static_cast<std::size_t>(search.limit)) {
+            const auto& last = page.entries.back().plan;
+            page.next = HistoryCursor{last.lastActivityUtc, last.id};
+            break;
         }
-        result.push_back({query.value(0).toString().toStdString(),
-                          query.value(1).toString().toStdString(), *status,
-                          query.value(3).toInt(), query.value(4).toInt()});
+        const auto status = parsePlanStatus(query.value(2).toString());
+        if (!status) return Result<HistorySearchPage>::failure({"history.corrupt_plan", "A saved plan has an invalid status."});
+        page.entries.push_back({{query.value(0).toString().toStdString(), query.value(1).toString().toStdString(), *status,
+            query.value(3).toInt(), query.value(4).toInt()}, query.value(5).toInt()});
     }
-    return Result<std::vector<PlanHistoryEntry>>::success(std::move(result));
+    return Result<HistorySearchPage>::success(std::move(page));
 }
 
 // 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.

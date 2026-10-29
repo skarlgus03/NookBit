@@ -218,6 +218,7 @@ if(NOOKBIT_BUILD_QT_APP)
           presentation/qml/WatchPatternEditor.qml
           presentation/qml/SettingsWorkflow.qml
         presentation/qml/HistoryPage.qml
+      presentation/qml/HistorySearchBar.qml
           presentation/qml/HistoryTimeline.qml
           presentation/qml/HistoryDetail.qml
           presentation/qml/FileTypeBadge.qml

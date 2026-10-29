@@ -525,6 +525,22 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_executable(nookbit_history_search_tests history_search_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/history_controller.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/background_task_runner.hpp)
+  set_target_properties(nookbit_history_search_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_history_search_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_history_search_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_history_search_tests PRIVATE nookbit_history Qt6::Core Qt6::Sql)
+  if(MSVC)
+    target_compile_options(nookbit_history_search_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_history_search_tests COMMAND nookbit_history_search_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_history_search_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_test(NAME nookbit_application_version COMMAND nookbit --version)
   string(REPLACE "." "\\." nookbit_version_pattern "${NOOKBIT_VERSION}")
   set_tests_properties(nookbit_application_version PROPERTIES

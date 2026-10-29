@@ -17,36 +17,68 @@ PageSurface {
 
     readonly property var selectedEntry: controller.historyEntries.find(entry => entry.planId === controller.selectedHistoryPlanId) || null
     background: Rectangle { color: page.theme.window }
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        HistoryTimeline {
-            Layout.preferredWidth: UiMetrics.historyListWidth
-            Layout.fillHeight: true
-            entries: page.controller.historyEntries
-            selectedPlanId: page.controller.selectedHistoryPlanId
-            busy: page.busy
-            dark: page.dark
-            onPlanRequested: planId => page.controller.selectHistoryPlan(planId)
-            onRefreshRequested: page.controller.refreshHistory()
-        }
-        Rectangle {
-            Layout.preferredWidth: UiMetrics.borderNormal
-            Layout.fillHeight: true
-            color: page.theme.border
-        }
-        HistoryDetail {
+        ColumnLayout {
             Layout.fillWidth: true
-            Layout.minimumWidth: 0
+            Layout.margins: UiMetrics.spaceSection
+            spacing: UiMetrics.spaceSmall
+            HistorySearchBar {
+                Layout.fillWidth: true
+                state: ({text: page.controller.searchText || "", period: page.controller.period || "all",
+                    result: page.controller.resultFilter || "all", order: page.controller.sortOrder || "newest",
+                    from: page.controller.fromDate || "", to: page.controller.toDate || ""})
+                busy: page.busy
+                dark: page.dark
+                onSearchRequested: (text, period, result, order, from, to) => page.controller.applyHistoryFilters(text, period, result, order, from, to)
+                onResetRequested: page.controller.resetHistoryFilters()
+            }
+            Label {
+                objectName: "historySearchMessage"
+                Layout.fillWidth: true
+                text: page.controller.searchMessage || ""
+                visible: text.length > 0
+                font.pixelSize: UiMetrics.textBody
+                color: page.theme.muted
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
             Layout.fillHeight: true
-            entry: page.selectedEntry
-            steps: page.controller.historySteps
-            message: page.controller.historyMessage
-            canUndo: page.controller.canUndoSelectedHistory
-            undoCount: page.controller.selectedHistoryFileCount
-            busy: page.busy
-            dark: page.dark
-            onUndoRequested: undoHistoryDialog.open()
+            spacing: 0
+            HistoryTimeline {
+                Layout.preferredWidth: UiMetrics.historyListWidth
+                Layout.fillHeight: true
+                entries: page.controller.historyEntries
+                selectedPlanId: page.controller.selectedHistoryPlanId
+                busy: page.busy
+                dark: page.dark
+                hasMore: !!page.controller.hasMoreHistory
+                onLoadMoreRequested: page.controller.loadMoreHistory()
+                onPlanRequested: planId => page.controller.selectHistoryPlan(planId)
+                onRefreshRequested: page.controller.refreshHistory()
+            }
+            Rectangle {
+                Layout.preferredWidth: UiMetrics.borderNormal
+                Layout.fillHeight: true
+                color: page.theme.border
+            }
+            HistoryDetail {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.fillHeight: true
+                entry: page.selectedEntry
+                steps: page.controller.historySteps
+                message: page.controller.historyMessage
+                canUndo: page.controller.canUndoSelectedHistory
+                undoCount: page.controller.selectedHistoryFileCount
+                busy: page.busy
+                dark: page.dark
+                onUndoRequested: undoHistoryDialog.open()
+            }
         }
     }
 

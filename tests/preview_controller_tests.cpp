@@ -309,7 +309,7 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
         ++sortFinishes;
         finishedAfterState = success && pending.count() == 0 && preview.canUndo() && !message.isEmpty();
     });
-    nookbit::HistoryController history(workflow.history, operations);
+    nookbit::HistoryController history(workflow.history, workflow.history, operations);
     nookbit::RecoveryController recovery(workflow.history, nullptr, &workflow.journal, &operations);
     preview.setTaskRunner(&runner); history.setTaskRunner(&runner); recovery.setTaskRunner(&runner);
     preview.setSortWorkflow(&operations);
@@ -1356,7 +1356,7 @@ void testHistoryUndoUpdatesLastMove() {
         workflow.approveUseCase, workflow.history, workflow.operations,
         projectPath("resources/rules/default.example.json"),
         projectPath("schemas/rules.schema.json"), home);
-    nookbit::HistoryController history(workflow.history, workflow.operations);
+    nookbit::HistoryController history(workflow.history, workflow.history, workflow.operations);
     QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted,
                      &preview, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     preview.createPreview(home);
@@ -1417,7 +1417,7 @@ void testHistoryUndoAfterRestart() {
             previewWorkflow.verifyUseCase, previewWorkflow.approveUseCase,
             previewWorkflow.history, previewWorkflow.operations,
             rulesPath, schemaPath, home);
-        nookbit::HistoryController historyController(previewWorkflow.history, previewWorkflow.operations);
+        nookbit::HistoryController historyController(previewWorkflow.history, previewWorkflow.history, previewWorkflow.operations);
         QObject::connect(&historyController, &nookbit::HistoryController::rollbackAttempted,
                          &controller, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
         pending.addUrl(QUrl::fromLocalFile(first));
@@ -1447,7 +1447,7 @@ void testHistoryUndoAfterRestart() {
         restartedWorkflow.verifyUseCase, restartedWorkflow.approveUseCase,
         restartedWorkflow.history, restartedWorkflow.operations,
         rulesPath, schemaPath, home);
-    nookbit::HistoryController restartedHistory(restartedWorkflow.history, restartedWorkflow.operations);
+    nookbit::HistoryController restartedHistory(restartedWorkflow.history, restartedWorkflow.history, restartedWorkflow.operations);
     QObject::connect(&restartedHistory, &nookbit::HistoryController::rollbackAttempted,
                      &restarted, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
     restartedHistory.refreshHistory();
@@ -1844,7 +1844,7 @@ void testNativeControllerCase(const QString& sourceRun, const QString& targetRun
     }
     if (index == 1) {
         PreviewWorkflow restarted(projectPath("resources/rules/default.v3.json"), projectPath("schemas/rules-tree-v3.schema.json"), appData, true);
-        nookbit::HistoryController history(restarted.history, restarted.operations);
+        nookbit::HistoryController history(restarted.history, restarted.history, restarted.operations);
         QObject::connect(&history, &nookbit::HistoryController::rollbackAttempted, &controller, &nookbit::PreviewController::refreshLastUndoAfterHistoryRollback);
         history.refreshHistory(); history.selectHistoryPlan(QString::fromStdString(plan.id));
         expect(history.canUndoSelectedHistory(), "reopened history must offer native v2 undo"); history.undoSelectedHistory();

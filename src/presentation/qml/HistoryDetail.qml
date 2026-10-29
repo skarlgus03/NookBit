@@ -148,8 +148,15 @@ Item {
                                 textFormat: Text.PlainText
                                 font.pixelSize: UiMetrics.textEmphasis
                                 font.weight: Font.DemiBold
-                                color: detail.theme.text
+                                color: modelData.searchMatch === true ? detail.theme.accent : detail.theme.text
                                 elide: Text.ElideMiddle
+                            }
+                            Label {
+                                objectName: "historySearchMatch_" + modelData.fileName
+                                visible: modelData.searchMatch === true
+                                text: qsTr("검색 일치")
+                                color: detail.theme.accent
+                                font.pixelSize: UiMetrics.textBody
                             }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -227,7 +234,7 @@ Item {
                 AppButton {
                     id: undoAction
                     objectName: "historyUndoButton"
-                    text: qsTr("이 작업 되돌리기")
+                    text: detail.canUndo ? qsTr("이 작업 되돌리기 (%1개)").arg(detail.undoCount) : qsTr("이 작업 되돌리기")
                     appearance: AppButton.Soft
                     dark: detail.dark
                     font.bold: true

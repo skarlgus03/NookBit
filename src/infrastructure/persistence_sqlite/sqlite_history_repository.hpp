@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nookbit/application/ports.hpp>
+#include <nookbit/application/history_query.hpp>
 
 #include <QSqlDatabase>
 #include <QString>
@@ -8,7 +9,7 @@
 namespace nookbit {
 
 /// 승인 전 계획을 앱 데이터 폴더의 SQLite에 저장하는 이력 저장소.
-class SqliteHistoryRepository final : public IHistoryRepository {
+class SqliteHistoryRepository final : public IHistoryRepository, public IHistoryQuery {
 public:
     /// DB 파일과 초기 Schema 경로를 보관하는 생성자.
     SqliteHistoryRepository(QString databasePath, QString migrationPath);
@@ -44,6 +45,8 @@ public:
 
     /// 최근 실행 작업을 파일을 변경하지 않고 최신순으로 조회하는 함수.
     [[nodiscard]] Result<std::vector<PlanHistoryEntry>> recentPlans(int limit) const override;
+    /// 경로·기간·결과 조건과 안정적인 이어 읽기로 기록을 조회하는 함수.
+    [[nodiscard]] Result<HistorySearchPage> searchHistory(const HistorySearch& query) const override;
 
     /// 확인 필요 상태 전의 실행·되돌리기 상태를 이벤트 기록에서 찾는 함수.
     [[nodiscard]] Result<PlanStatus> interruptedStatus(const PlanId& planId) const override;

@@ -105,7 +105,7 @@ struct FileOrganizerRuntime::State {
               std::filesystem::path(appData.toStdWString()), recoverySettings),
           previewController(pendingFiles, createPreview, freezePreview, verifySavedPlan, approvePlan,
               history, fileOperations, rulesPath, treeSchema, defaultDestination, nullptr, legacyTreeSchema),
-          recoveryController(history, nullptr, &transferJournal, &fileOperations), historyController(history, fileOperations),
+          recoveryController(history, nullptr, &transferJournal, &fileOperations), historyController(history, history, fileOperations),
           classificationQuery(previewRules, previewRuleEngine, previewHasher) {
         if (!verifyUi) {
             const auto restored = pendingRepository.load();

@@ -1,5 +1,10 @@
 # NookBit 설계와 확장 원칙
 
+History search uses a separate read-only `IHistoryQuery` capability. The host
+injects it alongside history persistence and file operations; SQL queries do not
+scan live files. Filtered pagination and full-plan undo scope are documented in
+[History search](history-search.md).
+
 Feature-module ownership, communication contracts, disabled-state behavior and
 the incremental refactor plan are recorded in [Feature modules](feature-modules.md).
 The plan distinguishes existing interfaces from module lifecycle work not yet implemented.

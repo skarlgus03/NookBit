@@ -36,7 +36,10 @@ NookBit은 사용자가 끌어놓은 파일과 폴더를 규칙에 따라 정리
 
 컴패니언 페이지는 왼쪽의 큰 미리보기·재생 타임라인과 오른쪽의 캐릭터 팩·표시·위치·바탕화면 조작 설정으로 나눈다. 미리보기에는 점 배경과 확대·축소 도구를 제공하며 프레임 편집 중에만 적용·취소 버튼이 나타난다. 미적용 변경이 있으면 팩 교체를 막고 적용·취소 버튼을 유지한다. 기존 프레임 시간·기준점 편집과 바탕화면 크기 저장은 그대로 동작한다.
 
-작업 기록은 왼쪽의 날짜별 최근 기록과 오른쪽 상세로 나눈다. 행 전체를 눌러 선택하면 대상·현재 이동됨·되돌림 수와 파일별 원본/목적지 경로·상태를 확인할 수 있다. 하단의 되돌리기는 기존 확인창을 거쳐 실행하며, 파일 작업 중에는 조작을 막는다. 현재 최근 50건을 조회하고 검색은 추후 DB 조회에 연결한다.
+History supports [text search and filters](docs/history-search.md) across all stored
+execution records: filename/path, local date range, plan result and sort order.
+Results load in pages of 50 plans. Detail retains all files and labels search
+matches; undo still applies to the entire selected plan, with its file count shown.
 
 규칙 편집기는 상단에 블록·연결 수와 저장 상태를 표시한다. 기본색의 메뉴 띠에는 파일·편집·보기·도움말과 빠른 블록 추가를 두며, 오른쪽 블록 설정은 선택 요약·입력 항목·비교/단위·실행 순서를 구분한다. 하단 상태 줄은 높이를 유지하고 선택 수를 표시하며, 잘린 안내는 마우스를 올려 전체 내용을 볼 수 있다.
 
@@ -91,7 +94,7 @@ cmake --build --preset archive-release
 
 Release 빌드·테스트는 `out/build/release`에, 실행 파일과 Qt 런타임은 `out/package/NookBit-Release`에 모인다. `out/package/NookBit-Release/nookbit.exe`를 더블클릭하면 실행된다. 폴더 전체가 필요하므로 exe만 옮기지 않는다. 패키지에는 테스트 실행 파일, 정적 라이브러리, 컴파일 중간 파일을 포함하지 않는다. Windows 패키징에는 Qt의 `windeployqt`가 필요하다.
 
-`archive-release` also creates `out/package/NookBit-0.1.0-alpha.1-Windows-x64.zip`
+`archive-release` also creates `out/package/NookBit-<version>-Windows-x64.zip`
 and a SHA-256 checksum beside it. The ZIP includes quick-start instructions and
 bundled character packs. The shared application version appears in Settings and
 Windows file properties. See [versioning and archive details](docs/windows-package.md#versioned-test-archive).

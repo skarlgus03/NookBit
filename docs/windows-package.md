@@ -7,7 +7,7 @@ Build with `cmake --build --preset package-release`. The package is generated at
 
 Run `cmake --build --preset archive-release` to update the package and create:
 
-- `out/package/NookBit-0.1.0-alpha.1-Windows-x64.zip`
+- `out/package/NookBit-<version>-Windows-x64.zip`
 - The matching `.zip.sha256` checksum file.
 
 The ZIP contains the entire `NookBit-Release` directory, including `nookbit.exe`,
@@ -17,7 +17,7 @@ preferences, imported packs, pending files and history are stored outside the
 application directory and are not added by the packaging target.
 
 The core version is `project(VERSION ...)` in the root CMakeLists.txt;
-`NOOKBIT_PRERELEASE` defaults to `alpha.1`. They form one display version used by
+`NOOKBIT_PRERELEASE` supplies the current pre-release identifier. They form one display version used by
 Qt application metadata, Settings > Information, Windows executable properties,
 package metadata, instructions and the archive filename. `nookbit.exe --version`
 prints the same value without loading personal settings or starting features.

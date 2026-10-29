@@ -372,6 +372,23 @@ int main(int argc, char** argv) {
         property bool canUndoSelectedHistory: true
         property int selectedHistoryFileCount: 1
         property int undoCalls: 0
+        property string searchText: ""
+        property string period: "all"
+        property string resultFilter: "all"
+        property string sortOrder: "newest"
+        property string fromDate: ""
+        property string toDate: ""
+        property string searchMessage: ""
+        property bool hasMoreHistory: true
+        property int searchCalls: 0
+        property int moreCalls: 0
+        function applyHistoryFilters(text, range, result, order, from, to) {
+            ++searchCalls
+            searchText = text; period = range; resultFilter = result; sortOrder = order; fromDate = from; toDate = to
+            return true
+        }
+        function resetHistoryFilters() { applyHistoryFilters("", "all", "all", "newest", "", "") }
+        function loadMoreHistory() { ++moreCalls }
         function undoSelectedHistory() { ++undoCalls }
     )");
     auto recovery = fake(engine, R"(
@@ -403,6 +420,31 @@ int main(int argc, char** argv) {
     auto* confirm = recoveryPage->findChild<QObject*>("recoveryConfirmDialog");
     if (!undo || !confirm) return 1;
     historyPage->setProperty("visible", true);
+    auto* searchInput = historyPage->findChild<QObject*>("historySearchInput");
+    auto* searchButton = historyPage->findChild<QObject*>("historySearchButton");
+    auto* resetButton = historyPage->findChild<QObject*>("historyResetButton");
+    auto* resultFilter = historyPage->findChild<QObject*>("historyResultFilter");
+    auto* moreButton = historyPage->findChild<QObject*>("historyLoadMoreButton");
+    expect(searchInput && searchButton && resetButton && resultFilter && moreButton, "history search controls receive explicit controller inputs");
+    if (searchInput && searchButton && resetButton && resultFilter && moreButton) {
+        settle();
+        searchInput->setProperty("text", "meeting");
+        QMetaObject::invokeMethod(searchButton, "clicked");
+        expect(history->property("searchText") == "meeting" && history->property("searchCalls").toInt() == 1, "search button sends text to query controller");
+        settle();
+        resultFilter->setProperty("currentIndex", 3);
+        QMetaObject::invokeMethod(resultFilter, "activated", Q_ARG(int, 3));
+        expect(history->property("resultFilter") == "problem", "result dropdown applies selected filter");
+        QMetaObject::invokeMethod(moreButton, "clicked");
+        expect(history->property("moreCalls").toInt() == 1, "load-more button requests a page without replacing detail");
+        QMetaObject::invokeMethod(resetButton, "clicked");
+        settle();
+        expect(searchInput->property("text").toString().isEmpty() && resultFilter->property("currentIndex").toInt() == 0,
+            "reset restores visible controls to applied defaults");
+        historyPage->setProperty("busy", true);
+        expect(!searchButton->property("enabled").toBool() && !moreButton->property("enabled").toBool(), "file work blocks search and paging input");
+        historyPage->setProperty("busy", false);
+    }
     QMetaObject::invokeMethod(undo, "open");
     settle();
     expect(undo->property("visible").toBool(), "undo confirmation opens over the injected window");
@@ -588,7 +630,7 @@ int main(int argc, char** argv) {
     // 되돌림 요약은 번역된 상태 문구가 아니라 전달된 실제 상태 플래그로 집계하는 검사.
     const QVariantList historyFiles{
         QVariantMap{{"fileName", "report.pdf"}, {"source", "C:/Downloads/report.pdf"}, {"destination", "D:/Archive/report.pdf"},
-            {"status", "localized state"}, {"statusTone", "success"}, {"applied", true}, {"rolledBack", false}},
+            {"status", "localized state"}, {"statusTone", "success"}, {"applied", true}, {"rolledBack", false}, {"searchMatch", true}},
         QVariantMap{{"fileName", "photo.png"}, {"source", "C:/Downloads/photo.png"}, {"destination", "D:/Pictures/photo.png"},
             {"status", "another localized state"}, {"statusTone", "success"}, {"applied", false}, {"rolledBack", true}}};
     auto historyDetail = create(engine, "HistoryDetail", {{"width", 559}, {"height", 480}, {"steps", historyFiles},
@@ -605,6 +647,10 @@ int main(int argc, char** argv) {
         auto* restored = find(find, detailItem, "historyRolledBackSummary");
         auto* documentBadge = find(find, detailItem, "historyFileType_report.pdf");
         auto* imageBadge = find(find, detailItem, "historyFileType_photo.png");
+        auto* matchingFile = find(find, detailItem, "historySearchMatch_report.pdf");
+        auto* nonmatchingFile = find(find, detailItem, "historySearchMatch_photo.png");
+        expect(matchingFile && matchingFile->isVisible() && nonmatchingFile && !nonmatchingFile->isVisible(),
+            "search match label distinguishes rows without removing nonmatching files from detail");
         expect(documentBadge && imageBadge && documentBadge->property("category").toString() == "document"
             && imageBadge->property("category").toString() == "image"
             && documentBadge->property("color") != imageBadge->property("color"),

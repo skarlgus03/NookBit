@@ -9,9 +9,11 @@ Item {
     property string selectedPlanId: ""
     property bool busy: false
     property bool dark: false
+    property bool hasMore: false
     readonly property var theme: UiTheme.colors(dark)
     signal planRequested(string planId)
     signal refreshRequested()
+    signal loadMoreRequested()
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: UiMetrics.spaceGroup
@@ -20,7 +22,7 @@ Item {
             Layout.fillWidth: true
             Label {
                 Layout.fillWidth: true
-                text: qsTr("최근 %1건").arg(timeline.entries.length)
+                text: qsTr("작업 %1건").arg(timeline.entries.length)
                 color: timeline.theme.muted
                 font.pixelSize: UiMetrics.textBody
             }
@@ -32,7 +34,7 @@ Item {
                 enabled: !timeline.busy
                 Accessible.name: qsTr("작업 기록 새로고침")
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("최근 작업을 최대 50건 다시 불러와요.")
+                ToolTip.text: qsTr("현재 조건으로 기록을 다시 불러와요.")
                 ToolTip.delay: UiMetrics.tooltipDelayMs
                 contentItem: NavigationIcon { kind: "refresh"; strokeColor: timeline.theme.muted }
                 onClicked: timeline.refreshRequested()
@@ -51,7 +53,7 @@ Item {
                 anchors.centerIn: parent
                 width: parent.width - UiMetrics.spaceSection * 2
                 visible: historyList.count === 0
-                text: qsTr("아직 작업 기록이 없어요.")
+                text: qsTr("조건에 맞는 작업 기록이 없어요.")
                 font.pixelSize: UiMetrics.textBody
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
@@ -117,7 +119,7 @@ Item {
                             }
                             Label {
                                 Layout.fillWidth: true
-                                text: modelData.status
+                                text: modelData.status + (modelData.matchedFileCount > 0 ? qsTr(" · 일치 %1개").arg(modelData.matchedFileCount) : "")
                                 font.pixelSize: UiMetrics.textBody
                                 color: timeline.theme.muted
                                 elide: Text.ElideRight
@@ -126,6 +128,15 @@ Item {
                     }
                 }
             }
+        }
+        AppButton {
+            objectName: "historyLoadMoreButton"
+            Layout.fillWidth: true
+            text: qsTr("50건 더 불러오기")
+            dark: timeline.dark
+            visible: timeline.hasMore
+            enabled: !timeline.busy
+            onClicked: timeline.loadMoreRequested()
         }
     }
 }
