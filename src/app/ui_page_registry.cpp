@@ -9,21 +9,36 @@ UiPageRegistry::UiPageRegistry(QSet<int> reservedPages, QObject* parent)
 
 // 중복·예약 번호·외부 QML 경로를 거부하고 소유 수명에 등록을 연결하는 함수.
 Result<void> UiPageRegistry::addPage(UiPageContribution contribution, QObject& lifetime) {
+    return addPages({std::move(contribution)}, lifetime);
+}
+
+// 일부 페이지가 잘못돼도 나머지만 남지 않도록 전체 검증 후 등록하는 함수.
+Result<void> UiPageRegistry::addPages(QList<UiPageContribution> contributions, QObject& lifetime) {
     if (QThread::currentThread() != thread() || lifetime.thread() != thread())
         return Result<void>::failure({"ui.page_thread", "Page registration requires the UI owning thread."});
-    if (contribution.id.trimmed().isEmpty() || contribution.ownerId.trimmed().isEmpty() ||
-        contribution.page <= 0 || contribution.title.trimmed().isEmpty() || contribution.icon.trimmed().isEmpty() ||
-        !contribution.source.isValid() || contribution.source.scheme() != QStringLiteral("qrc") ||
-        !contribution.source.path().endsWith(QStringLiteral(".qml")) || contribution.source.hasQuery() ||
-        contribution.source.hasFragment() || !contribution.source.host().isEmpty())
-        return Result<void>::failure({"ui.invalid_page", "A page needs stable names, a route, menu metadata and a bundled QML source."});
-    if (reservedPages_.contains(contribution.page) || pages_.contains(contribution.page) || pageId(contribution.id) != 0)
-        return Result<void>::failure({"ui.duplicate_page", "Page name or route is already registered or reserved by the host."});
-    const int route = contribution.page;
-    pages_.insert(route, std::move(contribution));
-    QObject::connect(&lifetime, &QObject::destroyed, this, [this, route] {
+    QSet<int> routes;
+    QSet<QString> names;
+    for (const auto& contribution : contributions) {
+        if (contribution.id.trimmed().isEmpty() || contribution.ownerId.trimmed().isEmpty() ||
+            contribution.page <= 0 || contribution.title.trimmed().isEmpty() || contribution.icon.trimmed().isEmpty() ||
+            !contribution.source.isValid() || contribution.source.scheme() != QStringLiteral("qrc") ||
+            !contribution.source.path().endsWith(QStringLiteral(".qml")) || contribution.source.hasQuery() ||
+            contribution.source.hasFragment() || !contribution.source.host().isEmpty())
+            return Result<void>::failure({"ui.invalid_page", "A page needs stable names, a route, menu metadata and a bundled QML source."});
+        if (reservedPages_.contains(contribution.page) || pages_.contains(contribution.page) || pageId(contribution.id) != 0 ||
+            routes.contains(contribution.page) || names.contains(contribution.id))
+            return Result<void>::failure({"ui.duplicate_page", "Page name or route is already registered or reserved by the host."});
+        routes.insert(contribution.page);
+        names.insert(contribution.id);
+    }
+    if (contributions.isEmpty()) return Result<void>::success();
+    for (auto& contribution : contributions) {
+        const int route = contribution.page;
+        pages_.insert(route, std::move(contribution));
+    }
+    QObject::connect(&lifetime, &QObject::destroyed, this, [this, routes] {
         // 기능의 문맥이 사라지면 메뉴와 화면 입력을 함께 제거하는 함수.
-        pages_.remove(route);
+        for (const int route : routes) pages_.remove(route);
         emit pagesChanged();
     });
     emit pagesChanged();

@@ -12,6 +12,7 @@ PageSurface {
     required property var motion
     required property var edits
     required property var guideService
+    property Item overlayHost
     property bool previewBubbleVisible: true
     property bool initialized: false
     Component.onCompleted: initialized = true

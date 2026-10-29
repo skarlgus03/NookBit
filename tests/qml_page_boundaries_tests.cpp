@@ -60,10 +60,12 @@ Item {
     objectName: "registeredPageProbe"
     required property var service
     required property var guideService
+    property var overlayHost
     property bool dark: false
     property int draft: 0
     signal openRequested()
     signal closeRequested()
+    signal routeRequested(int page)
 })");
     file.close();
     auto service = fake(engine, "property string token: 'feature-input'");
@@ -75,8 +77,10 @@ Item {
 RegisteredPageHost {
     property int openedRoute: 0
     property int closedRoute: 0
+    property int navigatedRoute: 0
     onPageRequested: function(page) { openedRoute = page }
     onCloseRequested: function(page) { closedRoute = page }
+    onNavigationRequested: function(page) { navigatedRoute = page }
 })", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/RegisteredHostHarness.qml")));
     std::unique_ptr<QObject> owner(component.createWithInitialProperties({{"registration", registration},
         {"guideService", QVariant::fromValue(service.get())}, {"width", 500}, {"height", 400}}));
@@ -93,8 +97,10 @@ RegisteredPageHost {
     expect(probe->property("visible").toBool() && probe->property("dark").toBool(), "selection and live theme reach registered page");
     QMetaObject::invokeMethod(probe, "openRequested");
     QMetaObject::invokeMethod(probe, "closeRequested");
+    QMetaObject::invokeMethod(probe, "routeRequested", Q_ARG(int, 10));
     expect(owner->property("openedRoute").toInt() == 37 && owner->property("closedRoute").toInt() == 37,
         "page requests are routed through its registration instead of a feature-specific host branch");
+    expect(owner->property("navigatedRoute").toInt() == 10, "cross-page navigation is a separate request from opening the current page");
     owner->setProperty("selected", false);
     owner->setProperty("selected", true);
     expect(probe && probe->property("draft").toInt() == 42, "ordinary navigation retains the page draft");
@@ -105,17 +111,17 @@ RegisteredPageHost {
 
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 660}});
     if (!home) return;
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 5,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "unregistered companion has no hardcoded home menu entry");
     auto menuEntry = registration;
     menuEntry.insert("label", "Companion"); menuEntry.insert("icon", "companion");
     menuEntry.insert("section", "Companion"); menuEntry.insert("order", 40);
     home->setProperty("registeredPages", QVariantList{menuEntry});
     const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
-    expect(entries.size() == 6 && entries[3].toMap().value("page").toInt() == 37,
+    expect(entries.size() == 3 && entries[0].toMap().value("page").toInt() == 37,
         "registered menu is placed between file tools and app settings");
     home->setProperty("registeredPages", QVariantList{});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 5,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "removing registration removes its home entry");
 }
 
@@ -343,8 +349,13 @@ int main(int argc, char** argv) {
         "leaving recovery cancels approval and cannot start file work");
 
     // 홈이 전달받은 값만으로 표시되고 상태 소유자를 변경하지 않는지 검사한다.
+    const QVariantList registeredMenus{
+        QVariantMap{{"label", "Sort"}, {"page", 7}, {"icon", "folder"}, {"section", "Files"}, {"order", 10}},
+        QVariantMap{{"label", "Rules"}, {"page", 1}, {"icon", "rules"}, {"section", ""}, {"order", 20}},
+        QVariantMap{{"label", "History"}, {"page", 4}, {"icon", "history"}, {"section", ""}, {"order", 30}},
+        QVariantMap{{"label", "Companion"}, {"page", 5}, {"icon", "companion"}, {"section", "Companion"}, {"order", 40}}};
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 420}, {"pendingCount", 5},
-        {"watchEnabled", true}, {"watchFolder", QStringLiteral("D:\\Downloads\\")}});
+        {"registeredPages", registeredMenus}, {"watchEnabled", true}, {"watchFolder", QStringLiteral("D:\\Downloads\\")}});
     if (!home) return 1;
     auto* homeItem = qobject_cast<QQuickItem*>(home.get());
     homeItem->setParentItem(host.contentItem());
@@ -361,7 +372,10 @@ int main(int argc, char** argv) {
     auto* watchSummary = find(find, homeItem, QStringLiteral("homeWatchSummary"));
     auto* filesButton = find(find, homeItem, QStringLiteral("homeNavigation7"));
     auto* badge = filesButton ? find(find, filesButton, QStringLiteral("homeNavigationBadge")) : nullptr;
-    if (!card || !action || !summary || !watchSummary || !filesButton || !badge) return 1;
+    if (!card || !action || !summary || !watchSummary || !filesButton || !badge) {
+        expect(false, "home fixture includes its registered file menu, summary and badge");
+        return 1;
+    }
     expect(summary->property("text").toString().contains("5") && badge->isVisible()
         && filesButton->property("badgeText").toString() == "5"
         && card->property("folderName").toString() == "Downloads",

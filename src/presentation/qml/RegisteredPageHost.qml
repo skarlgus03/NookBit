@@ -5,18 +5,21 @@ Loader {
     id: host
     required property var registration
     required property var guideService
+    property Item overlayHost: parent
     property bool dark: false
     property bool selected: false
     property bool initialized: false
     signal pageRequested(int page)
     signal closeRequested(int page)
+    signal navigationRequested(int page)
     active: !!registration && registration.page > 0
     visible: selected
 
     // 기능이 제공한 입력과 호스트 공통 서비스를 합쳐 페이지를 생성하는 함수.
     function loadPage() {
         if (!registration || !(registration.page > 0) || !registration.source) { source = ""; return }
-        const inputs = Object.assign({}, registration.properties, {guideService: guideService, dark: dark})
+        const inputs = Object.assign({}, registration.properties,
+            {guideService: guideService, overlayHost: overlayHost, dark: dark, visible: selected})
         setSource(registration.source, inputs)
     }
     Component.onCompleted: { initialized = true; loadPage() }
@@ -29,5 +32,7 @@ Loader {
         function onOpenRequested() { host.pageRequested(host.registration.page) }
         // 페이지의 닫기 요청을 해당 등록 번호로만 전달하는 함수.
         function onCloseRequested() { host.closeRequested(host.registration.page) }
+        // 한 기능의 화면이 요청한 다른 페이지 이동을 호스트에 전달하는 함수.
+        function onRouteRequested(page) { host.navigationRequested(page) }
     }
 }

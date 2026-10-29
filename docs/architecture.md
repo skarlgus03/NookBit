@@ -42,6 +42,11 @@ individual Companion controller globals. A scoped CompanionTrayAction owns the
 visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
 action selection and other pages; whole-module enablement and remaining UI
 contributions are pending.
+FileOrganizerRuntime also registers its primary sort/rules/history pages and menus
+as one atomic batch. Their small QML adapters own feature-internal screen wiring;
+the host supplies theme/guide/overlay services and routes navigation. Existing page
+numbers and window-size preference keys are retained. Recovery and settings-related
+views remain host-declared for the next incremental step.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

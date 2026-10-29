@@ -215,6 +215,9 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/RecoveryPage.qml
         presentation/qml/CompanionPage.qml
         presentation/qml/RegisteredPageHost.qml
+        presentation/qml/OrganizerSortPage.qml
+        presentation/qml/OrganizerRulesPage.qml
+        presentation/qml/OrganizerHistoryPage.qml
         presentation/qml/DesktopCompanion.qml
         presentation/qml/RegisteredDesktopHost.qml
           presentation/qml/CompanionSettingsPanel.qml

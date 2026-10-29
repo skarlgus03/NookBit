@@ -79,6 +79,25 @@ static QQuickItem* findVisualItem(QQuickItem* item, const QString& name) {
     return nullptr;
 }
 
+// 등록 로더·보조 창의 객체 소유 트리와 화면 트리를 함께 찾는 자동 검사용 함수.
+template<class T>
+static T findUiChild(QObject* root, const QString& name) {
+    QList<QObject*> pending{root};
+    QSet<QObject*> visited;
+    while (!pending.isEmpty()) {
+        auto* object = pending.takeLast();
+        if (!object || visited.contains(object)) continue;
+        visited.insert(object);
+        if (object->objectName() == name)
+            if (auto found = qobject_cast<T>(object)) return found;
+        for (auto* child : object->children()) pending.append(child);
+        if (auto* item = qobject_cast<QQuickItem*>(object))
+            for (auto* child : item->childItems()) pending.append(child);
+        if (auto* window = qobject_cast<QQuickWindow*>(object)) pending.append(window->contentItem());
+    }
+    return nullptr;
+}
+
 // 내장 SQL로 임시 메모리 DB를 최신 스키마까지 만들 수 있는지 검사하는 함수.
 static bool verifyBundledHistorySchema(const QString& migrationPath) {
     const auto connectionName = QStringLiteral("nookbit-bundled-schema-check");
@@ -216,7 +235,7 @@ static bool verifyCompanionGestures(QQuickWindow* window, nookbit::CharacterWind
     const bool originallyShown = placement.shown();
     placement.setShown(true);
     QCoreApplication::processEvents();
-    auto* area = window->findChild<QQuickItem*>(QStringLiteral("companionGestureInput"));
+    auto* area = findUiChild<QQuickItem*>(window, QStringLiteral("companionGestureInput"));
     if (!area) return false;
     const QPointF point(window->width() / 2.0, window->height() / 2.0);
     // 실제 포인터 경로를 따라 QML 입력 판정 코드까지 실행하는 함수.
@@ -260,8 +279,8 @@ static bool verifyCompanionGestures(QQuickWindow* window, nookbit::CharacterWind
 // 실제 확장 창에 마우스 이벤트를 보내 모든 페이지의 접기 버튼 접근성을 검사하는 함수.
 static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* extension, QObject* metrics,
                                        nookbit::NotificationController& notifications) {
-    auto* button = mainWindow->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
-    auto* rules = mainWindow->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
+    auto* button = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("extensionCloseButton"));
+    auto* rules = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("ruleEditorPage"));
     if (!button || !rules) return false;
     // 창 안의 실제 버튼 좌표로 눌렀다 떼는 입력을 전달하는 함수.
     const auto click = [extension](QQuickItem* item) {
@@ -285,7 +304,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             QTimer::singleShot(metrics->property("pageSlideDuration").toInt() + 40, &navigationFrame, &QEventLoop::quit);
             navigationFrame.exec();
         }
-        auto* home = mainWindow->findChild<QObject*>(QStringLiteral("compactHome"));
+        auto* home = findUiChild<QObject*>(mainWindow, QStringLiteral("compactHome"));
         const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
@@ -406,7 +425,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (selected.property("comparison").toString() != "atLeast" || selected.property("unit").toString() != "GB") return false;
         }
         if (page == 4) {
-            auto* list = mainWindow->findChild<QQuickItem*>(QStringLiteral("historyList"));
+            auto* list = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("historyList"));
             if (!list) return false;
             const auto originalModel = list->property("model");
             QVariantList entries;
@@ -432,8 +451,8 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (headings != QStringList{QStringLiteral("오늘"), QStringLiteral("어제")}) return false;
         }
         if (page == 8) {
-            auto* themeSwitch = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalDarkModeSwitch"));
-            auto* lightButton = mainWindow->findChild<QQuickItem*>(QStringLiteral("globalLightModeButton"));
+            auto* themeSwitch = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("globalDarkModeSwitch"));
+            auto* lightButton = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("globalLightModeButton"));
             const bool initial = mainWindow->property("editorDark").toBool();
             if (!themeSwitch || !lightButton) return false;
             click(initial ? lightButton : themeSwitch);
@@ -448,16 +467,16 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         if (page == 3) {
             // 감시 조건 네 항목에 실제 키 입력 후 Enter로 숫자를 확정하는 검사.
             for (const auto* name : {"watchIntervalSpin", "watchCountSpin", "watchSizeSpin", "watchAgeSpin"}) {
-                auto* spin = mainWindow->findChild<QQuickItem*>(QString::fromLatin1(name));
+                auto* spin = findUiChild<QQuickItem*>(mainWindow, QString::fromLatin1(name));
                 if (QString::fromLatin1(name) == QStringLiteral("watchIntervalSpin")) {
-                    auto* custom = mainWindow->findChild<QObject*>(QStringLiteral("watchIntervalCustomButton"));
+                    auto* custom = findUiChild<QObject*>(mainWindow, QStringLiteral("watchIntervalCustomButton"));
                     if (!custom || !QMetaObject::invokeMethod(custom, "clicked")) return false;
                     QCoreApplication::processEvents();
                 }
                 if (!spin || !spin->property("editable").toBool()
                     || spin->height() != metrics->property("controlHeight").toInt()) return false;
                 // 카드 아래의 입력도 실제로 보이는 위치까지 스크롤한 뒤 조작하는 검사.
-                auto* scroll = mainWindow->findChild<QQuickItem*>(QStringLiteral("watchSettingsScroll"));
+                auto* scroll = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("watchSettingsScroll"));
                 auto* viewport = scroll ? scroll->property("contentItem").value<QQuickItem*>() : nullptr;
                 if (!viewport) return false;
                 const auto contentY = viewport->property("contentY").toDouble();
@@ -499,12 +518,12 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                 if (spin->property("value").toInt() != 37) return false;
                 spin->setEnabled(wasEnabled);
             }
-            auto* sizeUnit = mainWindow->findChild<QObject*>(QStringLiteral("watchSizeUnitCombo"));
+            auto* sizeUnit = findUiChild<QObject*>(mainWindow, QStringLiteral("watchSizeUnitCombo"));
             if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
         if (page == 8) {
             // 설정 제목과 카드가 세 그룹에 같은 규격으로 배치되는지 검사한다.
-            auto* settings = mainWindow->findChild<QObject*>(QStringLiteral("settingsPage"));
+            auto* settings = findUiChild<QObject*>(mainWindow, QStringLiteral("settingsPage"));
             if (!settings) return false;
             const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
             const auto cards = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionCard"));
@@ -866,6 +885,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
+    nookbit::UiPageRegistry uiPages({2, 3, 6, 8, 9, 10, 11});
     nookbit::FileOrganizerRuntime organizer({appData, defaultDestination, verifyUi}, uiPreferences);
     auto& pendingFiles = organizer.pendingFiles();
     auto& backgroundTasks = organizer.tasks();
@@ -880,8 +900,11 @@ int main(int argc, char* argv[]) {
     auto& watchController = folderWatch.controller();
     QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
         &watchController, &nookbit::WatchController::pendingPathsChanged);
-    // 아직 호스트가 제공하는 페이지 번호는 기능 등록에서 재사용하지 않는다.
-    nookbit::UiPageRegistry uiPages({1, 2, 3, 4, 6, 7, 8, 9, 10, 11});
+    const auto organizerUi = organizer.registerUi(uiPages);
+    if (!organizerUi) {
+        QTextStream(stderr) << QString::fromStdString(organizerUi.error().message) << Qt::endl;
+        return EXIT_FAILURE;
+    }
     nookbit::CompanionRuntime companion({appData, QCoreApplication::applicationDirPath(), verifyUi}, uiPreferences, application);
     if (!companion.startupResult()) {
         QTextStream(stderr) << QString::fromStdString(companion.startupResult().error().message) << Qt::endl;
@@ -1035,9 +1058,9 @@ int main(int argc, char* argv[]) {
         bool compactLayout = false;
         if (!engine.rootObjects().isEmpty()) {
             auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
-            auto* home = window ? window->findChild<QObject*>(QStringLiteral("compactHome")) : nullptr;
-            auto* developer = window ? window->findChild<QObject*>(QStringLiteral("developerTools")) : nullptr;
-            auto* extension = window ? window->findChild<QQuickWindow*>(QStringLiteral("extensionWindow")) : nullptr;
+            auto* home = window ? findUiChild<QObject*>(window, QStringLiteral("compactHome")) : nullptr;
+            auto* developer = window ? findUiChild<QObject*>(window, QStringLiteral("developerTools")) : nullptr;
+            auto* extension = window ? findUiChild<QQuickWindow*>(window, QStringLiteral("extensionWindow")) : nullptr;
             if (window && home && developer && extension) {
                 // 다른 창의 배치·노출 문제를 검사 단계 이름으로 식별하는 함수.
                 const auto checkLayout = [&compactLayout](bool condition, const char* stage) {
@@ -1045,8 +1068,8 @@ int main(int argc, char* argv[]) {
                 };
                 // 본체 크기를 유지하는 별도 창·프레임 제거·연결 위치·개발 도구 숨김을 검사한다.
                 compactLayout = true;
-                auto* rulePage = window->findChild<QQuickItem*>(QStringLiteral("ruleEditorPage"));
-                auto* closeButton = window->findChild<QQuickItem*>(QStringLiteral("extensionCloseButton"));
+                auto* rulePage = findUiChild<QQuickItem*>(window, QStringLiteral("ruleEditorPage"));
+                auto* closeButton = findUiChild<QQuickItem*>(window, QStringLiteral("extensionCloseButton"));
                 checkLayout(rulePage && rulePage->window() == extension, "rule page belongs to extension window");
                 checkLayout(closeButton && closeButton->window() == extension, "close button belongs to extension window");
                 checkLayout(window->width() == 380 && !developer->property("visible").toBool()
@@ -1097,7 +1120,7 @@ int main(int argc, char* argv[]) {
                 }
                 QMetaObject::invokeMethod(home, "pageRequested", Q_ARG(int, 7));
                 QCoreApplication::processEvents();
-                auto* filePage = window->findChild<QQuickItem*>(QStringLiteral("fileSortPage"));
+                auto* filePage = findUiChild<QQuickItem*>(window, QStringLiteral("fileSortPage"));
                 checkLayout(filePage && filePage->isVisible() && filePage->window() == extension, "file sorting is a separate page");
                 // 파일 정리의 중단 작업 요청이 서브창 본문과 그 창의 확인 대화상자로 이어지는지 검사한다.
                 QMetaObject::invokeMethod(filePage, "recoveryRequested");
@@ -1109,8 +1132,8 @@ int main(int argc, char* argv[]) {
                 QTimer::singleShot(5000, &recoveryInspection, &QEventLoop::quit);
                 if (backgroundTasks.busy()) recoveryInspection.exec();
                 checkLayout(!backgroundTasks.busy(), "read-only recovery inspection completed");
-                auto* recoveryPage = window->findChild<QQuickItem*>(QStringLiteral("recoveryDialog"));
-                auto* recoveryConfirm = window->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
+                auto* recoveryPage = findUiChild<QQuickItem*>(window, QStringLiteral("recoveryDialog"));
+                auto* recoveryConfirm = findUiChild<QObject*>(window, QStringLiteral("recoveryConfirmDialog"));
                 checkLayout(window->property("currentPage").toInt() == 10 && recoveryPage
                     && recoveryPage->isVisible() && recoveryPage->window() == extension, "recovery is a subwindow page");
                 if (recoveryConfirm) {
@@ -1126,10 +1149,10 @@ int main(int argc, char* argv[]) {
                 QTimer::singleShot(40, &restoredLayout, &QEventLoop::quit);
                 restoredLayout.exec();
                 checkLayout(verifyPageFileDrop(extension, filePage, pendingFiles), "whole-page drop and file icon");
-                auto* undoButton = window->findChild<QQuickItem*>(QStringLiteral("compactUndoButton"));
+                auto* undoButton = findUiChild<QQuickItem*>(window, QStringLiteral("compactUndoButton"));
                 checkLayout(undoButton && undoButton->width() >= undoButton->implicitWidth() && undoButton->width() >= 60, "undo label width");
-                auto* previewButton = window->findChild<QQuickItem*>(QStringLiteral("compactPreviewButton"));
-                auto* sortButton = window->findChild<QQuickItem*>(QStringLiteral("compactSortButton"));
+                auto* previewButton = findUiChild<QQuickItem*>(window, QStringLiteral("compactPreviewButton"));
+                auto* sortButton = findUiChild<QQuickItem*>(window, QStringLiteral("compactSortButton"));
                 checkLayout(previewButton && sortButton && undoButton
                     && std::abs(previewButton->width() - sortButton->width()) <= 1
                     && previewButton->height() == uiMetrics->property("largeActionHeight").toInt()
@@ -1168,7 +1191,7 @@ int main(int argc, char* argv[]) {
         }
         const nookbit::JsonRuleSetRepository bundledRules(bundledTree, treeSchema);
         QObject* editorPage = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("ruleEditorPage"));
+            : findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("ruleEditorPage"));
         // 규칙을 다시 불러오면 자동 전체 보기 대신 100% 배율로 돌아오는지 검사한다.
         bool defaultRuleZoom = false;
         if (editorPage) {
@@ -1183,19 +1206,19 @@ int main(int argc, char* argv[]) {
         QObject* ruleTestPanel = editorPage
             ? editorPage->findChild<QObject*>(QStringLiteral("ruleTestPanel")) : nullptr;
         QObject* watchSettingsDialog = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("watchSettingsDialog"));
+            : findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("watchSettingsDialog"));
         QObject* historyDialog = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("historyDialog"));
+            : findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("historyDialog"));
         QObject* recoveryDialog = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryDialog"));
+            : findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("recoveryDialog"));
         QObject* recoveryConfirmDialog = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("recoveryConfirmDialog"));
+            : findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("recoveryConfirmDialog"));
         auto* companionExtension = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("extensionWindow"));
+            : findUiChild<QQuickWindow*>(engine.rootObjects().first(), QStringLiteral("extensionWindow"));
         QObject* characterSettingsDialog = findVisualItem(companionExtension ? companionExtension->contentItem() : nullptr,
             QStringLiteral("characterSettingsDialog"));
         auto* desktopCharacter = engine.rootObjects().isEmpty() ? nullptr
-            : engine.rootObjects().first()->findChild<QQuickWindow*>(QStringLiteral("desktopCharacterWindow"));
+            : findUiChild<QQuickWindow*>(engine.rootObjects().first(), QStringLiteral("desktopCharacterWindow"));
         QObject* desktopSprite = desktopCharacter
             ? desktopCharacter->findChild<QObject*>(QStringLiteral("desktopCharacterSprite")) : nullptr;
         auto* characterBubble = desktopCharacter
@@ -1330,8 +1353,8 @@ int main(int argc, char* argv[]) {
         const bool buttonFeedbackReady = verifyButtonFeedback(engine, uiMetrics);
         const bool gesturesReady = verifyCompanionGestures(desktopCharacter, characterWindow, companionInteractions, characterController);
         const bool ready = gesturesReady && buttonFeedbackReady && workspaceReady && guideReady && defaultRuleZoom && compactLayout && closeToTray && !engine.rootObjects().isEmpty() &&
-                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("compactHome")) != nullptr &&
-                           engine.rootObjects().first()->findChild<QObject*>(QStringLiteral("extensionPanel")) != nullptr &&
+                           findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("compactHome")) != nullptr &&
+                           findUiChild<QObject*>(engine.rootObjects().first(), QStringLiteral("extensionPanel")) != nullptr &&
                            characterSettingsDialog != nullptr &&
                            characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterAnchorEditor")) != nullptr &&
                            QMetaObject::invokeMethod(characterSettingsDialog->findChild<QObject*>(QStringLiteral("characterAnchorEditor")), "open") &&

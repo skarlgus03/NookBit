@@ -1,4 +1,5 @@
 #include "app/file_organizer_runtime.hpp"
+#include "app/ui_page_registry.hpp"
 #include "app/pending_queue_adapter.hpp"
 #include "app/thread_local_operations.hpp"
 #include "application/use_cases/classify_files_use_case.hpp"
@@ -13,6 +14,7 @@
 #include "presentation/destination_settings_controller.hpp"
 #include "presentation/background_task_runner.hpp"
 #include <QDir>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QSettings>
 #include <QTimer>
@@ -207,6 +209,30 @@ FileOrganizerRuntime::FileOrganizerRuntime(FileOrganizerRuntimeConfig config, QS
     : state_(std::make_unique<State>(std::move(config), preferences)) {}
 // 내부 실행기가 먼저 작업을 기다린 뒤 의존성을 해제하는 소멸자.
 FileOrganizerRuntime::~FileOrganizerRuntime() = default;
+// 페이지 구성과 준비 동작은 기능에 맡기고 호스트에는 메뉴·입력 정보만 등록하는 함수.
+Result<void> FileOrganizerRuntime::registerUi(UiPageRegistry& registry) {
+    const auto title = [](const char* text) {
+        // 같은 화면 문맥으로 정리 기능의 메뉴 이름을 번역하는 함수.
+        return QCoreApplication::translate("OrganizerUi", text);
+    };
+    const auto object = [](QObject* value) {
+        // 소유권을 넘기지 않고 QML에 빌려줄 입력 객체를 포장하는 함수.
+        return QVariant::fromValue(value);
+    };
+    const auto prefix = QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/");
+    return registry.addPages({
+        {"organizer.sort", "file-organizer", 7, title("파일 정리"), "folder", title("파일 관리"), 10,
+            QUrl(prefix + "OrganizerSortPage.qml"),
+            {{"controller", object(&preview())}, {"pending", object(&pendingFiles())},
+             {"recovery", object(&recovery())}, {"progress", object(&tasks())}}},
+        {"organizer.rules", "file-organizer", 1, title("분류 규칙"), "rules", {}, 20,
+            QUrl(prefix + "OrganizerRulesPage.qml"),
+            {{"controller", object(&rules())}, {"destinations", object(&destinations())}, {"progress", object(&tasks())}}},
+        {"organizer.history", "file-organizer", 4, title("작업 기록"), "history", {}, 30,
+            QUrl(prefix + "OrganizerHistoryPage.qml"),
+            {{"controller", object(&history())}, {"progress", object(&tasks())}}}
+    }, state_->connections);
+}
 // 소유한 pendingFiles 창구를 빌려주는 함수.
 PendingFilesModel& FileOrganizerRuntime::pendingFiles() { return state_->pendingFiles; }
 // 대기 목록의 구체 어댑터를 노출하지 않고 조회 계약만 빌려주는 함수.

@@ -64,12 +64,31 @@ void testLifetime() {
     replacement.reset();
     expect(registry.pages().size() == 1, "destroyed host does not leave callbacks on a longer-lived owner");
 }
+// 한 기능의 여러 페이지는 부분 등록 없이 한 번에 추가·제거되는지 검사하는 함수.
+void testBatchRegistration() {
+    nookbit::UiPageRegistry registry({8});
+    auto owner = std::make_unique<QObject>();
+    int changes{};
+    QObject observer;
+    QObject::connect(&registry, &nookbit::UiPageRegistry::pagesChanged, &observer, [&] { ++changes; });
+    expect(!registry.addPages({entry("first", 1), entry("reserved", 8)}, *owner)
+        && registry.pages().isEmpty() && changes == 0, "late batch conflict leaves no partial registration");
+    expect(!registry.addPages({entry("first", 1), entry("same-route", 1)}, *owner)
+        && registry.pages().isEmpty(), "duplicates within batch rejected atomically");
+    expect(!registry.addPages({entry("same-name", 1), entry("same-name", 4)}, *owner)
+        && registry.pages().isEmpty(), "duplicate batch stable names rejected atomically");
+    expect(registry.addPages({entry("sort", 7, 10), entry("rules", 1, 20), entry("history", 4, 30)}, *owner).hasValue()
+        && registry.pages().size() == 3 && changes == 1, "valid feature batch emits one update");
+    owner.reset();
+    expect(registry.pages().isEmpty() && changes == 2, "feature lifetime removes all batch pages with one update");
+}
 }
 // 실제 화면 없이 등록 유효성·독립 수명·조회 계약을 검사하는 함수.
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     testRegistration();
     testLifetime();
+    testBatchRegistration();
     if (!failures) std::cout << "All UI-page registration tests passed.\n";
     return failures ? 1 : 0;
 }

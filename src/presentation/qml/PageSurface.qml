@@ -8,6 +8,7 @@ Pane {
     readonly property var theme: UiTheme.colors(dark)
     signal openRequested
     signal closeRequested
+    signal routeRequested(int page)
     background: null
     padding: 0
 

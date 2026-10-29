@@ -39,19 +39,18 @@ ApplicationWindow {
         progress: backgroundTasks
         dark: root.editorDark
         visible: backgroundTasks.busy && extensionWindow.visible && !root.inlineRecoveryInspection
-                 && !(root.currentPage === 7 && fileSortPane.workflowStep === 3)
+                 && !(root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)
         x: (parent.width - width) / 2
         y: extensionHost.y + (extensionHost.height - height) / 2
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({1: qsTr("분류 규칙"), 3: qsTr("폴더 감시 설정"),
-        4: qsTr("작업 기록"), 6: qsTr("이름 충돌 설정"), 7: qsTr("파일 정리"),
+    readonly property var hostPageTitles: ({3: qsTr("폴더 감시 설정"), 6: qsTr("이름 충돌 설정"),
         8: qsTr("설정"), 9: qsTr("개발 도구"), 10: qsTr("중단 작업 확인"), 11: qsTr("알림")})
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
     function pageAvailable(page) { return page === 0 || hostPageTitles[page] !== undefined || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
     readonly property bool inlineRecoveryInspection: currentPage === 10 && backgroundTasks.busy && !backgroundTasks.fileWorkActive
-    readonly property bool inlineSortConfirmation: currentPage === 7 && fileSortPane.manualSortRequested
+    readonly property bool inlineSortConfirmation: currentPage === 7 && !!fileSortPane && fileSortPane.manualSortRequested
     // 확인을 인라인 화면으로 넘길 때 기존 대화상자를 닫되 승인 대기는 취소하지 않는 함수.
     onInlineSortConfirmationChanged: if (inlineSortConfirmation && sortConfirmation.visible) sortConfirmation.close()
     readonly property int homeWidth: 380
@@ -90,16 +89,30 @@ ApplicationWindow {
     // 복구 화면을 먼저 연 뒤 파일을 바꾸지 않는 목록 검사를 요청하는 함수.
     function openRecovery() { currentPage = 10; recoveryController.refreshRecoveryCases() }
 
-    // 최신 작업 기록을 조회하고 별도 창을 여는 함수.
-    function openHistory() {
-        currentPage = 4
-        historyController.refreshHistory()
-        historyDialog.open()
+    // 로더가 보관 중인 등록 페이지를 찾고 일반 전환에서는 다시 생성하지 않는 함수.
+    function registeredPage(page) {
+        if (!registeredPages) return null
+        for (let i = 0; i < registeredPages.count; ++i) {
+            const host = registeredPages.itemAt(i)
+            if (host && host.registration.page === page) return host.item
+        }
+        return null
     }
-    // 캐릭터 설정을 오른쪽 확장 영역에 여는 함수.
+    readonly property var fileSortPane: registeredPage(7)
+    // 등록 화면은 자체 준비 동작을 거쳐 열고 나머지 호스트 화면으로도 이동하는 함수.
+    function openPage(page) {
+        if (!pageAvailable(page)) return
+        if (page === 10) { openRecovery(); return }
+        const item = registeredPage(page)
+        if (item) item.open()
+        else currentPage = page
+    }
+    // 기록 조회 준비는 등록된 기록 화면에 맡기고 그 화면을 요청하는 함수.
+    function openHistory() { openPage(uiPages.pageId("organizer.history")) }
+    // 바탕화면 설정 요청도 안정적인 등록 이름으로 전달하는 함수.
     function openCharacterSettings() {
         const page = uiPages.pageId("companion.settings")
-        if (page !== 0) currentPage = page
+        if (page !== 0) openPage(page)
     }
 
     width: homeWidth
@@ -127,7 +140,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         dark: root.editorDark
         // 선택한 페이지를 본체와 별개인 연결 창에 표시하는 함수.
-        onPageRequested: function(page) { root.currentPage = page }
+        onPageRequested: function(page) { root.openPage(page) }
         onMoveRequested: root.startSystemMove()
         onMinimizeRequested: root.showMinimized()
         onCloseRequested: root.close()
@@ -254,7 +267,7 @@ ApplicationWindow {
     }
     Item {
         id: extensionHost
-        enabled: (!backgroundTasks.busy || (root.currentPage === 7 && fileSortPane.workflowStep === 3)) && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
+        enabled: (!backgroundTasks.busy || (root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)) && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
         parent: extensionWindow.contentItem
         anchors.fill: parent
         anchors.topMargin: 58
@@ -287,20 +300,6 @@ ApplicationWindow {
         controller: previewController
     }
 
-    FileSortPage {
-        id: fileSortPane
-        controller: previewController
-        pending: pendingFiles
-        recovery: recoveryController
-        progress: backgroundTasks
-        parent: extensionHost
-        anchors.fill: parent
-        visible: root.currentPage === 7
-        dark: root.editorDark
-        // 파일 정리에서 요청한 규칙 편집 페이지를 연결 창에 표시하는 함수.
-        onPageRequested: function(page) { root.currentPage = page }
-        onRecoveryRequested: { root.openRecovery() }
-    }
     NotificationSettingsPage {
         parent: extensionHost
         anchors.fill: parent
@@ -344,26 +343,13 @@ ApplicationWindow {
         recovery: recoveryController
         bubbleTestAvailable: desktopUiHost.item !== null
         onBubbleTestRequested: desktopUiHost.preview()
-        onLegacyEditorRequested: ruleDialog.open()
-        onRulesRequested: root.currentPage = 1
+        onLegacyEditorRequested: {
+            root.openPage(uiPages.pageId("organizer.rules"))
+            const page = root.registeredPage(uiPages.pageId("organizer.rules"))
+            if (page) page.openLegacyEditor()
+        }
+        onRulesRequested: root.openPage(uiPages.pageId("organizer.rules"))
         onRecoveryRequested: root.openRecovery()
-    }
-
-    RuleEditorPage {
-        id: ruleEditorPage
-        controller: ruleEditor
-        destinations: destinationSettings
-        guideService: userGuides
-        parent: extensionHost
-        objectName: "ruleEditorPage"
-        oldEditorFormDirty: ruleDialog.dirty
-        anchors.fill: parent
-        anchors.leftMargin: 0
-        anchors.topMargin: 0
-        visible: root.currentPage === 1
-        darkMode: root.editorDark
-        onOpenCurrentEditor: ruleDialog.open()
-        onEditorDraftReplaced: ruleDialog.resetDraftForm()
     }
 
     Connections {
@@ -378,6 +364,7 @@ ApplicationWindow {
     }
 
     Repeater {
+        id: registeredPages
         parent: extensionHost
         model: uiPages.pages
         delegate: RegisteredPageHost {
@@ -387,6 +374,8 @@ ApplicationWindow {
             selected: root.currentPage === modelData.page
             dark: root.editorDark
             guideService: userGuides
+            overlayHost: extensionWindow.contentItem
+            onNavigationRequested: function(page) { root.openPage(page) }
             onPageRequested: function(page) { root.currentPage = page }
             onCloseRequested: function(page) { if (root.currentPage === page) root.currentPage = 0 }
         }
@@ -399,31 +388,11 @@ ApplicationWindow {
         inlineConfirmation: root.inlineSortConfirmation
     }
 
-    LegacyRuleEditorDialog {
-        id: ruleDialog
-        controller: ruleEditor
-        busy: backgroundTasks.busy
-        dark: root.editorDark
-    }
-
     WatchProposalDialog {
         id: watchProposalDialog
         controller: watchController
         busy: backgroundTasks.busy
         onPendingAccepted: root.currentPage = 0
-    }
-
-    HistoryPage {
-        id: historyDialog
-        parent: extensionHost
-        anchors.fill: parent
-        visible: root.currentPage === 4
-        dark: root.editorDark
-        controller: historyController
-        overlayHost: extensionWindow.contentItem
-        busy: backgroundTasks.busy
-        onOpenRequested: root.currentPage = 4
-        onCloseRequested: if (root.currentPage === 4) root.currentPage = 0
     }
 
     RecoveryPage {

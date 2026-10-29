@@ -31,6 +31,8 @@ public:
     /// 수명 문맥보다 오래 사는 입력 창구만 빌리고 문맥 종료 시 등록을 제거하는 함수.
     /// 이 목록과 문맥은 화면 스레드에 있어야 하며 QML은 기능 소유자보다 먼저 해제해야 한다.
     Result<void> addPage(UiPageContribution page, QObject& lifetime);
+    /// 기능의 여러 페이지를 모두 검증한 뒤 한 번에 등록하는 함수.
+    Result<void> addPages(QList<UiPageContribution> pages, QObject& lifetime);
     /// 메뉴 순서대로 정렬한 페이지 값 복사본을 반환하는 함수.
     QVariantList pages() const;
     /// 등록된 페이지 번호인지 확인하는 함수.

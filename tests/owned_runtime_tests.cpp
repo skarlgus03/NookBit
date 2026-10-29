@@ -68,8 +68,20 @@ void testOrganizerWorkflow() {
     QPointer<nookbit::RecoveryController> recovery;
     QPointer<nookbit::HistoryController> history;
     QPointer<nookbit::BackgroundTaskRunner> tasks;
+    nookbit::UiPageRegistry pages({2, 3, 6, 8, 9, 10, 11});
     {
         nookbit::FileOrganizerRuntime runtime({appData, home}, preferences);
+        expect(runtime.registerUi(pages).hasValue() && pages.pages().size() == 3
+            && pages.pageId("organizer.sort") == 7 && pages.pageId("organizer.rules") == 1
+            && pages.pageId("organizer.history") == 4, "Organizer registers all three stable pages together");
+        const auto sortInputs = pages.page(7).value("properties").toMap();
+        expect(sortInputs.value("controller").value<QObject*>() == &runtime.preview()
+            && sortInputs.value("pending").value<QObject*>() == &runtime.pendingFiles()
+            && sortInputs.value("progress").value<QObject*>() == &runtime.tasks(), "Organizer supplies owned sorting inputs");
+        expect(pages.page(1).value("properties").toMap().value("controller").value<QObject*>() == &runtime.rules()
+            && pages.page(4).value("properties").toMap().value("controller").value<QObject*>() == &runtime.history(),
+            "Organizer supplies owned rule and history inputs");
+        expect(!runtime.registerUi(pages) && pages.pages().size() == 3, "duplicate feature registration leaves complete batch unchanged");
         queue = &runtime.pendingFiles(); preview = &runtime.preview(); rules = &runtime.rules();
         recovery = &runtime.recovery(); history = &runtime.history(); tasks = &runtime.tasks();
         expect(QFile::exists(QDir(appData).filePath("rules.json")), "first startup seeds existing default rules");
@@ -79,6 +91,7 @@ void testOrganizerWorkflow() {
     }
     expect(queue.isNull() && preview.isNull() && rules.isNull() && recovery.isNull() && history.isNull() && tasks.isNull(),
         "all Organizer UI endpoints die with owner");
+    expect(pages.pages().isEmpty(), "Organizer destruction removes all three page and menu entries");
     {
         nookbit::FileOrganizerRuntime runtime({appData, home}, preferences);
         expect(runtime.pendingFiles().count() == 1, "pending list restored after owner recreation");
