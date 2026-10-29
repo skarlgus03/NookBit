@@ -28,7 +28,8 @@ Rectangle {
             {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱"), order: 50},
             {label: qsTr("알림"), page: 11, icon: "notifications", section: "", order: 60}
         ]
-        for (let i = 0; i < registeredPages.length; ++i) entries.push(registeredPages[i])
+        for (let i = 0; i < registeredPages.length; ++i)
+            if (registeredPages[i].inMenu !== false) entries.push(registeredPages[i])
         return entries.sort((left, right) => left.order - right.order || left.page - right.page)
     }
     color: theme.home

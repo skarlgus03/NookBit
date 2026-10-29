@@ -695,11 +695,11 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
 
 // 무파일 작업으로 검사·되돌리기 표시가 서브창에 속하고 제목 이동은 잠기지 않는지 검사하는 함수.
 static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
-    auto* popup = root->findChild<QObject*>(QStringLiteral("operationProgressPopup"));
-    auto* veil = root->findChild<QQuickItem*>(QStringLiteral("operationProgressVeil"));
-    auto* recoveryIndicator = root->findChild<QQuickItem*>(QStringLiteral("recoveryInspectionIndicator"));
-    auto* drag = root->findChild<QQuickItem*>(QStringLiteral("homeWindowDragArea"));
-    auto* menu = root->findChild<QQuickItem*>(QStringLiteral("homeNavigationMenu"));
+    auto* popup = findUiChild<QObject*>(root, QStringLiteral("operationProgressPopup"));
+    auto* veil = findUiChild<QQuickItem*>(root, QStringLiteral("operationProgressVeil"));
+    auto* recoveryIndicator = findUiChild<QQuickItem*>(root, QStringLiteral("recoveryInspectionIndicator"));
+    auto* drag = findUiChild<QQuickItem*>(root, QStringLiteral("homeWindowDragArea"));
+    auto* menu = findUiChild<QQuickItem*>(root, QStringLiteral("homeNavigationMenu"));
     if (!popup || !veil || !recoveryIndicator || !drag || !menu) return false;
     using Kind = nookbit::BackgroundTaskRunner::TaskKind;
     struct BusyCase { int page; Kind kind; };
@@ -711,6 +711,16 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
         const bool showPopup = page != 0 && !inlineInspection;
         root->setProperty("currentPage", page);
         QCoreApplication::processEvents();
+        // 복구 페이지가 자체 시작한 읽기 검사를 끝낸 뒤 표시 전용 대기 작업을 넣는다.
+        if (runner.busy()) {
+            QEventLoop startup;
+            QObject::connect(&runner, &nookbit::BackgroundTaskRunner::busyChanged, &startup, [&] {
+                if (!runner.busy()) startup.quit();
+            });
+            QTimer::singleShot(5000, &startup, &QEventLoop::quit);
+            startup.exec();
+            if (runner.busy()) return false;
+        }
         const auto gate = std::make_shared<QSemaphore>();
         const auto finished = std::make_shared<bool>(false);
         // 화면 상태 검사를 기다리기만 하고 파일에 접근하지 않는 함수.
@@ -885,7 +895,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::UiPageRegistry uiPages({2, 3, 6, 8, 9, 10, 11});
+    nookbit::UiPageRegistry uiPages({2, 3, 8, 9, 11});
     nookbit::FileOrganizerRuntime organizer({appData, defaultDestination, verifyUi}, uiPreferences);
     auto& pendingFiles = organizer.pendingFiles();
     auto& backgroundTasks = organizer.tasks();
@@ -893,7 +903,6 @@ int main(int argc, char* argv[]) {
     auto& historyController = organizer.history();
     auto& recoveryController = organizer.recovery();
     auto& ruleEditor = organizer.rules();
-    auto& destinationSettings = organizer.destinations();
     nookbit::FolderWatchRuntime folderWatch({QDir(appData).filePath(QStringLiteral("watch.json")),
         QStringLiteral(":/nookbit/watch.schema.json"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), !verifyUi},
         organizer.classification(), organizer.pendingPaths(), organizer.pendingCommands(), uiPreferences);
@@ -982,7 +991,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
-    engine.rootContext()->setContextProperty(QStringLiteral("destinationSettings"), &destinationSettings);
+    engine.rootContext()->setContextProperty(QStringLiteral("organizerSettings"), organizer.settingsUi());
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     engine.rootContext()->setContextProperty(QStringLiteral("userGuides"), &userGuides);
     engine.rootContext()->setContextProperty(QStringLiteral("uiPages"), &uiPages);

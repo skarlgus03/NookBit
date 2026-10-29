@@ -19,6 +19,7 @@ struct UiPageContribution {
     int order{};
     QUrl source;
     QVariantMap properties;
+    bool inMenu{true};
 };
 
 /// 등록된 페이지 정보만 보관하며 기능 객체나 실제 QML 화면은 소유하지 않는 호스트 목록.

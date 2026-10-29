@@ -42,11 +42,16 @@ individual Companion controller globals. A scoped CompanionTrayAction owns the
 visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
 action selection and other pages; whole-module enablement and remaining UI
 contributions are pending.
-FileOrganizerRuntime also registers its primary sort/rules/history pages and menus
-as one atomic batch. Their small QML adapters own feature-internal screen wiring;
+FileOrganizerRuntime also registers sort/rules/history and auxiliary recovery/
+collision pages as one atomic batch. Only primary pages create home menu rows.
+Their small QML adapters own feature-internal screen wiring and recovery inspection
+preparation;
 the host supplies theme/guide/overlay services and routes navigation. Existing page
-numbers and window-size preference keys are retained. Recovery and settings-related
-views remain host-declared for the next incremental step.
+numbers and window-size preference keys are retained. Organizer supplies optional
+settings and recovery-notice fragments; AppSettingsPage retains theme controls and
+Watch navigation while RegisteredSettingsSection receives borrowed feature inputs.
+The Watch entry is a visual slot, so Organizer does not depend on WatchController.
+Whole-module enablement and Watch/notification contributions remain pending.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

@@ -68,12 +68,13 @@ void testOrganizerWorkflow() {
     QPointer<nookbit::RecoveryController> recovery;
     QPointer<nookbit::HistoryController> history;
     QPointer<nookbit::BackgroundTaskRunner> tasks;
-    nookbit::UiPageRegistry pages({2, 3, 6, 8, 9, 10, 11});
+    nookbit::UiPageRegistry pages({2, 3, 8, 9, 11});
     {
         nookbit::FileOrganizerRuntime runtime({appData, home}, preferences);
-        expect(runtime.registerUi(pages).hasValue() && pages.pages().size() == 3
+        expect(runtime.registerUi(pages).hasValue() && pages.pages().size() == 5
             && pages.pageId("organizer.sort") == 7 && pages.pageId("organizer.rules") == 1
-            && pages.pageId("organizer.history") == 4, "Organizer registers all three stable pages together");
+            && pages.pageId("organizer.history") == 4 && pages.pageId("organizer.recovery") == 10
+            && pages.pageId("organizer.collision") == 6, "Organizer registers primary and auxiliary stable pages together");
         const auto sortInputs = pages.page(7).value("properties").toMap();
         expect(sortInputs.value("controller").value<QObject*>() == &runtime.preview()
             && sortInputs.value("pending").value<QObject*>() == &runtime.pendingFiles()
@@ -81,7 +82,15 @@ void testOrganizerWorkflow() {
         expect(pages.page(1).value("properties").toMap().value("controller").value<QObject*>() == &runtime.rules()
             && pages.page(4).value("properties").toMap().value("controller").value<QObject*>() == &runtime.history(),
             "Organizer supplies owned rule and history inputs");
-        expect(!runtime.registerUi(pages) && pages.pages().size() == 3, "duplicate feature registration leaves complete batch unchanged");
+        expect(!runtime.registerUi(pages) && pages.pages().size() == 5, "duplicate feature registration leaves complete batch unchanged");
+        expect(!pages.page(10).value("inMenu").toBool() && !pages.page(6).value("inMenu").toBool()
+            && pages.page(7).value("inMenu").toBool(), "auxiliary pages are registered without adding home entries");
+        const auto settings = runtime.settingsUi();
+        expect(settings.value("source").toUrl().scheme() == "qrc"
+            && settings.value("properties").toMap().value("sorting").value<QObject*>() == &runtime.preview()
+            && settings.value("properties").toMap().value("destinations").value<QObject*>() == &runtime.destinations()
+            && settings.value("notice").toMap().value("properties").toMap().value("controller").value<QObject*>() == &runtime.recovery(),
+            "settings descriptor provides only feature-owned setting and recovery inputs");
         queue = &runtime.pendingFiles(); preview = &runtime.preview(); rules = &runtime.rules();
         recovery = &runtime.recovery(); history = &runtime.history(); tasks = &runtime.tasks();
         expect(QFile::exists(QDir(appData).filePath("rules.json")), "first startup seeds existing default rules");
@@ -91,7 +100,7 @@ void testOrganizerWorkflow() {
     }
     expect(queue.isNull() && preview.isNull() && rules.isNull() && recovery.isNull() && history.isNull() && tasks.isNull(),
         "all Organizer UI endpoints die with owner");
-    expect(pages.pages().isEmpty(), "Organizer destruction removes all three page and menu entries");
+    expect(pages.pages().isEmpty(), "Organizer destruction removes primary and auxiliary page entries");
     {
         nookbit::FileOrganizerRuntime runtime({appData, home}, preferences);
         expect(runtime.pendingFiles().count() == 1, "pending list restored after owner recreation");

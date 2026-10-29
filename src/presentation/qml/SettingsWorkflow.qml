@@ -4,19 +4,16 @@ import QtQuick
 Item {
     id: workflow
     required property var settings
-    required property var destinations
-    required property var sorting
     required property var watch
     property bool active: false
     property bool watchOpen: false
-    property bool recoveryAvailable: false
+    property var organizerContribution: ({})
     property bool dark: false
     readonly property bool transitioning: slide.running
     property real slidePosition: watchOpen ? 1 : 0
     signal watchRequested()
     signal settingsRequested()
-    signal collisionRequested()
-    signal recoveryRequested()
+    signal routeRequested(int page)
     clip: true
     Behavior on slidePosition {
         NumberAnimation { id: slide; duration: workflow.active ? UiMetrics.pageSlideDuration : 0; easing.type: Easing.OutCubic }
@@ -28,14 +25,11 @@ Item {
         visible: workflow.active && (!workflow.watchOpen || workflow.transitioning)
         enabled: !workflow.watchOpen && !workflow.transitioning
         settings: workflow.settings
-        destinations: workflow.destinations
-        sorting: workflow.sorting
+        organizerContribution: workflow.organizerContribution
         watch: workflow.watch
-        recoveryAvailable: workflow.recoveryAvailable
         dark: workflow.dark
         onWatchSettingsRequested: workflow.watchRequested()
-        onCollisionSettingsRequested: workflow.collisionRequested()
-        onRecoveryRequested: workflow.recoveryRequested()
+        onRouteRequested: function(route) { workflow.routeRequested(route) }
     }
     WatchSettingsPage {
         width: workflow.width

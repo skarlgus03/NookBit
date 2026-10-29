@@ -44,8 +44,8 @@ ApplicationWindow {
         y: extensionHost.y + (extensionHost.height - height) / 2
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({3: qsTr("폴더 감시 설정"), 6: qsTr("이름 충돌 설정"),
-        8: qsTr("설정"), 9: qsTr("개발 도구"), 10: qsTr("중단 작업 확인"), 11: qsTr("알림")})
+    readonly property var hostPageTitles: ({3: qsTr("폴더 감시 설정"),
+        8: qsTr("설정"), 9: qsTr("개발 도구"), 11: qsTr("알림")})
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
     function pageAvailable(page) { return page === 0 || hostPageTitles[page] !== undefined || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
@@ -87,7 +87,7 @@ ApplicationWindow {
     // 감시 입력 초안의 복원은 페이지에 맡기고 해당 화면을 여는 함수.
     function openWatchSettings() { currentPage = 3 }
     // 복구 화면을 먼저 연 뒤 파일을 바꾸지 않는 목록 검사를 요청하는 함수.
-    function openRecovery() { currentPage = 10; recoveryController.refreshRecoveryCases() }
+    function openRecovery() { openPage(uiPages.pageId("organizer.recovery")) }
 
     // 로더가 보관 중인 등록 페이지를 찾고 일반 전환에서는 다시 생성하지 않는 함수.
     function registeredPage(page) {
@@ -102,7 +102,6 @@ ApplicationWindow {
     // 등록 화면은 자체 준비 동작을 거쳐 열고 나머지 호스트 화면으로도 이동하는 함수.
     function openPage(page) {
         if (!pageAvailable(page)) return
-        if (page === 10) { openRecovery(); return }
         const item = registeredPage(page)
         if (item) item.open()
         else currentPage = page
@@ -292,14 +291,6 @@ ApplicationWindow {
         // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
         onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
     }
-    CollisionSettingsPage {
-        parent: extensionHost
-        anchors.fill: parent
-        visible: root.currentPage === 6
-        dark: root.editorDark
-        controller: previewController
-    }
-
     NotificationSettingsPage {
         parent: extensionHost
         anchors.fill: parent
@@ -319,14 +310,11 @@ ApplicationWindow {
         watchOpen: root.currentPage === 3
         dark: root.editorDark
         settings: uiSettings
-        destinations: destinationSettings
-        sorting: previewController
+        organizerContribution: organizerSettings
         watch: watchController
-        recoveryAvailable: recoveryController.recoveryCases.length > 0
         onWatchRequested: root.openWatchSettings()
         onSettingsRequested: root.currentPage = 8
-        onCollisionRequested: root.currentPage = 6
-        onRecoveryRequested: root.openRecovery()
+        onRouteRequested: function(route) { root.openPage(route) }
     }
 
     DeveloperToolsPage {
@@ -395,18 +383,5 @@ ApplicationWindow {
         onPendingAccepted: root.currentPage = 0
     }
 
-    RecoveryPage {
-        id: recoveryDialog
-        parent: extensionHost
-        anchors.fill: parent
-        anchors.margins: UiMetrics.pageInset
-        visible: root.currentPage === 10
-        dark: root.editorDark
-        controller: recoveryController
-        overlayHost: extensionWindow.contentItem
-        busy: backgroundTasks.busy
-        inspecting: root.inlineRecoveryInspection
-        onOpenRequested: root.currentPage = 10
-        onCloseRequested: if (root.currentPage === 10) root.currentPage = 0
-    }
+
 }

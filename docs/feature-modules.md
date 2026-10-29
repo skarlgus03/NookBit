@@ -7,8 +7,10 @@ Step 4 now has scoped runtimes for Notifications, Folder Watch, File Organizer
 and Companion. Companion management-page/menu registration, an explicit desktop
 renderer contribution and a scoped tray action are implemented. Other feature UI
 contributions and enablement remain pending. File Organizer now registers its
-primary sort, rule-editor and history pages/menus as one scoped batch; recovery
-and settings-related contributions are still host-declared.
+sort, rule-editor, history, recovery and collision pages as one scoped batch.
+Recovery/collision remain auxiliary routes rather than home menu entries. Organizer
+settings and its recovery notice are supplied as optional feature-owned fragments;
+general theme settings and Watch/notification contributions remain host-owned.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -51,9 +53,9 @@ owner without becoming one menu button.
 | [Integration adapters](../src/app/feature_connections.cpp) | Watch-to-notification, notification-to-companion and file-activity-to-companion bindings have a scoped owner | No feature lifecycle/enablement registry yet |
 | [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence | Injected Organizer capabilities and application preferences remain host-owned |
 | [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and persistent or transient enabled preferences | Module enablement and registration ordering remain host responsibilities |
-| [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner; registers primary sort/rules/history pages and menus | Queue state still resides in the existing model; recovery/collision/settings UI contributions remain host-declared |
+| [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner; supplies five pages, settings and recovery-notice fragments | Queue state still resides in the existing model; host still composes shared progress/approval and developer entry points |
 | [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; supplies management-page/menu, desktop renderer and tray contributions | Host still chooses construction, attention actions, cross-feature routes and application exit policy |
-| [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped Companion and primary Organizer pages, borrowed inputs, atomic multi-page registration, menu rendering and QML loading | Other pages remain host-declared; this is not module enablement or live unloading |
+| [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped Companion/Organizer pages, borrowed inputs, atomic multi-page registration and separate menu visibility | Watch/notification/settings host routes remain; this is not module enablement or live unloading |
 | [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
@@ -252,22 +254,26 @@ The host resolves the extension title from registration and rejects missing rout
 returning to home if an open registered page disappears. The stable-ID route lookup
 is also used by the existing desktop Companion settings action.
 
-### File Organizer primary page contributions
+### File Organizer page contributions
 
-`FileOrganizerRuntime::registerUi()` registers three entries together:
+`FileOrganizerRuntime::registerUi()` registers five entries together:
 
-| Stable ID | Existing route | Feature-owned UI adapter | Menu order |
+| Stable ID | Existing route | Feature-owned UI adapter | Home menu |
 | --- | --- | --- | --- |
-| `organizer.sort` | 7 | OrganizerSortPage | 10 |
-| `organizer.rules` | 1 | OrganizerRulesPage | 20 |
-| `organizer.history` | 4 | OrganizerHistoryPage | 30 |
+| `organizer.sort` | 7 | OrganizerSortPage | Yes, order 10 |
+| `organizer.rules` | 1 | OrganizerRulesPage | Yes, order 20 |
+| `organizer.history` | 4 | OrganizerHistoryPage | Yes, order 30 |
+| `organizer.recovery` | 10 | OrganizerRecoveryPage | No |
+| `organizer.collision` | 6 | OrganizerCollisionPage | No |
 
 The runtime supplies borrowed controller/model/progress inputs and menu metadata;
 Main no longer constructs these pages or owns their menu titles. The existing
 UiMetrics defaults and `windows/fileSort/size`, `windows/ruleEditor/size` and
-`windows/history/size` preference keys are unchanged. Recovery (10), collision (6),
-general settings, Folder Watch and notification UI remain host contributions for
-later incremental steps. Their business logic is not moved into the page registry.
+`windows/history/size`, `windows/recovery/size` and `windows/collisionSettings/size`
+preference keys are unchanged. General settings, Folder Watch and notification UI
+remain host contributions for later incremental steps. Business logic is not moved
+into the page registry. `inMenu` defaults to true; false keeps an auxiliary page
+routable and titled without creating another home menu row.
 
 `UiPageRegistry::addPages()` validates the entire batch before mutating the registry.
 Duplicate names/routes within a batch or conflicts with existing/reserved entries
@@ -285,12 +291,46 @@ window while preserving the form draft. The developer form request now opens its
 owning rules page first. OrganizerHistoryPage refreshes history on opening and
 connects the shared task state and overlay parent to the existing history view.
 
+OrganizerRecoveryPage owns read-only preparation on opening, including a repeated
+open of an already visible page. A hidden initial page does not start inspection.
+The existing RecoveryPage still owns approval/cancellation and its confirmation
+overlay; hiding it cancels pending approval. The adapter observes the feature's
+task runner for inline inspection state. OrganizerCollisionPage connects the
+existing policy view to the same shared preview/settings controller.
+
 PageSurface's `routeRequested(int)` distinguishes navigation to another page from
-opening/closing the current registered page. Main routes those requests and keeps
-host-owned recovery preparation. Registered page lookup retains loaded instances;
+opening/closing the current registered page. Main only routes recovery requests
+through `organizer.recovery`; it no longer starts the inspection itself.
+Registered page lookup retains loaded instances;
 ordinary navigation does not reconstruct them. Host file-sort overlays observe the
 registered sort adapter rather than a directly declared FileSortPage. The final
 approval path, serialized execution, undo and recovery contracts are unchanged.
+
+### Organizer settings contributions
+
+`FileOrganizerRuntime::settingsUi()` provides a settings-section QML URL with
+borrowed sorting/destination inputs and a separate recovery-notice URL with its
+read-only recovery input. These are compiled UI fragments rather than navigation
+pages or a new saved-file format. As with the desktop descriptor, the host must
+destroy QML before the runtime; normal app declaration order preserves that rule.
+
+AppSettingsPage retains theme controls and receives optional fragments through
+RegisteredSettingsSection. The common loader supplies live theme, a visual leading
+entry slot and outward route requests. Its size comes from Loader's loaded item.
+The notice's `hasContent` observes recovery facts independently of effective item
+visibility, so it can appear/disappear without reconstructing the settings page.
+Removing a contribution releases only its views and leaves host theme controls.
+
+OrganizerSettingsSection owns the existing collision-policy picker and allowed
+destination list/revocation controls. OrganizerRecoveryNotice only requests route
+10; displaying it never executes recovery. The Watch summary remains a host-owned
+Component inserted into the leading slot, preserving its placement above collision
+controls without giving Organizer a WatchController dependency. AppSettingsPage
+and SettingsWorkflow no longer receive sorting/destination controllers or a
+host-computed recovery flag. SettingsWorkflow still owns the existing same-size
+slide into Watch settings; the theme policy and Watch input remain host-owned.
+Colors, spacing, behavior, settings keys and the three visible settings groups
+are preserved.
 
 ### Companion desktop renderer and tray contribution
 
@@ -399,9 +439,10 @@ The same ownership/request/update rules apply to additions unrelated to companio
 4. **Host lifecycle and UI contributions: in progress.** NotificationRuntime,
    FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime own their internal
    objects and preference connections. Companion supplies its management page/menu,
-   desktop renderer and scoped tray action. Organizer registers primary sort,
-   rules and history pages together. Next extract recovery/settings-related,
-   Watch and notification contributions, initially with all modules enabled.
+   desktop renderer and scoped tray action. Organizer supplies sort/rules/history,
+   auxiliary recovery/collision pages, settings and recovery-notice fragments.
+   Next extract Watch and notification contributions, initially with all modules
+   enabled.
 5. **Persisted enablement and restart.** Add module management only after disabled
    startup combinations work. Check missing optional consumers, required-dependency
    reasons, preserved settings/data and absence of timers from inactive features.
@@ -439,4 +480,10 @@ single-update registration/removal and actual Organizer endpoint ownership. QML
 tests cover overlay-service injection and separate cross-page navigation. The app
 smoke tests traverse the registered sort/rules/history views, including the manual
 sort workflow, rule editor helper windows, history and preserved window sizes.
+Auxiliary-page tests cover routability without a menu row and actual recovery,
+collision and settings input ownership. QML tests verify hidden recovery startup,
+read-only preparation/reopening, cancellation without execution, live notice
+appearance/removal, feature-view cleanup, retained theme controls and unchanged
+Watch sliding. Existing app smoke checks retain inline recovery/progress overlays
+and unlocked window movement while tasks run.
 Step 4 continues with the remaining UI contributions.

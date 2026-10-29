@@ -67,7 +67,7 @@ QVariantMap UiPageRegistry::page(int route) const {
     const auto& entry = found.value();
     return {{"id", entry.id}, {"ownerId", entry.ownerId}, {"page", entry.page}, {"title", entry.title},
         {"label", entry.title}, {"icon", entry.icon}, {"section", entry.section}, {"order", entry.order},
-        {"source", entry.source}, {"properties", entry.properties}};
+        {"source", entry.source}, {"properties", entry.properties}, {"inMenu", entry.inMenu}};
 }
 
 // 등록되지 않은 이름에는 홈을 뜻하는 0을 반환하는 함수.

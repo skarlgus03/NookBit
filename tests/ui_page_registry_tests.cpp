@@ -79,8 +79,12 @@ void testBatchRegistration() {
         && registry.pages().isEmpty(), "duplicate batch stable names rejected atomically");
     expect(registry.addPages({entry("sort", 7, 10), entry("rules", 1, 20), entry("history", 4, 30)}, *owner).hasValue()
         && registry.pages().size() == 3 && changes == 1, "valid feature batch emits one update");
+    auto hidden = entry("recovery", 10, 31);
+    hidden.inMenu = false;
+    expect(registry.addPage(hidden, *owner).hasValue() && registry.contains(10)
+        && !registry.page(10).value("inMenu").toBool(), "auxiliary page remains routable without requesting a home menu");
     owner.reset();
-    expect(registry.pages().isEmpty() && changes == 2, "feature lifetime removes all batch pages with one update");
+    expect(registry.pages().isEmpty() && changes == 4, "feature lifetime removes primary and auxiliary registrations");
 }
 }
 // 실제 화면 없이 등록 유효성·독립 수명·조회 계약을 검사하는 함수.

@@ -230,8 +230,23 @@ Result<void> FileOrganizerRuntime::registerUi(UiPageRegistry& registry) {
             {{"controller", object(&rules())}, {"destinations", object(&destinations())}, {"progress", object(&tasks())}}},
         {"organizer.history", "file-organizer", 4, title("작업 기록"), "history", {}, 30,
             QUrl(prefix + "OrganizerHistoryPage.qml"),
-            {{"controller", object(&history())}, {"progress", object(&tasks())}}}
+            {{"controller", object(&history())}, {"progress", object(&tasks())}}},
+        {"organizer.recovery", "file-organizer", 10, title("중단 작업 확인"), "alert", {}, 31,
+            QUrl(prefix + "OrganizerRecoveryPage.qml"),
+            {{"controller", object(&recovery())}, {"progress", object(&tasks())}}, false},
+        {"organizer.collision", "file-organizer", 6, title("이름 충돌 설정"), "settings", {}, 32,
+            QUrl(prefix + "OrganizerCollisionPage.qml"), {{"controller", object(&preview())}}, false}
     }, state_->connections);
+}
+// 테마 설정과 감시 전환을 알지 않고 정리 관련 설정의 표시 경로와 입력만 제공하는 함수.
+QVariantMap FileOrganizerRuntime::settingsUi() {
+    const auto prefix = QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/");
+    return {{"source", QUrl(prefix + "OrganizerSettingsSection.qml")},
+        {"properties", QVariantMap{
+            {"sorting", QVariant::fromValue(static_cast<QObject*>(&preview()))},
+            {"destinations", QVariant::fromValue(static_cast<QObject*>(&destinations()))}}},
+        {"notice", QVariantMap{{"source", QUrl(prefix + "OrganizerRecoveryNotice.qml")},
+            {"properties", QVariantMap{{"controller", QVariant::fromValue(static_cast<QObject*>(&recovery()))}}}}}};
 }
 // 소유한 pendingFiles 창구를 빌려주는 함수.
 PendingFilesModel& FileOrganizerRuntime::pendingFiles() { return state_->pendingFiles; }

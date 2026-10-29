@@ -1,6 +1,7 @@
 #pragma once
 #include <nookbit/domain/result.hpp>
 #include <QString>
+#include <QVariantMap>
 #include <memory>
 
 class QSettings;
@@ -31,8 +32,10 @@ public:
     FileOrganizerRuntime(FileOrganizerRuntimeConfig config, QSettings& preferences);
     /// 진행 중인 작업이 끝날 때까지 의존성을 보존한 뒤 내부 객체를 해제하는 소멸자.
     ~FileOrganizerRuntime();
-    /// 정리·규칙·기록 페이지의 메뉴와 입력을 기능 수명에 묶어 함께 등록하는 함수.
+    /// 정리·규칙·기록·복구·충돌 페이지의 입력과 메뉴 표시 여부를 함께 등록하는 함수.
     Result<void> registerUi(UiPageRegistry& registry);
+    /// 공통 설정 화면에 삽입할 기능 소유 영역과 빌려줄 입력을 반환하는 함수.
+    QVariantMap settingsUi();
     /// 대기 목록의 화면 창구를 반환하는 함수.
     PendingFilesModel& pendingFiles();
     /// 다른 기능이 대기 경로의 값 복사본만 읽는 창구를 반환하는 함수.

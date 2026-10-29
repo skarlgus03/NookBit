@@ -120,6 +120,12 @@ RegisteredPageHost {
     const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
     expect(entries.size() == 3 && entries[0].toMap().value("page").toInt() == 37,
         "registered menu is placed between file tools and app settings");
+    auto auxiliary = menuEntry;
+    auxiliary["page"] = 10;
+    auxiliary["inMenu"] = false;
+    home->setProperty("registeredPages", QVariantList{menuEntry, auxiliary});
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 3,
+        "auxiliary routes do not create extra home menu entries");
     home->setProperty("registeredPages", QVariantList{});
     expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "removing registration removes its home entry");
@@ -311,9 +317,11 @@ int main(int argc, char** argv) {
         property string recoveryConfirmationText: "Confirm"
         property int cancelCalls: 0
         property int confirmCalls: 0
+        property int scanCalls: 0
         signal recoveryConfirmationChanged()
         function cancelRecoveryChoice() { ++cancelCalls; awaitingRecoveryConfirmation = false; recoveryConfirmationChanged() }
         function confirmRecoveryChoice() { ++confirmCalls }
+        function refreshRecoveryCases() { ++scanCalls }
     )");
     if (!history || !recovery) return 1;
     // Controller와 확인창의 표시 부모만 각 페이지에 명시적으로 전달하는 함수.
@@ -347,6 +355,28 @@ int main(int argc, char** argv) {
     expect(!confirm->property("visible").toBool() && recovery->property("cancelCalls").toInt() == 1
         && recovery->property("confirmCalls").toInt() == 0 && !recovery->property("awaitingRecoveryConfirmation").toBool(),
         "leaving recovery cancels approval and cannot start file work");
+
+    // 복구 어댑터는 숨겨진 시작 화면에서 조회하지 않고 실제로 열릴 때만 준비한다.
+    auto recoveryProgress = fake(engine, "property bool busy: false; property bool fileWorkActive: false");
+    if (!recoveryProgress) return 1;
+    auto recoveryAdapterInputs = pageInputs(recovery.get());
+    recoveryAdapterInputs.insert("progress", QVariant::fromValue(recoveryProgress.get()));
+    recoveryAdapterInputs.insert("guideService", QVariant::fromValue(watch.get()));
+    auto recoveryAdapter = create(engine, "OrganizerRecoveryPage", recoveryAdapterInputs);
+    if (!recoveryAdapter) return 1;
+    qobject_cast<QQuickItem*>(recoveryAdapter.get())->setParentItem(host.contentItem());
+    expect(recovery->property("scanCalls").toInt() == 0, "hidden registered recovery page does not inspect at startup");
+    recoveryAdapter->setProperty("visible", true);
+    expect(recovery->property("scanCalls").toInt() == 1 && recovery->property("confirmCalls").toInt() == 0,
+        "showing recovery performs read-only inspection without approval");
+    QMetaObject::invokeMethod(recoveryAdapter.get(), "open");
+    expect(recovery->property("scanCalls").toInt() == 2, "reopening visible recovery refreshes once");
+    recovery->setProperty("awaitingRecoveryConfirmation", true);
+    QMetaObject::invokeMethod(recovery.get(), "recoveryConfirmationChanged");
+    settle();
+    recoveryAdapter->setProperty("visible", false);
+    expect(recovery->property("cancelCalls").toInt() == 2 && recovery->property("confirmCalls").toInt() == 0,
+        "leaving contributed recovery cancels confirmation and never executes recovery");
 
     // 홈이 전달받은 값만으로 표시되고 상태 소유자를 변경하지 않는지 검사한다.
     const QVariantList registeredMenus{
@@ -556,9 +586,14 @@ int main(int argc, char** argv) {
     auto uiPreferences = fake(engine, "property bool darkMode: false");
     auto destinationPreferences = fake(engine, "property var allowedRoots: []");
     auto sortPreferences = fake(engine, "property string collisionPolicy: \"rename\"");
-    if (!uiPreferences || !destinationPreferences || !sortPreferences) return 1;
+    auto settingsRecovery = fake(engine, "property var recoveryCases: []");
+    if (!uiPreferences || !destinationPreferences || !sortPreferences || !settingsRecovery) return 1;
+    const QVariantMap organizerSettings{{"source", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/OrganizerSettingsSection.qml"))},
+        {"properties", QVariantMap{{"sorting", QVariant::fromValue(sortPreferences.get())}, {"destinations", QVariant::fromValue(destinationPreferences.get())}}},
+        {"notice", QVariantMap{{"source", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/OrganizerRecoveryNotice.qml"))},
+            {"properties", QVariantMap{{"controller", QVariant::fromValue(settingsRecovery.get())}}}}}};
     auto settingsPage = create(engine, "AppSettingsPage", {{"settings", QVariant::fromValue(uiPreferences.get())},
-        {"destinations", QVariant::fromValue(destinationPreferences.get())}, {"sorting", QVariant::fromValue(sortPreferences.get())},
+        {"organizerContribution", organizerSettings},
         {"watch", QVariant::fromValue(watch.get())}, {"width", 500}, {"height", 520}});
     if (!settingsPage) return 1;
     auto* settingsItem = qobject_cast<QQuickItem*>(settingsPage.get());
@@ -596,9 +631,22 @@ int main(int argc, char** argv) {
         QMetaObject::invokeMethod(lightChoice, "clicked");
         expect(!uiPreferences->property("darkMode").toBool(), "light choice explicitly selects light mode");
     }
+    // 기능 안내는 복구 사실에 따라 나타나며 기여 제거 뒤에도 공통 테마 설정은 남는다.
+    QPointer<QQuickItem> notice = find(find, settingsItem, "organizerRecoveryNotice");
+    QPointer<QQuickItem> settingsSection = find(find, settingsItem, "organizerSettingsSection");
+    expect(notice && !notice->isVisible() && settingsSection, "empty recovery evidence hides only its contributed notice");
+    settingsRecovery->setProperty("recoveryCases", QVariantList{QVariantMap{{"id", "case"}}});
+    settle();
+    expect(notice && notice->isVisible(), "new recovery evidence reveals notice without rebuilding settings");
+    settingsRecovery->setProperty("recoveryCases", QVariantList{});
+    expect(notice && !notice->isVisible(), "resolved recovery evidence hides notice again");
+    settingsPage->setProperty("organizerContribution", QVariantMap{});
+    settle();
+    expect(notice.isNull() && settingsSection.isNull() && find(find, settingsItem, "globalDarkModeSwitch"),
+        "removing feature settings releases its views and preserves host theme controls");
     // 설정과 감시를 같은 크기에서 왕복하고, 저장 실패가 초안을 지우지 않는지 검사한다.
     auto flow = create(engine, "SettingsWorkflow", {{"settings", QVariant::fromValue(uiPreferences.get())},
-        {"destinations", QVariant::fromValue(destinationPreferences.get())}, {"sorting", QVariant::fromValue(sortPreferences.get())},
+        {"organizerContribution", organizerSettings},
         {"watch", QVariant::fromValue(watch.get())}, {"active", true}, {"width", 500}, {"height", 520}});
     if (!flow) return 1;
     auto* flowItem = qobject_cast<QQuickItem*>(flow.get());
