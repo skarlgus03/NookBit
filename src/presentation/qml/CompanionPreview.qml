@@ -24,8 +24,8 @@ Rectangle {
     property point userPivotOffset: Qt.point(0, 0)
     property point userBubbleOffset: Qt.point(0, 0)
     signal applyRequested(var edits)
-    property var drafts: ({})
-    property var durationDrafts: ({})
+    property alias drafts: editState.drafts
+    property alias durationDrafts: editState.durationDrafts
     property real viewZoom: 1
     property real viewPanX: 0
     property real viewPanY: 0
@@ -34,30 +34,13 @@ Rectangle {
     readonly property var authoredDescriptor: animations && animations.length && choice.currentIndex >= 0 && choice.currentIndex < animations.length ? animations[choice.currentIndex].descriptor : ({})
     readonly property var descriptor: withDurationDrafts(authoredDescriptor)
     readonly property var step: sprite.renderedStep
-    readonly property string frameKey: step.frameId || ""
-    readonly property var draft: drafts[frameKey] || ({})
-    readonly property var basePivot: draft.pivot || step.pivot || ({
-            x: 0,
-            y: 0
-        })
-    readonly property var pivot: ({
-            x: basePivot.x + userPivotOffset.x,
-            y: basePivot.y + userPivotOffset.y
-        })
-    readonly property var baseAttachment: draft.attachment || bubble.attachment || ({
-            x: 0,
-            y: -120
-        })
-    readonly property var attachment: ({
-            x: baseAttachment.x + userBubbleOffset.x - userPivotOffset.x,
-            y: baseAttachment.y + userBubbleOffset.y - userPivotOffset.y
-        })
-    // 저장값의 초기 바인딩이 초안을 복원하므로 저장값을 먼저 평가한 뒤 초안을 비교한다.
-    readonly property bool dirty: {
-        const frames = JSON.stringify(savedEdits.frames || ({}));
-        const durations = JSON.stringify(savedEdits.durations || ({}));
-        return frames !== JSON.stringify(drafts) || durations !== JSON.stringify(durationDrafts);
-    }
+    readonly property alias frameKey: editState.frameKey
+    readonly property alias draft: editState.draft
+    readonly property alias basePivot: editState.basePivot
+    readonly property alias pivot: editState.pivot
+    readonly property alias baseAttachment: editState.baseAttachment
+    readonly property alias attachment: editState.attachment
+    readonly property alias dirty: editState.dirty
     readonly property bool playbackActive: displayActive && running && !clock.finished && sprite.steps.length > 0
     color: "transparent"
     radius: UiMetrics.radiusPanel
@@ -78,40 +61,22 @@ Rectangle {
     }
     // 애니메이션의 각 등장 순서에 저장한 임시 지속시간을 재생 데이터에 반영하는 함수.
     function withDurationDrafts(authored) {
-        const changes = durationDrafts[authored.id];
-        if (!changes)
-            return authored;
-        const steps = sprite.resolveSteps(authored).map(function (step, index) {
-            return changes[index] === undefined ? step : Object.assign({}, step, {
-                durationMs: changes[index]
-            });
-        });
-        return Object.assign({}, authored, {
-            steps: steps
-        });
+        return editState.withDurationDrafts(authored, sprite.resolveSteps(authored));
     }
     // 프레임 길이를 변경하되 현재 시간 위치는 보존하는 함수.
     function resizeFrame(index, durationMs) {
-        if (!editing || !Number.isInteger(index) || index < 0 || index >= sprite.steps.length || !isFinite(durationMs))
-            return;
-        running = false;
         const position = clock.positionMs;
-        const all = Object.assign({}, durationDrafts);
-        const changes = Object.assign({}, all[authoredDescriptor.id] || {});
-        changes[index] = Math.max(16, Math.min(60000, Math.round(durationMs)));
-        all[authoredDescriptor.id] = changes;
-        durationDrafts = all;
+        if (!editState.resizeFrame(index, durationMs)) return;
+        running = false;
         clock.seek(position);
     }
     // 기준점과 지속시간 초안을 함께 초기화하는 함수.
     function resetEdits() {
-        drafts = ({});
-        durationDrafts = ({});
+        editState.resetEdits();
     }
     // 마지막 적용값을 복제하여 미적용 변경을 되돌리는 함수.
     function reloadEdits() {
-        drafts = JSON.parse(JSON.stringify(savedEdits.frames || ({})));
-        durationDrafts = JSON.parse(JSON.stringify(savedEdits.durations || ({})));
+        editState.reloadEdits();
     }
     // 저장 성공 알림을 화면 위에 잠깐 표시하는 함수.
     function showSavedNotice() {
@@ -155,39 +120,14 @@ Rectangle {
         if (!editing || ![px, py, ax, ay].every(isFinite))
             return;
         running = false;
-        movePoint(0, px, py);
-        movePoint(1, ax, ay);
+        editState.setCoordinates(px, py, ax, ay);
     }
     // 현재 기준점을 선택한 애니메이션 안의 모든 프레임에 정확히 복사하는 함수.
     function alignFrames(kind) {
         if (!editing || !sprite.ready || ![0, 1, 2].includes(kind))
             return;
         running = false;
-        const sourcePivot = {
-            x: basePivot.x,
-            y: basePivot.y
-        };
-        const bubblePoint = {
-            x: basePivot.x + baseAttachment.x,
-            y: basePivot.y + baseAttachment.y
-        };
-        const values = Object.assign({}, drafts);
-        for (const frame of sprite.steps) {
-            const value = Object.assign({}, values[frame.frameId] || {});
-            if (kind === 0 || kind === 2)
-                value.pivot = {
-                    x: sourcePivot.x,
-                    y: sourcePivot.y
-                };
-            const targetPivot = value.pivot || frame.pivot;
-            if (kind === 1 || kind === 2)
-                value.attachment = {
-                    x: bubblePoint.x - targetPivot.x,
-                    y: bubblePoint.y - targetPivot.y
-                };
-            values[frame.frameId] = value;
-        }
-        drafts = values;
+        editState.alignFrames(kind);
     }
     // 완료한 재생은 처음으로 돌리고 재생과 일시정지를 전환하는 함수.
     function togglePlayback() {
@@ -198,25 +138,8 @@ Rectangle {
     }
     // 선택한 프레임의 기준점을 임시 조정값으로 보관하는 함수.
     function movePoint(kind, x, y) {
-        if (!editing || !sprite.ready)
-            return;
-        const values = Object.assign({}, drafts);
-        const value = Object.assign({}, values[frameKey] || {});
-        if (kind === 0)
-            value.pivot = {
-                x: x - userPivotOffset.x,
-                y: y - userPivotOffset.y
-            };
-        else
-            value.attachment = {
-                x: x - pivot.x - userBubbleOffset.x + userPivotOffset.x,
-                y: y - pivot.y - userBubbleOffset.y + userPivotOffset.y
-            };
-        values[frameKey] = value;
-        drafts = values;
+        editState.movePoint(kind, x, y);
     }
-    onSavedEditsChanged: reloadEdits()
-    Component.onCompleted: reloadEdits()
     onAnimationsChanged: {
         editing = false;
         reloadEdits();
@@ -246,6 +169,18 @@ Rectangle {
         onActivated: pane.selectFrame(sprite.sequenceIndex + 1)
     }
 
+    CompanionEditState {
+        id: editState
+        savedEdits: pane.savedEdits
+        step: pane.step
+        steps: sprite.steps
+        animationId: pane.authoredDescriptor.id
+        bubble: pane.bubble
+        editing: pane.editing
+        frameReady: sprite.ready
+        userPivotOffset: pane.userPivotOffset
+        userBubbleOffset: pane.userBubbleOffset
+    }
     CompanionPlaybackClock {
         id: clock
         objectName: "companionPlaybackClock"

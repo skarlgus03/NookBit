@@ -19,6 +19,15 @@ weights. See [font provenance and reproduction](../resources/fonts/README.md).
 The exact cause of the original intermittent rendering issue was not reproduced;
 visual verification on the affected machine remains necessary.
 
+Companion preview edit drafts live in `CompanionEditState.qml`, independently of
+the view, playback clock and persistence service. The view supplies frame metadata
+and personal offsets, owns playback/camera requests, and emits apply requests.
+Standalone state tests cover draft isolation, coordinate offsets, frame alignment,
+duration overrides and reset/cancel. Preview playback additionally requires a
+visible, non-minimized containing window, while preserving the user's playback
+request during temporary window hiding. Rule connection cancellation clears only
+temporary wire state on pointer cancellation and page exit.
+
 The optional [feeding feature](companion-feeding.md) borrows only the interaction
 registration capability. Its scoped owner registers a handler and menu metadata;
 Companion owns generic input/rendering and the host enforces the dependency.

@@ -27,6 +27,10 @@ foreach(qml_file IN LISTS qml_files)
       AND source MATCHES "(lineCanvas|canvasViewport|inspectorValue|controller|destinations|guideService)\\.")
     message(FATAL_ERROR "${qml_name}: keep the editing session independent of views and services")
   endif()
+  if(qml_name STREQUAL "CompanionEditState.qml"
+      AND source MATCHES "(pane|sprite|clock|stage|controller|settings|placement)\\.")
+    message(FATAL_ERROR "${qml_name}: keep edit drafts independent of views, playback and persistence")
+  endif()
   # 전문 편집기·캐릭터를 포함한 모든 QML은 공통 테마에서만 색상값을 정의한다.
   if(NOT qml_name STREQUAL "UiTheme.qml"
       AND source MATCHES "#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]")
