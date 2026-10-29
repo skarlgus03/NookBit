@@ -4,8 +4,10 @@
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "presentation/watch_controller.hpp"
 #include <QSettings>
+#include <QVariantMap>
 
 namespace nookbit {
+class UiPageRegistry;
 struct FolderWatchRuntimeConfig {
     QString settingsPath;
     QString schemaPath;
@@ -22,6 +24,12 @@ public:
         IPendingPathsQuery& pendingPaths, IEnqueuePendingPaths& pendingCommands, QSettings& preferences);
     /// 컨트롤러와 타이머를 해제한 뒤 그들이 사용하는 일꾼을 해제하는 소멸자.
     ~FolderWatchRuntime() = default;
+    /// 설정 상세 슬라이드의 페이지 경로와 입력을 기능 수명에 묶어 등록하는 함수.
+    Result<void> registerUi(UiPageRegistry& registry);
+    /// 설정 화면에 삽입할 요약 버튼의 경로와 입력을 반환하는 함수.
+    QVariantMap settingsEntryUi();
+    /// 외부 요청으로 열 정리 제안창의 경로와 입력을 반환하는 함수.
+    QVariantMap proposalUi();
     /// 이 묶음이 살아 있는 동안만 유효한 감시 화면·입력 창구를 반환하는 함수.
     WatchController& controller() { return controller_; }
 private:
@@ -36,5 +44,7 @@ private:
     FilesystemScanner scanner_;
     EvaluateWatchFolderUseCase evaluate_;
     WatchController controller_;
+    /// 등록 화면을 컨트롤러보다 먼저 정리하는 수명 문맥.
+    QObject uiLifetime_;
 };
 }

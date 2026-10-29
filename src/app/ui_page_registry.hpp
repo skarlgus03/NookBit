@@ -8,6 +8,8 @@
 #include <QVariantList>
 
 namespace nookbit {
+/// 등록 화면을 일반 확장 영역 또는 설정 상세 슬라이드에 배치하는 구분.
+enum class UiPageHost { Extension, SettingsDetail };
 /// 모듈이 제공하는 페이지의 메뉴 정보와 명시적인 화면 입력.
 struct UiPageContribution {
     QString id;
@@ -20,12 +22,14 @@ struct UiPageContribution {
     QUrl source;
     QVariantMap properties;
     bool inMenu{true};
+    UiPageHost host{UiPageHost::Extension};
 };
 
 /// 등록된 페이지 정보만 보관하며 기능 객체나 실제 QML 화면은 소유하지 않는 호스트 목록.
 class UiPageRegistry final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList pages READ pages NOTIFY pagesChanged)
+    Q_PROPERTY(QVariantList extensionPages READ extensionPages NOTIFY pagesChanged)
 public:
     /// 기존 호스트 페이지 번호와 충돌하지 않도록 예약 목록을 받는 생성자.
     explicit UiPageRegistry(QSet<int> reservedPages = {}, QObject* parent = nullptr);
@@ -36,6 +40,8 @@ public:
     Result<void> addPages(QList<UiPageContribution> pages, QObject& lifetime);
     /// 메뉴 순서대로 정렬한 페이지 값 복사본을 반환하는 함수.
     QVariantList pages() const;
+    /// 별도 설정 슬라이드와 중복 생성하지 않을 일반 확장 페이지만 반환하는 함수.
+    QVariantList extensionPages() const;
     /// 등록된 페이지 번호인지 확인하는 함수.
     Q_INVOKABLE bool contains(int page) const;
     /// 페이지의 제목·경로·입력 정보를 값으로 반환하는 함수.

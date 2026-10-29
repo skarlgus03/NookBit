@@ -10,7 +10,10 @@ contributions and enablement remain pending. File Organizer now registers its
 sort, rule-editor, history, recovery and collision pages as one scoped batch.
 Recovery/collision remain auxiliary routes rather than home menu entries. Organizer
 settings and its recovery notice are supplied as optional feature-owned fragments;
-general theme settings and Watch/notification contributions remain host-owned.
+general theme settings remain host-owned. Watch now supplies its settings-detail
+route, summary entry and proposal renderer; Notifications supplies its page/menu.
+All four feature runtimes still start unconditionally; module-enable startup and
+restart handling remain pending.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -51,11 +54,11 @@ owner without becoming one menu button.
 | [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | CompanionRuntime owns the desktop objects; host still constructs it unconditionally |
 | [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution | No feature-level startup/disable boundary yet |
 | [Integration adapters](../src/app/feature_connections.cpp) | Watch-to-notification, notification-to-companion and file-activity-to-companion bindings have a scoped owner | No feature lifecycle/enablement registry yet |
-| [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence | Injected Organizer capabilities and application preferences remain host-owned |
-| [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and persistent or transient enabled preferences | Module enablement and registration ordering remain host responsibilities |
+| [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence; supplies settings-detail route, summary entry and proposal renderer | Organizer capabilities and preferences are injected; host still chooses attention activation |
+| [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and enabled preferences; registers its settings page/menu | Module enablement, source registration and delivery routes remain host responsibilities |
 | [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner; supplies five pages, settings and recovery-notice fragments | Queue state still resides in the existing model; host still composes shared progress/approval and developer entry points |
 | [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; supplies management-page/menu, desktop renderer and tray contributions | Host still chooses construction, attention actions, cross-feature routes and application exit policy |
-| [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped Companion/Organizer pages, borrowed inputs, atomic multi-page registration and separate menu visibility | Watch/notification/settings host routes remain; this is not module enablement or live unloading |
+| [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped feature pages, borrowed inputs, atomic registration, menu visibility and explicit extension/settings-detail placement | General settings/developer host routes remain; this is not module enablement or live unloading |
 | [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
@@ -270,8 +273,8 @@ The runtime supplies borrowed controller/model/progress inputs and menu metadata
 Main no longer constructs these pages or owns their menu titles. The existing
 UiMetrics defaults and `windows/fileSort/size`, `windows/ruleEditor/size` and
 `windows/history/size`, `windows/recovery/size` and `windows/collisionSettings/size`
-preference keys are unchanged. General settings, Folder Watch and notification UI
-remain host contributions for later incremental steps. Business logic is not moved
+preference keys are unchanged. General settings and developer UI remain host
+contributions. Business logic is not moved
 into the page registry. `inMenu` defaults to true; false keeps an auxiliary page
 routable and titled without creating another home menu row.
 
@@ -323,14 +326,61 @@ Removing a contribution releases only its views and leaves host theme controls.
 
 OrganizerSettingsSection owns the existing collision-policy picker and allowed
 destination list/revocation controls. OrganizerRecoveryNotice only requests route
-10; displaying it never executes recovery. The Watch summary remains a host-owned
-Component inserted into the leading slot, preserving its placement above collision
-controls without giving Organizer a WatchController dependency. AppSettingsPage
+10; displaying it never executes recovery. The host inserts a Watch-provided entry
+into the leading visual slot, preserving its placement above collision controls
+without giving Organizer a WatchController dependency. AppSettingsPage
 and SettingsWorkflow no longer receive sorting/destination controllers or a
 host-computed recovery flag. SettingsWorkflow still owns the existing same-size
-slide into Watch settings; the theme policy and Watch input remain host-owned.
+slide into the registered settings detail; the theme policy remains host-owned.
 Colors, spacing, behavior, settings keys and the three visible settings groups
 are preserved.
+
+### Folder Watch and notification UI contributions
+
+`FolderWatchRuntime::registerUi()` supplies `watch.settings`, existing route 3,
+hidden from the home menu and placed in `UiPageHost::SettingsDetail`.
+`NotificationRuntime::registerUi()` supplies `notifications.settings`, existing
+route 11, in the normal extension host with home menu order 60. Source/type
+registration and delivery wiring remain separate host decisions. Both runtimes
+have a UI lifetime context declared after their controller: page registration is
+removed before the controller's derived state is destroyed.
+
+UiPageRegistry returns `host` placement metadata and an `extensionPages` view.
+Main creates only extension-host pages in its ordinary repeater; SettingsWorkflow
+receives the Watch settings-detail descriptor separately. This prevents duplicate
+WatchSettingsPage instances and competing drafts. Unknown host values are rejected.
+Settings-detail routes continue to share the general settings window size/key,
+preserving the existing same-size slide. The current compiled host selects the
+Watch detail slot explicitly; this is not arbitrary third-party page discovery.
+
+FolderWatchSettingsPage adapts the existing watch editor to registered-page
+services. SettingsWorkflow no longer creates WatchSettingsPage or receives a
+WatchController; it only controls the transition, theme, overlay and navigation
+requests. Its `detailOpen`/`detailPage` inputs replace the Watch-specific view input.
+Settings drafts, rescan fields, pattern editing, explicit saves, failed-save draft
+preservation and hide/reopen behavior stay in the existing editor.
+
+`settingsEntryUi()` supplies FolderWatchSettingsEntry and its controller input.
+The feature now owns summary formatting and the settings-open request. AppSettingsPage
+only hosts that optional contribution in the Organizer leading slot; absent Watch
+metadata leaves the slot/divider out. It has no WatchController or condition-format
+dependency. NotificationsPage owns the type list/status and per-type enable calls;
+the common home menu/title rendering uses its registration instead of a fixed row.
+
+`proposalUi()` supplies FolderWatchProposal, which owns WatchProposalDialog wiring.
+RegisteredDialogHost receives the optional descriptor, overlay, busy state and
+theme, and forwards open/close and accepted events. The feature connects enqueue
+and snooze; the host chooses when attention is actionable and collapses navigation
+after acceptance. Closing/removing a proposal renderer does not enqueue, snooze or
+execute file work. Admission still uses the existing queue contract and movement
+still requires a new preview and approval. Main keeps Watch/notification fact
+endpoints for home summaries and cross-feature attention selection; it does not
+change their policies through the settings UI itself.
+
+As with other borrowed UI descriptors, the QML engine/hosts must be destroyed before
+their feature runtimes. Descriptor removal tests cover renderer cleanup, not live
+backend unloading. No JSON format, preference key, thread or module-enable switch
+is added by this refactor.
 
 ### Companion desktop renderer and tray contribution
 
@@ -441,8 +491,10 @@ The same ownership/request/update rules apply to additions unrelated to companio
    objects and preference connections. Companion supplies its management page/menu,
    desktop renderer and scoped tray action. Organizer supplies sort/rules/history,
    auxiliary recovery/collision pages, settings and recovery-notice fragments.
-   Next extract Watch and notification contributions, initially with all modules
-   enabled.
+   Watch supplies the settings slide/entry and proposal renderer; Notifications
+   supplies its settings page/menu. General settings/developer UI and shared
+   progress/approval integration remain host-owned. Next remove unconditional
+   feature assumptions during startup before adding module management.
 5. **Persisted enablement and restart.** Add module management only after disabled
    startup combinations work. Check missing optional consumers, required-dependency
    reasons, preserved settings/data and absence of timers from inactive features.
@@ -486,4 +538,10 @@ read-only preparation/reopening, cancellation without execution, live notice
 appearance/removal, feature-view cleanup, retained theme controls and unchanged
 Watch sliding. Existing app smoke checks retain inline recovery/progress overlays
 and unlocked window movement while tasks run.
+Watch/notification runtime tests cover registered endpoint identity, settings-detail
+placement, descriptor inputs and registration cleanup. Registry tests ensure detail
+pages are not also extension pages. QML tests retain same-size sliding, numeric and
+pattern edits, failed-save drafts and notification toggles; proposal tests distinguish
+accept, snooze, close, busy input blocking, absent contributions and cleanup while
+open without extra commands. App smoke tests exercise the actual registered screens.
 Step 4 continues with the remaining UI contributions.

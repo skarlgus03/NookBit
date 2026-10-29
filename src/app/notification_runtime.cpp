@@ -1,6 +1,15 @@
 #include "app/notification_runtime.hpp"
+#include "app/ui_page_registry.hpp"
+#include <QCoreApplication>
 
 namespace nookbit {
+// 알림 표시 정책만 변경하는 화면을 등록하고 실제 기능 명령과 분리하는 함수.
+Result<void> NotificationRuntime::registerUi(UiPageRegistry& registry) {
+    return registry.addPage({"notifications.settings", "notifications", 11,
+        QCoreApplication::translate("NotificationUi", "알림"), "notifications", {}, 60,
+        QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/NotificationsPage.qml")),
+        {{"controller", QVariant::fromValue(static_cast<QObject*>(&controller_))}}}, uiLifetime_);
+}
 // 콜백이 참조하는 설정 상태를 먼저 만들고 알림 컨트롤러를 생성하는 함수.
 NotificationRuntime::NotificationRuntime(QSettings& preferences, bool persistEnabled)
     : preferences_(preferences), persistEnabled_(persistEnabled),

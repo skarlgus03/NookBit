@@ -1,17 +1,19 @@
 import QtQuick
 
-// 설정과 감시 입력을 같은 공간에서 전환하며 창 크기나 설정값은 소유하지 않는 화면 흐름.
+// 공통 설정과 등록된 상세 화면을 같은 공간에서 전환하며 기능 입력은 소유하지 않는 흐름.
 Item {
     id: workflow
     required property var settings
-    required property var watch
+    property var watchContribution: ({})
+    property var detailPage: ({})
+    property var guideService: null
+    property Item overlayHost: parent
     property bool active: false
-    property bool watchOpen: false
+    property bool detailOpen: false
     property var organizerContribution: ({})
     property bool dark: false
     readonly property bool transitioning: slide.running
-    property real slidePosition: watchOpen ? 1 : 0
-    signal watchRequested()
+    property real slidePosition: detailOpen ? 1 : 0
     signal settingsRequested()
     signal routeRequested(int page)
     clip: true
@@ -22,29 +24,31 @@ Item {
         width: workflow.width
         height: workflow.height
         x: -workflow.width * workflow.slidePosition
-        visible: workflow.active && (!workflow.watchOpen || workflow.transitioning)
-        enabled: !workflow.watchOpen && !workflow.transitioning
+        visible: workflow.active && (!workflow.detailOpen || workflow.transitioning)
+        enabled: !workflow.detailOpen && !workflow.transitioning
         settings: workflow.settings
         organizerContribution: workflow.organizerContribution
-        watch: workflow.watch
+        watchContribution: workflow.watchContribution
         dark: workflow.dark
-        onWatchSettingsRequested: workflow.watchRequested()
         onRouteRequested: function(route) { workflow.routeRequested(route) }
     }
-    WatchSettingsPage {
+    RegisteredPageHost {
+        registration: workflow.detailPage
+        guideService: workflow.guideService
+        overlayHost: workflow.overlayHost
         width: workflow.width
         height: workflow.height
         x: workflow.width * (1 - workflow.slidePosition)
-        visible: workflow.active && (workflow.watchOpen || workflow.transitioning)
-        enabled: workflow.watchOpen && !workflow.transitioning
-        controller: workflow.watch
+        selected: workflow.active && (workflow.detailOpen || workflow.transitioning)
+        enabled: workflow.detailOpen && !workflow.transitioning
         dark: workflow.dark
-        onOpenRequested: workflow.watchRequested()
+        onPageRequested: function(route) { workflow.routeRequested(route) }
+        onNavigationRequested: function(route) { workflow.routeRequested(route) }
         onCloseRequested: workflow.settingsRequested()
     }
     Shortcut {
         sequence: "Escape"
-        enabled: workflow.enabled && workflow.active && workflow.watchOpen && !workflow.transitioning
+        enabled: workflow.enabled && workflow.active && workflow.detailOpen && !workflow.transitioning
         onActivated: workflow.settingsRequested()
     }
 }

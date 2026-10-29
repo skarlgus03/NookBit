@@ -111,23 +111,23 @@ RegisteredPageHost {
 
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 660}});
     if (!home) return;
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 1,
         "unregistered companion has no hardcoded home menu entry");
     auto menuEntry = registration;
     menuEntry.insert("label", "Companion"); menuEntry.insert("icon", "companion");
     menuEntry.insert("section", "Companion"); menuEntry.insert("order", 40);
     home->setProperty("registeredPages", QVariantList{menuEntry});
     const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
-    expect(entries.size() == 3 && entries[0].toMap().value("page").toInt() == 37,
+    expect(entries.size() == 2 && entries[0].toMap().value("page").toInt() == 37,
         "registered menu is placed between file tools and app settings");
     auto auxiliary = menuEntry;
     auxiliary["page"] = 10;
     auxiliary["inMenu"] = false;
     home->setProperty("registeredPages", QVariantList{menuEntry, auxiliary});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 3,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "auxiliary routes do not create extra home menu entries");
     home->setProperty("registeredPages", QVariantList{});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 1,
         "removing registration removes its home entry");
 }
 
@@ -222,6 +222,64 @@ RegisteredDesktopHost {
     motion->setProperty("held", false);
     settle();
 }
+
+// 제안창의 수락·미루기·닫기와 표시기 해제가 다른 명령으로 섞이지 않는지 검사하는 함수.
+void testProposalContribution(QQmlEngine& engine, QQuickWindow& window) {
+    auto watch = fake(engine, R"(
+        property string proposalText: "Offer"
+        property var proposalFiles: ["sample.txt"]
+        property bool proposalVisible: true
+        property int enqueued: 0
+        property int snoozed: 0
+        function addProposalToPending() { ++enqueued }
+        function snoozeProposal() { ++snoozed }
+    )");
+    if (!watch) return;
+    QQmlComponent component(&engine);
+    component.setData(R"(import QtQuick
+RegisteredDialogHost {
+    property int acceptedCalls: 0
+    onAccepted: ++acceptedCalls
+})", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/ProposalHostHarness.qml")));
+    std::unique_ptr<QObject> owner(component.createWithInitialProperties({{"contribution", QVariantMap{}},
+        {"overlayHost", QVariant::fromValue(window.contentItem())}}));
+    if (!owner) { expect(false, "create proposal host"); std::cerr << component.errorString().toStdString(); return; }
+    QMetaObject::invokeMethod(owner.get(), "open");
+    expect(!owner->property("opened").toBool(), "missing proposal contribution creates no dialog");
+    owner->setProperty("contribution", QVariantMap{{"source", QUrl::fromLocalFile(
+        QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/FolderWatchProposal.qml"))},
+        {"properties", QVariantMap{{"controller", QVariant::fromValue(watch.get())}}}});
+    QPointer<QObject> dialog = owner->findChild<QObject*>("watchProposalDialog");
+    if (!dialog) { expect(false, "feature proposal dialog loads"); return; }
+    QMetaObject::invokeMethod(owner.get(), "open");
+    settle();
+    expect(owner->property("opened").toBool(), "host opens the contributed proposal");
+    owner->setProperty("busy", true);
+    expect(!dialog->property("enabled").toBool(), "file work busy state disables proposal input");
+    QMetaObject::invokeMethod(owner.get(), "close");
+    expect(watch->property("enqueued").toInt() == 0 && watch->property("snoozed").toInt() == 0,
+        "closing proposal executes neither enqueue nor snooze");
+    owner->setProperty("busy", false);
+    QMetaObject::invokeMethod(owner.get(), "open");
+    settle();
+    auto* accept = dialog->findChild<QObject*>("watchAcceptProposalButton");
+    auto* snooze = dialog->findChild<QObject*>("watchSnoozeProposalButton");
+    if (!accept || !snooze) { expect(false, "proposal actions are owned by its renderer"); return; }
+    QMetaObject::invokeMethod(accept, "clicked");
+    expect(watch->property("enqueued").toInt() == 1 && owner->property("acceptedCalls").toInt() == 1,
+        "accept enqueues once and reports completion once");
+    QMetaObject::invokeMethod(owner.get(), "open");
+    settle();
+    QMetaObject::invokeMethod(snooze, "clicked");
+    expect(watch->property("snoozed").toInt() == 1 && owner->property("acceptedCalls").toInt() == 1,
+        "snooze does not report an accepted proposal");
+    QMetaObject::invokeMethod(owner.get(), "open");
+    settle();
+    owner->setProperty("contribution", QVariantMap{});
+    settle();
+    expect(dialog.isNull() && !owner->property("opened").toBool() && watch->property("enqueued").toInt() == 1
+        && watch->property("snoozed").toInt() == 1, "removing an open renderer releases its popup without executing a command");
+}
 }
 
 // 입력 초안의 독립성과 페이지 소유 확인창의 종료를 앱 조립부 없이 검사하는 함수.
@@ -273,6 +331,7 @@ int main(int argc, char** argv) {
     host.show();
     testRegisteredPageHost(engine, host);
     testDesktopContribution(engine);
+    testProposalContribution(engine, host);
     if (!watch) return 1;
     const QVariantMap watchInputs{{"controller", QVariant::fromValue(watch.get())}, {"visible", false},
         {"width", 900}, {"height", 700}};
@@ -383,7 +442,8 @@ int main(int argc, char** argv) {
         QVariantMap{{"label", "Sort"}, {"page", 7}, {"icon", "folder"}, {"section", "Files"}, {"order", 10}},
         QVariantMap{{"label", "Rules"}, {"page", 1}, {"icon", "rules"}, {"section", ""}, {"order", 20}},
         QVariantMap{{"label", "History"}, {"page", 4}, {"icon", "history"}, {"section", ""}, {"order", 30}},
-        QVariantMap{{"label", "Companion"}, {"page", 5}, {"icon", "companion"}, {"section", "Companion"}, {"order", 40}}};
+        QVariantMap{{"label", "Companion"}, {"page", 5}, {"icon", "companion"}, {"section", "Companion"}, {"order", 40}},
+        QVariantMap{{"label", "Notifications"}, {"page", 11}, {"icon", "notifications"}, {"section", ""}, {"order", 60}}};
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 420}, {"pendingCount", 5},
         {"registeredPages", registeredMenus}, {"watchEnabled", true}, {"watchFolder", QStringLiteral("D:\\Downloads\\")}});
     if (!home) return 1;
@@ -592,9 +652,13 @@ int main(int argc, char** argv) {
         {"properties", QVariantMap{{"sorting", QVariant::fromValue(sortPreferences.get())}, {"destinations", QVariant::fromValue(destinationPreferences.get())}}},
         {"notice", QVariantMap{{"source", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/OrganizerRecoveryNotice.qml"))},
             {"properties", QVariantMap{{"controller", QVariant::fromValue(settingsRecovery.get())}}}}}};
+    const QVariantMap watchEntry{{"source", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/FolderWatchSettingsEntry.qml"))},
+        {"properties", QVariantMap{{"controller", QVariant::fromValue(watch.get())}}}};
+    const QVariantMap watchDetail{{"page", 3}, {"source", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/FolderWatchSettingsPage.qml"))},
+        {"properties", QVariantMap{{"controller", QVariant::fromValue(watch.get())}}}};
     auto settingsPage = create(engine, "AppSettingsPage", {{"settings", QVariant::fromValue(uiPreferences.get())},
         {"organizerContribution", organizerSettings},
-        {"watch", QVariant::fromValue(watch.get())}, {"width", 500}, {"height", 520}});
+        {"watchContribution", watchEntry}, {"width", 500}, {"height", 520}});
     if (!settingsPage) return 1;
     auto* settingsItem = qobject_cast<QQuickItem*>(settingsPage.get());
     settingsItem->setParentItem(host.contentItem());
@@ -647,11 +711,12 @@ int main(int argc, char** argv) {
     // 설정과 감시를 같은 크기에서 왕복하고, 저장 실패가 초안을 지우지 않는지 검사한다.
     auto flow = create(engine, "SettingsWorkflow", {{"settings", QVariant::fromValue(uiPreferences.get())},
         {"organizerContribution", organizerSettings},
-        {"watch", QVariant::fromValue(watch.get())}, {"active", true}, {"width", 500}, {"height", 520}});
+        {"watchContribution", watchEntry}, {"detailPage", watchDetail}, {"overlayHost", QVariant::fromValue(host.contentItem())},
+        {"active", true}, {"width", 500}, {"height", 520}});
     if (!flow) return 1;
     auto* flowItem = qobject_cast<QQuickItem*>(flow.get());
     flowItem->setParentItem(host.contentItem());
-    flow->setProperty("watchOpen", true);
+    flow->setProperty("detailOpen", true);
     settle(); settle();
     auto* watchPage = find(find, flowItem, "watchSettingsDialog");
     auto* watchInput = find(find, flowItem, "watchIntervalSpin");
@@ -670,7 +735,7 @@ int main(int argc, char** argv) {
     expect(watchPage->property("changeCount").toInt() == 0 && watch->property("rescanIntervalMinutes").toInt() == 17
         && watch->property("excludePatterns").toString().contains("*.download"),
         "successful saves include the last typed pattern and reset the draft baseline");
-    flow->setProperty("watchOpen", false);
+    flow->setProperty("detailOpen", false);
     settle(); settle();
     auto* returnedSettings = find(find, flowItem, "settingsPage");
     expect(returnedSettings && returnedSettings->isVisible() && qAbs(returnedSettings->x()) < 1

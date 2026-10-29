@@ -39,6 +39,7 @@ Dialog {
         }
         RowLayout {
             AppButton {
+                objectName: "watchAcceptProposalButton"
                 text: qsTr("대기 목록에 담기")
                 enabled: page.controller.proposalVisible
                 onClicked: {
@@ -48,6 +49,7 @@ Dialog {
                 }
             }
             AppButton {
+                objectName: "watchSnoozeProposalButton"
                 text: qsTr("30분 뒤 다시 알림")
                 onClicked: {
                     page.controller.snoozeProposal();

@@ -44,8 +44,7 @@ ApplicationWindow {
         y: extensionHost.y + (extensionHost.height - height) / 2
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({3: qsTr("폴더 감시 설정"),
-        8: qsTr("설정"), 9: qsTr("개발 도구"), 11: qsTr("알림")})
+    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구")})
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
     function pageAvailable(page) { return page === 0 || hostPageTitles[page] !== undefined || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
@@ -85,7 +84,7 @@ ApplicationWindow {
     palette.disabled.buttonText: mutedText
 
     // 감시 입력 초안의 복원은 페이지에 맡기고 해당 화면을 여는 함수.
-    function openWatchSettings() { currentPage = 3 }
+    function openWatchSettings() { openPage(uiPages.pageId("watch.settings")) }
     // 복구 화면을 먼저 연 뒤 파일을 바꾸지 않는 목록 검사를 요청하는 함수.
     function openRecovery() { openPage(uiPages.pageId("organizer.recovery")) }
 
@@ -173,7 +172,7 @@ ApplicationWindow {
                 uiSettings.rememberExtensionSize(sizeKey(activePage), width, height)
         }
         // 설정 안의 감시 화면은 설정 창의 크기를 공유하는 함수.
-        function sizeKey(page) { return page === 3 ? 8 : page }
+        function sizeKey(page) { return uiPages.page(page).host === "settingsDetail" ? 8 : page }
         // 이전 페이지 크기를 보존한 뒤 새 페이지의 기본값 또는 마지막 크기를 복원하는 함수.
         function activatePage(page) {
             if (page > 0 && activePage > 0 && sizeKey(page) === sizeKey(activePage)) {
@@ -260,7 +259,7 @@ ApplicationWindow {
                 color: root.theme.text
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: [3, 6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: uiPages.page(root.currentPage).host === "settingsDetail" || [6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
             NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
         }
     }
@@ -291,28 +290,23 @@ ApplicationWindow {
         // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
         onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
     }
-    NotificationSettingsPage {
-        parent: extensionHost
-        anchors.fill: parent
-        anchors.margins: UiMetrics.editorInset
-        visible: root.currentPage === 11
-        dark: root.editorDark
-        types: notifications.types
-        status: notifications.status
-        onEnabledRequested: function(typeId, value) { notifications.setEnabled(typeId, value) }
-    }
     SettingsWorkflow {
         objectName: "settingsWorkflow"
         parent: extensionHost
         anchors.fill: parent
-        visible: root.currentPage === 8 || root.currentPage === 3
+        visible: root.currentPage === 8 || root.currentPage === detailPage.page
         active: visible
-        watchOpen: root.currentPage === 3
+        detailPage: {
+            for (const entry of uiPages.pages) if (entry.id === "watch.settings") return entry
+            return ({})
+        }
+        detailOpen: root.currentPage === detailPage.page
+        guideService: userGuides
+        overlayHost: extensionWindow.contentItem
         dark: root.editorDark
         settings: uiSettings
         organizerContribution: organizerSettings
-        watch: watchController
-        onWatchRequested: root.openWatchSettings()
+        watchContribution: watchSettingsEntry
         onSettingsRequested: root.currentPage = 8
         onRouteRequested: function(route) { root.openPage(route) }
     }
@@ -354,7 +348,7 @@ ApplicationWindow {
     Repeater {
         id: registeredPages
         parent: extensionHost
-        model: uiPages.pages
+        model: uiPages.extensionPages
         delegate: RegisteredPageHost {
             required property var modelData
             registration: modelData
@@ -376,11 +370,13 @@ ApplicationWindow {
         inlineConfirmation: root.inlineSortConfirmation
     }
 
-    WatchProposalDialog {
+    RegisteredDialogHost {
         id: watchProposalDialog
-        controller: watchController
+        contribution: watchProposalUi
+        overlayHost: root.contentItem
         busy: backgroundTasks.busy
-        onPendingAccepted: root.currentPage = 0
+        dark: root.editorDark
+        onAccepted: root.currentPage = 0
     }
 
 

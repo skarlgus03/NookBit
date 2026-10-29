@@ -895,7 +895,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::UiPageRegistry uiPages({2, 3, 8, 9, 11});
+    nookbit::UiPageRegistry uiPages({2, 8, 9});
     nookbit::FileOrganizerRuntime organizer({appData, defaultDestination, verifyUi}, uiPreferences);
     auto& pendingFiles = organizer.pendingFiles();
     auto& backgroundTasks = organizer.tasks();
@@ -906,6 +906,8 @@ int main(int argc, char* argv[]) {
     nookbit::FolderWatchRuntime folderWatch({QDir(appData).filePath(QStringLiteral("watch.json")),
         QStringLiteral(":/nookbit/watch.schema.json"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), !verifyUi},
         organizer.classification(), organizer.pendingPaths(), organizer.pendingCommands(), uiPreferences);
+    const auto watchUi = folderWatch.registerUi(uiPages);
+    if (!watchUi) { QTextStream(stderr) << QString::fromStdString(watchUi.error().message) << Qt::endl; return EXIT_FAILURE; }
     auto& watchController = folderWatch.controller();
     QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
         &watchController, &nookbit::WatchController::pendingPathsChanged);
@@ -931,6 +933,8 @@ int main(int argc, char* argv[]) {
     auto& companionInteractions = companion.interactions();
     auto& characterImports = companion.imports();
     nookbit::NotificationRuntime notificationRuntime(uiPreferences, !verifyUi);
+    const auto notificationUi = notificationRuntime.registerUi(uiPages);
+    if (!notificationUi) { QTextStream(stderr) << QString::fromStdString(notificationUi.error().message) << Qt::endl; return EXIT_FAILURE; }
     auto& notifications = notificationRuntime.controller();
     const auto registeredNotice = notifications.registerType(nookbit::folderWatchOfferType());
     if (!registeredNotice) { QTextStream(stderr) << QString::fromStdString(registeredNotice.error().message) << Qt::endl; return EXIT_FAILURE; }
@@ -992,6 +996,8 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
     engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
     engine.rootContext()->setContextProperty(QStringLiteral("organizerSettings"), organizer.settingsUi());
+    engine.rootContext()->setContextProperty(QStringLiteral("watchSettingsEntry"), folderWatch.settingsEntryUi());
+    engine.rootContext()->setContextProperty(QStringLiteral("watchProposalUi"), folderWatch.proposalUi());
     engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
     engine.rootContext()->setContextProperty(QStringLiteral("userGuides"), &userGuides);
     engine.rootContext()->setContextProperty(QStringLiteral("uiPages"), &uiPages);

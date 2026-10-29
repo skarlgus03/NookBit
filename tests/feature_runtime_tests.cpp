@@ -1,5 +1,6 @@
 #include "app/notification_runtime.hpp"
 #include "app/folder_watch_runtime.hpp"
+#include "app/ui_page_registry.hpp"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -25,14 +26,19 @@ void testNotificationOwnership() {
     if (!directory.isValid()) { expect(false, "notification fixture"); return; }
     QSettings preferences(directory.filePath("preferences.ini"), QSettings::IniFormat);
     QPointer<nookbit::NotificationController> controller;
+    nookbit::UiPageRegistry pages;
     {
         nookbit::NotificationRuntime runtime(preferences);
         controller = &runtime.controller();
+        expect(runtime.registerUi(pages).hasValue() && pages.pageId("notifications.settings") == 11
+            && pages.page(11).value("properties").toMap().value("controller").value<QObject*>() == controller,
+            "notification owner registers its own menu and controller inputs");
         expect(controller->registerType(offerType).hasValue(), "runtime exposes an ordinary notification controller");
         expect(controller->setEnabled("file.offer", false), "runtime stores existing enabled preference");
     }
     expect(controller.isNull() && !preferences.value("notifications/types/file.offer/enabled", true).toBool(),
         "controller dies with owner while preferences survive");
+    expect(pages.pages().isEmpty(), "notification UI metadata dies with owner");
     {
         nookbit::NotificationRuntime restored(preferences);
         expect(restored.controller().registerType(offerType).hasValue() && !restored.controller().isEnabled("file.offer"),
@@ -107,10 +113,17 @@ void testWatchOwnership() {
     PendingQueue pending; Classification classification;
     nookbit::FolderWatchRuntimeConfig config{settingsPath, schema, directory.filePath("fallback"), true};
     QPointer<nookbit::WatchController> controller;
+    nookbit::UiPageRegistry pages;
     const auto deadline = QDateTime::currentMSecsSinceEpoch() + 120000;
     {
         nookbit::FolderWatchRuntime runtime(config, classification, pending, pending, preferences);
         controller = &runtime.controller();
+        expect(runtime.registerUi(pages).hasValue() && pages.pageId("watch.settings") == 3
+            && pages.page(3).value("host").toString() == "settingsDetail" && pages.extensionPages().isEmpty(),
+            "watch settings are registered once for the settings slide");
+        expect(runtime.settingsEntryUi().value("properties").toMap().value("controller").value<QObject*>() == controller
+            && runtime.proposalUi().value("properties").toMap().value("controller").value<QObject*>() == controller,
+            "watch owner supplies entry and proposal inputs without exposing them to common settings");
         expect(controller->enabled() && QDir::cleanPath(controller->folder()) == QDir::cleanPath(watched), "saved settings take precedence over fallback folder");
         controller->checkNow();
         expect(classification.calls == 1 && pending.enqueues == 0, "runtime connects real scanner and proposal flow without enqueueing");
@@ -119,6 +132,7 @@ void testWatchOwnership() {
             preferences.value("watchSnoozeFolder").toString() == controller->folder(), "snooze uses existing preference keys");
     }
     expect(controller.isNull(), "watch controller dies before its owned dependencies");
+    expect(pages.pages().isEmpty(), "watch UI metadata dies with owner");
     {
         nookbit::FolderWatchRuntime restored(config, classification, pending, pending, preferences);
         expect(restored.controller().snoozedUntilUtcMs() == deadline, "same-folder snooze restores after recreation");

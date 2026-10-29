@@ -51,7 +51,14 @@ numbers and window-size preference keys are retained. Organizer supplies optiona
 settings and recovery-notice fragments; AppSettingsPage retains theme controls and
 Watch navigation while RegisteredSettingsSection receives borrowed feature inputs.
 The Watch entry is a visual slot, so Organizer does not depend on WatchController.
-Whole-module enablement and Watch/notification contributions remain pending.
+FolderWatchRuntime now supplies its settings-detail page, summary entry and proposal
+renderer. SettingsWorkflow only hosts the registered slide; AppSettingsPage no
+longer receives a WatchController. NotificationRuntime registers its settings page
+and menu, with policy changes wired inside NotificationsPage. UiPageRegistry
+distinguishes normal extension pages from settings-detail placement so Watch has
+only one editor instance. Main retains source facts and attention selection,
+general settings/developer UI, and progress/approval integration. Whole-module
+enablement, conditional startup and restart handling remain pending.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

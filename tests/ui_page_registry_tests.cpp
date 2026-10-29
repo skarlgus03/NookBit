@@ -86,6 +86,21 @@ void testBatchRegistration() {
     owner.reset();
     expect(registry.pages().isEmpty() && changes == 4, "feature lifetime removes primary and auxiliary registrations");
 }
+// 설정 상세 페이지는 같은 경로를 유지하면서 일반 확장 화면에 중복 생성되지 않는지 검사하는 함수.
+void testSettingsHost() {
+    nookbit::UiPageRegistry registry;
+    QObject owner;
+    auto settings = entry("watch.settings", 3);
+    settings.inMenu = false;
+    settings.host = nookbit::UiPageHost::SettingsDetail;
+    expect(registry.addPages({entry("notifications.settings", 11), settings}, owner).hasValue(), "register two different page hosts");
+    expect(registry.pages().size() == 2 && registry.extensionPages().size() == 1
+        && registry.extensionPages().first().toMap().value("page").toInt() == 11
+        && registry.page(3).value("host").toString() == "settingsDetail", "settings detail route has exactly one intended render host");
+    auto invalid = entry("invalid-host", 12);
+    invalid.host = static_cast<nookbit::UiPageHost>(99);
+    expect(!registry.addPage(invalid, owner) && registry.pages().size() == 2, "unknown render host does not add an unreachable page");
+}
 }
 // 실제 화면 없이 등록 유효성·독립 수명·조회 계약을 검사하는 함수.
 int main(int argc, char* argv[]) {
@@ -93,6 +108,7 @@ int main(int argc, char* argv[]) {
     testRegistration();
     testLifetime();
     testBatchRegistration();
+    testSettingsHost();
     if (!failures) std::cout << "All UI-page registration tests passed.\n";
     return failures ? 1 : 0;
 }

@@ -223,6 +223,11 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/OrganizerSettingsSection.qml
         presentation/qml/OrganizerRecoveryNotice.qml
         presentation/qml/RegisteredSettingsSection.qml
+        presentation/qml/FolderWatchSettingsPage.qml
+        presentation/qml/FolderWatchSettingsEntry.qml
+        presentation/qml/FolderWatchProposal.qml
+        presentation/qml/NotificationsPage.qml
+        presentation/qml/RegisteredDialogHost.qml
         presentation/qml/DesktopCompanion.qml
         presentation/qml/RegisteredDesktopHost.qml
           presentation/qml/CompanionSettingsPanel.qml

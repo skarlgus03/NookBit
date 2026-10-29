@@ -148,6 +148,8 @@ if(TARGET nookbit_json_config)
   endif()
   add_executable(nookbit_feature_runtime_tests
     feature_runtime_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.hpp
+    ${PROJECT_SOURCE_DIR}/src/app/ui_page_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/app/notification_runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/app/folder_watch_runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/watch_controller.hpp

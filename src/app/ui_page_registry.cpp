@@ -25,6 +25,8 @@ Result<void> UiPageRegistry::addPages(QList<UiPageContribution> contributions, Q
             !contribution.source.path().endsWith(QStringLiteral(".qml")) || contribution.source.hasQuery() ||
             contribution.source.hasFragment() || !contribution.source.host().isEmpty())
             return Result<void>::failure({"ui.invalid_page", "A page needs stable names, a route, menu metadata and a bundled QML source."});
+        if (contribution.host != UiPageHost::Extension && contribution.host != UiPageHost::SettingsDetail)
+            return Result<void>::failure({"ui.invalid_page_host", "Page host must be an extension or settings-detail surface."});
         if (reservedPages_.contains(contribution.page) || pages_.contains(contribution.page) || pageId(contribution.id) != 0 ||
             routes.contains(contribution.page) || names.contains(contribution.id))
             return Result<void>::failure({"ui.duplicate_page", "Page name or route is already registered or reserved by the host."});
@@ -59,6 +61,13 @@ QVariantList UiPageRegistry::pages() const {
 
 // 등록 정보의 존재만 확인하고 화면을 생성하지 않는 함수.
 bool UiPageRegistry::contains(int route) const { return pages_.contains(route); }
+// 설정 상세로 표시할 페이지가 일반 호스트에도 만들어지는 것을 방지하는 함수.
+QVariantList UiPageRegistry::extensionPages() const {
+    QVariantList result;
+    for (const auto& value : pages())
+        if (value.toMap().value("host").toString() == QStringLiteral("extension")) result.append(value);
+    return result;
+}
 
 // QML이 전역 기능 이름을 찾지 않고 전달된 입력만 사용하도록 반환하는 함수.
 QVariantMap UiPageRegistry::page(int route) const {
@@ -67,7 +76,8 @@ QVariantMap UiPageRegistry::page(int route) const {
     const auto& entry = found.value();
     return {{"id", entry.id}, {"ownerId", entry.ownerId}, {"page", entry.page}, {"title", entry.title},
         {"label", entry.title}, {"icon", entry.icon}, {"section", entry.section}, {"order", entry.order},
-        {"source", entry.source}, {"properties", entry.properties}, {"inMenu", entry.inMenu}};
+        {"source", entry.source}, {"properties", entry.properties}, {"inMenu", entry.inMenu},
+        {"host", entry.host == UiPageHost::SettingsDetail ? QStringLiteral("settingsDetail") : QStringLiteral("extension")}};
 }
 
 // 등록되지 않은 이름에는 홈을 뜻하는 0을 반환하는 함수.
