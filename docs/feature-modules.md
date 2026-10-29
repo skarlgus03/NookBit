@@ -2,7 +2,7 @@
 
 Status: incremental refactor, 2026-10-29. The pending-queue, classification-query
 and integration-adapter seams (steps 1 through 3) are implemented. Persisted module
-toggles, a module-management page and plugin loading remain planned.
+selection and the host-owned management page are implemented. Plugin loading remains planned.
 Step 4 now has scoped runtimes for Notifications, Folder Watch, File Organizer
 and Companion. Companion management-page/menu registration, an explicit desktop
 renderer contribution and a scoped tray action are implemented. File Organizer registers its
@@ -12,7 +12,8 @@ settings and its recovery notice are supplied as optional feature-owned fragment
 general theme settings remain host-owned. Watch now supplies its settings-detail
 route, summary entry and proposal renderer; Notifications supplies its page/menu.
 FeatureRuntimeHost now creates only the effective features selected at startup.
-Command-line selection is available; saved selections and restart controls remain pending.
+Saved selections apply on the next launch; temporary command-line disables remain available.
+Restart is manual: save, exit through the tray, and launch again.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -23,7 +24,7 @@ It is larger than a worker such as Scanner or RuleEngine. The existing
 `src/modules/` directories are implementation groupings, not switchable features.
 Modules can use separate instances of the same stateless worker implementation.
 
-| Proposed module ID | Owns | Public capabilities | Required feature dependency |
+| Module ID | Owns | Public capabilities | Required feature dependency |
 | --- | --- | --- | --- |
 | `file-organizer` | Pending queue, active/draft rules, rule editor, previews, approval, movement/undo, history and recovery | Pending-path query, enqueue command, read-only classification query, existing sort workflow | None |
 | `folder-watch` | Watched paths, timers, file readiness, thresholds, proposals and snooze state | Watch configuration, current proposal, accept/dismiss/snooze actions | `file-organizer` |
@@ -58,7 +59,7 @@ owner without becoming one menu button.
 | [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner; supplies five pages, settings and recovery-notice fragments | Queue state still resides in the existing model; host still composes shared progress/approval and developer entry points |
 | [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; supplies management-page/menu, desktop renderer and tray contributions | Host still chooses construction, attention actions, cross-feature routes and application exit policy |
 | [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped feature pages, borrowed inputs, atomic registration, menu visibility and explicit extension/settings-detail placement | General settings/developer host routes remain; this is not module enablement or live unloading |
-| [Application wiring](../src/presentation/main.cpp) | Supplies startup choices to FeatureRuntimeHost and exposes nullable endpoints and registered UI | Persisted module-management UI is still pending |
+| [Application wiring](../src/presentation/main.cpp) | Loads saved choices, applies CLI disables, supplies FeatureRuntimeHost and hosts module management | Feature catalog is compiled in; no plugin discovery or live unload |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
 desktop module host. Do not describe its presence as completed module loading.
@@ -430,7 +431,40 @@ no runtime, worker, feature timer, image provider, page, settings fragment or tr
 action. General settings and the application lifecycle remain available, including
 when every feature is disabled. Existing feature data is retained for reactivation.
 
-For one run, use a repeatable command-line option (all features default to enabled):
+On first launch, all features are enabled. The host-owned **모듈 관리** page stays
+available even with every feature disabled. Its four switches edit a draft;
+**저장** persists the requested selection and **변경 취소** restores the saved draft.
+Each row distinguishes the current runtime state from the effective next-launch
+state. A requested Watch remains remembered when Organizer blocks it, with an
+explicit dependency explanation. Enabling Organizer later restores that request.
+
+Saving does not unload runtimes, hide current feature UI, or stop running jobs.
+The page displays restart guidance only after a successful save changes effective
+features. Use the tray's **완전 종료**, then launch again; closing the main window
+normally just hides it. Automatic process restart is not implemented, preserving
+the existing task-exit protection and avoiding overlapping app instances.
+
+`FeaturePreferences` stores one compact JSON value in QSettings at
+`modules/selection`, separate from all feature-specific keys/files:
+
+```json
+{"schemaVersion":1,"enabled":{"file-organizer":true,"folder-watch":true,"notifications":true,"companion":true}}
+```
+
+The entire document must have version 1 and actual Boolean values for all four
+known feature IDs; documents over 16 KiB are rejected. A missing key uses the
+first-launch defaults without writing them. An unreadable/invalid document starts
+no features, leaves the original stored value intact, and exposes repair guidance
+in settings and module management. An explicit save can replace that value.
+Failed writes report an error, retain the draft, and restore the previous in-memory
+preference value rather than claiming success. Other settings are untouched.
+
+`FeatureSettingsController` receives saved choices, an immutable active snapshot,
+and a save callback. It owns no runtime or worker. The module page receives this
+controller explicitly and uses shared UI controls/theme/metrics. Its host route is
+12, with its own `windows/modules/size` preference; existing route numbers remain.
+
+For one run, overlay the saved choices with repeatable command-line disables:
 
 ```powershell
 .\nookbit.exe --disable-feature=companion
@@ -440,8 +474,10 @@ For one run, use a repeatable command-line option (all features default to enabl
 ```
 
 IDs are `file-organizer`, `folder-watch`, `notifications` and `companion`.
-Unknown or empty IDs fail before runtime creation. These options do not save a
-module preference; the next ordinary launch enables all features again.
+Unknown or empty IDs fail before runtime creation. These options only disable
+features from the saved baseline; they never enable a saved-disabled feature.
+They do not save a module preference. The next launch without options uses the
+saved selection. The module page labels sessions with temporary overrides.
 
 Folder Watch requires File Organizer. Disabling Organizer leaves Watch inactive
 and shows the dependency reason in general settings if Watch was requested.
@@ -461,10 +497,16 @@ CTest exercises all 16 requested combinations through the real app using
 `--verify-feature-startup`. Each case uses temporary data and INI preferences,
 disables automatic scanning, and checks runtime/page/window/tray presence, absent
 notification sources, dependency messages, stale routes and QML binding warnings.
-The normal all-enabled UI smoke test remains separate. Selection tests also cover
-invalid options, repeated options and requested-versus-effective dependency state.
+The normal all-enabled UI smoke test remains separate and ignores personal module
+choices. Selection tests also cover invalid/repeated options and dependency state.
+Preference/controller tests cover all 16 save/reopen combinations, invalid documents,
+failed saves, draft discard, CLI overlays, preserved unrelated preferences and
+immutable current state. Four `--verify-feature-preferences` app cases seed only a
+temporary INI and exercise the real preference-loading path, module switches/save,
+dependency resolution, disabled UI absence and the unchanged current desktop
+window after saving. No verification mode reads or writes personal module settings.
 
-## Enablement and UI ownership: target behavior
+## Enablement and UI ownership
 
 Initially modules are compiled into one app. No DLL discovery or hot unloading is
 required. The host reads requested enablement, resolves required dependencies,
@@ -538,9 +580,11 @@ The same ownership/request/update rules apply to additions unrelated to companio
    supplies its settings page/menu. General settings/developer UI and shared
    progress/approval integration remain host-owned and conditional on Organizer.
    FeatureRuntimeHost supports absent features and optional connection routes.
-5. **Persisted enablement and restart: next.** All startup combinations are covered
-   before adding module management. Reuse the requested/effective startup plan;
-   keep feature preferences/data intact and apply changes after restart.
+5. **Persisted enablement and restart: implemented.** Host-owned module management
+   edits requested choices and saves them separately from active runtimes. The next
+   launch resolves dependencies and creates only effective features. Manual restart
+   retains feature data and existing task-exit protection; no live unloading or
+   automatic process restart is introduced.
 
 Each step is independently reviewable. Tests cover queue-model-free WatchController
 operation, read/command failure, invalidation during enqueue, per-path partial

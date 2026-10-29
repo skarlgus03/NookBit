@@ -116,6 +116,10 @@ if(NOOKBIT_BUILD_QT_APP)
       app/feature_connections.cpp
       app/feature_startup.hpp
       app/feature_startup.cpp
+      app/feature_preferences.hpp
+      app/feature_preferences.cpp
+      presentation/feature_settings_controller.hpp
+      presentation/feature_settings_controller.cpp
       app/feature_runtime_host.hpp
       app/feature_runtime_host.cpp
       app/notification_runtime.hpp
@@ -238,6 +242,7 @@ if(NOOKBIT_BUILD_QT_APP)
           presentation/qml/AppSwitch.qml
           presentation/qml/AppSlider.qml
         presentation/qml/AppSettingsPage.qml
+      presentation/qml/ModuleManagementPage.qml
         presentation/qml/DeveloperToolsPage.qml
         presentation/qml/LegacyRuleEditorDialog.qml
         presentation/qml/WatchProposalDialog.qml

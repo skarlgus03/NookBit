@@ -40,7 +40,7 @@ and uses shared theme/navigation services. DesktopCompanion now owns the indepen
 character-window bindings; Main loads its explicit descriptor instead of publishing
 individual Companion controller globals. A scoped CompanionTrayAction owns the
 visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
-action selection and general settings. Persisted module management remains pending.
+action selection, general settings and module management.
 FileOrganizerRuntime also registers sort/rules/history and auxiliary recovery/
 collision pages as one atomic batch. Only primary pages create home menu rows.
 Their small QML adapters own feature-internal screen wiring and recovery inspection
@@ -61,9 +61,13 @@ host widgets and the home portrait are loaded only with their feature.
 FeatureRuntimeHost conditionally creates the four runtimes; disabling Organizer
 also leaves Watch inactive with an explicit dependency reason. Notifications and
 Companion are independent optional consumers. Temporary `--disable-feature=<id>`
-options select one run without changing saved settings; a persisted module page
-and restart controls remain pending. All 16 requested startup combinations are
-checked with isolated data/preferences and QML binding-warning detection.
+options overlay the saved choices for one run without saving those overrides.
+The host-owned module page edits a separate draft and persists requested selection
+through FeaturePreferences at `modules/selection`. The current runtimes remain
+unchanged until a full exit and fresh launch. Saved-disabled features retain their
+own settings/data. Invalid module preferences start no features and leave module
+management accessible for explicit repair. All 16 requested startup combinations,
+saved-state startup cases and QML binding warnings are checked with isolated data.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

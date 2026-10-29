@@ -9,6 +9,8 @@ struct FeatureSelection {
     bool watch{true};
     bool notifications{true};
     bool companion{true};
+    /// 네 기능의 요청값이 모두 같은지 비교하는 연산자.
+    bool operator==(const FeatureSelection&) const = default;
 };
 struct FeatureStartupPlan {
     FeatureSelection requested;
@@ -18,5 +20,5 @@ struct FeatureStartupPlan {
 /// 꺼진 필수 의존성을 다시 켜지 않고 시작 가능한 기능과 이유를 계산하는 함수.
 FeatureStartupPlan resolveFeatureStartup(FeatureSelection requested);
 /// 저장된 설정을 바꾸지 않는 명시적인 시작 옵션을 읽고 알 수 없는 기능을 거부하는 함수.
-Result<FeatureSelection> parseFeatureSelection(const QStringList& arguments);
+Result<FeatureSelection> parseFeatureSelection(const QStringList& arguments, FeatureSelection initial = {});
 }

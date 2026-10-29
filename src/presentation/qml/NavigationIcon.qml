@@ -55,6 +55,9 @@ Canvas {
             ctx.bezierCurveTo(7, 2, 17, 2, 17, 9)
             ctx.lineTo(17, 14); ctx.lineTo(19, 17); ctx.closePath()
             ctx.moveTo(9, 20); ctx.quadraticCurveTo(12, 23, 15, 20)
+        } else if (kind === "modules") {
+            ctx.rect(3, 3, 7, 7); ctx.rect(14, 3, 7, 7)
+            ctx.rect(3, 14, 7, 7); ctx.rect(14, 14, 7, 7)
         } else if (kind === "history") {
             ctx.arc(12, 12, 9, 0, Math.PI * 2)
             ctx.moveTo(12, 6); ctx.lineTo(12, 12); ctx.lineTo(16, 15)

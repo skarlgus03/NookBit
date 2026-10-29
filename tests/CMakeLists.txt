@@ -525,6 +525,22 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_executable(nookbit_feature_settings_tests feature_settings_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/feature_startup.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/feature_preferences.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/feature_settings_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/feature_settings_controller.cpp)
+  set_target_properties(nookbit_feature_settings_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_feature_settings_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_feature_settings_tests PRIVATE nookbit_core Qt6::Core)
+  if(MSVC)
+    target_compile_options(nookbit_feature_settings_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_feature_settings_tests COMMAND nookbit_feature_settings_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_feature_settings_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_feature_startup_tests feature_startup_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/feature_startup.cpp)
   target_include_directories(nookbit_feature_startup_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -550,6 +566,23 @@ if(TARGET nookbit_json_config)
       ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
     if(WIN32)
       set_tests_properties(nookbit_feature_startup_${mask} PROPERTIES ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
+    endif()
+  endforeach()
+  foreach(saved_case all none no_organizer no_companion)
+    set(saved_arguments --verify-feature-preferences)
+    if(saved_case STREQUAL "none")
+      list(APPEND saved_arguments --disable-feature=all)
+    elseif(saved_case STREQUAL "no_organizer")
+      list(APPEND saved_arguments --disable-feature=file-organizer)
+    elseif(saved_case STREQUAL "no_companion")
+      list(APPEND saved_arguments --disable-feature=companion)
+    endif()
+    add_test(NAME nookbit_saved_features_${saved_case} COMMAND nookbit ${saved_arguments})
+    set_tests_properties(nookbit_saved_features_${saved_case} PROPERTIES TIMEOUT 45
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+    if(WIN32)
+      set_tests_properties(nookbit_saved_features_${saved_case} PROPERTIES ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
     endif()
   endforeach()

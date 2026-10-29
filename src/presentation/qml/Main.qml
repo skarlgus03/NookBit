@@ -54,9 +54,9 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구")})
+    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리")})
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
-    function pageAvailable(page) { return page === 0 || page === 8 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
+    function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
     readonly property bool inlineRecoveryInspection: currentPage === 10 && root.workBusy && !root.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && !!fileSortPane && fileSortPane.manualSortRequested
@@ -329,6 +329,14 @@ ApplicationWindow {
         onSettingsRequested: root.currentPage = 8
         onRouteRequested: function(route) { root.openPage(route) }
         onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
+    }
+
+    ModuleManagementPage {
+        parent: extensionHost
+        anchors.fill: parent
+        visible: root.currentPage === 12
+        controller: featureSettings
+        dark: root.editorDark
     }
 
     readonly property var sortConfirmation: organizerHostUi.item ? organizerHostUi.item.confirmation : null

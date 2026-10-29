@@ -116,23 +116,23 @@ RegisteredPageHost {
 
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 660}});
     if (!home) return;
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 1,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "unregistered companion has no hardcoded home menu entry");
     auto menuEntry = registration;
     menuEntry.insert("label", "Companion"); menuEntry.insert("icon", "companion");
     menuEntry.insert("section", "Companion"); menuEntry.insert("order", 40);
     home->setProperty("registeredPages", QVariantList{menuEntry});
     const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
-    expect(entries.size() == 2 && entries[0].toMap().value("page").toInt() == 37,
+    expect(entries.size() == 3 && entries[0].toMap().value("page").toInt() == 37,
         "registered menu is placed between file tools and app settings");
     auto auxiliary = menuEntry;
     auxiliary["page"] = 10;
     auxiliary["inMenu"] = false;
     home->setProperty("registeredPages", QVariantList{menuEntry, auxiliary});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 3,
         "auxiliary routes do not create extra home menu entries");
     home->setProperty("registeredPages", QVariantList{});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 1,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
         "removing registration removes its home entry");
 }
 

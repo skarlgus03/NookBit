@@ -12,8 +12,7 @@ FeatureStartupPlan resolveFeatureStartup(FeatureSelection requested) {
     return plan;
 }
 // 반복 가능한 --disable-feature 옵션으로 이번 실행의 기능 선택만 만드는 함수.
-Result<FeatureSelection> parseFeatureSelection(const QStringList& arguments) {
-    FeatureSelection selection;
+Result<FeatureSelection> parseFeatureSelection(const QStringList& arguments, FeatureSelection selection) {
     const auto prefix = QStringLiteral("--disable-feature=");
     for (const auto& argument : arguments) {
         if (argument == QStringLiteral("--disable-feature"))

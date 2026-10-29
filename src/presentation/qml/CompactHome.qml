@@ -27,7 +27,8 @@ Rectangle {
     // 기존 메뉴와 모듈이 등록한 메뉴를 같은 순서 규격으로 합치는 함수형 바인딩.
     readonly property var navigationEntries: {
         const entries = [
-            {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱"), order: 50}
+            {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱"), order: 50},
+            {label: qsTr("모듈 관리"), page: 12, icon: "modules", section: "", order: 55}
         ]
         for (let i = 0; i < registeredPages.length; ++i)
             if (registeredPages[i].inMenu !== false) entries.push(registeredPages[i])

@@ -1,6 +1,8 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/feature_connections.hpp"
 #include "app/feature_runtime_host.hpp"
+#include "app/feature_preferences.hpp"
+#include "presentation/feature_settings_controller.hpp"
 #include "app/notification_runtime.hpp"
 #include "app/folder_watch_runtime.hpp"
 #include "app/file_organizer_runtime.hpp"
@@ -297,7 +299,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
+    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         if (page == 3 || page == 8) {
@@ -677,7 +679,7 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
         for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
         return nullptr;
     };
-    for (const int page : {7, 1, 4, 5, 8, 11}) {
+    for (const int page : {7, 1, 4, 5, 8, 11, 12}) {
         auto* button = find(find, home, QStringLiteral("homeNavigation%1").arg(page));
         auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
         auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;
@@ -859,15 +861,12 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
-    const bool verifyFeatures = QCoreApplication::arguments().contains(QStringLiteral("--verify-feature-startup"));
-    const bool verifyUi = verifyFeatures || QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
-    const auto selection = nookbit::parseFeatureSelection(QCoreApplication::arguments());
+    const auto arguments = QCoreApplication::arguments();
+    const bool verifyFeaturePreferences = arguments.contains(QStringLiteral("--verify-feature-preferences"));
+    const bool verifyFeatures = verifyFeaturePreferences || arguments.contains(QStringLiteral("--verify-feature-startup"));
+    const bool verifyUi = verifyFeatures || arguments.contains(QStringLiteral("--verify-ui"));
+    const auto selection = nookbit::parseFeatureSelection(arguments);
     if (!selection) { QTextStream(stderr) << QString::fromStdString(selection.error().message) << Qt::endl; return EXIT_FAILURE; }
-    const auto startup = nookbit::resolveFeatureStartup(selection.value());
-    if (verifyUi && !verifyFeatures && (!startup.active.organizer || !startup.active.watch || !startup.active.notifications || !startup.active.companion)) {
-        QTextStream(stderr) << "Use --verify-feature-startup for disabled feature combinations." << Qt::endl;
-        return EXIT_FAILURE;
-    }
     application.setWindowIcon(applicationIcon());
     if (verifyUi) {
         // 내장 아이콘의 모든 크기가 읽히고 바깥 모서리의 투명도가 유지되는지 검사한다.
@@ -898,6 +897,28 @@ int main(int argc, char* argv[]) {
         ? std::make_unique<QSettings>(QDir(appData).filePath("preferences.ini"), QSettings::IniFormat)
         : std::make_unique<QSettings>();
     auto& uiPreferences = *preferenceStorage;
+    nookbit::FeaturePreferences featurePreferences(uiPreferences);
+    // 저장 복원 검사에서는 임시 INI에만 선택을 먼저 기록한 뒤 실제 시작 읽기 경로를 사용한다.
+    if (verifyFeaturePreferences && !featurePreferences.save(selection.value())) return EXIT_FAILURE;
+    // 자동 검사는 개인 모듈 설정을 읽거나 쓰지 않고 기존 전체 기능 기준을 유지한다.
+    const auto loadedFeatures = verifyUi && !verifyFeaturePreferences
+        ? nookbit::Result<nookbit::FeatureSelection>::success({}) : featurePreferences.load();
+    const auto savedFeatures = loadedFeatures ? loadedFeatures.value() : nookbit::FeatureSelection{false, false, false, false};
+    const auto selectedFeatures = nookbit::parseFeatureSelection(verifyFeaturePreferences ? QStringList{} : arguments, savedFeatures);
+    auto startup = nookbit::resolveFeatureStartup(selectedFeatures.value());
+    const auto featureLoadError = loadedFeatures ? QString() : QString::fromStdString(loadedFeatures.error().message);
+    if (!featureLoadError.isEmpty()) startup.messages.prepend(featureLoadError);
+    if (verifyUi && !verifyFeatures && startup.active != nookbit::FeatureSelection{}) {
+        QTextStream(stderr) << "Use --verify-feature-startup for disabled feature combinations." << Qt::endl;
+        return EXIT_FAILURE;
+    }
+    const bool featureOverride = !verifyFeaturePreferences && std::any_of(arguments.cbegin(), arguments.cend(),
+        [](const QString& argument) { return argument.startsWith("--disable-feature="); });
+    nookbit::FeatureSettingsController featureSettings(savedFeatures, startup.active, featureOverride,
+        [&featurePreferences, verifyUi, verifyFeaturePreferences](nookbit::FeatureSelection value) {
+            // 화면 자동 검사에서는 저장 콜백만 성공시키고 사용자 환경은 변경하지 않는 함수.
+            return verifyUi && !verifyFeaturePreferences ? nookbit::Result<void>::success() : featurePreferences.save(value);
+        }, featureLoadError);
     nookbit::UiSettingsController uiSettings(uiPreferences, !verifyUi);
     const auto rememberedDestination = verifyUi
         ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
@@ -912,7 +933,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::UiPageRegistry uiPages({2, 8, 9});
+    nookbit::UiPageRegistry uiPages({2, 8, 9, 12});
     const auto watchFolder = verifyFeatures ? QDir(appData).filePath("watch")
         : QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (verifyFeatures && startup.active.watch) QDir().mkpath(watchFolder);
@@ -982,6 +1003,7 @@ int main(int argc, char* argv[]) {
     expose("notifications", notificationRuntime ? &notificationRuntime->controller() : nullptr);
     expose("appLifecycle", &appLifecycle);
     expose("uiSettings", &uiSettings);
+    expose("featureSettings", &featureSettings);
     expose("userGuides", &userGuides);
     expose("uiPages", &uiPages);
     engine.rootContext()->setContextProperty("featureStartupMessages", startup.messages);
@@ -1082,6 +1104,26 @@ int main(int argc, char* argv[]) {
             QCoreApplication::processEvents();
             valid = valid && present("settingsPage") && present("globalDarkModeSwitch");
             valid = valid && present("featureStartupMessage") == !startup.messages.isEmpty();
+            window->setProperty("currentPage", 12);
+            QCoreApplication::processEvents();
+            valid = valid && window->property("currentPage").toInt() == 12 && present("moduleManagementPage")
+                && present("homeNavigation12") && present("moduleToggle_file-organizer") && present("moduleSaveButton");
+            // 임시 저장 복원 검사에서 실제 화면 요청이 저장만 하고 기능을 즉시 교체하지 않는지 확인한다.
+            if (verifyFeaturePreferences) {
+                auto* toggle = findUiChild<QObject*>(window, "moduleToggle_companion");
+                if (toggle) {
+                    toggle->setProperty("checked", !savedFeatures.companion);
+                    valid = QMetaObject::invokeMethod(toggle, "toggled") && valid && featureSettings.dirty();
+                } else valid = false;
+                auto* saveButton = findUiChild<QObject*>(window, "moduleSaveButton");
+                valid = valid && saveButton && saveButton->property("enabled").toBool();
+                if (saveButton) valid = QMetaObject::invokeMethod(saveButton, "clicked") && valid;
+                const auto saved = featurePreferences.load();
+                valid = valid && saved && saved.value().companion != savedFeatures.companion && !featureSettings.dirty()
+                    && featureSettings.restartRequired() && present("desktopCharacterWindow") == startup.active.companion;
+                featureSettings.setEnabled("companion", savedFeatures.companion);
+                valid = featureSettings.save() && valid && !featureSettings.restartRequired();
+            }
             if (!organizer) {
                 window->setProperty("currentPage", 9);
                 valid = valid && window->property("currentPage").toInt() == 0;
