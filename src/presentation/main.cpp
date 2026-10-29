@@ -864,6 +864,7 @@ static bool verifyCharacterAnchorStability(QQuickWindow* window, nookbit::Charac
 // 응용 프로그램과 의존성을 조립하고 이벤트 루프를 실행하는 함수.
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
+    nookbit::configureUiTextRendering();
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));

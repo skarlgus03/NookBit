@@ -9,6 +9,15 @@ Font tests inject a Thin named style/weight axis and verify stable regular/bold
 selection across separate windows and loader-created content, without displaying
 the test windows.
 
+On Windows, startup also selects Qt Quick's NativeTextRendering before creating
+any text items. The inheritance-only change did not resolve the reported thin
+text on the user's machine. Native rendering bypasses the GPU distance-field
+text path while keeping the same family and role sizes/weights; it is a rendering
+workaround, not a confirmed diagnosis of a Qt bug. Font tests check Korean glyph
+runs and the renderer used by labels created in both windows and a Loader.
+Transformed text may look less sharp at non-integer canvas zoom levels with native
+rendering; visual verification on the affected machine remains necessary.
+
 The optional [feeding feature](companion-feeding.md) borrows only the interaction
 registration capability. Its scoped owner registers a handler and menu metadata;
 Companion owns generic input/rendering and the host enforces the dependency.

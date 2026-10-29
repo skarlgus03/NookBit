@@ -7,11 +7,14 @@
 #include <QFontInfo>
 #include <QQuickStyle>
 #include <QTextStream>
+#include <QTextLayout>
+#include <QGlyphRun>
 #include <memory>
 
 // 잘못된 시스템 스타일을 주입해도 공통 글꼴과 페이지 제목 굵기가 유지되는지 검사하는 함수.
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    nookbit::configureUiTextRendering();
     QQuickStyle::setStyle("Basic");
     QFont poisoned("Times New Roman");
     poisoned.setStyleName("Thin"); poisoned.setWeight(QFont::Thin);
@@ -77,8 +80,26 @@ ApplicationWindow {
                 QTextStream(stderr) << "Font matching failed: " << object->objectName() << " " << resolved.family() << " " << resolved.weight() << Qt::endl;
                 return 1;
             }
+            // 지정값뿐 아니라 한글 문장을 실제로 구성한 글리프의 굵기도 확인한다.
+            QTextLayout layout(QStringLiteral("모듈 관리 필요한 기능만 켜 두세요"), actual);
+            layout.beginLayout();
+            auto line = layout.createLine();
+            if (!line.isValid()) return 1;
+            line.setLineWidth(2000);
+            layout.endLayout();
+            const auto runs = layout.glyphRuns();
+            if (runs.isEmpty()) return 1;
+            for (const auto& run : runs) {
+                if (run.rawFont().familyName() != font.families().first() || run.rawFont().weight() != expectedWeight) return 1;
+            }
         }
     }
+#ifdef Q_OS_WIN
+    // 나중에 로드한 페이지까지 운영체제 렌더러가 적용되는지 확인한다.
+    for (auto* label : {body, title, loaded}) {
+        if (label->property("renderType").toInt() != QQuickWindow::NativeTextRendering) return 1;
+    }
+#endif
     app.setFont(font);
     QTextStream(stdout) << "UI font family and regular/bold weights remain stable across windows and loaders." << Qt::endl;
     return 0;
