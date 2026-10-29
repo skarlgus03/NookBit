@@ -66,6 +66,7 @@ Item {
     signal openRequested()
     signal closeRequested()
     signal routeRequested(int page)
+    signal dialogRequested(string dialogId)
 })");
     file.close();
     auto service = fake(engine, "property string token: 'feature-input'");
@@ -78,9 +79,11 @@ RegisteredPageHost {
     property int openedRoute: 0
     property int closedRoute: 0
     property int navigatedRoute: 0
+    property string requestedDialog: ""
     onPageRequested: function(page) { openedRoute = page }
     onCloseRequested: function(page) { closedRoute = page }
     onNavigationRequested: function(page) { navigatedRoute = page }
+    onDialogRequested: function(dialogId) { requestedDialog = dialogId }
 })", QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/RegisteredHostHarness.qml")));
     std::unique_ptr<QObject> owner(component.createWithInitialProperties({{"registration", registration},
         {"guideService", QVariant::fromValue(service.get())}, {"width", 500}, {"height", 400}}));
@@ -98,6 +101,8 @@ RegisteredPageHost {
     QMetaObject::invokeMethod(probe, "openRequested");
     QMetaObject::invokeMethod(probe, "closeRequested");
     QMetaObject::invokeMethod(probe, "routeRequested", Q_ARG(int, 10));
+    QMetaObject::invokeMethod(probe, "dialogRequested", Q_ARG(QString, QStringLiteral("watch.proposal")));
+    expect(owner->property("requestedDialog").toString() == "watch.proposal", "feature dialog requests reach host without controller coupling");
     expect(owner->property("openedRoute").toInt() == 37 && owner->property("closedRoute").toInt() == 37,
         "page requests are routed through its registration instead of a feature-specific host branch");
     expect(owner->property("navigatedRoute").toInt() == 10, "cross-page navigation is a separate request from opening the current page");
@@ -301,6 +306,7 @@ int main(int argc, char** argv) {
         id: watchStub
         property string folder: "D:/Watch"
         property bool enabled: true
+        property bool proposalVisible: false
         property bool recursive: false
         property int rescanIntervalMinutes: 45
         property bool combineAll: false

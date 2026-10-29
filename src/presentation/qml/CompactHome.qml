@@ -9,6 +9,8 @@ Rectangle {
     property bool dark: false
     property bool navigationEnabled: true
     property int pendingCount: 0
+    property bool sortingAvailable: true
+    property bool companionAvailable: true
     property bool watchEnabled: false
     property string watchFolder: ""
     property var companionDescriptor: ({})
@@ -69,6 +71,8 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.bottomMargin: UiMetrics.spaceSmall
                     pendingCount: home.pendingCount
+                    sortingAvailable: home.sortingAvailable
+                    companionAvailable: home.companionAvailable
                     watchEnabled: home.watchEnabled
                     watchFolder: home.watchFolder
                     companionDescriptor: home.companionDescriptor

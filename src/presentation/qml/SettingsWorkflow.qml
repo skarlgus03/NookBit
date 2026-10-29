@@ -12,10 +12,12 @@ Item {
     property bool detailOpen: false
     property var organizerContribution: ({})
     property bool dark: false
+    property var startupMessages: []
     readonly property bool transitioning: slide.running
     property real slidePosition: detailOpen ? 1 : 0
     signal settingsRequested()
     signal routeRequested(int page)
+    signal dialogRequested(string dialogId)
     clip: true
     Behavior on slidePosition {
         NumberAnimation { id: slide; duration: workflow.active ? UiMetrics.pageSlideDuration : 0; easing.type: Easing.OutCubic }
@@ -28,6 +30,7 @@ Item {
         enabled: !workflow.detailOpen && !workflow.transitioning
         settings: workflow.settings
         organizerContribution: workflow.organizerContribution
+        startupMessages: workflow.startupMessages
         watchContribution: workflow.watchContribution
         dark: workflow.dark
         onRouteRequested: function(route) { workflow.routeRequested(route) }
@@ -44,6 +47,7 @@ Item {
         dark: workflow.dark
         onPageRequested: function(route) { workflow.routeRequested(route) }
         onNavigationRequested: function(route) { workflow.routeRequested(route) }
+        onDialogRequested: function(dialogId) { workflow.dialogRequested(dialogId) }
         onCloseRequested: workflow.settingsRequested()
     }
     Shortcut {

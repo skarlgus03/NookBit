@@ -12,6 +12,7 @@ Loader {
     signal pageRequested(int page)
     signal closeRequested(int page)
     signal navigationRequested(int page)
+    signal dialogRequested(string dialogId)
     active: !!registration && registration.page > 0
     visible: selected
 
@@ -34,5 +35,7 @@ Loader {
         function onCloseRequested() { host.closeRequested(host.registration.page) }
         // 한 기능의 화면이 요청한 다른 페이지 이동을 호스트에 전달하는 함수.
         function onRouteRequested(page) { host.navigationRequested(page) }
+        // 기능의 확인창 요청을 식별자만으로 바깥 연결부에 전달하는 함수.
+        function onDialogRequested(dialogId) { host.dialogRequested(dialogId) }
     }
 }

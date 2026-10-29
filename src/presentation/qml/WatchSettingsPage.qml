@@ -76,6 +76,13 @@ PageSurface {
         anchors.fill: parent
         anchors.margins: UiMetrics.spaceSection
         spacing: UiMetrics.spaceGroup
+        AppButton {
+            objectName: "watchOpenProposalButton"
+            visible: page.controller.proposalVisible
+            text: qsTr("정리 제안 확인")
+            dark: page.dark
+            onClicked: page.dialogRequested("watch.proposal")
+        }
         ScrollView {
             id: watchSettingsScroll
             objectName: "watchSettingsScroll"

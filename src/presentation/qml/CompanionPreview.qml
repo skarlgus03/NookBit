@@ -50,7 +50,12 @@ Rectangle {
             x: baseAttachment.x + userBubbleOffset.x - userPivotOffset.x,
             y: baseAttachment.y + userBubbleOffset.y - userPivotOffset.y
         })
-    readonly property bool dirty: JSON.stringify(drafts) !== JSON.stringify(savedEdits.frames || ({})) || JSON.stringify(durationDrafts) !== JSON.stringify(savedEdits.durations || ({}))
+    // 저장값의 초기 바인딩이 초안을 복원하므로 저장값을 먼저 평가한 뒤 초안을 비교한다.
+    readonly property bool dirty: {
+        const frames = JSON.stringify(savedEdits.frames || ({}));
+        const durations = JSON.stringify(savedEdits.durations || ({}));
+        return frames !== JSON.stringify(drafts) || durations !== JSON.stringify(durationDrafts);
+    }
     readonly property bool playbackActive: active && running && !clock.finished && sprite.steps.length > 0
     color: "transparent"
     radius: UiMetrics.radiusPanel

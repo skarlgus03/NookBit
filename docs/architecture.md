@@ -23,8 +23,8 @@ notification-to-companion and file-activity-to-companion signal routes. Main
 constructs services and selects those bindings; the bridge owns no feature state
 or worker and preserves the existing input contracts and IDs. Notification
 preferences remain independent from file-work activity. Lifetime guards and
-scoped QObject connections prevent delivery to destroyed endpoints; module
-startup/disable management remains a later step.
+scoped QObject connections prevent delivery to destroyed endpoints.
+FeatureRuntimeHost now selects only available routes from resolved startup choices.
 
 NotificationRuntime, FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime
 now own feature-level object groups. File Organizer owns its queue, rule/query and
@@ -40,8 +40,7 @@ and uses shared theme/navigation services. DesktopCompanion now owns the indepen
 character-window bindings; Main loads its explicit descriptor instead of publishing
 individual Companion controller globals. A scoped CompanionTrayAction owns the
 visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
-action selection and other pages; whole-module enablement and remaining UI
-contributions are pending.
+action selection and general settings. Persisted module management remains pending.
 FileOrganizerRuntime also registers sort/rules/history and auxiliary recovery/
 collision pages as one atomic batch. Only primary pages create home menu rows.
 Their small QML adapters own feature-internal screen wiring and recovery inspection
@@ -57,8 +56,14 @@ longer receives a WatchController. NotificationRuntime registers its settings pa
 and menu, with policy changes wired inside NotificationsPage. UiPageRegistry
 distinguishes normal extension pages from settings-detail placement so Watch has
 only one editor instance. Main retains source facts and attention selection,
-general settings/developer UI, and progress/approval integration. Whole-module
-enablement, conditional startup and restart handling remain pending.
+general settings/developer UI, and progress/approval integration. Organizer-owned
+host widgets and the home portrait are loaded only with their feature.
+FeatureRuntimeHost conditionally creates the four runtimes; disabling Organizer
+also leaves Watch inactive with an explicit dependency reason. Notifications and
+Companion are independent optional consumers. Temporary `--disable-feature=<id>`
+options select one run without changing saved settings; a persisted module page
+and restart controls remain pending. All 16 requested startup combinations are
+checked with isolated data/preferences and QML binding-warning detection.
 See [runtime ownership](feature-modules.md#current-runtime-ownership)
 for lifetime order and verification-mode behavior.
 

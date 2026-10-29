@@ -1,19 +1,18 @@
 # Feature modules: boundaries and communication
 
 Status: incremental refactor, 2026-10-29. The pending-queue, classification-query
-and integration-adapter seams (steps 1 through 3) are implemented. Module toggles,
-a module-enable registry and plugin loading remain planned.
+and integration-adapter seams (steps 1 through 3) are implemented. Persisted module
+toggles, a module-management page and plugin loading remain planned.
 Step 4 now has scoped runtimes for Notifications, Folder Watch, File Organizer
 and Companion. Companion management-page/menu registration, an explicit desktop
-renderer contribution and a scoped tray action are implemented. Other feature UI
-contributions and enablement remain pending. File Organizer now registers its
+renderer contribution and a scoped tray action are implemented. File Organizer registers its
 sort, rule-editor, history, recovery and collision pages as one scoped batch.
 Recovery/collision remain auxiliary routes rather than home menu entries. Organizer
 settings and its recovery notice are supplied as optional feature-owned fragments;
 general theme settings remain host-owned. Watch now supplies its settings-detail
 route, summary entry and proposal renderer; Notifications supplies its page/menu.
-All four feature runtimes still start unconditionally; module-enable startup and
-restart handling remain pending.
+FeatureRuntimeHost now creates only the effective features selected at startup.
+Command-line selection is available; saved selections and restart controls remain pending.
 The current adapter reuses the existing queue model; ownership of queue state has
 not yet moved out of the presentation layer.
 
@@ -46,20 +45,20 @@ owner without becoming one menu button.
 
 | Current seam | What exists | Remaining coupling |
 | --- | --- | --- |
-| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase`, `IPendingPathsQuery` and `IEnqueuePendingPaths`; no queue-model dependency | Host still assembles it unconditionally |
+| [WatchController](../src/presentation/watch_controller.hpp) | Uses `IWatchProposalUseCase`, `IPendingPathsQuery` and `IEnqueuePendingPaths`; no queue-model dependency | Requires an active Organizer; capability lifetimes remain borrowed |
 | [Pending queue contracts](../include/nookbit/application/pending_queue.hpp) and [adapter](../src/app/pending_queue_adapter.hpp) | Standard C++ path snapshots and per-path admission receipts; host forwards model changes | Adapter deliberately retains the existing model and its admission policies |
 | [Watch evaluation](../src/application/use_cases/evaluate_watch_folder_use_case.cpp) | Owns scanning, pending-path exclusion, readiness and thresholds; uses `IClassificationQuery` | Feature lifecycle is still assembled by the host |
-| [Classification contract](../include/nookbit/application/classification_query.hpp) and [use case](../src/application/use_cases/classify_files_use_case.cpp) | Organizer-side active-rule loading and matching; ordered per-file decisions and content-based rule revision | Still part of the shared app, not a separately enabled module |
+| [Classification contract](../include/nookbit/application/classification_query.hpp) and [use case](../src/application/use_cases/classify_files_use_case.cpp) | Organizer-side active-rule loading and matching; ordered per-file decisions and content-based rule revision | Belongs to Organizer, not an independently selectable capability |
 | [Notification channel](../include/nookbit/application/notification_channel.hpp) | Typed registration/update data; no knowledge of a renderer; source/delivery wiring is in FeatureConnections | NotificationRuntime owns controller creation and enabled-preference callbacks; type registration is still selected by the host |
-| [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | CompanionRuntime owns the desktop objects; host still constructs it unconditionally |
-| [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution | No feature-level startup/disable boundary yet |
+| [Companion channel](../include/nookbit/application/character_channel.hpp) | Typed activity/attention input; separate interaction and behavior managers | CompanionRuntime owns desktop objects; host chooses available integrations |
+| [Sort workflow](../include/nookbit/application/sort_workflow.hpp) | Preparation is separate from explicit approval/execution; absent when Organizer is disabled | Shared progress/approval UI remains host-owned |
 | [Integration adapters](../src/app/feature_connections.cpp) | Watch-to-notification, notification-to-companion and file-activity-to-companion bindings have a scoped owner | No feature lifecycle/enablement registry yet |
 | [Folder Watch runtime](../src/app/folder_watch_runtime.hpp) | Owns watch settings repository, scanner, evaluation, controller/timers and snooze persistence; supplies settings-detail route, summary entry and proposal renderer | Organizer capabilities and preferences are injected; host still chooses attention activation |
 | [Notification runtime](../src/app/notification_runtime.hpp) | Owns notification controller/center and enabled preferences; registers its settings page/menu | Module enablement, source registration and delivery routes remain host responsibilities |
 | [Organizer runtime](../src/app/file_organizer_runtime.hpp) | Owns queue persistence/availability, rules/editor, classification, previews, approval, file-operation assembly, history/recovery and a shared task runner; supplies five pages, settings and recovery-notice fragments | Queue state still resides in the existing model; host still composes shared progress/approval and developer entry points |
 | [Companion runtime](../src/app/companion_runtime.hpp) | Owns presentation/pack loading, preferences/edits, import runner, desktop placement, interactions, motion and internal connections; supplies management-page/menu, desktop renderer and tray contributions | Host still chooses construction, attention actions, cross-feature routes and application exit policy |
 | [UI-page registry](../src/app/ui_page_registry.hpp) and [page host](../src/presentation/qml/RegisteredPageHost.qml) | Lifetime-scoped feature pages, borrowed inputs, atomic registration, menu visibility and explicit extension/settings-detail placement | General settings/developer host routes remain; this is not module enablement or live unloading |
-| [Application wiring](../src/presentation/main.cpp) | Explicitly chooses and binds the existing routes | Startup, QML context objects and navigation are not yet driven by enabled modules |
+| [Application wiring](../src/presentation/main.cpp) | Supplies startup choices to FeatureRuntimeHost and exposes nullable endpoints and registered UI | Persisted module-management UI is still pending |
 
 `CompositionRoot` currently validates a service bundle; it is not the complete
 desktop module host. Do not describe its presence as completed module loading.
@@ -160,6 +159,7 @@ The ownership groups use ordinary C++ composition, not a plugin framework:
 
 ```text
 Host preferences, paths and application lifetime
+  -> FeatureRuntimeHost (creates the selected runtimes and their connections)
   -> FileOrganizerRuntime
        queue / rules / classification / workflow / history / recovery
        shared file-operation runner
@@ -195,11 +195,11 @@ preferences with an in-memory map. FolderWatchRuntime's `persistSnooze: false`
 only disables snooze preference reads/writes; its explicitly supplied watch JSON
 repository remains separate. These are existing verification-mode behaviors, not
 new module-enable switches. Construction still honors the saved watch-monitoring
-setting; the app currently constructs both runtimes on every ordinary startup.
+setting, but only when the feature is selected for this run.
 
 Host-created integration bridges and QML endpoints must be released before their
-runtime owners. Current main declares the bridges and QML engine after the owners,
-so normal stack destruction follows that ordering. Companion management-page
+runtime owners. FeatureRuntimeHost destroys bridges before feature owners; Main
+destroys the QML engine and tray contribution before FeatureRuntimeHost. Companion management-page
 registration is described below; live unloading is not implemented.
 
 FileOrganizerRuntime preserves `pending-files.json`, rule/layout paths, SQLite
@@ -416,10 +416,53 @@ the contribution before the menu and runtime. The system-tray icon, open/exit
 actions, exit-while-busy policy and application lifecycle remain host-owned.
 Qt Widgets was already used by the app; this adds no new distribution dependency.
 
-This does not yet provide a working module-disable startup: Main still constructs
-Companion and selects its integration routes, and other features' menus/pages remain
-host-declared. Runtime enablement and restart handling follow after these remaining
-contributions are extracted.
+Desktop, tray and page contributions are now absent when Companion is not selected
+at startup. This does not introduce live backend unloading.
+
+## Conditional feature startup
+
+`FeatureSelection` records the request; `resolveFeatureStartup` produces the
+effective selection and dependency explanations before creating any runtime.
+`FeatureRuntimeHost` owns only the effective runtime instances and their routes.
+Main supplies shared paths/preferences/application services; QML receives borrowed
+nullable endpoints and optional contribution descriptors. A disabled feature has
+no runtime, worker, feature timer, image provider, page, settings fragment or tray
+action. General settings and the application lifecycle remain available, including
+when every feature is disabled. Existing feature data is retained for reactivation.
+
+For one run, use a repeatable command-line option (all features default to enabled):
+
+```powershell
+.\nookbit.exe --disable-feature=companion
+.\nookbit.exe --disable-feature=notifications --disable-feature=folder-watch
+.\nookbit.exe --disable-feature=file-organizer
+.\nookbit.exe --disable-feature=all
+```
+
+IDs are `file-organizer`, `folder-watch`, `notifications` and `companion`.
+Unknown or empty IDs fail before runtime creation. These options do not save a
+module preference; the next ordinary launch enables all features again.
+
+Folder Watch requires File Organizer. Disabling Organizer leaves Watch inactive
+and shows the dependency reason in general settings if Watch was requested.
+No disabled dependency is silently enabled. Notifications and Companion are
+optional consumers: missing consumers omit their connections rather than creating
+replacement workers. Watch offers remain accessible using **정리 제안 확인** in
+Watch settings, even without either consumer. Only active Watch registers its
+notification type. Work-to-Companion activity does not depend on Notifications.
+
+The shared approval/progress/developer UI and home portrait use conditional loaders;
+stale routes to unavailable pages return home. Hosts are destroyed before borrowed
+feature endpoints; connection adapters die before Companion/Notifications/Watch,
+and Watch dies before Organizer. Existing runner destructors join work before
+their dependencies disappear. No new thread or saved format is introduced.
+
+CTest exercises all 16 requested combinations through the real app using
+`--verify-feature-startup`. Each case uses temporary data and INI preferences,
+disables automatic scanning, and checks runtime/page/window/tray presence, absent
+notification sources, dependency messages, stale routes and QML binding warnings.
+The normal all-enabled UI smoke test remains separate. Selection tests also cover
+invalid options, repeated options and requested-versus-effective dependency state.
 
 ## Enablement and UI ownership: target behavior
 
@@ -433,7 +476,7 @@ and general app settings belong to the host and remain accessible.
 | --- | --- |
 | File Organizer | No organizing/rules/history pages or file jobs; dependent Folder Watch is inactive with an explicit dependency reason |
 | Folder Watch | No watchers/timers or watch-owned settings entry; manual organizing continues |
-| Notifications module | No notification delivery/page; optional publishers can use a host-provided no-op channel; source features continue |
+| Notifications module | No notification delivery/page; host omits optional routes; source features continue |
 | Companion | No desktop companion, animation timers or companion pages; organizing/watch/notification state does not depend on it |
 | One notification type | Existing center still tracks its active/withdrawn state while delivery is muted; unrelated notification types and work activity continue |
 
@@ -486,18 +529,18 @@ The same ownership/request/update rules apply to additions unrelated to companio
    notification/activity routes outside `main.cpp`, retaining channel contracts,
    stable source/cue IDs, initial synchronization and ordinary delivery behavior.
    Main chooses the routes; features do not call peer controllers to render them.
-4. **Host lifecycle and UI contributions: in progress.** NotificationRuntime,
+4. **Host lifecycle and UI contributions: implemented.** NotificationRuntime,
    FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime own their internal
    objects and preference connections. Companion supplies its management page/menu,
    desktop renderer and scoped tray action. Organizer supplies sort/rules/history,
    auxiliary recovery/collision pages, settings and recovery-notice fragments.
    Watch supplies the settings slide/entry and proposal renderer; Notifications
    supplies its settings page/menu. General settings/developer UI and shared
-   progress/approval integration remain host-owned. Next remove unconditional
-   feature assumptions during startup before adding module management.
-5. **Persisted enablement and restart.** Add module management only after disabled
-   startup combinations work. Check missing optional consumers, required-dependency
-   reasons, preserved settings/data and absence of timers from inactive features.
+   progress/approval integration remain host-owned and conditional on Organizer.
+   FeatureRuntimeHost supports absent features and optional connection routes.
+5. **Persisted enablement and restart: next.** All startup combinations are covered
+   before adding module management. Reuse the requested/effective startup plan;
+   keep feature preferences/data intact and apply changes after restart.
 
 Each step is independently reviewable. Tests cover queue-model-free WatchController
 operation, read/command failure, invalidation during enqueue, per-path partial
@@ -544,4 +587,4 @@ pages are not also extension pages. QML tests retain same-size sliding, numeric 
 pattern edits, failed-save drafts and notification toggles; proposal tests distinguish
 accept, snooze, close, busy input blocking, absent contributions and cleanup while
 open without extra commands. App smoke tests exercise the actual registered screens.
-Step 4 continues with the remaining UI contributions.
+Startup matrix tests additionally cover disabled-feature composition and QML absence.

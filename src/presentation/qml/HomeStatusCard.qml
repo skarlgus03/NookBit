@@ -7,6 +7,8 @@ Rectangle {
     id: card
     objectName: "homeStatusCard"
     property int pendingCount: 0
+    property bool sortingAvailable: true
+    property bool companionAvailable: true
     property bool watchEnabled: false
     property string watchFolder: ""
     property var companionDescriptor: ({})
@@ -28,11 +30,17 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: UiMetrics.spaceGroup
-            CompanionPortrait {
+            Loader {
                 Layout.preferredWidth: UiMetrics.homePortraitSize
                 Layout.preferredHeight: UiMetrics.homePortraitSize
-                descriptor: card.companionDescriptor
-                dark: card.dark
+                active: card.companionAvailable
+                visible: active
+                sourceComponent: Component {
+                    CompanionPortrait {
+                        descriptor: card.companionDescriptor
+                        dark: card.dark
+                    }
+                }
             }
             ColumnLayout {
                 Layout.fillWidth: true
@@ -41,7 +49,7 @@ Rectangle {
                 Label {
                     objectName: "homePendingSummary"
                     Layout.fillWidth: true
-                    text: card.pendingCount > 0 ? qsTr("정리할 파일 %1개가 모였어요").arg(card.pendingCount)
+                    text: !card.sortingAvailable ? qsTr("파일 정리 기능이 꺼져 있어요") : card.pendingCount > 0 ? qsTr("정리할 파일 %1개가 모였어요").arg(card.pendingCount)
                                                : qsTr("정리할 파일이 없어요")
                     textFormat: Text.PlainText
                     font.pixelSize: UiMetrics.textEmphasis
@@ -74,6 +82,7 @@ Rectangle {
             appearance: AppButton.Soft
             dark: card.dark
             text: qsTr("정리하러 가기")
+            enabled: card.sortingAvailable
             font.pixelSize: UiMetrics.textEmphasis
             font.bold: true
             onClicked: card.sortRequested()

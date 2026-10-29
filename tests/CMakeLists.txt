@@ -525,6 +525,34 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_executable(nookbit_feature_startup_tests feature_startup_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/feature_startup.cpp)
+  target_include_directories(nookbit_feature_startup_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_feature_startup_tests PRIVATE nookbit_core Qt6::Core)
+  add_test(NAME nookbit_feature_startup_tests COMMAND nookbit_feature_startup_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_feature_startup_tests PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
+  # 활성 요청의 모든 조합을 사용자 설정과 분리된 실제 앱으로 시작해 검사한다.
+  foreach(mask RANGE 0 15)
+    set(feature_arguments --verify-feature-startup)
+    set(feature_bit 1)
+    foreach(feature file-organizer folder-watch notifications companion)
+      math(EXPR feature_enabled "${mask} & ${feature_bit}")
+      if(NOT feature_enabled)
+        list(APPEND feature_arguments "--disable-feature=${feature}")
+      endif()
+      math(EXPR feature_bit "${feature_bit} * 2")
+    endforeach()
+    add_test(NAME nookbit_feature_startup_${mask} COMMAND nookbit ${feature_arguments})
+    set_tests_properties(nookbit_feature_startup_${mask} PROPERTIES TIMEOUT 45
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+    if(WIN32)
+      set_tests_properties(nookbit_feature_startup_${mask} PROPERTIES ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
+    endif()
+  endforeach()
   add_test(NAME nookbit_ui_metrics_contract COMMAND ${CMAKE_COMMAND}
     "-DNOOKBIT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/ui_metrics_contract.cmake")

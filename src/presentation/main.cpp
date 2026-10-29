@@ -1,5 +1,6 @@
 #include "presentation/pending_files_model.hpp"
 #include "app/feature_connections.hpp"
+#include "app/feature_runtime_host.hpp"
 #include "app/notification_runtime.hpp"
 #include "app/folder_watch_runtime.hpp"
 #include "app/file_organizer_runtime.hpp"
@@ -858,7 +859,15 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName(QStringLiteral("NookBitProject"));
     QCoreApplication::setApplicationName(QStringLiteral("NookBit"));
-    const bool verifyUi = QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
+    const bool verifyFeatures = QCoreApplication::arguments().contains(QStringLiteral("--verify-feature-startup"));
+    const bool verifyUi = verifyFeatures || QCoreApplication::arguments().contains(QStringLiteral("--verify-ui"));
+    const auto selection = nookbit::parseFeatureSelection(QCoreApplication::arguments());
+    if (!selection) { QTextStream(stderr) << QString::fromStdString(selection.error().message) << Qt::endl; return EXIT_FAILURE; }
+    const auto startup = nookbit::resolveFeatureStartup(selection.value());
+    if (verifyUi && !verifyFeatures && (!startup.active.organizer || !startup.active.watch || !startup.active.notifications || !startup.active.companion)) {
+        QTextStream(stderr) << "Use --verify-feature-startup for disabled feature combinations." << Qt::endl;
+        return EXIT_FAILURE;
+    }
     application.setWindowIcon(applicationIcon());
     if (verifyUi) {
         // 내장 아이콘의 모든 크기가 읽히고 바깥 모서리의 투명도가 유지되는지 검사한다.
@@ -877,10 +886,18 @@ int main(int argc, char* argv[]) {
     nookbit::AppLifecycleController appLifecycle;
     nookbit::UserGuideController userGuides;
 
-    const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    std::unique_ptr<QTemporaryDir> isolatedFeatureData;
+    if (verifyFeatures) {
+        isolatedFeatureData = std::make_unique<QTemporaryDir>();
+        if (!isolatedFeatureData->isValid()) return EXIT_FAILURE;
+    }
+    const auto appData = verifyFeatures ? isolatedFeatureData->path() : QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const auto fallbackDestination = QDir(documents).filePath(QStringLiteral("NookBit Organized"));
-    QSettings uiPreferences;
+    auto preferenceStorage = verifyFeatures
+        ? std::make_unique<QSettings>(QDir(appData).filePath("preferences.ini"), QSettings::IniFormat)
+        : std::make_unique<QSettings>();
+    auto& uiPreferences = *preferenceStorage;
     nookbit::UiSettingsController uiSettings(uiPreferences, !verifyUi);
     const auto rememberedDestination = verifyUi
         ? QString() : uiPreferences.value(QStringLiteral("destinationRoot")).toString().trimmed();
@@ -896,55 +913,20 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
     nookbit::UiPageRegistry uiPages({2, 8, 9});
-    nookbit::FileOrganizerRuntime organizer({appData, defaultDestination, verifyUi}, uiPreferences);
-    auto& pendingFiles = organizer.pendingFiles();
-    auto& backgroundTasks = organizer.tasks();
-    auto& previewController = organizer.preview();
-    auto& historyController = organizer.history();
-    auto& recoveryController = organizer.recovery();
-    auto& ruleEditor = organizer.rules();
-    nookbit::FolderWatchRuntime folderWatch({QDir(appData).filePath(QStringLiteral("watch.json")),
-        QStringLiteral(":/nookbit/watch.schema.json"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), !verifyUi},
-        organizer.classification(), organizer.pendingPaths(), organizer.pendingCommands(), uiPreferences);
-    const auto watchUi = folderWatch.registerUi(uiPages);
-    if (!watchUi) { QTextStream(stderr) << QString::fromStdString(watchUi.error().message) << Qt::endl; return EXIT_FAILURE; }
-    auto& watchController = folderWatch.controller();
-    QObject::connect(&pendingFiles, &nookbit::PendingFilesModel::countChanged,
-        &watchController, &nookbit::WatchController::pendingPathsChanged);
-    const auto organizerUi = organizer.registerUi(uiPages);
-    if (!organizerUi) {
-        QTextStream(stderr) << QString::fromStdString(organizerUi.error().message) << Qt::endl;
+    const auto watchFolder = verifyFeatures ? QDir(appData).filePath("watch")
+        : QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (verifyFeatures && startup.active.watch) QDir().mkpath(watchFolder);
+    nookbit::FeatureRuntimeHost features(startup, {appData, defaultDestination,
+        QCoreApplication::applicationDirPath(), watchFolder, verifyUi}, uiPreferences, application, uiPages);
+    if (!features.startupResult()) {
+        QTextStream(stderr) << QString::fromStdString(features.startupResult().error().message) << Qt::endl;
         return EXIT_FAILURE;
     }
-    nookbit::CompanionRuntime companion({appData, QCoreApplication::applicationDirPath(), verifyUi}, uiPreferences, application);
-    if (!companion.startupResult()) {
-        QTextStream(stderr) << QString::fromStdString(companion.startupResult().error().message) << Qt::endl;
-        return EXIT_FAILURE;
-    }
-    const auto companionUi = companion.registerUi(uiPages);
-    if (!companionUi) {
-        QTextStream(stderr) << QString::fromStdString(companionUi.error().message) << Qt::endl;
-        return EXIT_FAILURE;
-    }
-    auto& characterController = companion.character();
-    auto& characterSettings = companion.settings();
-    auto& characterWindow = companion.window();
-    auto& companionEdits = companion.edits();
-    auto& companionInteractions = companion.interactions();
-    auto& characterImports = companion.imports();
-    nookbit::NotificationRuntime notificationRuntime(uiPreferences, !verifyUi);
-    const auto notificationUi = notificationRuntime.registerUi(uiPages);
-    if (!notificationUi) { QTextStream(stderr) << QString::fromStdString(notificationUi.error().message) << Qt::endl; return EXIT_FAILURE; }
-    auto& notifications = notificationRuntime.controller();
-    const auto registeredNotice = notifications.registerType(nookbit::folderWatchOfferType());
-    if (!registeredNotice) { QTextStream(stderr) << QString::fromStdString(registeredNotice.error().message) << Qt::endl; return EXIT_FAILURE; }
-    nookbit::FeatureConnections featureConnections;
-    auto connected = featureConnections.notificationsToCompanion(notifications, characterController, characterController);
-    if (connected) connected = featureConnections.workToCompanion(backgroundTasks, characterController, characterController);
-    if (connected) connected = featureConnections.watchToNotifications(watchController, notifications, notifications);
-    if (!connected) { QTextStream(stderr) << QString::fromStdString(connected.error().message) << Qt::endl; return EXIT_FAILURE; }
-    QObject::connect(&ruleEditor, &nookbit::RuleEditorController::rulesSaved,
-                     &watchController, &nookbit::WatchController::rulesChanged);
+    auto* organizer = features.organizer();
+    auto* folderWatch = features.watch();
+    auto* notificationRuntime = features.notifications();
+    auto* companion = features.companion();
+    bool featureBindingsClean = true;
     QQmlApplicationEngine engine;
     auto* uiTheme = engine.singletonInstance<QObject*>("NookBit", "UiTheme");
     if (!uiTheme) {
@@ -971,8 +953,10 @@ int main(int argc, char* argv[]) {
     };
     applyWidgetTheme();
     QObject::connect(&uiSettings, &nookbit::UiSettingsController::darkModeChanged, &application, applyWidgetTheme);
-    engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
-    engine.addImageProvider(QStringLiteral("filepreviews"), new nookbit::FilePreviewProvider);
+    if (organizer) {
+        engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
+        engine.addImageProvider(QStringLiteral("filepreviews"), new nookbit::FilePreviewProvider);
+    }
     // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.
     auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
     if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
@@ -986,22 +970,30 @@ int main(int argc, char* argv[]) {
     baseFont.setPixelSize(uiMetrics->property("textBody").toInt());
     application.setFont(baseFont);
     if (verifyUi) QTextStream(stdout) << "UI font: " << previousFont << " -> " << QFontInfo(baseFont).family() << Qt::endl;
-    engine.rootContext()->setContextProperty(QStringLiteral("pendingFiles"), &pendingFiles);
-    engine.rootContext()->setContextProperty(QStringLiteral("backgroundTasks"), &backgroundTasks);
-    engine.rootContext()->setContextProperty(QStringLiteral("previewController"), &previewController);
-    engine.rootContext()->setContextProperty(QStringLiteral("recoveryController"), &recoveryController);
-    engine.rootContext()->setContextProperty(QStringLiteral("historyController"), &historyController);
-    engine.rootContext()->setContextProperty(QStringLiteral("watchController"), &watchController);
-    engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
-    engine.rootContext()->setContextProperty(QStringLiteral("appLifecycle"), &appLifecycle);
-    engine.rootContext()->setContextProperty(QStringLiteral("uiSettings"), &uiSettings);
-    engine.rootContext()->setContextProperty(QStringLiteral("organizerSettings"), organizer.settingsUi());
-    engine.rootContext()->setContextProperty(QStringLiteral("watchSettingsEntry"), folderWatch.settingsEntryUi());
-    engine.rootContext()->setContextProperty(QStringLiteral("watchProposalUi"), folderWatch.proposalUi());
-    engine.rootContext()->setContextProperty(QStringLiteral("ruleEditor"), &ruleEditor);
-    engine.rootContext()->setContextProperty(QStringLiteral("userGuides"), &userGuides);
-    engine.rootContext()->setContextProperty(QStringLiteral("uiPages"), &uiPages);
-    engine.rootContext()->setContextProperty(QStringLiteral("companionDesktop"), companion.desktopUi());
+    // 실제 기능 창구만 빌려주고 꺼진 기능의 대체 컨트롤러나 실행기는 만들지 않는다.
+    const auto expose = [&engine](const QString& name, QObject* value) { engine.rootContext()->setContextProperty(name, value); };
+    expose("pendingFiles", organizer ? &organizer->pendingFiles() : nullptr);
+    expose("backgroundTasks", organizer ? &organizer->tasks() : nullptr);
+    expose("previewController", organizer ? &organizer->preview() : nullptr);
+    expose("recoveryController", organizer ? &organizer->recovery() : nullptr);
+    expose("historyController", organizer ? &organizer->history() : nullptr);
+    expose("ruleEditor", organizer ? &organizer->rules() : nullptr);
+    expose("watchController", folderWatch ? &folderWatch->controller() : nullptr);
+    expose("notifications", notificationRuntime ? &notificationRuntime->controller() : nullptr);
+    expose("appLifecycle", &appLifecycle);
+    expose("uiSettings", &uiSettings);
+    expose("userGuides", &userGuides);
+    expose("uiPages", &uiPages);
+    engine.rootContext()->setContextProperty("featureStartupMessages", startup.messages);
+    engine.rootContext()->setContextProperty("organizerSettings", organizer ? organizer->settingsUi() : QVariantMap{});
+    engine.rootContext()->setContextProperty("watchSettingsEntry", folderWatch ? folderWatch->settingsEntryUi() : QVariantMap{});
+    engine.rootContext()->setContextProperty("watchProposalUi", folderWatch ? folderWatch->proposalUi() : QVariantMap{});
+    engine.rootContext()->setContextProperty("companionDesktop", companion ? companion->desktopUi() : QVariantMap{});
+    if (verifyFeatures) QObject::connect(&engine, &QQmlEngine::warnings, &engine, [&featureBindingsClean](const QList<QQmlError>& errors) {
+        // 일부 기능이 없는 상태에서 숨은 필수 참조나 잘못된 바인딩을 놓치지 않는 함수.
+        featureBindingsClean = false;
+        for (const auto& error : errors) QTextStream(stderr) << error.toString() << Qt::endl;
+    });
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -1013,7 +1005,7 @@ int main(int argc, char* argv[]) {
     // 호스트는 공통 트레이 동작을 만들고 컴패니언의 메뉴 기여 수명만 보관한다.
     QMenu trayMenu;
     auto* openAction = trayMenu.addAction(QStringLiteral("NookBit 열기"));
-    auto companionTray = companion.createTrayAction(trayMenu);
+    auto companionTray = companion ? companion->createTrayAction(trayMenu) : std::unique_ptr<nookbit::CompanionTrayAction>{};
     trayMenu.addSeparator();
     auto* exitAction = trayMenu.addAction(QStringLiteral("완전 종료"));
     QSystemTrayIcon tray(application.windowIcon());
@@ -1042,14 +1034,13 @@ int main(int argc, char* argv[]) {
             QCoreApplication::quit();
         });
     // 종료는 막되 창 숨기기는 허용하도록 모든 백그라운드 작업 상태를 합치는 함수.
-    const auto refreshExitState = [&appLifecycle, &backgroundTasks, &characterImports, exitAction] {
-        const bool busy = backgroundTasks.busy() || characterImports.busy();
+    const auto refreshExitState = [&appLifecycle, &features, exitAction] {
+        const bool busy = features.busy();
         appLifecycle.setBusy(busy);
         exitAction->setEnabled(!busy);
         exitAction->setText(busy ? QStringLiteral("작업 중 · 완료 후 종료 가능") : QStringLiteral("완전 종료"));
     };
-    QObject::connect(&backgroundTasks, &nookbit::BackgroundTaskRunner::busyChanged, &appLifecycle, refreshExitState);
-    QObject::connect(&characterImports, &nookbit::BackgroundTaskRunner::busyChanged, &appLifecycle, refreshExitState);
+    QObject::connect(&features, &nookbit::FeatureRuntimeHost::busyChanged, &appLifecycle, refreshExitState);
     refreshExitState();
     // 시스템 트레이가 없어졌을 때 숨긴 앱이 접근 불가능해지지 않도록 확인하는 함수.
     const auto refreshTray = [&appLifecycle, &tray, verifyUi] {
@@ -1064,8 +1055,63 @@ int main(int argc, char* argv[]) {
     QObject::connect(&trayAvailability, &QTimer::timeout, &appLifecycle, refreshTray);
     if (!verifyUi) trayAvailability.start();
 
+    // 활성 기능 조합 검사는 실제 창구와 화면 부재를 확인하고 사용자 저장소에 접근하지 않는다.
+    if (verifyFeatures) {
+        QEventLoop settle;
+        QTimer::singleShot(160, &settle, &QEventLoop::quit);
+        settle.exec();
+        auto* window = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+        bool valid = window && featureBindingsClean && !features.busy();
+        valid = valid && bool(organizer) == startup.active.organizer && bool(folderWatch) == startup.active.watch
+            && bool(notificationRuntime) == startup.active.notifications && bool(companion) == startup.active.companion;
+        const int expectedPages = (organizer ? 5 : 0) + (folderWatch ? 1 : 0)
+            + (notificationRuntime ? 1 : 0) + (companion ? 1 : 0);
+        valid = valid && uiPages.pages().size() == expectedPages;
+        if (notificationRuntime) valid = valid && notificationRuntime->controller().types().size() == (folderWatch ? 1 : 0);
+        const auto present = [window](const char* name) { return findUiChild<QObject*>(window, QString::fromLatin1(name)) != nullptr; };
+        valid = valid && present("fileSortPage") == startup.active.organizer && present("ruleEditorPage") == startup.active.organizer
+            && present("legacySortConfirmation") == startup.active.organizer && present("developerTools") == startup.active.organizer
+            && present("watchSettingsDialog") == startup.active.watch && present("settingsWatchButton") == startup.active.watch
+            && present("watchProposalDialog") == startup.active.watch && present("notificationSettingsPage") == startup.active.notifications
+            && present("desktopCharacterWindow") == startup.active.companion && present("homeCompanionSprite") == startup.active.companion;
+        int companionActions{};
+        for (auto* action : trayMenu.actions()) if (action->objectName() == "companionVisibilityAction") ++companionActions;
+        valid = valid && companionActions == (startup.active.companion ? 1 : 0);
+        if (window) {
+            window->setProperty("currentPage", 8);
+            QCoreApplication::processEvents();
+            valid = valid && present("settingsPage") && present("globalDarkModeSwitch");
+            valid = valid && present("featureStartupMessage") == !startup.messages.isEmpty();
+            if (!organizer) {
+                window->setProperty("currentPage", 9);
+                valid = valid && window->property("currentPage").toInt() == 0;
+            }
+            for (const int route : {1, 3, 4, 5, 6, 7, 10, 11}) if (!uiPages.contains(route)) {
+                window->setProperty("currentPage", route);
+                QCoreApplication::processEvents();
+                valid = valid && window->property("currentPage").toInt() == 0;
+            }
+        }
+        valid = valid && featureBindingsClean;
+        QTextStream(stdout) << "Feature startup: organizer=" << startup.active.organizer << " watch=" << startup.active.watch
+            << " notifications=" << startup.active.notifications << " companion=" << startup.active.companion << " valid=" << valid << Qt::endl;
+        return valid ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
     // 자동 검사에서는 화면과 리소스를 확인하고 이벤트를 한 번 처리한 뒤 종료한다.
     if (verifyUi) {
+        auto& pendingFiles = organizer->pendingFiles();
+        auto& backgroundTasks = organizer->tasks();
+        auto& previewController = organizer->preview();
+        auto& historyController = organizer->history();
+        auto& recoveryController = organizer->recovery();
+        auto& ruleEditor = organizer->rules();
+        auto& watchController = folderWatch->controller();
+        auto& notifications = notificationRuntime->controller();
+        auto& characterController = companion->character();
+        auto& characterSettings = companion->settings();
+        auto& characterWindow = companion->window();
+        auto& companionEdits = companion->edits();
+        auto& companionInteractions = companion->interactions();
         const auto migrationPath = QStringLiteral(":/nookbit/001_initial.sql");
         const auto bundledTree = QStringLiteral(":/nookbit/default-v3.json");
         const auto treeSchema = QStringLiteral(":/nookbit/rules-tree-v3.schema.json");

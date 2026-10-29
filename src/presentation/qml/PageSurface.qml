@@ -9,6 +9,7 @@ Pane {
     signal openRequested
     signal closeRequested
     signal routeRequested(int page)
+    signal dialogRequested(string dialogId)
     background: null
     padding: 0
 

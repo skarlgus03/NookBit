@@ -9,6 +9,7 @@ ScrollView {
     property var watchContribution: ({})
     property var organizerContribution: ({})
     property bool dark: false
+    property var startupMessages: []
     readonly property var theme: UiTheme.colors(dark)
     signal routeRequested(int page)
     objectName: "settingsPage"
@@ -20,6 +21,19 @@ ScrollView {
     ColumnLayout {
         width: page.availableWidth
         spacing: UiMetrics.spaceSection
+        Repeater {
+            model: page.startupMessages
+            Label {
+                required property string modelData
+                objectName: "featureStartupMessage"
+                Layout.fillWidth: true
+                text: modelData
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: page.theme.warning
+                font.pixelSize: UiMetrics.textBody
+            }
+        }
         RegisteredSettingsSection {
             Layout.fillWidth: true
             contribution: page.organizerContribution.notice || ({})

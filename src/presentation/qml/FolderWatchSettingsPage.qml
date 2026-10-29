@@ -12,5 +12,6 @@ PageSurface {
         dark: page.dark
         onOpenRequested: page.openRequested()
         onCloseRequested: page.closeRequested()
+        onDialogRequested: function(dialogId) { page.dialogRequested(dialogId) }
     }
 }

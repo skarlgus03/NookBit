@@ -114,6 +114,10 @@ if(NOOKBIT_BUILD_QT_APP)
       app/pending_queue_adapter.hpp
       app/feature_connections.hpp
       app/feature_connections.cpp
+      app/feature_startup.hpp
+      app/feature_startup.cpp
+      app/feature_runtime_host.hpp
+      app/feature_runtime_host.cpp
       app/notification_runtime.hpp
       app/notification_runtime.cpp
       app/folder_watch_runtime.hpp

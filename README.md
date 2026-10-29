@@ -1,7 +1,8 @@
 # NookBit
 
 Feature-module design: [ownership, communication and incremental migration](docs/feature-modules.md).
-This is a refactor plan; startup module toggles and plugin loading are not implemented yet.
+Feature startup can be selected with temporary [command-line options](docs/feature-modules.md#conditional-feature-startup).
+Saved module toggles, a module-management page and plugin loading are not implemented yet.
 
 컴패니언 팩 목록에서 **Nmoo - Idle & Walk**를 선택하면 쉬다가 좌우로 잠깐 걷는다. 현재 높이를 유지하며 기본 주기는 휴식 6초·걷기 3초다. 클릭·드래그·작업·알림 때는 멈추고, **쉬는 동안 가끔 걷기**에서 끌 수 있다. 이전에 가져온 팩은 자동으로 교체하지 않는다.
 

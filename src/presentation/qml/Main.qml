@@ -6,6 +6,10 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: root
     font.pixelSize: UiMetrics.textBody
+    readonly property bool organizerAvailable: previewController !== null
+    readonly property bool workBusy: backgroundTasks ? backgroundTasks.busy : false
+    readonly property bool fileWorkActive: backgroundTasks ? backgroundTasks.fileWorkActive : false
+    readonly property bool confirmationPending: previewController ? previewController.awaitingConfirmation : false
     // 트레이 종료에서도 마지막 캐릭터 위치와 열린 페이지 크기를 저장하는 함수.
     function commitCharacterPosition() { desktopUiHost.commitState(); extensionWindow.commitSize() }
     // 닫기는 트레이에 숨기고 프로세스 종료 여부는 별도 정책에 맡기는 함수.
@@ -18,12 +22,12 @@ ApplicationWindow {
         id: desktopUiHost
         contribution: companionDesktop
         dark: root.editorDark
-        attentionActionAvailable: notifications.activeTypes.includes("file.offer") && watchController.proposalVisible && !backgroundTasks.busy
+        attentionActionAvailable: !!notifications && !!watchController && notifications.activeTypes.includes("file.offer") && watchController.proposalVisible && !root.workBusy
         // 알림의 실제 확인 동작은 기능 사이 연결을 맡는 호스트에서 선택한다.
         onAttentionRequested: {
             if (!attentionActionAvailable) return
             appLifecycle.openWindow()
-            watchProposalDialog.open()
+            root.openFeatureDialog("watch.proposal")
         }
         // 등록되지 않은 설정 페이지는 열지 않고 정상 페이지를 메인 창과 함께 복원한다.
         onPageRequested: function(pageId) {
@@ -33,25 +37,31 @@ ApplicationWindow {
             root.currentPage = page
         }
     }
-    OperationProgressPopup {
-        id: operationProgressPopup
-        parent: extensionWindow.contentItem
-        progress: backgroundTasks
-        dark: root.editorDark
-        visible: backgroundTasks.busy && extensionWindow.visible && !root.inlineRecoveryInspection
-                 && !(root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)
-        x: (parent.width - width) / 2
-        y: extensionHost.y + (extensionHost.height - height) / 2
+    readonly property var operationProgressPopup: operationProgressHost.item
+    Loader {
+        id: operationProgressHost
+        active: root.organizerAvailable
+        sourceComponent: Component {
+            OperationProgressPopup {
+                parent: extensionWindow.contentItem
+                progress: backgroundTasks
+                dark: root.editorDark
+                visible: root.workBusy && extensionWindow.visible && !root.inlineRecoveryInspection
+                         && !(root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)
+                x: (parent.width - width) / 2
+                y: extensionHost.y + (extensionHost.height - height) / 2
+            }
+        }
     }
     property int currentPage: 0
     readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구")})
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
-    function pageAvailable(page) { return page === 0 || hostPageTitles[page] !== undefined || uiPages.contains(page) }
+    function pageAvailable(page) { return page === 0 || page === 8 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
-    readonly property bool inlineRecoveryInspection: currentPage === 10 && backgroundTasks.busy && !backgroundTasks.fileWorkActive
+    readonly property bool inlineRecoveryInspection: currentPage === 10 && root.workBusy && !root.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && !!fileSortPane && fileSortPane.manualSortRequested
     // 확인을 인라인 화면으로 넘길 때 기존 대화상자를 닫되 승인 대기는 취소하지 않는 함수.
-    onInlineSortConfirmationChanged: if (inlineSortConfirmation && sortConfirmation.visible) sortConfirmation.close()
+    onInlineSortConfirmationChanged: if (inlineSortConfirmation && sortConfirmation && sortConfirmation.visible) sortConfirmation.close()
     readonly property int homeWidth: 380
     // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
@@ -83,6 +93,12 @@ ApplicationWindow {
     palette.disabled.text: mutedText
     palette.disabled.buttonText: mutedText
 
+    // 기능 화면이 요청한 제안 확인만 열고 파일 실행이나 승인을 시작하지 않는 함수.
+    function openFeatureDialog(dialogId) {
+        if (dialogId !== "watch.proposal" || !watchController || !watchController.proposalVisible || workBusy) return
+        appLifecycle.openWindow()
+        watchProposalDialog.open()
+    }
     // 감시 입력 초안의 복원은 페이지에 맡기고 해당 화면을 여는 함수.
     function openWatchSettings() { openPage(uiPages.pageId("watch.settings")) }
     // 복구 화면을 먼저 연 뒤 파일을 바꾸지 않는 목록 검사를 요청하는 함수.
@@ -125,12 +141,14 @@ ApplicationWindow {
 
     CompactHome {
         id: compactHome
-        pendingCount: pendingFiles.count
-        watchEnabled: watchController.enabled
-        watchFolder: watchController.folder
+        pendingCount: pendingFiles ? pendingFiles.count : 0
+        sortingAvailable: root.organizerAvailable
+        companionAvailable: desktopUiHost.item !== null
+        watchEnabled: watchController ? watchController.enabled : false
+        watchFolder: watchController ? watchController.folder : ""
         companionDescriptor: desktopUiHost.summary
         registeredPages: uiPages.pages
-        navigationEnabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
+        navigationEnabled: !root.workBusy && !root.confirmationPending
         currentPage: root.currentPage
         width: root.homeWidth
         anchors.left: parent.left
@@ -259,13 +277,13 @@ ApplicationWindow {
                 color: root.theme.text
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
-            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !backgroundTasks.busy; visible: uiPages.page(root.currentPage).host === "settingsDetail" || [6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
-            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !backgroundTasks.busy; onClicked: root.currentPage = 0 }
+            BackButton { description: qsTr("설정으로 돌아가기"); enabled: !root.workBusy; visible: uiPages.page(root.currentPage).host === "settingsDetail" || [6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
+            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !root.workBusy; onClicked: root.currentPage = 0 }
         }
     }
     Item {
         id: extensionHost
-        enabled: (!backgroundTasks.busy || (root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)) && (!previewController.awaitingConfirmation || root.inlineSortConfirmation)
+        enabled: (!root.workBusy || (root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)) && (!root.confirmationPending || root.inlineSortConfirmation)
         parent: extensionWindow.contentItem
         anchors.fill: parent
         anchors.topMargin: 58
@@ -278,7 +296,7 @@ ApplicationWindow {
         objectName: "operationProgressVeil"
         parent: extensionWindow.contentItem
         anchors.fill: extensionHost
-        visible: operationProgressPopup.visible
+        visible: !!operationProgressPopup && operationProgressPopup.visible
         color: root.theme.inspectionVeil
         opacity: UiMetrics.operationVeilOpacity
         z: 90
@@ -286,7 +304,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Shift+D"
         context: Qt.ApplicationShortcut
-        enabled: !backgroundTasks.busy && !previewController.awaitingConfirmation
+        enabled: root.organizerAvailable && !root.workBusy && !root.confirmationPending
         // 사용자 화면과 분리된 개발 도구 페이지를 여는 함수.
         onActivated: root.currentPage = root.currentPage === 9 ? 0 : 9
     }
@@ -306,45 +324,64 @@ ApplicationWindow {
         dark: root.editorDark
         settings: uiSettings
         organizerContribution: organizerSettings
+        startupMessages: featureStartupMessages
         watchContribution: watchSettingsEntry
         onSettingsRequested: root.currentPage = 8
         onRouteRequested: function(route) { root.openPage(route) }
+        onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
     }
 
-    DeveloperToolsPage {
-        parent: extensionHost
-        anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 28
-        anchors.topMargin: 10
-        anchors.bottomMargin: 28
-        visible: root.currentPage === 9
-        dark: root.editorDark
-        controller: previewController
-        pending: pendingFiles
-        recovery: recoveryController
-        bubbleTestAvailable: desktopUiHost.item !== null
-        onBubbleTestRequested: desktopUiHost.preview()
-        onLegacyEditorRequested: {
-            root.openPage(uiPages.pageId("organizer.rules"))
-            const page = root.registeredPage(uiPages.pageId("organizer.rules"))
-            if (page) page.openLegacyEditor()
+    readonly property var sortConfirmation: organizerHostUi.item ? organizerHostUi.item.confirmation : null
+    Loader {
+        id: organizerHostUi
+        active: root.organizerAvailable
+        sourceComponent: Component {
+            Item {
+                property alias confirmation: legacyConfirmation
+                DeveloperToolsPage {
+                    parent: extensionHost
+                    anchors.fill: parent
+                    anchors.leftMargin: 18
+                    anchors.rightMargin: 28
+                    anchors.topMargin: 10
+                    anchors.bottomMargin: 28
+                    visible: root.currentPage === 9
+                    dark: root.editorDark
+                    controller: previewController
+                    pending: pendingFiles
+                    recovery: recoveryController
+                    bubbleTestAvailable: desktopUiHost.item !== null
+                    onBubbleTestRequested: desktopUiHost.preview()
+                    onLegacyEditorRequested: {
+                        root.openPage(uiPages.pageId("organizer.rules"))
+                        const page = root.registeredPage(uiPages.pageId("organizer.rules"))
+                        if (page) page.openLegacyEditor()
+                    }
+                    onRulesRequested: root.openPage(uiPages.pageId("organizer.rules"))
+                    onRecoveryRequested: root.openRecovery()
+                }
+
+                Connections {
+                    target: previewController
+                    // 목록·규칙·설정 변경으로 확인이 무효화되면 창도 닫는 함수.
+                    function onPreviewChanged() {
+                        if (root.confirmationPending && !root.inlineSortConfirmation && sortConfirmation && !sortConfirmation.visible)
+                            sortConfirmation.open()
+                        else if (!root.confirmationPending && sortConfirmation && sortConfirmation.visible)
+                            sortConfirmation.close()
+                    }
+                }
+
+                SortConfirmationDialog {
+                    id: legacyConfirmation
+                    parent: root.contentItem
+                    controller: previewController
+                    busy: root.workBusy
+                    inlineConfirmation: root.inlineSortConfirmation
+                }
+            }
         }
-        onRulesRequested: root.openPage(uiPages.pageId("organizer.rules"))
-        onRecoveryRequested: root.openRecovery()
     }
-
-    Connections {
-        target: previewController
-        // 목록·규칙·설정 변경으로 확인이 무효화되면 창도 닫는 함수.
-        function onPreviewChanged() {
-            if (previewController.awaitingConfirmation && !root.inlineSortConfirmation && !sortConfirmation.visible)
-                sortConfirmation.open()
-            else if (!previewController.awaitingConfirmation && sortConfirmation.visible)
-                sortConfirmation.close()
-        }
-    }
-
     Repeater {
         id: registeredPages
         parent: extensionHost
@@ -357,24 +394,18 @@ ApplicationWindow {
             dark: root.editorDark
             guideService: userGuides
             overlayHost: extensionWindow.contentItem
+            onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
             onNavigationRequested: function(page) { root.openPage(page) }
             onPageRequested: function(page) { root.currentPage = page }
             onCloseRequested: function(page) { if (root.currentPage === page) root.currentPage = 0 }
         }
     }
 
-    SortConfirmationDialog {
-        id: sortConfirmation
-        controller: previewController
-        busy: backgroundTasks.busy
-        inlineConfirmation: root.inlineSortConfirmation
-    }
-
     RegisteredDialogHost {
         id: watchProposalDialog
         contribution: watchProposalUi
         overlayHost: root.contentItem
-        busy: backgroundTasks.busy
+        busy: root.workBusy
         dark: root.editorDark
         onAccepted: root.currentPage = 0
     }
