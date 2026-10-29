@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
-    font.pixelSize: UiMetrics.textBody
+    font: UiMetrics.applicationFont
     readonly property bool organizerAvailable: previewController !== null
     readonly property bool workBusy: backgroundTasks ? backgroundTasks.busy : false
     readonly property bool fileWorkActive: backgroundTasks ? backgroundTasks.fileWorkActive : false
@@ -273,6 +273,7 @@ ApplicationWindow {
             anchors.margins: UiMetrics.spaceGroup; height: 36
             Label {
                 Layout.fillWidth: true
+                objectName: "extensionPageTitle"
                 text: uiPages.page(root.currentPage).title || root.hostPageTitles[root.currentPage] || ""
                 color: root.theme.text
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true

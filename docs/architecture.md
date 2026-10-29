@@ -1,5 +1,14 @@
 # NookBit 설계와 확장 원칙
 
+Typography is defined by UiMetrics. Startup builds a fresh UI font from those
+roles, clears inherited named styles/variable axes, and assigns it to both the
+application default and `UiMetrics.applicationFont`. Main pins that full font;
+the extension window inherits it explicitly. Page controls override only role
+sizes/weights. This avoids relying on ambient system/theme font inheritance.
+Font tests inject a Thin named style/weight axis and verify stable regular/bold
+selection across separate windows and loader-created content, without displaying
+the test windows.
+
 The optional [feeding feature](companion-feeding.md) borrows only the interaction
 registration capability. Its scoped owner registers a handler and menu metadata;
 Companion owns generic input/rendering and the host enforces the dependency.

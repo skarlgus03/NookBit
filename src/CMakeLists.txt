@@ -153,6 +153,7 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/character_window_controller.hpp
       presentation/app_lifecycle_controller.hpp
       presentation/ui_settings_controller.hpp
+      presentation/ui_font.hpp
       presentation/destination_settings_controller.hpp
       presentation/user_guide_controller.hpp
       presentation/file_icon_provider.hpp

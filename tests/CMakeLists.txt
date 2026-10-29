@@ -70,7 +70,7 @@ add_test(NAME nookbit_operation_timing_tests COMMAND nookbit_operation_timing_te
 add_test(NAME nookbit_operation_progress_tests COMMAND nookbit_operation_progress_tests)
 
 if(TARGET nookbit_json_config)
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Widgets Qml Quick)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Gui Widgets Qml Quick QuickControls2)
   add_executable(nookbit_companion_tray_tests companion_tray_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.hpp
     ${PROJECT_SOURCE_DIR}/src/app/companion_tray_action.cpp
@@ -525,6 +525,19 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_executable(nookbit_ui_font_tests ui_font_tests.cpp)
+  target_include_directories(nookbit_ui_font_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_compile_definitions(nookbit_ui_font_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  target_link_libraries(nookbit_ui_font_tests PRIVATE Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  if(MSVC)
+    target_compile_options(nookbit_ui_font_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_ui_font_tests COMMAND nookbit_ui_font_tests)
+  set_tests_properties(nookbit_ui_font_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+  if(WIN32)
+    set_tests_properties(nookbit_ui_font_tests PROPERTIES ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
+  endif()
   add_executable(nookbit_feeding_interaction_tests feeding_interaction_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/app/companion_feeding_runtime.cpp
     ${PROJECT_SOURCE_DIR}/src/presentation/companion_interaction_controller.hpp

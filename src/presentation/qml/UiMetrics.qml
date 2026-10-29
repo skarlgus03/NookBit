@@ -5,6 +5,9 @@ import QtQuick
 QtObject {
     readonly property string fontFamily: "Noto Sans KR"
     readonly property string fontFallback: "Malgun Gothic"
+    readonly property int bodyWeight: Font.Normal
+    // 시작 조립부가 초기화하며 모든 창이 공유하는 실제 글꼴. 독립 화면 검사도 같은 기본 규격을 쓴다.
+    property font applicationFont: Qt.font({family: fontFamily, styleName: "", pixelSize: textBody, weight: bodyWeight})
     readonly property int pageSlideDuration: 180
     // 실제 크기는 네 단계뿐이며 화면에서는 아래 의미별 별칭을 선택한다.
     readonly property int typeBody: 14

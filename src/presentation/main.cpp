@@ -23,11 +23,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
-#include <QFontInfo>
 #include <QApplication>
 #include <QQuickStyle>
 #include <QPalette>
 #include "presentation/ui_settings_controller.hpp"
+#include "presentation/ui_font.hpp"
 #include "presentation/destination_settings_controller.hpp"
 #include "presentation/user_guide_controller.hpp"
 #include <QSystemTrayIcon>
@@ -308,6 +308,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             navigationFrame.exec();
         }
         auto* home = findUiChild<QObject*>(mainWindow, QStringLiteral("compactHome"));
+        auto* title = findUiChild<QObject*>(mainWindow, QStringLiteral("extensionPageTitle"));
+        const auto titleFont = title ? title->property("font").value<QFont>() : QFont();
+        const auto sharedFont = metrics->property("applicationFont").value<QFont>();
+        if (!title || titleFont.families() != sharedFont.families() || !titleFont.styleName().isEmpty() || titleFont.weight() != QFont::Bold) return false;
         const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
@@ -956,6 +960,17 @@ int main(int argc, char* argv[]) {
     auto* companion = features.companion();
     bool featureBindingsClean = true;
     QQmlApplicationEngine engine;
+    // 테마와 컨트롤을 만들기 전에 공통 글꼴을 확정하고 창에서도 명시적으로 공유한다.
+    auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
+    if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
+        QTextStream(stderr) << "Cannot load shared UI metrics." << Qt::endl;
+        return EXIT_FAILURE;
+    }
+    const auto baseFont = nookbit::applicationUiFont(*uiMetrics);
+    application.setFont(baseFont);
+    uiMetrics->setProperty("applicationFont", baseFont);
+    if (verifyUi) QTextStream(stdout) << "UI font: " << baseFont.families().join(", ")
+        << " weight=" << baseFont.weight() << " style=" << baseFont.styleName() << Qt::endl;
     auto* uiTheme = engine.singletonInstance<QObject*>("NookBit", "UiTheme");
     if (!uiTheme) {
         QTextStream(stderr) << "Cannot load shared UI theme." << Qt::endl;
@@ -985,19 +1000,6 @@ int main(int argc, char* argv[]) {
         engine.addImageProvider(QStringLiteral("fileicons"), new nookbit::FileIconProvider);
         engine.addImageProvider(QStringLiteral("filepreviews"), new nookbit::FilePreviewProvider);
     }
-    // QML 공통 규격을 네이티브 메뉴·대화상자의 기본 글씨에도 적용한다.
-    auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
-    if (!uiMetrics || uiMetrics->property("textBody").toInt() <= 0) {
-        QTextStream(stderr) << "Cannot load shared UI metrics." << Qt::endl;
-        return 1;
-    }
-    QFont baseFont = application.font();
-    const auto previousFont = QFontInfo(baseFont).family();
-    baseFont.setFamilies({uiMetrics->property("fontFamily").toString(),
-        uiMetrics->property("fontFallback").toString(), baseFont.family()});
-    baseFont.setPixelSize(uiMetrics->property("textBody").toInt());
-    application.setFont(baseFont);
-    if (verifyUi) QTextStream(stdout) << "UI font: " << previousFont << " -> " << QFontInfo(baseFont).family() << Qt::endl;
     // 실제 기능 창구만 빌려주고 꺼진 기능의 대체 컨트롤러나 실행기는 만들지 않는다.
     const auto expose = [&engine](const QString& name, QObject* value) { engine.rootContext()->setContextProperty(name, value); };
     expose("pendingFiles", organizer ? &organizer->pendingFiles() : nullptr);

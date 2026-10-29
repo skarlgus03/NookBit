@@ -200,7 +200,7 @@ Window {
         Component.onCompleted: if ("popupType" in actionMenu) actionMenu.popupType = Popup.Window
         width: Math.min(UiMetrics.companionMenuWidth, pet.width)
         padding: UiMetrics.spaceExtraSmall
-        font.pixelSize: UiMetrics.textBody
+        font: UiMetrics.applicationFont
         palette.text: UiTheme.colors(pet.dark).text
         palette.windowText: UiTheme.colors(pet.dark).text
         palette.highlight: UiTheme.colors(pet.dark).accent
