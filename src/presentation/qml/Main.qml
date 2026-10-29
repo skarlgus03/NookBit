@@ -266,11 +266,11 @@ ApplicationWindow {
     Item {
         parent: extensionWindow.contentItem
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-        height: 58
+        height: UiMetrics.extensionHeaderHeight
         z: 100
         RowLayout {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.margins: UiMetrics.spaceGroup; height: 36
+            anchors.margins: UiMetrics.spaceGroup; height: UiMetrics.extensionHeaderRowHeight
             Label {
                 Layout.fillWidth: true
                 objectName: "extensionPageTitle"
@@ -287,7 +287,7 @@ ApplicationWindow {
         enabled: (!root.workBusy || (root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)) && (!root.confirmationPending || root.inlineSortConfirmation)
         parent: extensionWindow.contentItem
         anchors.fill: parent
-        anchors.topMargin: 58
+        anchors.topMargin: UiMetrics.extensionHeaderHeight
         visible: root.currentPage !== 0
         clip: true
         z: 1
@@ -351,10 +351,10 @@ ApplicationWindow {
                 DeveloperToolsPage {
                     parent: extensionHost
                     anchors.fill: parent
-                    anchors.leftMargin: 18
-                    anchors.rightMargin: 28
-                    anchors.topMargin: 10
-                    anchors.bottomMargin: 28
+                    anchors.leftMargin: UiMetrics.pageInset
+                    anchors.rightMargin: UiMetrics.editorInset + UiMetrics.spaceExtraSmall
+                    anchors.topMargin: UiMetrics.spaceCompact
+                    anchors.bottomMargin: UiMetrics.editorInset + UiMetrics.spaceExtraSmall
                     visible: root.currentPage === 9
                     dark: root.editorDark
                     controller: previewController

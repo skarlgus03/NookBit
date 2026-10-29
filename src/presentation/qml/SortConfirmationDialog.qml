@@ -12,8 +12,8 @@ Dialog {
 
     objectName: "legacySortConfirmation"
     anchors.centerIn: parent
-    width: Math.min(parent.width - 32, 760)
-    height: Math.min(parent.height - 32, 520)
+    width: Math.min(parent.width - UiMetrics.spaceSection * 2, UiMetrics.sortConfirmationWidth)
+    height: Math.min(parent.height - UiMetrics.spaceSection * 2, UiMetrics.sortConfirmationHeight)
     modal: true
     title: qsTr("파일 이동 최종 확인")
     onClosed: if (!page.inlineConfirmation)

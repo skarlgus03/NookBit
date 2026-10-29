@@ -65,6 +65,14 @@ QtObject {
     readonly property int buttonReleaseMs: 120
     readonly property int confirmationContentWidth: 640
     readonly property int confirmationContentHeight: 480
+    readonly property int dialogInset: 20
+    readonly property int dialogCompactWidth: 420
+    readonly property int dialogStandardWidth: 480
+    readonly property int dialogWideWidth: 520
+    readonly property int sortConfirmationWidth: 760
+    readonly property int sortConfirmationHeight: 520
+    readonly property int extensionHeaderHeight: 58
+    readonly property int extensionHeaderRowHeight: 36
     readonly property int operationPopupWidth: 440
     readonly property int operationPopupHeight: 200
     readonly property real operationVeilOpacity: 0.72

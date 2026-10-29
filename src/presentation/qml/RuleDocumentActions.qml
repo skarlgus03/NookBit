@@ -106,7 +106,7 @@ Item {
         id: confirmSave
         modal: true
         anchors.centerIn: parent
-        width: Math.min(actions.width - 40, 420)
+        width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogCompactWidth)
         title: qsTr("기존 편집기의 초안을 교체할까요?")
         standardButtons: Dialog.NoButton
         palette.window: actions.surfaceColor
@@ -148,7 +148,7 @@ Item {
         id: confirmReload
         modal: true
         anchors.centerIn: parent
-        width: Math.min(actions.width - 40, 420)
+        width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogCompactWidth)
         title: qsTr("저장된 규칙 다시 열기")
         standardButtons: Dialog.NoButton
         palette.window: actions.surfaceColor
@@ -228,7 +228,7 @@ Item {
         id: exportErrorDialog
         modal: true
         anchors.centerIn: parent
-        width: Math.min(actions.width - 40, 480)
+        width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogStandardWidth)
         title: qsTr("JSON 내보내기 실패")
         standardButtons: Dialog.Close
         palette.window: actions.surfaceColor
@@ -250,7 +250,7 @@ Item {
         id: confirmImportReplace
         modal: true
         anchors.centerIn: parent
-        width: Math.min(actions.width - 40, 430)
+        width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogCompactWidth)
         title: qsTr("편집 중인 초안을 교체할까요?")
         standardButtons: Dialog.NoButton
         palette.window: actions.surfaceColor
@@ -292,7 +292,7 @@ Item {
         id: importErrorDialog
         modal: true
         anchors.centerIn: parent
-        width: Math.min(actions.width - 40, 520)
+        width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogWideWidth)
         title: qsTr("규칙 파일 검증 실패")
         standardButtons: Dialog.Close
         palette.window: actions.surfaceColor
