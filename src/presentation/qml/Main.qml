@@ -54,12 +54,17 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리"), 13: qsTr("처음 시작하기")})
+    property int setupReturnPage: 0
+    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리"),
+        13: initialSetup.reviewing ? qsTr("처음 설정 다시 보기") : qsTr("처음 시작하기")})
     Component.onCompleted: if (initialSetup.required) currentPage = 13
     Connections {
         target: initialSetup
         // 명시적인 시작·건너뛰기를 마치면 일반 홈으로 돌아가는 함수.
-        function onRequiredChanged() { if (!initialSetup.required && root.currentPage === 13) root.currentPage = 0 }
+        function onRequiredChanged() {
+            if (initialSetup.required) root.currentPage = 13
+            else if (root.currentPage === 13) { root.currentPage = root.setupReturnPage; root.setupReturnPage = 0 }
+        }
     }
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
     function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || page === 13 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
@@ -238,7 +243,8 @@ ApplicationWindow {
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
         onClosing: function(event) {
             event.accepted = false
-            if (initialSetup.required) root.close()
+            if (initialSetup.reviewing) initialSetup.skip()
+            else if (initialSetup.required) root.close()
             else root.currentPage = 0
         }
     }
@@ -290,7 +296,12 @@ ApplicationWindow {
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
             BackButton { description: qsTr("설정으로 돌아가기"); enabled: !root.workBusy; visible: uiPages.page(root.currentPage).host === "settingsDetail" || [6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
-            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !root.workBusy && !initialSetup.required; onClicked: root.currentPage = 0 }
+            NavigationButton {
+                objectName: "extensionCloseButton"
+                text: qsTr("접기 ×")
+                enabled: !root.workBusy && (!initialSetup.required || initialSetup.reviewing)
+                onClicked: { if (initialSetup.reviewing) initialSetup.skip(); else root.currentPage = 0 }
+            }
         }
     }
     Item {
@@ -340,6 +351,10 @@ ApplicationWindow {
         applicationVersion: Qt.application.version
         watchContribution: watchSettingsEntry
         onSettingsRequested: root.currentPage = 8
+        onInitialSetupRequested: {
+            root.setupReturnPage = 8
+            if (!initialSetup.reopen()) root.setupReturnPage = 0
+        }
         onRouteRequested: function(route) { root.openPage(route) }
         onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
     }

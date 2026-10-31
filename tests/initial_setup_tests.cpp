@@ -58,6 +58,25 @@ int main(int argc, char** argv) {
     expect(!QFileInfo::exists(destination), "setup input handling never creates or moves user files");
     nookbit::InitialSetupController restored(preferences, true, defaults, apply);
     expect(!restored.required(), "successful setup is not shown again");
+    auto latest = defaults;
+    latest.destinationRoot = directory.filePath("updated-home");
+    latest.ruleLabel = "updated rules";
+    latest.companionShown = false;
+    restored.setDefaultsReader([&] { return latest; });
+    const auto beforeReview = applies;
+    expect(restored.reopen() && restored.reviewing() && restored.required() && !restored.reopen()
+        && restored.destinationRoot() == latest.destinationRoot && restored.ruleLabel() == latest.ruleLabel
+        && !restored.companionShown(), "reopen refreshes live settings and rejects overlapping reviews");
+    expect(!restored.finish("relative", false, {}, true) && restored.reviewing(), "invalid review remains editable");
+    expect(restored.skip() && !restored.reviewing() && applies == beforeReview
+        && preferences.value("onboarding/completed").toBool(), "closing a review changes neither feature settings nor completion");
+    latest.companionShown = true;
+    expect(restored.reopen() && restored.companionShown() && restored.message().isEmpty(), "each review discards stale values and errors");
+    expect(restored.finish(latest.destinationRoot, false, {}, true) && applies == beforeReview + 1
+        && received.destinationRoot == latest.destinationRoot && !restored.required() && !restored.reviewing(),
+        "explicit review apply uses the same feature contract and closes");
+    nookbit::InitialSetupController afterReview(preferences, true, defaults, apply);
+    expect(!afterReview.required() && !QFileInfo::exists(latest.destinationRoot), "review never re-arms automatic onboarding or creates folders");
     preferences.remove("onboarding/completed");
     nookbit::InitialSetupController disabled(preferences, true, {false, false, {}, {}, false, false}, apply);
     expect(disabled.finish({}, true, QUrl("https://example.org/unused"), true)

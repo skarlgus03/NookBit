@@ -255,6 +255,8 @@ Result<void> FileOrganizerRuntime::configureInitialSettings(const QString& desti
     if (!folder.isAbsolute() || QDir(destination).isRoot() || (folder.exists() && !folder.isDir()))
         return Result<void>::failure({"setup.folder", "정리 폴더의 전체 경로를 확인해 주세요."});
     if (!rulesFile.isEmpty()) {
+        if (rules().dirty())
+            return Result<void>::failure({"setup.rules_dirty", "분류 규칙 편집기에 저장하지 않은 초안이 있어요. 먼저 저장하거나 초안을 취소해 주세요."});
         const auto imported = rules().importJsonFile(rulesFile);
         if (!imported.value("ok").toBool())
             return Result<void>::failure({"setup.rules", (imported.value("location").toString() + ": " + imported.value("reason").toString()).toStdString()});

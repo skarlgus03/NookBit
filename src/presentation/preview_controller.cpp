@@ -90,8 +90,8 @@ bool PreviewController::setDefaultDestinationRoot(const QString& root) {
     if (defaultDestinationRoot_ != clean) {
         defaultDestinationRoot_ = clean;
         clear();
-        emit defaultDestinationRootChanged();
     }
+    emit defaultDestinationRootChanged();
     emit destinationRootAccepted(clean);
     return true;
 }

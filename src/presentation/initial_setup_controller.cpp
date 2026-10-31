@@ -14,9 +14,17 @@ InitialSetupController::InitialSetupController(QSettings& settings, bool persist
 bool InitialSetupController::fail(const QString& message) {
     message_ = message; emit messageChanged(); return false;
 }
+// 다시 보기는 완료 기록이나 기능 설정을 변경하지 않고 화면 초안만 새로 준비하는 함수.
+bool InitialSetupController::reopen() {
+    if (QThread::currentThread() != thread() || required_ || applying_) return false;
+    if (readDefaults_) defaults_ = readDefaults_();
+    message_.clear(); reviewing_ = true; required_ = true;
+    emit defaultsChanged(); emit messageChanged(); emit reviewingChanged(); emit requiredChanged();
+    return true;
+}
 // 명시적인 시작 또는 건너뛰기만 저장하며 저장 오류 시 안내를 유지하는 함수.
 bool InitialSetupController::markCompleted() {
-    if (persist_) {
+    if (persist_ && !reviewing_) {
         settings_.setValue(QStringLiteral("onboarding/completed"), true);
         settings_.sync();
         if (settings_.status() != QSettings::NoError) {
@@ -24,7 +32,8 @@ bool InitialSetupController::markCompleted() {
             return fail(QStringLiteral("첫 실행 완료 기록을 저장하지 못했어요. 설정 저장 권한을 확인해 주세요."));
         }
     }
-    required_ = false; message_.clear(); emit messageChanged(); emit requiredChanged(); return true;
+    required_ = false; reviewing_ = false; message_.clear();
+    emit messageChanged(); emit reviewingChanged(); emit requiredChanged(); return true;
 }
 // 모든 화면 입력을 먼저 검사하고 기능 소유자에게만 실제 설정 적용을 요청하는 함수.
 bool InitialSetupController::finish(const QString& destination, bool importRules, const QUrl& rulesFile, bool showCompanion) {

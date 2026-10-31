@@ -20,6 +20,11 @@ Item {
     signal undoRequested()
     signal rulesRequested()
     signal recoveryRequested()
+    Connections {
+        target: input.controller
+        // 설정에서 명시적으로 적용한 기본 경로는 이전에 편집한 입력칸에도 반영하는 함수.
+        function onDefaultDestinationRootChanged() { destination.text = input.controller.defaultDestinationRoot }
+    }
 
     ColumnLayout {
         anchors.fill: parent

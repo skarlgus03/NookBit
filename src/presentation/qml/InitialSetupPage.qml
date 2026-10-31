@@ -10,8 +10,23 @@ PageSurface {
     required property var controller
     property url selectedRules: ""
     property bool initialized: false
-    Component.onCompleted: initialized = true
-    onVisibleChanged: if (initialized && !visible) { folderPicker.close(); rulePicker.close() }
+    // 다시 열 때 이전 입력 대신 현재 설정으로 화면 초안을 준비하는 함수.
+    function resetDrafts() {
+        destination.text = controller.destinationRoot
+        ruleChoice.currentIndex = 0
+        selectedRules = ""
+        companionShown.checked = controller.companionShown
+    }
+    Component.onCompleted: { initialized = true; resetDrafts() }
+    onVisibleChanged: if (initialized) {
+        if (visible) resetDrafts()
+        else { folderPicker.close(); rulePicker.close() }
+    }
+    Connections {
+        target: page.controller
+        // 최신 설정을 읽었다는 알림에서 미적용 화면 입력을 초기화하는 함수.
+        function onDefaultsChanged() { if (page.initialized) page.resetDrafts() }
+    }
     background: Rectangle { color: page.theme.window }
     ColumnLayout {
         anchors.fill: parent
@@ -19,14 +34,14 @@ PageSurface {
         spacing: UiMetrics.spaceSection
         Label {
             Layout.fillWidth: true
-            text: qsTr("NookBit을 시작할 준비")
+            text: page.controller.reviewing ? qsTr("처음 설정 다시 보기") : qsTr("NookBit을 시작할 준비")
             font.pixelSize: UiMetrics.textSectionTitle
             font.bold: true
             color: page.theme.text
         }
         Label {
             Layout.fillWidth: true
-            text: page.controller.existingConfiguration
+            text: page.controller.reviewing ? qsTr("현재 설정을 불러왔어요. 적용하고 닫기를 눌러야 변경 사항이 저장돼요.") : page.controller.existingConfiguration
                 ? qsTr("기존 설정을 채워 두었어요. 그대로 시작하거나 필요한 것만 바꿔 주세요.")
                 : qsTr("처음 한 번만 선택하면 돼요. 나중에도 각 설정 화면에서 바꿀 수 있어요.")
             wrapMode: Text.Wrap
@@ -107,7 +122,7 @@ PageSurface {
                     Label {
                         Layout.fillWidth: true
                         visible: ruleChoice.currentIndex === 1
-                        text: qsTr("시작하기를 누르면 검증한 뒤 적용해요. 외부 목적지는 자동으로 허용하지 않아요.")
+                        text: qsTr("적용할 때 검증해요. 외부 목적지는 자동으로 허용하지 않아요.")
                         wrapMode: Text.Wrap
                         color: page.theme.muted
                     }
@@ -158,7 +173,7 @@ PageSurface {
                 objectName: "setupSkipButton"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                text: qsTr("건너뛰기")
+                text: page.controller.reviewing ? qsTr("닫기") : qsTr("건너뛰기")
                 dark: page.dark
                 onClicked: page.controller.skip()
             }
@@ -166,7 +181,7 @@ PageSurface {
                 objectName: "setupFinishButton"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                text: qsTr("시작하기")
+                text: page.controller.reviewing ? qsTr("적용하고 닫기") : qsTr("시작하기")
                 primary: true
                 dark: page.dark
                 onClicked: page.controller.finish(destination.text, ruleChoice.currentIndex === 1, page.selectedRules, companionShown.checked)

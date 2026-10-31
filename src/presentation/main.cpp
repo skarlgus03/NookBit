@@ -978,6 +978,13 @@ int main(int argc, char* argv[]) {
             if (companion) companion->window().setShown(request.companionShown);
             return nookbit::Result<void>::success();
         });
+    initialSetup.setDefaultsReader([organizer, companion, defaultDestination] {
+        // 다시 열 때마다 적용된 최신 설정만 읽고 편집 중인 초안은 포함하지 않는 함수.
+        return nookbit::InitialSetupDefaults{organizer != nullptr, companion != nullptr,
+            organizer ? organizer->destinations().homeRoot() : defaultDestination,
+            organizer ? organizer->preview().activeRuleLabel() : QString(),
+            companion ? companion->window().shown() : false, true};
+    });
     bool featureBindingsClean = true;
     QQmlApplicationEngine engine;
     // 테마와 컨트롤을 만들기 전에 공통 글꼴을 확정하고 창에서도 명시적으로 공유한다.
@@ -1142,6 +1149,40 @@ int main(int argc, char* argv[]) {
                 valid = valid && organizer->preview().defaultDestinationRoot() == chosen
                     && sortingDestination && sortingDestination->property("text").toString() == chosen
                     && companion->window().shown() != originallyShown;
+                auto* reopen = findUiChild<QObject*>(window, "settingsInitialSetupButton");
+                auto* close = findUiChild<QObject*>(window, "extensionCloseButton");
+                auto* ruleChoice = findUiChild<QObject*>(window, "setupRuleChoice");
+                auto* setupPage = findUiChild<QObject*>(window, "initialSetupPage");
+                valid = valid && reopen && close && ruleChoice && setupPage;
+                if (reopen && close && ruleChoice && setupPage && sortingDestination) {
+                    window->setProperty("currentPage", 8);
+                    valid = QMetaObject::invokeMethod(reopen, "clicked") && valid;
+                    valid = valid && initialSetup.reviewing() && window->property("currentPage").toInt() == 13
+                        && destination->property("text").toString() == chosen;
+                    destination->setProperty("text", QDir(appData).filePath("discarded-folder"));
+                    companionToggle->setProperty("checked", originallyShown);
+                    ruleChoice->setProperty("currentIndex", 1);
+                    setupPage->setProperty("selectedRules", QUrl::fromLocalFile(QDir(appData).filePath("discarded.json")));
+                    valid = QMetaObject::invokeMethod(skip, "clicked") && valid;
+                    valid = valid && window->property("currentPage").toInt() == 8 && !initialSetup.required()
+                        && organizer->preview().defaultDestinationRoot() == chosen && companion->window().shown() != originallyShown;
+                    valid = QMetaObject::invokeMethod(reopen, "clicked") && valid;
+                    valid = valid && destination->property("text").toString() == chosen
+                        && ruleChoice->property("currentIndex").toInt() == 0
+                        && setupPage->property("selectedRules").toUrl().isEmpty();
+                    valid = QMetaObject::invokeMethod(close, "clicked") && valid;
+                    valid = valid && window->property("currentPage").toInt() == 8 && !initialSetup.reviewing();
+                    // 수동 입력으로 끊어진 경로 바인딩도 명시적 설정 적용 시 갱신하는지 검사한다.
+                    sortingDestination->setProperty("text", "unapplied-draft");
+                    valid = QMetaObject::invokeMethod(reopen, "clicked") && valid;
+                    const auto updated = QDir(appData).filePath("reviewed-folder");
+                    destination->setProperty("text", updated);
+                    valid = QMetaObject::invokeMethod(finish, "clicked") && valid;
+                    valid = valid && !initialSetup.required() && window->property("currentPage").toInt() == 8
+                        && organizer->preview().defaultDestinationRoot() == updated
+                        && sortingDestination->property("text").toString() == updated
+                        && !QFileInfo::exists(updated) && !features.busy();
+                }
             }
             nookbit::InitialSetupController restored(uiPreferences, true, {}, {});
             valid = valid && !restored.required() && featureBindingsClean;

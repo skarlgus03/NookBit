@@ -5,6 +5,8 @@ import a v3 JSON ruleset, and select desktop companion visibility. Start validat
 and applies these settings; Skip retains existing values. The setup is shown once
 until Start or Skip records completion, including on older installations without
 that marker. Existing settings are prefilled. No files are moved during setup.
+Open Settings → Information → **처음 설정 다시 보기** to revisit it. Closing
+discards the page's edits; **적용하고 닫기** explicitly applies them.
 See [initial-setup behavior and verification](docs/initial-setup.md).
 
 Real file work (including undo/recovery) selects the companion's working clip;

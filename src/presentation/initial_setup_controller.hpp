@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QUrl>
 #include <functional>
+#include <utility>
 #include <nookbit/domain/result.hpp>
 
 namespace nookbit {
@@ -24,20 +25,28 @@ class InitialSetupController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool required READ required NOTIFY requiredChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
-    Q_PROPERTY(bool organizerAvailable READ organizerAvailable CONSTANT)
-    Q_PROPERTY(bool companionAvailable READ companionAvailable CONSTANT)
-    Q_PROPERTY(QString destinationRoot READ destinationRoot CONSTANT)
-    Q_PROPERTY(QString ruleLabel READ ruleLabel CONSTANT)
-    Q_PROPERTY(bool companionShown READ companionShown CONSTANT)
-    Q_PROPERTY(bool existingConfiguration READ existingConfiguration CONSTANT)
+    Q_PROPERTY(bool reviewing READ reviewing NOTIFY reviewingChanged)
+    Q_PROPERTY(bool organizerAvailable READ organizerAvailable NOTIFY defaultsChanged)
+    Q_PROPERTY(bool companionAvailable READ companionAvailable NOTIFY defaultsChanged)
+    Q_PROPERTY(QString destinationRoot READ destinationRoot NOTIFY defaultsChanged)
+    Q_PROPERTY(QString ruleLabel READ ruleLabel NOTIFY defaultsChanged)
+    Q_PROPERTY(bool companionShown READ companionShown NOTIFY defaultsChanged)
+    Q_PROPERTY(bool existingConfiguration READ existingConfiguration NOTIFY defaultsChanged)
 public:
     using Apply = std::function<Result<void>(const InitialSetupRequest&)>;
+    using ReadDefaults = std::function<InitialSetupDefaults()>;
     /// 현재 설정과 적용 계약을 받고 자동 검사에서는 개인 저장소를 사용하지 않는 생성자.
     InitialSetupController(QSettings& settings, bool persist, InitialSetupDefaults defaults, Apply apply, QObject* parent = nullptr);
     /// 아직 명시적으로 시작하거나 건너뛰지 않았는지 반환하는 함수.
     bool required() const { return required_; }
     /// 마지막 입력 또는 저장 오류를 반환하는 함수.
     QString message() const { return message_; }
+    /// 자동 안내가 아닌 사용자가 요청한 다시 보기인지 반환하는 함수.
+    bool reviewing() const { return reviewing_; }
+    /// 현재 기능 설정을 다시 읽는 호스트 창구를 지정하는 함수.
+    void setDefaultsReader(ReadDefaults reader) { readDefaults_ = std::move(reader); }
+    /// 완료 기록은 유지한 채 최신 설정으로 안내를 다시 여는 함수.
+    Q_INVOKABLE bool reopen();
     /// 이번 실행에서 정리 설정을 받을 수 있는지 반환하는 함수.
     bool organizerAvailable() const { return defaults_.organizerAvailable; }
     /// 이번 실행에서 컴패니언 표시를 변경할 수 있는지 반환하는 함수.
@@ -61,15 +70,18 @@ public:
 signals:
     void requiredChanged();
     void messageChanged();
+    void defaultsChanged();
+    void reviewingChanged();
 private:
     /// 실패 이유를 표시하고 미완료 상태를 유지하는 함수.
     bool fail(const QString& message);
     /// 완료 또는 건너뛰기 표식을 저장한 뒤 화면 종료를 알리는 함수.
     bool markCompleted();
     QSettings& settings_;
-    bool persist_, required_, applying_{false};
+    bool persist_, required_, applying_{false}, reviewing_{false};
     InitialSetupDefaults defaults_;
     Apply apply_;
+    ReadDefaults readDefaults_;
     QString message_;
 };
 }
