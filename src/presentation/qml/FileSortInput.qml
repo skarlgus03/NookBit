@@ -140,8 +140,8 @@ Item {
                     implicitHeight: UiMetrics.iconButtonSize
                     width: implicitWidth
                     height: implicitHeight
-                    padding: UiMetrics.spaceSmall
-                    horizontalPadding: UiMetrics.spaceSmall
+                    padding: UiMetrics.spaceExtraSmall
+                    horizontalPadding: UiMetrics.spaceExtraSmall
                     enabled: input.pending.count > 0 && !input.workBusy
                     dark: input.dark
                     appearance: AppButton.Menu
@@ -153,8 +153,8 @@ Item {
                     contentItem: Item {
                         NavigationIcon {
                             anchors.centerIn: parent
-                            width: UiMetrics.iconSize
-                            height: UiMetrics.iconSize
+                            width: UiMetrics.navigationIconSize
+                            height: UiMetrics.navigationIconSize
                             kind: "trash"
                             strokeColor: clearQueue.buttonForeground
                         }
