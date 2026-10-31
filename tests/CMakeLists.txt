@@ -525,6 +525,27 @@ if(TARGET nookbit_json_config)
   endif()
 
   add_test(NAME nookbit_qml_smoke COMMAND nookbit --verify-ui)
+  add_test(NAME nookbit_initial_setup_smoke COMMAND nookbit --verify-initial-setup)
+  add_test(NAME nookbit_initial_setup_skip_smoke COMMAND nookbit --verify-initial-setup-skip)
+  set_tests_properties(nookbit_initial_setup_smoke nookbit_initial_setup_skip_smoke PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software" TIMEOUT 45)
+  if(WIN32)
+    set_tests_properties(nookbit_initial_setup_smoke nookbit_initial_setup_skip_smoke PROPERTIES ENVIRONMENT_MODIFICATION
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_QPA_PLATFORM_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
+  endif()
+  add_executable(nookbit_initial_setup_tests initial_setup_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/initial_setup_controller.hpp
+    ${PROJECT_SOURCE_DIR}/src/presentation/initial_setup_controller.cpp)
+  set_target_properties(nookbit_initial_setup_tests PROPERTIES AUTOMOC ON)
+  target_include_directories(nookbit_initial_setup_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(nookbit_initial_setup_tests PRIVATE nookbit_core Qt6::Core)
+  if(MSVC)
+    target_compile_options(nookbit_initial_setup_tests PRIVATE /W4 /permissive- /utf-8)
+  endif()
+  add_test(NAME nookbit_initial_setup_tests COMMAND nookbit_initial_setup_tests)
+  if(WIN32)
+    set_tests_properties(nookbit_initial_setup_tests PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+  endif()
   add_executable(nookbit_ui_font_tests ui_font_tests.cpp ${PROJECT_SOURCE_DIR}/resources/fonts.qrc)
   set_target_properties(nookbit_ui_font_tests PROPERTIES AUTORCC ON)
   target_include_directories(nookbit_ui_font_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)

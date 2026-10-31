@@ -1,5 +1,10 @@
 # NookBit 설계와 확장 원칙
 
+Initial setup is host-owned UI with an injected application callback. It owns no
+feature runtimes and cannot start file movement. File Organizer applies optional
+validated rule imports and a default-destination update; Companion retains its
+existing visibility setting. See [initial setup](initial-setup.md).
+
 File-work state uses `ICharacterChannel`; bounded result presentation uses the
 separate `ICharacterReactionChannel`. BackgroundTaskRunner emits a completion fact
 only for FileWork tasks, and FeatureConnections maps it to optional pack cues.

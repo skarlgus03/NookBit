@@ -28,6 +28,7 @@
 #include <QPalette>
 #include "presentation/ui_settings_controller.hpp"
 #include "presentation/ui_font.hpp"
+#include "presentation/initial_setup_controller.hpp"
 #include "presentation/destination_settings_controller.hpp"
 #include "presentation/user_guide_controller.hpp"
 #include <QSystemTrayIcon>
@@ -875,7 +876,9 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
     const bool verifyFeaturePreferences = arguments.contains(QStringLiteral("--verify-feature-preferences"));
-    const bool verifyFeatures = verifyFeaturePreferences || arguments.contains(QStringLiteral("--verify-feature-startup"));
+    const bool verifySetupSkip = arguments.contains(QStringLiteral("--verify-initial-setup-skip"));
+    const bool verifyInitialSetup = verifySetupSkip || arguments.contains(QStringLiteral("--verify-initial-setup"));
+    const bool verifyFeatures = verifyInitialSetup || verifyFeaturePreferences || arguments.contains(QStringLiteral("--verify-feature-startup"));
     const bool verifyUi = verifyFeatures || arguments.contains(QStringLiteral("--verify-ui"));
     const auto selection = nookbit::parseFeatureSelection(arguments);
     if (!selection) { QTextStream(stderr) << QString::fromStdString(selection.error().message) << Qt::endl; return EXIT_FAILURE; }
@@ -909,6 +912,8 @@ int main(int argc, char* argv[]) {
         ? std::make_unique<QSettings>(QDir(appData).filePath("preferences.ini"), QSettings::IniFormat)
         : std::make_unique<QSettings>();
     auto& uiPreferences = *preferenceStorage;
+    const bool existingConfiguration = QFileInfo::exists(QDir(appData).filePath(QStringLiteral("rules.json")))
+        || uiPreferences.contains(QStringLiteral("destinationRoot")) || uiPreferences.contains(QStringLiteral("character/selectedPack"));
     nookbit::FeaturePreferences featurePreferences(uiPreferences);
     // 저장 복원 검사에서는 임시 INI에만 선택을 먼저 기록한 뒤 실제 시작 읽기 경로를 사용한다.
     if (verifyFeaturePreferences && !featurePreferences.save(selection.value())) return EXIT_FAILURE;
@@ -945,7 +950,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::UiPageRegistry uiPages({2, 8, 9, 12});
+    nookbit::UiPageRegistry uiPages({2, 8, 9, 12, 13});
     const auto watchFolder = verifyFeatures ? QDir(appData).filePath("watch")
         : QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (verifyFeatures && startup.active.watch) QDir().mkpath(watchFolder);
@@ -959,6 +964,20 @@ int main(int argc, char* argv[]) {
     auto* folderWatch = features.watch();
     auto* notificationRuntime = features.notifications();
     auto* companion = features.companion();
+    nookbit::InitialSetupController initialSetup(uiPreferences, !verifyUi || verifyInitialSetup,
+        {organizer != nullptr, companion != nullptr, defaultDestination,
+            organizer ? organizer->preview().activeRuleLabel() : QString(),
+            companion ? companion->window().shown() : false, existingConfiguration},
+        [&features, organizer, companion](const nookbit::InitialSetupRequest& request) {
+            // 기능 소유 창구만 호출하고 초기 설정에서는 파일 작업을 시작하지 않는 함수.
+            if (features.busy()) return nookbit::Result<void>::failure({"setup.busy", "진행 중인 작업이 끝나면 다시 눌러 주세요."});
+            if (organizer) {
+                const auto configured = organizer->configureInitialSettings(request.destinationRoot, request.rulesFile);
+                if (!configured) return configured;
+            }
+            if (companion) companion->window().setShown(request.companionShown);
+            return nookbit::Result<void>::success();
+        });
     bool featureBindingsClean = true;
     QQmlApplicationEngine engine;
     // 테마와 컨트롤을 만들기 전에 공통 글꼴을 확정하고 창에서도 명시적으로 공유한다.
@@ -1017,6 +1036,7 @@ int main(int argc, char* argv[]) {
     expose("notifications", notificationRuntime ? &notificationRuntime->controller() : nullptr);
     expose("appLifecycle", &appLifecycle);
     expose("uiSettings", &uiSettings);
+    expose("initialSetup", &initialSetup);
     expose("featureSettings", &featureSettings);
     expose("userGuides", &userGuides);
     expose("uiPages", &uiPages);
@@ -1091,6 +1111,44 @@ int main(int argc, char* argv[]) {
     QObject::connect(&trayAvailability, &QTimer::timeout, &appLifecycle, refreshTray);
     if (!verifyUi) trayAvailability.start();
 
+    // 임시 저장소에서 첫 실행 화면의 실제 버튼과 목적지 바인딩·재실행 복원을 검사한다.
+    if (verifyInitialSetup) {
+        QEventLoop settle;
+        QTimer::singleShot(160, &settle, &QEventLoop::quit);
+        settle.exec();
+        auto* window = engine.rootObjects().isEmpty() ? nullptr : engine.rootObjects().first();
+        auto* destination = window ? findUiChild<QObject*>(window, "setupDestination") : nullptr;
+        auto* finish = window ? findUiChild<QObject*>(window, "setupFinishButton") : nullptr;
+        auto* skip = window ? findUiChild<QObject*>(window, "setupSkipButton") : nullptr;
+        auto* companionToggle = window ? findUiChild<QObject*>(window, "setupCompanionSwitch") : nullptr;
+        bool valid = window && destination && finish && skip && companionToggle && initialSetup.required()
+            && window->property("currentPage").toInt() == 13 && featureBindingsClean && organizer && companion;
+        if (valid) {
+            destination->setProperty("text", "relative");
+            valid = QMetaObject::invokeMethod(finish, "clicked") && initialSetup.required() && !initialSetup.message().isEmpty();
+            const auto chosen = QDir(appData).filePath("chosen-folder");
+            const auto original = organizer->preview().defaultDestinationRoot();
+            const bool originallyShown = companion->window().shown();
+            destination->setProperty("text", chosen);
+            companionToggle->setProperty("checked", !originallyShown);
+            valid = QMetaObject::invokeMethod(verifySetupSkip ? skip : finish, "clicked") && valid;
+            QCoreApplication::processEvents();
+            valid = valid && !initialSetup.required() && window->property("currentPage").toInt() == 0
+                && !QFileInfo::exists(chosen) && !features.busy();
+            if (verifySetupSkip) {
+                valid = valid && organizer->preview().defaultDestinationRoot() == original && companion->window().shown() == originallyShown;
+            } else {
+                auto* sortingDestination = findUiChild<QObject*>(window, "compactDestinationField");
+                valid = valid && organizer->preview().defaultDestinationRoot() == chosen
+                    && sortingDestination && sortingDestination->property("text").toString() == chosen
+                    && companion->window().shown() != originallyShown;
+            }
+            nookbit::InitialSetupController restored(uiPreferences, true, {}, {});
+            valid = valid && !restored.required() && featureBindingsClean;
+        }
+        QTextStream(stdout) << "Initial setup " << (verifySetupSkip ? "skip" : "finish") << ": " << valid << Qt::endl;
+        return valid ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
     // 활성 기능 조합 검사는 실제 창구와 화면 부재를 확인하고 사용자 저장소에 접근하지 않는다.
     if (verifyFeatures) {
         QEventLoop settle;

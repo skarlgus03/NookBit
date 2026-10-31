@@ -1,5 +1,12 @@
 # NookBit
 
+On first launch, choose a default organizing folder, keep the prepared rules or
+import a v3 JSON ruleset, and select desktop companion visibility. Start validates
+and applies these settings; Skip retains existing values. The setup is shown once
+until Start or Skip records completion, including on older installations without
+that marker. Existing settings are prefilled. No files are moved during setup.
+See [initial-setup behavior and verification](docs/initial-setup.md).
+
 Real file work (including undo/recovery) selects the companion's working clip;
 inspection/approval preparation does not. Completion and failure use separate
 2.4-second cues, then return to the current behavior/offer. Packs can bind

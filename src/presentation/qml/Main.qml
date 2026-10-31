@@ -54,9 +54,15 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
-    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리")})
+    readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리"), 13: qsTr("처음 시작하기")})
+    Component.onCompleted: if (initialSetup.required) currentPage = 13
+    Connections {
+        target: initialSetup
+        // 명시적인 시작·건너뛰기를 마치면 일반 홈으로 돌아가는 함수.
+        function onRequiredChanged() { if (!initialSetup.required && root.currentPage === 13) root.currentPage = 0 }
+    }
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
-    function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
+    function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || page === 13 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
     readonly property bool inlineRecoveryInspection: currentPage === 10 && root.workBusy && !root.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && !!fileSortPane && fileSortPane.manualSortRequested
@@ -65,6 +71,7 @@ ApplicationWindow {
     readonly property int homeWidth: 380
     // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
+        if (initialSetup.required && currentPage !== 13) { currentPage = 13; return }
         // 예전 독립 미리보기 번호는 파일 정리로 돌려 빈 페이지를 만들지 않는다.
         if (currentPage === 2) { currentPage = 7; return }
         if (!pageAvailable(currentPage)) currentPage = 0
@@ -148,7 +155,7 @@ ApplicationWindow {
         watchFolder: watchController ? watchController.folder : ""
         companionDescriptor: desktopUiHost.summary
         registeredPages: uiPages.pages
-        navigationEnabled: !root.workBusy && !root.confirmationPending
+        navigationEnabled: !root.workBusy && !root.confirmationPending && !initialSetup.required
         currentPage: root.currentPage
         width: root.homeWidth
         anchors.left: parent.left
@@ -229,7 +236,11 @@ ApplicationWindow {
         y: root.y
         visible: root.currentPage !== 0 && root.visible && root.visibility !== Window.Minimized
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
-        onClosing: function(event) { event.accepted = false; root.currentPage = 0 }
+        onClosing: function(event) {
+            event.accepted = false
+            if (initialSetup.required) root.close()
+            else root.currentPage = 0
+        }
     }
     Repeater {
         parent: extensionWindow.contentItem
@@ -279,7 +290,7 @@ ApplicationWindow {
                 font.pixelSize: UiMetrics.textWindowTitle; font.bold: true
             }
             BackButton { description: qsTr("설정으로 돌아가기"); enabled: !root.workBusy; visible: uiPages.page(root.currentPage).host === "settingsDetail" || [6, 10, 11].indexOf(root.currentPage) >= 0; onClicked: root.currentPage = 8 }
-            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !root.workBusy; onClicked: root.currentPage = 0 }
+            NavigationButton { objectName: "extensionCloseButton"; text: qsTr("접기 ×"); enabled: !root.workBusy && !initialSetup.required; onClicked: root.currentPage = 0 }
         }
     }
     Item {
@@ -338,6 +349,13 @@ ApplicationWindow {
         anchors.fill: parent
         visible: root.currentPage === 12
         controller: featureSettings
+        dark: root.editorDark
+    }
+    InitialSetupPage {
+        parent: extensionHost
+        anchors.fill: parent
+        visible: root.currentPage === 13
+        controller: initialSetup
         dark: root.editorDark
     }
 

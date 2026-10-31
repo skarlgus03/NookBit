@@ -248,6 +248,28 @@ QVariantMap FileOrganizerRuntime::settingsUi() {
         {"notice", QVariantMap{{"source", QUrl(prefix + "OrganizerRecoveryNotice.qml")},
             {"properties", QVariantMap{{"controller", QVariant::fromValue(static_cast<QObject*>(&recovery()))}}}}}};
 }
+// 입력 검증을 통과한 초기 선택만 적용하며 기존 규칙 유지 선택은 저장본을 건드리지 않는 함수.
+Result<void> FileOrganizerRuntime::configureInitialSettings(const QString& destination, const QUrl& rulesFile) {
+    if (tasks().busy()) return Result<void>::failure({"setup.busy", "다른 작업이 끝난 뒤 다시 시작하기를 눌러 주세요."});
+    const QFileInfo folder(destination);
+    if (!folder.isAbsolute() || QDir(destination).isRoot() || (folder.exists() && !folder.isDir()))
+        return Result<void>::failure({"setup.folder", "정리 폴더의 전체 경로를 확인해 주세요."});
+    if (!rulesFile.isEmpty()) {
+        const auto imported = rules().importJsonFile(rulesFile);
+        if (!imported.value("ok").toBool())
+            return Result<void>::failure({"setup.rules", (imported.value("location").toString() + ": " + imported.value("reason").toString()).toStdString()});
+        if (!rules().save()) {
+            const auto error = rules().message();
+            rules().reload();
+            return Result<void>::failure({"setup.rules_save", error.toStdString()});
+        }
+    }
+    if (!preview().setDefaultDestinationRoot(destination))
+        return Result<void>::failure({"setup.folder", "기본 정리 폴더를 적용하지 못했어요."});
+    if (!state_->verifyUi && state_->uiPreferences.status() != QSettings::NoError)
+        return Result<void>::failure({"setup.save", "정리 설정을 저장하지 못했어요. 저장 권한을 확인해 주세요."});
+    return Result<void>::success();
+}
 // 소유한 pendingFiles 창구를 빌려주는 함수.
 PendingFilesModel& FileOrganizerRuntime::pendingFiles() { return state_->pendingFiles; }
 // 대기 목록의 구체 어댑터를 노출하지 않고 조회 계약만 빌려주는 함수.

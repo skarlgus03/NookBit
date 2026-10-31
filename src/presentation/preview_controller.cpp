@@ -81,6 +81,21 @@ bool PreviewController::canUndo() const noexcept { return undoPlanId_.has_value(
 // 처음 제안할 정리 목적지 루트를 반환하는 함수.
 QString PreviewController::defaultDestinationRoot() const { return defaultDestinationRoot_; }
 
+// 초기 설정에서도 기존 목적지 저장 연결을 재사용하되 파일을 검사하거나 이동하지 않는 함수.
+bool PreviewController::setDefaultDestinationRoot(const QString& root) {
+    if (runner_ && runner_->busy()) return false;
+    const auto clean = QDir::cleanPath(QDir::fromNativeSeparators(root.trimmed()));
+    const QFileInfo info(clean);
+    if (root.trimmed().isEmpty() || !info.isAbsolute() || QDir(clean).isRoot() || (info.exists() && !info.isDir())) return false;
+    if (defaultDestinationRoot_ != clean) {
+        defaultDestinationRoot_ = clean;
+        clear();
+        emit defaultDestinationRootChanged();
+    }
+    emit destinationRootAccepted(clean);
+    return true;
+}
+
 // 사용자 저장본을 화면에 표시할 짧은 규칙 식별자로 반환하는 함수.
 QString PreviewController::activeRuleLabel() const { return activeRuleLabel_; }
 
