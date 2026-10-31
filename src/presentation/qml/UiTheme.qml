@@ -57,6 +57,7 @@ QtObject {
             window: p.window, surface: p.surface, alternate: p.raised, home: p.window,
             inspectionVeil: white, text: p.text, contentText: p.text, muted: p.muted, homeMuted: p.muted,
             border: p.border, sectionBorder: p.border, button: p.raised,
+            homeFooterDivider: Qt.tint(p.border, Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.32)),
             navigationText: p.text, navigationButton: p.raised, navigationSelected: p.navigationSelected || p.accentSoft,
             navigationBorder: p.border, navigationFocus: p.focus,
             navigationActiveText: p.accent,

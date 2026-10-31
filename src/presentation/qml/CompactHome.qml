@@ -106,7 +106,13 @@ Rectangle {
             Layout.fillWidth: true
             enabled: home.navigationEnabled
             spacing: UiMetrics.spaceExtraSmall
-            Rectangle { Layout.fillWidth: true; implicitHeight: UiMetrics.borderNormal; color: home.theme.border }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: UiMetrics.homeFooterDividerSpacing
+                Layout.bottomMargin: UiMetrics.homeFooterDividerSpacing
+                implicitHeight: UiMetrics.homeFooterDividerThickness
+                color: home.theme.homeFooterDivider
+            }
             HomeMenuButton {
                 objectName: "homeNavigation14"
                 Layout.fillWidth: true

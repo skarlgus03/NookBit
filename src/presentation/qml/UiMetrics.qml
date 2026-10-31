@@ -46,6 +46,8 @@ QtObject {
     readonly property int navigationHeight: 48
     readonly property int mainNavigationHeight: navigationHeight
     readonly property int homeShortcutLimit: 4
+    readonly property int homeFooterDividerThickness: borderActive
+    readonly property int homeFooterDividerSpacing: spaceControl
     readonly property int navigationIconSize: 24
     readonly property int textNavigation: typeEmphasis
     readonly property int mainMenuIconSize: navigationIconSize
