@@ -1,9 +1,10 @@
 # NookBit 설계와 확장 원칙
 
-Initial setup is host-owned UI with an injected application callback. It owns no
-feature runtimes and cannot start file movement. File Organizer applies optional
-validated rule imports and a default-destination update; Companion retains its
-existing visibility setting. See [initial setup](initial-setup.md).
+The tutorial is read-only host UI backed by module-owned value contributions in
+`UiPageRegistry`. Active modules may contribute multiple ordered pages; lifetime
+cleanup removes their instructions. `TutorialController` stores only completion,
+has no feature apply callback and cannot change settings or execute file work.
+Legacy first-run completion remains valid. See [tutorial](tutorial.md).
 
 File-work state uses `ICharacterChannel`; bounded result presentation uses the
 separate `ICharacterReactionChannel`. BackgroundTaskRunner emits a completion fact

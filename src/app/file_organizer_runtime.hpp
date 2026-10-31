@@ -37,8 +37,6 @@ public:
     Result<void> registerUi(UiPageRegistry& registry);
     /// 공통 설정 화면에 삽입할 기능 소유 영역과 빌려줄 입력을 반환하는 함수.
     QVariantMap settingsUi();
-    /// 파일 이동 없이 초기 목적지와 사용자가 선택한 규칙만 적용하는 함수.
-    Result<void> configureInitialSettings(const QString& destination, const QUrl& rulesFile);
     /// 대기 목록의 화면 창구를 반환하는 함수.
     PendingFilesModel& pendingFiles();
     /// 다른 기능이 대기 경로의 값 복사본만 읽는 창구를 반환하는 함수.

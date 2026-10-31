@@ -1,13 +1,12 @@
 # NookBit
 
-On first launch, choose a default organizing folder, keep the prepared rules or
-import a v3 JSON ruleset, and select desktop companion visibility. Start validates
-and applies these settings; Skip retains existing values. The setup is shown once
-until Start or Skip records completion, including on older installations without
-that marker. Existing settings are prefilled. No files are moved during setup.
-Open Settings → Information → **처음 설정 다시 보기** to revisit it. Closing
-discards the page's edits; **적용하고 닫기** explicitly applies them.
-See [initial-setup behavior and verification](docs/initial-setup.md).
+The first-launch **tutorial** explains the currently active built-in modules.
+Use Previous/Next or the contents selector to read about sorting, rules, history,
+companions and other enabled features. It never changes feature settings or moves
+files. Each module supplies its own guidance; disabled modules are omitted.
+Open Settings → Information → **튜토리얼 다시 보기** to revisit it.
+Existing first-run completion records remain valid.
+See [tutorial behavior, contribution contract and verification](docs/tutorial.md).
 
 Real file work (including undo/recovery) selects the companion's working clip;
 inspection/approval preparation does not. Completion and failure use separate

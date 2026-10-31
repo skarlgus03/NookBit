@@ -162,8 +162,8 @@ if(NOOKBIT_BUILD_QT_APP)
       presentation/pending_files_model.cpp
       presentation/preview_controller.hpp
       presentation/preview_controller.cpp
-      presentation/initial_setup_controller.hpp
-      presentation/initial_setup_controller.cpp
+      presentation/tutorial_controller.hpp
+      presentation/tutorial_controller.cpp
       presentation/history_controller.hpp
       presentation/history_controller.cpp
       presentation/recovery_controller.hpp
@@ -215,7 +215,7 @@ if(NOOKBIT_BUILD_QT_APP)
       VERSION 1.0
       QML_FILES
         presentation/qml/Main.qml
-        presentation/qml/InitialSetupPage.qml
+        presentation/qml/TutorialPage.qml
         presentation/qml/PageSurface.qml
         presentation/qml/OperationProgressPopup.qml
         presentation/qml/CollisionSettingsPage.qml

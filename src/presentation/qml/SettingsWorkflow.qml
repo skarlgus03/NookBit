@@ -19,7 +19,7 @@ Item {
     signal settingsRequested()
     signal routeRequested(int page)
     signal dialogRequested(string dialogId)
-    signal initialSetupRequested()
+    signal tutorialRequested()
     clip: true
     Behavior on slidePosition {
         NumberAnimation { id: slide; duration: workflow.active ? UiMetrics.pageSlideDuration : 0; easing.type: Easing.OutCubic }
@@ -37,7 +37,7 @@ Item {
         watchContribution: workflow.watchContribution
         dark: workflow.dark
         onRouteRequested: function(route) { workflow.routeRequested(route) }
-        onInitialSetupRequested: workflow.initialSetupRequested()
+        onTutorialRequested: workflow.tutorialRequested()
     }
     RegisteredPageHost {
         registration: workflow.detailPage

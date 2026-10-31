@@ -7,6 +7,48 @@ namespace nookbit {
 UiPageRegistry::UiPageRegistry(QSet<int> reservedPages, QObject* parent)
     : QObject(parent), reservedPages_(std::move(reservedPages)) {}
 
+// 텍스트 안내만 허용하고 잘못된 묶음이나 중복 이름은 부분 등록 없이 거부하는 함수.
+Result<void> UiPageRegistry::addTutorialSteps(QList<UiTutorialStep> steps, QObject& lifetime) {
+    if (QThread::currentThread() != thread() || lifetime.thread() != thread())
+        return Result<void>::failure({"ui.tutorial_thread", "Tutorial registration requires the UI owning thread."});
+    QSet<QString> ids;
+    for (const auto& step : steps) {
+        if (step.id.trimmed().isEmpty() || step.ownerId.trimmed().isEmpty() || step.title.trimmed().isEmpty()
+            || step.summary.trimmed().isEmpty() || step.instructions.isEmpty()
+            || std::any_of(step.instructions.cbegin(), step.instructions.cend(), [](const QString& text) {
+                // 비어 있는 설명 항목을 등록 전에 확인하는 함수.
+                return text.trimmed().isEmpty();
+            }))
+            return Result<void>::failure({"ui.invalid_tutorial", "Tutorial steps need stable names, a title, a summary and instructions."});
+        if (tutorialSteps_.contains(step.id) || ids.contains(step.id))
+            return Result<void>::failure({"ui.duplicate_tutorial", "Tutorial step name is already registered."});
+        ids.insert(step.id);
+    }
+    if (steps.isEmpty()) return Result<void>::success();
+    for (auto& step : steps) { const auto id = step.id; tutorialSteps_.insert(id, std::move(step)); }
+    QObject::connect(&lifetime, &QObject::destroyed, this, [this, ids] {
+        // 모듈이 사라지면 해당 모듈이 소유한 안내만 제거하는 함수.
+        for (const auto& id : ids) tutorialSteps_.remove(id);
+        emit tutorialStepsChanged();
+    });
+    emit tutorialStepsChanged();
+    return Result<void>::success();
+}
+
+// 안내에 실행 창구를 포함하지 않고 QML에 순수 값 복사본만 전달하는 함수.
+QVariantList UiPageRegistry::tutorialSteps() const {
+    auto sorted = tutorialSteps_.values();
+    std::sort(sorted.begin(), sorted.end(), [](const auto& left, const auto& right) {
+        // 같은 순서 값에서도 등록 시점에 따라 안내가 섞이지 않게 비교하는 함수.
+        return left.order != right.order ? left.order < right.order : left.id < right.id;
+    });
+    QVariantList result;
+    for (const auto& step : sorted)
+        result.append(QVariantMap{{"id", step.id}, {"ownerId", step.ownerId}, {"title", step.title},
+            {"summary", step.summary}, {"instructions", step.instructions}, {"note", step.note}});
+    return result;
+}
+
 // 중복·예약 번호·외부 QML 경로를 거부하고 소유 수명에 등록을 연결하는 함수.
 Result<void> UiPageRegistry::addPage(UiPageContribution contribution, QObject& lifetime) {
     return addPages({std::move(contribution)}, lifetime);

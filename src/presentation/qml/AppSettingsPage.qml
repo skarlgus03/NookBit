@@ -13,7 +13,7 @@ ScrollView {
     property string applicationVersion: ""
     readonly property var theme: UiTheme.colors(dark)
     signal routeRequested(int page)
-    signal initialSetupRequested()
+    signal tutorialRequested()
     objectName: "settingsPage"
     contentWidth: availableWidth
     clip: true
@@ -111,11 +111,11 @@ ScrollView {
                 wrapMode: Text.Wrap
             }
             AppButton {
-                objectName: "settingsInitialSetupButton"
-                text: qsTr("처음 설정 다시 보기")
+                objectName: "settingsTutorialButton"
+                text: qsTr("튜토리얼 다시 보기")
                 dark: page.dark
                 appearance: AppButton.Soft
-                onClicked: page.initialSetupRequested()
+                onClicked: page.tutorialRequested()
             }
         }
     }

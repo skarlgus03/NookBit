@@ -7,6 +7,19 @@
 namespace nookbit {
 // 공통 설정 흐름에는 컨트롤러 대신 화면 경로와 명시적인 입력만 등록하는 함수.
 Result<void> FolderWatchRuntime::registerUi(UiPageRegistry& registry) {
+    const auto text = [](const char* value) {
+        // 감시 모듈의 안내 문구를 번역하는 함수.
+        return QCoreApplication::translate("WatchTutorial", value);
+    };
+    const auto tutorial = registry.addTutorialSteps({
+        {"watch.basics", "folder-watch", text("폴더 감시로 정리 제안 받기"),
+            text("지정한 폴더가 설정한 조건에 닿으면 정리를 제안해요."),
+            {text("설정에서 폴더 감시를 열고, 지켜볼 폴더와 하위 폴더 포함 여부를 선택해요."),
+             text("다시 확인하는 간격과 파일 개수·전체 크기·가장 오래된 파일 조건을 정하고 저장해요. 하나라도 또는 모두 맞을 때 제안하도록 고를 수 있어요."),
+             text("지금 검사로 조건을 확인할 수 있어요. 제안을 받으면 정리할지 검토하거나 나중으로 미룰 수 있어요.")},
+            text("감시 폴더와 파일 정리의 기본 목적지는 다른 설정이에요. 제안이 발생했다는 것만으로 파일을 즉시 이동하지 않아요."), 50}
+    }, uiLifetime_);
+    if (!tutorial) return tutorial;
     return registry.addPage({"watch.settings", "folder-watch", 3,
         QCoreApplication::translate("WatchUi", "폴더 감시 설정"), "folder", {}, 0,
         QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/FolderWatchSettingsPage.qml")),

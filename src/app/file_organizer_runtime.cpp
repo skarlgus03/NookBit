@@ -220,6 +220,28 @@ Result<void> FileOrganizerRuntime::registerUi(UiPageRegistry& registry) {
         return QVariant::fromValue(value);
     };
     const auto prefix = QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/");
+    const auto tutorial = registry.addTutorialSteps({
+        {"organizer.sort", "file-organizer", title("파일을 모으고 정리하기"),
+            title("파일 정리 페이지에서 대기 목록에 넣고, 이동할 위치를 확인해요."),
+            {title("메인 메뉴의 파일 정리를 열고, 페이지에 파일이나 폴더를 끌어다 놓아요. 등록만으로 파일이 이동하지는 않아요."),
+             title("정리할 위치를 확인하고 결과 미리보기를 눌러요. 저장된 분류 규칙으로 각 항목의 목적지를 확인할 수 있어요."),
+             title("정리하기를 누른 뒤 최종 확인에서 이동할 항목을 확인하고 승인하면 이동이 시작돼요.")},
+            title("맞는 규칙이 없거나 정리하지 않음으로 지정된 항목은 옮기지 않아요. 폴더는 내부를 나누지 않고 하나의 대상으로 다뤄요."), 10},
+        {"organizer.rules", "file-organizer", title("분류 규칙 만들기"),
+            title("조건을 연결해 원하는 파일 구조를 만들어요."),
+            {title("분류 규칙 페이지의 캔버스에서 우클릭하면 조건 노드와 목적지·정리하지 않음 노드를 추가할 수 있어요."),
+             title("파일 입력에서 조건으로 연결하고, 조건을 더 붙이려면 자식 노드로 이어 주세요. 마지막에는 목적지 또는 정리하지 않음을 연결해요."),
+             title("형제 조건은 표시된 순서대로 검사해요. 먼저 맞은 가지를 따라 내려가며, 그 가지에서 끝까지 맞지 않아도 다른 형제로 되돌아가지 않아요."),
+             title("규칙 테스트로 실제 파일이나 입력한 메타데이터를 시험한 뒤 전체 저장을 눌러요. 파일 메뉴에서 JSON 불러오기·내보내기도 가능해요.")},
+            title("AI용 작성 문서를 다른 LLM에 제공해 JSON 초안을 만들 수도 있어요. 불러올 때 검증하며, 저장 후 파일 정리에 적용돼요."), 20},
+        {"organizer.history", "file-organizer", title("작업 기록과 되돌리기"),
+            title("이동 결과를 확인하고 필요한 작업을 되돌릴 수 있어요."),
+            {title("작업 기록에서 날짜별 작업을 선택하면 파일별 원래 위치와 이동 결과를 확인할 수 있어요."),
+             title("파일명이나 경로로 검색하고, 기간과 결과 필터로 찾을 범위를 줄여요."),
+             title("되돌릴 작업을 선택하고 이 작업 되돌리기를 눌러 확인해요. 중단된 작업은 설정의 안내에서 중단 작업 확인을 열어 검토해요.")},
+            title("원본 위치에 다른 파일이 생기는 등 상태가 달라지면 되돌리기가 제한될 수 있어요. 실제 검사 결과를 확인해 주세요."), 30}
+    }, state_->connections);
+    if (!tutorial) return tutorial;
     return registry.addPages({
         {"organizer.sort", "file-organizer", 7, title("파일 정리"), "folder", title("파일 관리"), 10,
             QUrl(prefix + "OrganizerSortPage.qml"),
@@ -247,30 +269,6 @@ QVariantMap FileOrganizerRuntime::settingsUi() {
             {"destinations", QVariant::fromValue(static_cast<QObject*>(&destinations()))}}},
         {"notice", QVariantMap{{"source", QUrl(prefix + "OrganizerRecoveryNotice.qml")},
             {"properties", QVariantMap{{"controller", QVariant::fromValue(static_cast<QObject*>(&recovery()))}}}}}};
-}
-// 입력 검증을 통과한 초기 선택만 적용하며 기존 규칙 유지 선택은 저장본을 건드리지 않는 함수.
-Result<void> FileOrganizerRuntime::configureInitialSettings(const QString& destination, const QUrl& rulesFile) {
-    if (tasks().busy()) return Result<void>::failure({"setup.busy", "다른 작업이 끝난 뒤 다시 시작하기를 눌러 주세요."});
-    const QFileInfo folder(destination);
-    if (!folder.isAbsolute() || QDir(destination).isRoot() || (folder.exists() && !folder.isDir()))
-        return Result<void>::failure({"setup.folder", "정리 폴더의 전체 경로를 확인해 주세요."});
-    if (!rulesFile.isEmpty()) {
-        if (rules().dirty())
-            return Result<void>::failure({"setup.rules_dirty", "분류 규칙 편집기에 저장하지 않은 초안이 있어요. 먼저 저장하거나 초안을 취소해 주세요."});
-        const auto imported = rules().importJsonFile(rulesFile);
-        if (!imported.value("ok").toBool())
-            return Result<void>::failure({"setup.rules", (imported.value("location").toString() + ": " + imported.value("reason").toString()).toStdString()});
-        if (!rules().save()) {
-            const auto error = rules().message();
-            rules().reload();
-            return Result<void>::failure({"setup.rules_save", error.toStdString()});
-        }
-    }
-    if (!preview().setDefaultDestinationRoot(destination))
-        return Result<void>::failure({"setup.folder", "기본 정리 폴더를 적용하지 못했어요."});
-    if (!state_->verifyUi && state_->uiPreferences.status() != QSettings::NoError)
-        return Result<void>::failure({"setup.save", "정리 설정을 저장하지 못했어요. 저장 권한을 확인해 주세요."});
-    return Result<void>::success();
 }
 // 소유한 pendingFiles 창구를 빌려주는 함수.
 PendingFilesModel& FileOrganizerRuntime::pendingFiles() { return state_->pendingFiles; }

@@ -33,7 +33,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
     Q_PROPERTY(bool awaitingConfirmation READ awaitingConfirmation NOTIFY previewChanged)
     Q_PROPERTY(QVariantList confirmationSteps READ confirmationSteps NOTIFY previewChanged)
-    Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot NOTIFY defaultDestinationRootChanged)
+    Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
     Q_PROPERTY(QString activeRuleLabel READ activeRuleLabel NOTIFY activeRuleChanged)
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
 
@@ -83,8 +83,6 @@ public:
 
     /// 처음 제안할 정리 목적지 루트를 반환하는 함수.
     [[nodiscard]] QString defaultDestinationRoot() const;
-    /// 미리보기나 파일 이동 없이 기본 목적지를 바꾸고 기존 설정 연결에 전달하는 함수.
-    bool setDefaultDestinationRoot(const QString& root);
 
     /// 현재 저장되어 실제 미리보기에 적용되는 규칙의 이름과 버전을 반환하는 함수.
     [[nodiscard]] QString activeRuleLabel() const;
@@ -143,7 +141,6 @@ public:
     Q_INVOKABLE void clear();
 
 signals:
-    void defaultDestinationRootChanged();
     /// 실제 정리 실행의 시작과 결과만 알리고 어떤 화면을 열지는 결정하지 않는다.
     void sortExecutionStarted();
     void sortExecutionFinished(bool success, const QString& message);

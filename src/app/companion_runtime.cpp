@@ -280,6 +280,19 @@ std::unique_ptr<CompanionTrayAction> CompanionRuntime::createTrayAction(QMenu& m
 // 관리 페이지의 실제 입력은 이 기능이 선택하고 호스트에는 등록 정보만 전달하는 함수.
 Result<void> CompanionRuntime::registerUi(UiPageRegistry& registry) {
     if (!startupResult()) return startupResult();
+    const auto text = [](const char* value) {
+        // 컴패니언이 소유한 안내 문구를 같은 번역 문맥으로 제공하는 함수.
+        return QCoreApplication::translate("CompanionTutorial", value);
+    };
+    const auto tutorial = registry.addTutorialSteps({
+        {"companion.basics", "companion", text("컴패니언과 함께하기"),
+            text("바탕화면의 컴패니언은 알림과 작업 상황을 표현해요."),
+            {text("메인 메뉴의 컴패니언에서 바탕화면 표시 여부와 표시 크기를 조정할 수 있어요. 쉬는 동안 가끔 걷기도 선택할 수 있어요."),
+             text("캐릭터 팩을 가져오면 이미지와 애니메이션을 바꿀 수 있어요. 미리보기에서 행동을 고르고 재생해 보세요."),
+             text("바탕화면의 컴패니언을 드래그하면 위치를 옮길 수 있어요. 클릭하면 반응하고, 정리 중에는 팩이 제공하는 작업 표현을 보여줘요.")},
+            text("컴패니언은 작업 상황을 보여주는 역할이에요. 파일 이동은 파일 정리 기능이 처리하므로 컴패니언을 숨겨도 작업은 계속돼요."), 40}
+    }, state_->connections);
+    if (!tutorial) return tutorial;
     const auto title = QCoreApplication::translate("CompanionUi", "컴패니언");
     return registry.addPage({QStringLiteral("companion.settings"), QStringLiteral("companion"), 5,
         title, QStringLiteral("companion"), title, 40,

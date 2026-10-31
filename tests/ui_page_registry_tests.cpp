@@ -101,6 +101,33 @@ void testSettingsHost() {
     invalid.host = static_cast<nookbit::UiPageHost>(99);
     expect(!registry.addPage(invalid, owner) && registry.pages().size() == 2, "unknown render host does not add an unreachable page");
 }
+// 안내는 여러 장을 제공할 수 있고 순수 값·정렬·모듈 수명·묶음 검증을 지키는지 검사하는 함수.
+void testTutorials() {
+    nookbit::UiPageRegistry registry;
+    auto owner = std::make_unique<QObject>();
+    QObject other;
+    nookbit::UiTutorialStep step{"organizer.first", "file-organizer", "First", "Summary", {"Instruction"}, "Note", 20};
+    auto second = step; second.id = "organizer.second"; second.order = 10;
+    expect(registry.addTutorialSteps({step, second}, *owner).hasValue(), "one module may contribute several tutorial pages");
+    expect(registry.tutorialSteps().size() == 2 && registry.tutorialSteps().first().toMap().value("id") == second.id,
+        "tutorials sorted independently of registration order");
+    auto duplicate = step; duplicate.id = "new";
+    expect(!registry.addTutorialSteps({duplicate, step}, *owner) && registry.tutorialSteps().size() == 2,
+        "late duplicate leaves the entire tutorial batch unchanged");
+    auto invalid = duplicate; invalid.instructions = {" "};
+    expect(!registry.addTutorialSteps({invalid}, *owner), "blank tutorial instructions are rejected");
+    invalid = duplicate; invalid.ownerId.clear();
+    expect(!registry.addTutorialSteps({invalid}, *owner), "tutorials require a stable owner");
+    QObject foreign; QThread thread; foreign.moveToThread(&thread);
+    expect(!registry.addTutorialSteps({duplicate}, foreign), "foreign-thread tutorial registration rejected");
+    duplicate.id = "other";
+    expect(registry.addTutorialSteps({duplicate}, other).hasValue(), "independent tutorial fixture");
+    auto copy = registry.tutorialSteps(); copy[0] = QVariantMap{{"title", "Changed"}};
+    expect(registry.tutorialSteps().first().toMap().value("title") == "First", "tutorial snapshots cannot modify stored data");
+    owner.reset();
+    expect(registry.tutorialSteps().size() == 1 && registry.tutorialSteps().first().toMap().value("id") == "other",
+        "module lifetime removes only its own tutorial pages");
+}
 }
 // 실제 화면 없이 등록 유효성·독립 수명·조회 계약을 검사하는 함수.
 int main(int argc, char* argv[]) {
@@ -109,6 +136,7 @@ int main(int argc, char* argv[]) {
     testLifetime();
     testBatchRegistration();
     testSettingsHost();
+    testTutorials();
     if (!failures) std::cout << "All UI-page registration tests passed.\n";
     return failures ? 1 : 0;
 }

@@ -54,16 +54,16 @@ ApplicationWindow {
         }
     }
     property int currentPage: 0
-    property int setupReturnPage: 0
+    property int tutorialReturnPage: 0
     readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리"),
-        13: initialSetup.reviewing ? qsTr("처음 설정 다시 보기") : qsTr("처음 시작하기")})
-    Component.onCompleted: if (initialSetup.required) currentPage = 13
+        13: tutorial.reviewing ? qsTr("튜토리얼 다시 보기") : qsTr("튜토리얼")})
+    Component.onCompleted: if (tutorial.required) currentPage = 13
     Connections {
-        target: initialSetup
-        // 명시적인 시작·건너뛰기를 마치면 일반 홈으로 돌아가는 함수.
+        target: tutorial
+        // 튜토리얼 종료 후 처음 열었던 홈 또는 설정 화면으로 돌아가는 함수.
         function onRequiredChanged() {
-            if (initialSetup.required) root.currentPage = 13
-            else if (root.currentPage === 13) { root.currentPage = root.setupReturnPage; root.setupReturnPage = 0 }
+            if (tutorial.required) root.currentPage = 13
+            else if (root.currentPage === 13) { root.currentPage = root.tutorialReturnPage; root.tutorialReturnPage = 0 }
         }
     }
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
@@ -76,7 +76,7 @@ ApplicationWindow {
     readonly property int homeWidth: 380
     // 본체 크기는 유지하고 별도 연결 창의 페이지만 전환하는 함수.
     onCurrentPageChanged: {
-        if (initialSetup.required && currentPage !== 13) { currentPage = 13; return }
+        if (tutorial.required && currentPage !== 13) { currentPage = 13; return }
         // 예전 독립 미리보기 번호는 파일 정리로 돌려 빈 페이지를 만들지 않는다.
         if (currentPage === 2) { currentPage = 7; return }
         if (!pageAvailable(currentPage)) currentPage = 0
@@ -160,7 +160,7 @@ ApplicationWindow {
         watchFolder: watchController ? watchController.folder : ""
         companionDescriptor: desktopUiHost.summary
         registeredPages: uiPages.pages
-        navigationEnabled: !root.workBusy && !root.confirmationPending && !initialSetup.required
+        navigationEnabled: !root.workBusy && !root.confirmationPending && !tutorial.required
         currentPage: root.currentPage
         width: root.homeWidth
         anchors.left: parent.left
@@ -243,8 +243,8 @@ ApplicationWindow {
         // 확장 창의 닫기는 앱 종료가 아니라 페이지 숨기기로 처리하는 함수.
         onClosing: function(event) {
             event.accepted = false
-            if (initialSetup.reviewing) initialSetup.skip()
-            else if (initialSetup.required) root.close()
+            if (tutorial.reviewing) tutorial.skip()
+            else if (tutorial.required) root.close()
             else root.currentPage = 0
         }
     }
@@ -299,8 +299,8 @@ ApplicationWindow {
             NavigationButton {
                 objectName: "extensionCloseButton"
                 text: qsTr("접기 ×")
-                enabled: !root.workBusy && (!initialSetup.required || initialSetup.reviewing)
-                onClicked: { if (initialSetup.reviewing) initialSetup.skip(); else root.currentPage = 0 }
+                enabled: !root.workBusy && (!tutorial.required || tutorial.reviewing)
+                onClicked: { if (tutorial.reviewing) tutorial.skip(); else root.currentPage = 0 }
             }
         }
     }
@@ -351,9 +351,9 @@ ApplicationWindow {
         applicationVersion: Qt.application.version
         watchContribution: watchSettingsEntry
         onSettingsRequested: root.currentPage = 8
-        onInitialSetupRequested: {
-            root.setupReturnPage = 8
-            if (!initialSetup.reopen()) root.setupReturnPage = 0
+        onTutorialRequested: {
+            root.tutorialReturnPage = 8
+            if (!tutorial.reopen()) root.tutorialReturnPage = 0
         }
         onRouteRequested: function(route) { root.openPage(route) }
         onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
@@ -366,11 +366,12 @@ ApplicationWindow {
         controller: featureSettings
         dark: root.editorDark
     }
-    InitialSetupPage {
+    TutorialPage {
         parent: extensionHost
         anchors.fill: parent
         visible: root.currentPage === 13
-        controller: initialSetup
+        controller: tutorial
+        steps: uiPages.tutorialSteps
         dark: root.editorDark
     }
 
