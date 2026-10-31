@@ -969,17 +969,14 @@ int main(int argc, char* argv[]) {
     };
     const auto hostTutorial = uiPages.addTutorialSteps({
         {"host.welcome", "host", tutorialText("NookBit에 오신 걸 환영해요"),
-            tutorialText("원하는 파일 구조를 만들고, 컴패니언과 함께 정리하는 도구예요."),
-            {tutorialText("메인 메뉴에서 기능을 누르면 옆에 해당 페이지가 열려요. 접기를 누르면 메인 메뉴로 돌아올 수 있어요."),
-             tutorialText("이 튜토리얼은 사용법만 설명해요. 다음을 눌러 읽거나 아래 목차에서 궁금한 항목으로 바로 이동할 수 있어요."),
-             tutorialText("안내는 현재 활성화된 기본 모듈을 기준으로 구성돼요. 모듈마다 하나 이상의 안내를 제공할 수 있어요.")},
-            tutorialText("언제든 건너뛰어도 괜찮아요. 설정 → 정보 → 튜토리얼 다시 보기에서 다시 열 수 있어요."), 0},
+            tutorialText("파일 정리부터 컴패니언까지, 사용법을 살펴봐요."),
+            {tutorialText("메인 메뉴에서 기능을 선택하면 옆에 페이지가 열려요."),
+             tutorialText("다음을 누르거나 아래 목차에서 궁금한 항목을 골라 보세요.")}, {}, 0},
         {"host.finish", "host", tutorialText("이제 직접 사용해 보세요"),
-            tutorialText("튜토리얼을 읽는 동안 설정이나 파일은 변경되지 않았어요."),
-            {tutorialText("파일 정리를 사용한다면 작은 테스트 파일부터 대기 목록에 넣고 결과 미리보기를 확인해 보세요."),
-             tutorialText("화면 테마 등 앱 설정은 설정에서, 각 기능의 세부 설정은 해당 페이지에서 변경할 수 있어요."),
-             tutorialText("모듈 관리에서 필요한 기능을 선택하고 저장한 뒤 앱을 완전히 종료했다 다시 켜면 적용돼요. 꺼진 모듈의 안내도 튜토리얼에서 빠져요.")},
-            tutorialText("나중에 사용법이 궁금해지면 설정에서 이 튜토리얼을 다시 열어 주세요."), 1000}
+            tutorialText("작은 테스트 파일부터 시작해 보세요."),
+            {tutorialText("파일 정리에 파일을 넣고 결과 미리보기를 확인해 보세요."),
+             tutorialText("필요한 기능은 모듈 관리에서 선택할 수 있어요. 저장 후 앱을 완전히 종료했다 다시 켜면 적용돼요.")},
+            tutorialText("이 안내는 설정 → 정보 → 튜토리얼 다시 보기에서 다시 열 수 있어요."), 1000}
     }, tutorial);
     if (!hostTutorial) {
         QTextStream(stderr) << QString::fromStdString(hostTutorial.error().message) << Qt::endl;
@@ -1129,7 +1126,8 @@ int main(int argc, char* argv[]) {
         auto* previous = window ? findUiChild<QObject*>(window, "tutorialPreviousButton") : nullptr;
         auto* skip = window ? findUiChild<QObject*>(window, "tutorialSkipButton") : nullptr;
         auto* contents = window ? findUiChild<QObject*>(window, "tutorialContents") : nullptr;
-        bool valid = window && page && next && previous && skip && contents && tutorial.required()
+        auto* details = window ? findUiChild<QObject*>(window, "tutorialDetailsButton") : nullptr;
+        bool valid = window && page && next && previous && skip && contents && details && tutorial.required()
             && window->property("currentPage").toInt() == 13 && featureBindingsClean && organizer && companion;
         const auto beforeFolder = organizer ? organizer->preview().defaultDestinationRoot() : QString();
         const auto beforeRules = organizer ? organizer->preview().activeRuleLabel() : QString();
@@ -1140,8 +1138,11 @@ int main(int argc, char* argv[]) {
             valid = count == uiPages.tutorialSteps().size() && count >= 7 && page->property("stepIndex").toInt() == 0;
             valid = QMetaObject::invokeMethod(next, "clicked") && valid;
             valid = valid && page->property("stepIndex").toInt() == 1;
+            valid = valid && !page->property("detailsExpanded").toBool() && details->property("visible").toBool();
+            valid = QMetaObject::invokeMethod(details, "clicked") && valid;
+            valid = valid && page->property("detailsExpanded").toBool();
             valid = QMetaObject::invokeMethod(previous, "clicked") && valid;
-            valid = valid && page->property("stepIndex").toInt() == 0;
+            valid = valid && page->property("stepIndex").toInt() == 0 && !page->property("detailsExpanded").toBool();
             // 마지막이 아닌 단계에서 목차를 선택해도 안내만 바뀌는지 검사한다.
             valid = QMetaObject::invokeMethod(contents, "activated", Q_ARG(int, count - 1)) && valid;
             valid = valid && page->property("lastStep").toBool();

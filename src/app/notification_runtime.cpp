@@ -12,8 +12,8 @@ Result<void> NotificationRuntime::registerUi(UiPageRegistry& registry) {
     const auto tutorial = registry.addTutorialSteps({
         {"notifications.basics", "notifications", text("알림 골라 받기"),
             text("모듈이 등록한 알림 종류를 한곳에서 관리해요."),
-            {text("메인 메뉴의 알림을 열면 현재 등록된 알림 종류를 볼 수 있어요."),
-             text("필요한 알림은 켜고, 받고 싶지 않은 알림은 꺼 두세요. 표시되는 종류는 활성화된 모듈에 따라 달라져요.")},
+            {text("메인 메뉴에서 알림을 열어요."),
+             text("받고 싶은 알림만 켜 두세요.")},
             text("알림을 끄는 것과 해당 기능 모듈을 끄는 것은 달라요. 기능 자체를 끄려면 모듈 관리를 사용해 주세요."), 60}
     }, uiLifetime_);
     if (!tutorial) return tutorial;

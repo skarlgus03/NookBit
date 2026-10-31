@@ -13,7 +13,8 @@ cannot invoke feature commands.
   pages: File Organizer contributes sorting, rules and history; Companion, Folder
   Watch and Notifications contribute their respective introductions. A module
   may supply multiple pages or none. Disabled modules contribute no pages.
-- The page explicitly states that it describes currently enabled base modules.
+- Pages show a short summary and a few essential actions. Supplementary notes
+  stay collapsed behind **참고사항 보기**, resetting on navigation or replay.
   Extensions may register their own instructions through the same contribution
   API; the host does not inspect feature identities to render them.
 - Skip records completion without changing feature settings. Closing/minimizing

@@ -10,14 +10,16 @@ PageSurface {
     required property var steps
     property int stepIndex: 0
     property bool initialized: false
+    property bool detailsExpanded: false
     readonly property int stepCount: steps.length
     readonly property var currentStep: stepCount > 0 ? steps[Math.min(stepIndex, stepCount - 1)] : ({})
     readonly property bool lastStep: stepIndex >= stepCount - 1
     // 다시 열 때 첫 안내와 스크롤 위치로 돌아가는 함수.
-    function restart() { stepIndex = 0; scroll.contentItem.contentY = 0 }
+    function restart() { goTo(0) }
     // 안내 단계만 바꾸며 어떤 기능 명령도 호출하지 않는 함수.
     function goTo(index) {
         stepIndex = Math.max(0, Math.min(index, stepCount - 1))
+        detailsExpanded = false
         scroll.contentItem.contentY = 0
     }
     Component.onCompleted: { initialized = true; restart() }
@@ -37,12 +39,6 @@ PageSurface {
             Accessible.role: Accessible.StaticText
         }
         ProgressBar { Layout.fillWidth: true; from: 0; to: page.stepCount; value: page.stepIndex + 1 }
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("활성화된 기본 모듈을 기준으로 안내해요. 여기서는 설정을 바꾸거나 파일을 이동하지 않아요.")
-            color: page.theme.muted
-            wrapMode: Text.Wrap
-        }
         ScrollView {
             id: scroll
             Layout.fillWidth: true
@@ -53,56 +49,77 @@ PageSurface {
             ColumnLayout {
                 width: scroll.availableWidth
                 spacing: UiMetrics.settingsSectionSpacing
-                Label {
-                    objectName: "tutorialStepTitle"
+                ColumnLayout {
                     Layout.fillWidth: true
-                    text: page.currentStep.title || ""
-                    textFormat: Text.PlainText
-                    font.pixelSize: UiMetrics.textPageTitle
-                    font.bold: true
-                    wrapMode: Text.Wrap
-                    color: page.theme.text
+                    spacing: UiMetrics.spaceControl
+                    Label {
+                        objectName: "tutorialStepTitle"
+                        Layout.fillWidth: true
+                        text: page.currentStep.title || ""
+                        textFormat: Text.PlainText
+                        font.pixelSize: UiMetrics.textPageTitle
+                        font.bold: true
+                        wrapMode: Text.Wrap
+                        color: page.theme.text
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: page.currentStep.summary || ""
+                        textFormat: Text.PlainText
+                        font.pixelSize: UiMetrics.textEmphasis
+                        wrapMode: Text.Wrap
+                        color: page.theme.muted
+                    }
                 }
-                Label {
+                Rectangle {
                     Layout.fillWidth: true
-                    text: page.currentStep.summary || ""
-                    textFormat: Text.PlainText
-                    font.pixelSize: UiMetrics.textEmphasis
-                    wrapMode: Text.Wrap
-                    color: page.theme.text
-                }
-                SettingsSection {
-                    Layout.fillWidth: true
-                    dark: page.dark
-                    title: qsTr("이렇게 사용해요")
-                    Repeater {
-                        model: page.currentStep.instructions || []
-                        delegate: RowLayout {
-                            required property int index
-                            required property string modelData
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignTop
-                            spacing: UiMetrics.spaceGroup
-                            Label {
-                                text: (index + 1).toString()
-                                Layout.alignment: Qt.AlignTop
-                                font.pixelSize: UiMetrics.textEmphasis
-                                font.bold: true
-                                color: page.theme.accent
-                            }
-                            Label {
+                    implicitHeight: instructionList.implicitHeight + UiMetrics.spaceSection * 2
+                    color: page.theme.surface
+                    radius: UiMetrics.radiusCard
+                    ColumnLayout {
+                        id: instructionList
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: UiMetrics.spaceSection
+                        spacing: UiMetrics.settingsSectionSpacing
+                        Repeater {
+                            model: page.currentStep.instructions || []
+                            delegate: RowLayout {
+                                required property int index
+                                required property string modelData
                                 Layout.fillWidth: true
-                                text: modelData
-                                textFormat: Text.PlainText
-                                wrapMode: Text.Wrap
-                                color: page.theme.text
+                                Layout.alignment: Qt.AlignTop
+                                spacing: UiMetrics.spaceGroup
+                                Label {
+                                    text: (index + 1).toString()
+                                    Layout.alignment: Qt.AlignTop
+                                    font.pixelSize: UiMetrics.textEmphasis
+                                    font.bold: true
+                                    color: page.theme.accent
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                    color: page.theme.text
+                                }
                             }
                         }
                     }
                 }
+                AppButton {
+                    objectName: "tutorialDetailsButton"
+                    visible: (page.currentStep.note || "").length > 0
+                    text: page.detailsExpanded ? qsTr("참고사항 접기") : qsTr("참고사항 보기")
+                    appearance: AppButton.Soft
+                    dark: page.dark
+                    onClicked: page.detailsExpanded = !page.detailsExpanded
+                }
                 Label {
                     Layout.fillWidth: true
-                    visible: text.length > 0
+                    visible: page.detailsExpanded && text.length > 0
                     text: page.currentStep.note || ""
                     textFormat: Text.PlainText
                     wrapMode: Text.Wrap
