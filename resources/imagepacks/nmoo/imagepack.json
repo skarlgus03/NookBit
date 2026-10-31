@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "packType": "imagepack",
   "id": "nookbit.nmoo",
-  "name": "Nmoo - Idle & Walk",
-  "version": "0.3.1",
+  "name": "Nmoo - Idle, Walk & Work",
+  "version": "0.4.0",
   "display": {
     "referenceSize": { "width": 256, "height": 256 },
     "pixelsPerUnit": 4,
@@ -51,6 +51,23 @@
       ]
     },
     {
+      "id": "work-placeholder",
+      "loop": true,
+      "steps": [
+        { "frameId": "eyes-open", "durationMs": 650 },
+        { "frameId": "eyes-closed", "durationMs": 150 }
+      ]
+    },
+    {
+      "id": "complete-placeholder",
+      "loop": false,
+      "steps": [
+        { "frameId": "eyes-open", "durationMs": 200 },
+        { "frameId": "eyes-closed", "durationMs": 120 },
+        { "frameId": "eyes-open", "durationMs": 480 }
+      ]
+    },
+    {
       "id": "notice",
       "loop": true,
       "steps": [ { "frameId": "notice", "durationMs": 1000 } ]
@@ -60,7 +77,10 @@
     { "cueId": "resting", "animationId": "standing" },
     { "cueId": "calling", "animationId": "notice" },
     { "cueId": "file.offer", "animationId": "notice" },
-    { "cueId": "working", "animationId": "standing" },
+    { "cueId": "working", "animationId": "work-placeholder" },
+    { "cueId": "file.work", "animationId": "work-placeholder" },
+    { "cueId": "file.work.completed", "animationId": "complete-placeholder" },
+    { "cueId": "file.work.failed", "animationId": "notice" },
     { "cueId": "walk.left", "animationId": "walk" },
     { "cueId": "walk.right", "animationId": "walk" }
   ]

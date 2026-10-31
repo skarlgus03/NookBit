@@ -24,6 +24,8 @@ QVariantMap CharacterController::bubble() const {
 }
 // 휴식 상태의 캐릭터 표시 모델을 만드는 생성자.
 CharacterController::CharacterController(QObject* parent) : QObject(parent) {
+    outcomeDeadline_.setSingleShot(true);
+    connect(&outcomeDeadline_, &QTimer::timeout, this, &CharacterController::clearOutcome);
     (void)behaviors_.registerBehavior({"resting", "resting", 0, {}, {}});
     (void)behaviors_.registerBehavior({"calling", "calling", 10, {"attention"}, {}});
     (void)behaviors_.registerBehavior({"working", "working", 20, {"working"}, {}});
@@ -52,6 +54,36 @@ void CharacterController::presentInteraction(const QString& instanceId, const QS
     reactionMessage_ = instanceId.isEmpty() ? QString() : message;
     refreshState();
     emit reactionChanged();
+}
+// 파일 작업은 수행하지 않고 최신 일시 결과 하나만 제한된 시간 동안 표시하는 함수.
+Result<void> CharacterController::present(const CharacterReaction& reaction) {
+    if (QThread::currentThread() != thread())
+        return Result<void>::failure({"character.wrong_thread", "Present on the character's owning thread."});
+    if (reaction.sourceId.empty() || reaction.entryId.empty() || reaction.cueId.empty()
+        || reaction.sourceId.find('\0') != std::string::npos || reaction.entryId.find('\0') != std::string::npos
+        || reaction.cueId.find('\0') != std::string::npos || reaction.durationMs <= 0 || reaction.durationMs > 60000)
+        return Result<void>::failure({"character.invalid_reaction", "A bounded presentation cue and identifiers are required."});
+    // 새 작업 중에는 늦게 도착한 이전 결과를 보관하거나 나중에 다시 표시하지 않는다.
+    if (!activities_.empty()) return Result<void>::success();
+    outcome_ = reaction;
+    outcomeDeadline_.start(reaction.durationMs);
+    refreshState();
+    emit reactionChanged();
+    return Result<void>::success();
+}
+// 반응을 기다리는 동안 달라진 현재 상황으로 복귀하는 함수.
+void CharacterController::clearOutcome() {
+    outcomeDeadline_.stop();
+    if (!outcome_) return;
+    outcome_.reset();
+    refreshState();
+    emit reactionChanged();
+}
+// 자율 이동과 입력 정책에 현재 표시 중인 일시 반응의 식별자를 전달하는 함수.
+QString CharacterController::reactionId() const {
+    if (!activities_.empty()) return {};
+    if (outcome_) return QStringLiteral("outcome/") + QString::fromStdString(outcome_->sourceId + "/" + outcome_->entryId);
+    return reactionId_;
 }
 // 현재 캐릭터 상태를 반환하는 함수.
 CharacterController::State CharacterController::state() const noexcept { return state_; }
@@ -238,6 +270,7 @@ Result<void> CharacterController::publish(const CharacterUpdate& update) {
     const EntryKey key{update.sourceId, update.entryId};
     if (update.active) entries.insert_or_assign(key, update);
     else entries.erase(key);
+    if (update.kind == CharacterUpdateKind::Activity && update.active) clearOutcome();
     refreshState();
     return Result<void>::success();
 }
@@ -258,7 +291,10 @@ void CharacterController::refreshState() {
         if (selected && !selected->cueId.empty()) requestedCue = selected->cueId;
         text = next == State::Working ? QStringLiteral("작업 중이에요.") : QStringLiteral("확인할 내용이 있어요!");
     }
-    if (!reactionId_.isEmpty()) requestedCue = reactionCue_.toStdString();
+    const bool showOutcome = activities_.empty() && outcome_.has_value();
+    const bool showInteraction = activities_.empty() && !showOutcome && !reactionId_.isEmpty();
+    if (showOutcome) requestedCue = outcome_->cueId;
+    else if (showInteraction) requestedCue = reactionCue_.toStdString();
     const auto findCue = [this](const std::string& id) {
         return std::find_if(presentation_.cues.begin(), presentation_.cues.end(),
             [&id](const CharacterCue& cue) { return cue.id == id; });
@@ -278,7 +314,8 @@ void CharacterController::refreshState() {
         if (cue != presentation_.cues.end()) animation = QString::fromStdString(cue->animationId);
     }
     if (selected && !selected->message.empty()) text = QString::fromStdString(selected->message);
-    if (!reactionId_.isEmpty() && !reactionMessage_.isEmpty()) text = reactionMessage_;
+    if (showOutcome && !outcome_->message.empty()) text = QString::fromStdString(outcome_->message);
+    else if (showInteraction && !reactionMessage_.isEmpty()) text = reactionMessage_;
     const auto cueName = QString::fromStdString(requestedCue);
     if (next == state_ && behaviorName == behaviorId_ && text == message_ && cueName == cueId_ && animation == animationId_) return;
     const bool animationReplaced = animationId_ != animation || cueId_ != cueName;

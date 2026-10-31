@@ -1,5 +1,12 @@
 # NookBit
 
+Real file work (including undo/recovery) selects the companion's working clip;
+inspection/approval preparation does not. Completion and failure use separate
+2.4-second cues, then return to the current behavior/offer. Packs can bind
+`file.work`, `file.work.completed` and `file.work.failed`. The bundled Nmoo uses
+temporary standing/blink artwork for work and completion until dedicated frames
+are available. Existing imported packs retain fallback artwork.
+
 The optional **먹이 주기** module adds a short reaction to the companion's
 right-click menu. It uses existing artwork when no `interact.feed` animation is
 provided. Module management can disable it on the next launch. See
@@ -12,7 +19,7 @@ closing the main window alone normally hides it to the tray. Feature data is ret
 [Temporary command-line overrides and module boundaries](docs/feature-modules.md#conditional-feature-startup)
 are documented separately. Plugin loading and live unloading are not implemented.
 
-컴패니언 팩 목록에서 **Nmoo - Idle & Walk**를 선택하면 쉬다가 좌우로 잠깐 걷는다. 현재 높이를 유지하며 기본 주기는 휴식 6초·걷기 3초다. 클릭·드래그·작업·알림 때는 멈추고, **쉬는 동안 가끔 걷기**에서 끌 수 있다. 이전에 가져온 팩은 자동으로 교체하지 않는다.
+컴패니언 팩 목록에서 **Nmoo - Idle, Walk & Work**를 선택하면 쉬다가 좌우로 잠깐 걷는다. 현재 높이를 유지하며 기본 주기는 휴식 6초·걷기 3초다. 클릭·드래그·작업·알림 때는 멈추고, **쉬는 동안 가끔 걷기**에서 끌 수 있다. 이전에 가져온 팩은 자동으로 교체하지 않는다.
 
 바탕화면 컴패니언은 **클릭**하면 짧게 반응하고, **왼쪽 드래그**로 이동하며, **Shift + 왼쪽 드래그**로 쓰다듬을 수 있다. 우클릭은 컴패니언 설정을 연다. 전용 그림이 없는 팩은 기존 애니메이션과 안내 문구를 사용한다. 기본 행동과 일시 반응은 분리되어 파일 작업은 계속 진행된다.
 

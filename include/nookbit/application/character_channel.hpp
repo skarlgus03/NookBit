@@ -27,4 +27,22 @@ public:
     [[nodiscard]] virtual Result<void> publish(const CharacterUpdate& update) = 0;
 };
 
+/// 작업 실행과 무관한 일시 표현 요청. 그림 선택은 팩에 맡기며 표시 시간만 지정한다.
+struct CharacterReaction {
+    std::string sourceId;
+    std::string entryId;
+    std::string cueId;
+    std::string message;
+    int durationMs{2400};
+};
+
+/// 업무 결과 등을 짧게 표현하는 창구. 알림 등록이나 사용자 상호작용을 실행하지 않는다.
+class ICharacterReactionChannel {
+public:
+    /// 인터페이스를 통해 표현 수신자를 안전하게 해제하는 소멸자.
+    virtual ~ICharacterReactionChannel() = default;
+    /// 일시 표현을 요청하고 수신 여부를 반환하는 함수.
+    [[nodiscard]] virtual Result<void> present(const CharacterReaction& reaction) = 0;
+};
+
 } // namespace nookbit

@@ -12,7 +12,9 @@
     { "id": "resting", "message": "잠깐 쉬고 있어요.", "animationId": "idle" },
     { "id": "calling", "message": "확인할 내용이 있어요!", "animationId": "call" },
     { "id": "working", "message": "작업 중이에요.", "animationId": "work" },
-    { "id": "file.work", "message": "파일을 옮기고 있어요.", "animationId": "work" },
+    { "id": "file.work", "message": "파일 작업을 하고 있어요.", "animationId": "work" },
+    { "id": "file.work.completed", "message": "파일 작업을 마쳤어요.", "animationId": "call" },
+    { "id": "file.work.failed", "message": "작업을 끝내지 못했어요. 작업 기록을 확인해 주세요.", "animationId": "call" },
     { "id": "file.offer", "message": "정리할 파일이 있어요!", "animationId": "call" },
     { "id": "walk.left", "message": "잠깐 산책 중이에요.", "animationId": "idle" },
     { "id": "walk.right", "message": "잠깐 산책 중이에요.", "animationId": "idle" }

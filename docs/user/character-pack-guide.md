@@ -90,6 +90,18 @@ are not supported.
 - Optional bindings can target actual application cues such as `file.offer` and
   `file.work`. An unbound cue uses the relevant fallback state. Inventing a cue
   name in JSON does not add a feature or cause that cue to be emitted.
+- File work emits `file.work` during actual file-operation tasks, including undo
+  and recovery. Read-only preparation and approval dialogs do not emit it. Use a
+  looping work clip; its frame speed and loop count do not represent file counts
+  or byte progress. Bind `file.work.completed` and `file.work.failed` to optional
+  result clips. Result presentation lasts 2,400 ms; a non-looping result clip holds
+  its final frame until that time expires. Without these bindings the current
+  fallback artwork is used with the result message. The bundled Nmoo work and
+  completion clips temporarily reuse its existing standing/blink frames.
+- New file work immediately replaces any previous result cue. On timeout, the
+  companion re-evaluates the current state (including pending offers), rather than
+  restoring a saved old state. Results are presentation events, not notification
+  types or user interactions, and cannot initiate file operations.
 - The optional feeding module emits `interact.feed` for 2,400 ms. Bind that cue
   to an authored eating animation if available; otherwise normal fallback artwork
   is used with the feeding message. No new top-level field or schema version is

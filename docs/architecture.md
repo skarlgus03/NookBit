@@ -1,5 +1,13 @@
 # NookBit 설계와 확장 원칙
 
+File-work state uses `ICharacterChannel`; bounded result presentation uses the
+separate `ICharacterReactionChannel`. BackgroundTaskRunner emits a completion fact
+only for FileWork tasks, and FeatureConnections maps it to optional pack cues.
+CharacterController owns the short presentation deadline and re-evaluates current
+behavior when it expires. Active file work wins over result and interaction cues;
+a new work request discards an old result instead of replaying it later. Result
+delivery does not register notifications or execute interactions/file operations.
+
 Typography is defined by UiMetrics. Startup builds a fresh UI font from those
 roles, clears inherited named styles/variable axes, and assigns it to both the
 application default and `UiMetrics.applicationFont`. Main pins that full font;

@@ -84,4 +84,21 @@ Result<void> FeatureConnections::workToCompanion(BackgroundTaskRunner& tasks,
     report();
     return Result<void>::success();
 }
+
+// 표시가 실패해도 업무 완료 콜백과 원래 작업 결과는 그대로 유지하는 함수.
+Result<void> FeatureConnections::workResultsToCompanion(BackgroundTaskRunner& tasks,
+    QObject& recipientContext, ICharacterReactionChannel& channel) {
+    const auto valid = validateContext(*this, tasks, recipientContext);
+    if (!valid) return valid;
+    const QPointer<BackgroundTaskRunner> source(&tasks);
+    const QPointer<QObject> recipient(&recipientContext);
+    QObject::connect(&tasks, &BackgroundTaskRunner::fileWorkFinished, this,
+        [source, recipient, &channel](bool succeeded) {
+            if (!source || !recipient) return;
+            reportDelivery(channel.present({"file-operations", "last-operation",
+                succeeded ? "file.work.completed" : "file.work.failed",
+                succeeded ? "파일 작업을 마쳤어요." : "작업을 끝내지 못했어요. 파일 위치와 작업 기록을 확인해 주세요.", 2400}));
+        });
+    return Result<void>::success();
+}
 }

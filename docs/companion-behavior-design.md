@@ -1,5 +1,12 @@
 # 알림 · Interact · 행동 계약
 
+File-work results also have a bounded presentation channel,
+`ICharacterReactionChannel`, separate from user interactions and notification
+registration. Working presentation takes priority; the latest result lasts
+2,400 ms and temporarily takes precedence over interaction artwork. New work
+discards an old result. On expiry, current behavior is evaluated again. This
+does not implement the general notification reaction queue described below.
+
 The optional [feeding module](companion-feeding.md) registers a one-shot handler
 and context-menu metadata through `IInteractionRegistry`. The existing input
 controller submits its ID and owns reaction expiry; the feature does not call a

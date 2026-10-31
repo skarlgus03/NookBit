@@ -3,6 +3,7 @@
 #include <QString>
 #include <QUrl>
 #include <QVariantMap>
+#include <QTimer>
 #include <nookbit/application/character_channel.hpp>
 #include <nookbit/domain/character_presentation.hpp>
 #include <nookbit/domain/image_pack.hpp>
@@ -12,7 +13,7 @@
 
 namespace nookbit {
 /// 다른 화면이나 파일 작업을 호출하지 않고 캐릭터 표시 상태만 관리한다.
-class CharacterController final : public QObject, public ICharacterChannel, public IBehaviorChannel {
+class CharacterController final : public QObject, public ICharacterChannel, public IBehaviorChannel, public ICharacterReactionChannel {
     Q_OBJECT
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString stateKey READ stateKey NOTIFY stateChanged)
@@ -43,7 +44,7 @@ public:
     /// 일시 반응에 가려져도 유지되는 기본 행동 식별자를 반환하는 함수.
     [[nodiscard]] QString behaviorId() const { return behaviorId_; }
     /// 현재 표시 중인 상호작용 요청 식별자를 반환하는 함수.
-    [[nodiscard]] QString reactionId() const { return reactionId_; }
+    [[nodiscard]] QString reactionId() const;
     /// 현재 팩이 양방향 걷기 바인딩을 제공하는지 반환하는 함수.
     [[nodiscard]] bool canWalk() const;
     /// 새 행동 정의를 등록하고 현재 상황을 다시 판단하는 함수.
@@ -70,6 +71,8 @@ public:
     [[nodiscard]] const CharacterPresentation& presentation() const noexcept;
     /// 화면 스레드에서 기능별 활동·주의 요청을 받아 표시 상태를 갱신하는 함수.
     [[nodiscard]] Result<void> publish(const CharacterUpdate& update) override;
+    /// 업무를 실행하지 않고 제한 시간 동안 결과 표현을 표시하는 함수.
+    [[nodiscard]] Result<void> present(const CharacterReaction& reaction) override;
 signals:
     void stateChanged();
     void animationChanged();
@@ -80,6 +83,8 @@ private:
     [[nodiscard]] QVariantMap animationFor(const QString& id) const;
     /// 작업 중을 우선하고 남은 제안 여부로 다음 상태를 고르는 함수.
     void refreshState();
+    /// 일시 결과를 지우고 현재 활동·주의 상태를 다시 선택하는 함수.
+    void clearOutcome();
     using EntryKey = std::pair<std::string, std::string>;
     std::map<EntryKey, CharacterUpdate> activities_;
     std::map<EntryKey, CharacterUpdate> attentions_;
@@ -88,6 +93,8 @@ private:
     QString reactionId_;
     QString reactionCue_;
     QString reactionMessage_;
+    std::optional<CharacterReaction> outcome_;
+    QTimer outcomeDeadline_;
     QString message_{QStringLiteral("잠깐 쉬고 있어요.")};
     QString cueId_{QStringLiteral("resting")};
     QString animationId_;

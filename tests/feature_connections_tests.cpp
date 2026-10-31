@@ -18,14 +18,20 @@ void expect(bool value, const char* message) {
     if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
 }
 
-class CharacterRecipient final : public QObject, public nookbit::ICharacterChannel {
+class CharacterRecipient final : public QObject, public nookbit::ICharacterChannel, public nookbit::ICharacterReactionChannel {
 public:
     bool fail{false};
     std::vector<nookbit::CharacterUpdate> received;
+    std::vector<nookbit::CharacterReaction> reactions;
     // 표시 요청을 기록하고 선택적으로 전달 실패를 반환하는 함수.
     nookbit::Result<void> publish(const nookbit::CharacterUpdate& value) override {
         received.push_back(value);
         return fail ? nookbit::Result<void>::failure({"test.delivery", "Injected presentation delivery failure."}) : nookbit::Result<void>::success();
+    }
+    // 일시 표현의 식별자와 표시 시간만 기록하고 업무에는 접근하지 않는 함수.
+    nookbit::Result<void> present(const nookbit::CharacterReaction& value) override {
+        reactions.push_back(value);
+        return fail ? nookbit::Result<void>::failure({"test.delivery", "Injected reaction delivery failure."}) : nookbit::Result<void>::success();
     }
 };
 
@@ -99,6 +105,7 @@ void testRoutes() {
     CharacterRecipient companion; nookbit::BackgroundTaskRunner tasks; nookbit::FeatureConnections connections;
     expect(connections.notificationsToCompanion(notifications, companion, companion).hasValue(), "bind notification consumer");
     expect(connections.workToCompanion(tasks, companion, companion).hasValue(), "bind independent file activity");
+    expect(connections.workResultsToCompanion(tasks, companion, companion).hasValue(), "bind independent file result cues");
     expect(companion.received.size() == 1 && !companion.received[0].active, "current idle work state is synchronized");
     expect(connections.watchToNotifications(watch, notifications, notifications).hasValue(), "bind watch source after its consumer");
     expect(companion.received.size() == 2 && companion.received.back().active && companion.received.back().sourceId == "folder-watch" &&
@@ -114,8 +121,11 @@ void testRoutes() {
     bool workActive = false;
     for (const auto& update : companion.received) workActive = workActive || update.active;
     expect(!workActive, "read-only inspection never produces active file work");
+    expect(companion.reactions.empty(), "inspection cannot produce completion or failure animations");
     companion.received.clear();
     expect(runTask(tasks, nookbit::BackgroundTaskRunner::TaskKind::FileWork), "file work succeeds while notifications are muted");
+    expect(companion.reactions.size() == 1 && companion.reactions.back().cueId == "file.work.completed"
+        && companion.reactions.back().durationMs == 2400, "successful file work emits one bounded completion cue even when notifications are muted");
     expect(companion.received.size() == 2 && companion.received[0].active && !companion.received[1].active &&
         companion.received[0].kind == nookbit::CharacterUpdateKind::Activity && companion.received[0].sourceId == "file-operations" &&
         companion.received[0].entryId == "current-operation" && companion.received[0].cueId == "file.work", "file activity starts and stops independently of notification preferences");
@@ -128,6 +138,7 @@ void testRoutes() {
     companion.fail = false;
     expect(!runTask(tasks, nookbit::BackgroundTaskRunner::TaskKind::FileWork, false) && !companion.received.back().active,
         "failed file work still clears its active presentation state");
+    expect(companion.reactions.back().cueId == "file.work.failed", "failed file work emits a distinct failure cue");
 }
 
 // 다른 스레드에서 신호만 발생시켜 연결부에 대기 중 전달을 만드는 함수.
@@ -152,6 +163,15 @@ void testLifetimes() {
         expect(recipient.received.empty(), "destroying connection owner drops queued delivery");
     }
     nookbit::FeatureConnections connections;
+    nookbit::BackgroundTaskRunner resultSource;
+    {
+        auto temporary = std::make_unique<nookbit::FeatureConnections>();
+        expect(bool(temporary->workResultsToCompanion(resultSource, recipient, recipient)), "result lifetime binding");
+        std::unique_ptr<QThread> emitter(QThread::create([&] { emit resultSource.fileWorkFinished(true); }));
+        emitter->start(); emitter->wait();
+        temporary.reset(); QCoreApplication::processEvents();
+        expect(recipient.reactions.empty(), "destroying the result route drops queued delivery");
+    }
     auto temporaryRecipient = std::make_unique<CharacterRecipient>();
     expect(connections.notificationsToCompanion(notifications, *temporaryRecipient, *temporaryRecipient).hasValue(), "temporary recipient binding");
     queueNotice(notifications); temporaryRecipient.reset(); QCoreApplication::processEvents();

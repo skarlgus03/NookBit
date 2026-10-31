@@ -30,5 +30,8 @@ public:
     /// 실제 파일 작업 상태를 알림 표시 정책과 무관하게 컴패니언에 전달하는 함수.
     [[nodiscard]] Result<void> workToCompanion(BackgroundTaskRunner& tasks,
         QObject& recipientContext, ICharacterChannel& channel);
+    /// 파일 작업의 성공·실패 결과만 일시 표현 창구에 전달하는 함수.
+    [[nodiscard]] Result<void> workResultsToCompanion(BackgroundTaskRunner& tasks,
+        QObject& recipientContext, ICharacterReactionChannel& channel);
 };
 }

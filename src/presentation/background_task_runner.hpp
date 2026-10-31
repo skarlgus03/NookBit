@@ -85,7 +85,7 @@ public:
         taskKind_ = kind;
         busy_ = true; emit busyChanged();
         QPointer<QObject> target(receiver);
-        thread_ = QThread::create([this, target, work = std::move(work), complete = std::move(complete)] {
+        thread_ = QThread::create([this, target, work = std::move(work), complete = std::move(complete), kind] {
             OperationProgressScope progress([this](const OperationProgress& value) {
                 // 값만 복사해 전달하고 화면 객체의 상태는 화면 스레드에서만 수정한다.
                 QMetaObject::invokeMethod(this, [this, value] { progress_ = value; emit progressChanged(); }, Qt::QueuedConnection);
@@ -95,8 +95,9 @@ public:
             catch (const std::exception& error) { result = Result<void>::failure({"background.exception", error.what()}); }
             catch (...) {}
             OperationProgressScope::phase(result ? OperationPhase::Completed : OperationPhase::Failed);
-            QMetaObject::invokeMethod(this, [this, target, complete, result] {
+            QMetaObject::invokeMethod(this, [this, target, complete, result, kind] {
                 busy_ = false; emit busyChanged();
+                if (kind == TaskKind::FileWork) emit fileWorkFinished(bool(result));
                 if (target) complete(result);
             }, Qt::QueuedConnection);
         });
@@ -105,6 +106,7 @@ public:
 signals:
     void busyChanged();
     void progressChanged();
+    void fileWorkFinished(bool succeeded);
 private:
     /// 표시 단위를 이진 기준으로 변환하며 바이트 크기를 잘라내지 않는 함수.
     static QString formatBytes(std::uintmax_t bytes) {

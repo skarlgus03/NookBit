@@ -77,6 +77,8 @@ struct FeatureRuntimeHost::State {
         if (organizer && companion) {
             const auto bound = routes.workToCompanion(organizer->tasks(), companion->character(), companion->character());
             if (!bound) return bound;
+            const auto resultsBound = routes.workResultsToCompanion(organizer->tasks(), companion->character(), companion->character());
+            if (!resultsBound) return resultsBound;
         }
         if (watch && notifications) {
             const auto bound = routes.watchToNotifications(watch->controller(), notifications->controller(), notifications->controller());

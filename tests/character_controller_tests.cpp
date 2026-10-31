@@ -13,6 +13,8 @@
 #include <atomic>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QEventLoop>
+#include <QTimer>
 
 namespace {
 int failures = 0;
@@ -128,6 +130,73 @@ void testIndependentSources() {
 // 프로젝트의 캐릭터 설정 예제 경로를 만드는 함수.
 QString profilePath(const char* relative) {
     return QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/" + QString::fromUtf8(relative);
+}
+// 짧은 표현 타이머가 종료되도록 이벤트만 처리하는 함수.
+void settleReaction() {
+    QEventLoop loop;
+    QTimer::singleShot(90, &loop, &QEventLoop::quit);
+    loop.exec();
+}
+// 작업 우선순위·일시 결과·타이머 복귀와 기존 팩의 대체 그림을 검사하는 함수.
+void testWorkReactions() {
+    const auto profile = nookbit::loadCharacterPresentation(profilePath("resources/character/default.presentation.json"),
+        profilePath("schemas/character-presentation.schema.json"));
+    if (!profile) { expect(false, "work reaction profile loads"); return; }
+    nookbit::CharacterController character;
+    expect(bool(character.setPresentation(profile.value())), "apply work reaction profile");
+    nookbit::ICharacterReactionChannel& result = character;
+    character.presentInteraction("touch", "interact.click", "touch");
+    reportWork(character, true);
+    expect(character.stateKey() == "working" && character.cueId() == "working" && character.reactionId().isEmpty(),
+        "work wins over a previous interaction");
+    expect(bool(result.present({"files", "old", "file.work.completed", "old", 40})) && character.message() != "old",
+        "late old results are not retained during work");
+    character.presentInteraction({}, {}, {});
+    reportWork(character, false);
+    expect(character.reactionId().isEmpty() && character.cueId() == "resting", "ignored results never reappear");
+    expect(bool(result.present({"files", "done", "file.work.completed", "done", 40}))
+        && character.cueId() == "file.work.completed" && character.animationId() == "call" && !character.reactionId().isEmpty(),
+        "completion selects an optional cue and exposes its identity to motion policy");
+    reportAttention(character, true);
+    character.presentInteraction({}, {}, {});
+    expect(character.message() == "done", "interaction cleanup cannot clear an independent result");
+    settleReaction();
+    expect(character.reactionId().isEmpty() && character.cueId() == "calling", "timeout re-evaluates an offer received during the result");
+    reportAttention(character, false);
+    expect(bool(result.present({"files", "failed", "file.work.failed", "failed", 40}))
+        && character.cueId() == "file.work.failed" && character.message() == "failed", "failure has its own cue");
+    reportWork(character, true);
+    expect(character.stateKey() == "working" && character.reactionId().isEmpty(), "new work discards the previous result");
+    reportWork(character, false);
+    expect(character.cueId() == "resting", "old results cannot resume after new work");
+    expect(!result.present({"files", "bad", "file.work.failed", "bad", 0})
+        && !result.present({"files", "bad", "file.work.failed", "bad", 60001}), "unbounded deadlines are rejected");
+    std::atomic<bool> rejected{false};
+    std::unique_ptr<QThread> worker(QThread::create([&] {
+        const auto accepted = result.present({"files", "foreign", "file.work.completed", "foreign", 40});
+        rejected = !accepted && accepted.error().code == "character.wrong_thread";
+    }));
+    worker->start(); worker->wait();
+    expect(rejected && character.reactionId().isEmpty(), "foreign threads cannot start a presentation timer");
+    nookbit::JsonImagePackLoader loader(profilePath("schemas/imagepack.schema.json"));
+    auto legacy = loader.load(std::filesystem::path(profilePath("resources/imagepacks/test/imagepack.json").toStdWString()));
+    if (!legacy) { expect(false, "legacy pack loads"); return; }
+    expect(bool(character.setImagePack(legacy.value())), "apply legacy pack without optional result bindings");
+    expect(bool(result.present({"files", "legacy", "file.work.completed", "legacy done", 40}))
+        && character.cueId() == "resting" && character.message() == "legacy done", "legacy artwork retains the result message through fallback");
+    settleReaction();
+    auto nmoo = loader.load(std::filesystem::path(profilePath("resources/imagepacks/nmoo/imagepack.json").toStdWString()));
+    if (!nmoo) { expect(false, "work placeholder pack loads"); return; }
+    expect(nmoo.value().animations.at("work-placeholder").loop && !nmoo.value().animations.at("complete-placeholder").loop,
+        "work repeats while completion is a one-shot clip");
+    expect(bool(character.setImagePack(nmoo.value())), "apply placeholder pack");
+    reportWork(character, true);
+    expect(character.animationId() == "work-placeholder", "work uses the pack-defined clip");
+    reportWork(character, false);
+    expect(bool(result.present({"files", "nmoo", "file.work.completed", "done", 40}))
+        && character.animationId() == "complete-placeholder", "a pack-defined result overrides fallback artwork");
+    settleReaction();
+    expect(character.animationId() == "standing", "completion returns to resting artwork");
 }
 // 실제 JSON 예제로 상황 선택·문구 우선순위·잘못된 참조를 검사하는 함수.
 void testPresentationConfiguration() {
@@ -280,6 +349,7 @@ int main(int argc, char* argv[]) {
     testRunnerConnection();
     testIndependentSources();
     testPresentationConfiguration();
+    testWorkReactions();
     testCompanionEdits();
     return failures == 0 ? 0 : 1;
 }
