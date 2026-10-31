@@ -708,13 +708,14 @@ int main(int argc, char** argv) {
             auto* previewAction = find(find, inputItem, "compactPreviewButton");
             auto* sortAction = find(find, inputItem, "compactSortButton");
             auto* empty = find(find, inputItem, "pendingEmptyState");
-            if (!bar || !queue || !previewAction || !sortAction || !empty) return 1;
+            auto* clearQueue = find(find, inputItem, "pendingQueueClearButton");
+            if (!bar || !queue || !previewAction || !sortAction || !empty || !clearQueue) return 1;
             expect(queue->mapToItem(inputItem, QPointF(0, queue->height())).y() <= bar->mapToItem(inputItem, QPointF()).y()
                 && bar->mapToItem(inputItem, QPointF(0, bar->height())).y() <= inputItem->height()
                 && sortAction->mapToItem(inputItem, QPointF(sortAction->width(), 0)).x() <= inputItem->width(),
                 "sorting queue and fixed footer fit the minimum height across window widths");
             expect(previewAction->width() == sortAction->width() && previewAction->height() == sortAction->height()
-                && empty->isVisible() && !previewAction->isEnabled() && !sortAction->isEnabled(),
+                && empty->isVisible() && !previewAction->isEnabled() && !sortAction->isEnabled() && !clearQueue->isEnabled(),
                 "empty queues show guidance and disable equally sized sorting actions in both themes");
         }
     }

@@ -68,6 +68,8 @@ public:
 
     /// 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.
     Q_INVOKABLE void removeAt(int index);
+    /// 파일과 폴더는 건드리지 않고 대기 목록 전체를 한 번에 비우는 함수.
+    Q_INVOKABLE void clear();
 
 signals:
     void countChanged();

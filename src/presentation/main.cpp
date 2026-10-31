@@ -838,8 +838,11 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
         QTextStream(stderr) << "Inline file preview navigation failed." << Qt::endl;
         return false;
     }
-    pending.removeAt(0);
-    return loaded && pending.count() == 0 && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
+    if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction) || pending.count() != 2) return false;
+    auto* clearQueue = findUiChild<QQuickItem*>(page, QStringLiteral("pendingQueueClearButton"));
+    if (!clearQueue || !clearQueue->isEnabled() || !QMetaObject::invokeMethod(clearQueue, "clicked")) return false;
+    return loaded && pending.count() == 0 && !clearQueue->isEnabled() && QFile::exists(picturePath)
+        && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
 }
 
 // 소수 기준점의 반복 위치 저장이 바탕화면 좌표를 밀어내지 않는지 검사하는 함수.

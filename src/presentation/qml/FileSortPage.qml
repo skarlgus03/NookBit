@@ -124,6 +124,7 @@ Rectangle {
         controller: home.controller
         pending: home.pending
         recovery: home.recovery
+        workBusy: home.progress.busy || home.controller.awaitingConfirmation
         dark: home.dark
         onRulesRequested: home.pageRequested(1)
         onRecoveryRequested: home.recoveryRequested()

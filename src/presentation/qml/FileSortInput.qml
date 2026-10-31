@@ -10,6 +10,7 @@ Item {
     required property var pending
     required property var recovery
     property bool dark: false
+    property bool workBusy: false
     readonly property var theme: UiTheme.colors(dark)
     readonly property bool hasUnavailable: pending.unavailableCount > 0
     readonly property string notice: [pending.storageNotice,
@@ -123,11 +124,15 @@ Item {
                     font.pixelSize: UiMetrics.textBody
                 }
                 Item { Layout.fillWidth: true }
-                Label {
-                    visible: input.pending.count > 0
-                    text: qsTr("파일이나 폴더를 놓으세요")
-                    color: input.theme.muted
-                    font.pixelSize: UiMetrics.textBody
+                AppButton {
+                    objectName: "pendingQueueClearButton"
+                    text: qsTr("비우기")
+                    enabled: input.pending.count > 0 && !input.workBusy
+                    dark: input.dark
+                    appearance: AppButton.Soft
+                    Accessible.name: qsTr("대기 목록 비우기")
+                    Accessible.description: qsTr("목록에서만 제외하며 원본 파일과 폴더는 그대로 둬요.")
+                    onClicked: input.pending.clear()
                 }
             }
             ColumnLayout {

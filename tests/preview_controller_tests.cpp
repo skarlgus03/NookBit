@@ -907,9 +907,10 @@ void testPreviewFromPendingFiles() {
     expect(QFile::exists(source) && !QFile::exists(home),
            "saving a plan must not move files or create the destination");
 
-    pending.removeAt(0);
-    expect(!controller.hasPreview() && controller.steps().isEmpty(),
-           "changing the pending list should clear a stale preview");
+    pending.clear();
+    expect(!controller.hasPreview() && !controller.hasFrozenPlan() && !controller.hasApprovedPlan()
+        && !controller.awaitingConfirmation() && controller.steps().isEmpty(),
+           "clearing the queue invalidates its preview, saved-plan selection and any approval");
 
     pending.addUrl(QUrl::fromLocalFile(source));
     controller.createPreview(QStringLiteral("relative/path"));

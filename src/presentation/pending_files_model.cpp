@@ -158,6 +158,17 @@ void PendingFilesModel::removeAt(int index) {
     setLastMessage(QStringLiteral("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
 }
 
+// 한 번의 모델 초기화와 저장 알림으로 목록만 제거하고 원본은 보존하는 함수.
+void PendingFilesModel::clear() {
+    if (entries_.isEmpty()) return;
+    beginResetModel();
+    entries_.clear();
+    endResetModel();
+    emit countChanged();
+    emit availabilityChanged();
+    setLastMessage(QStringLiteral("대기 목록을 비웠어요. 원본 파일과 폴더는 그대로 있어요."));
+}
+
 // 화면에 보여줄 결과 문구를 갱신하는 함수.
 void PendingFilesModel::setLastMessage(const QString& message) {
     if (lastMessage_ == message) return;

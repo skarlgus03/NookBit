@@ -59,6 +59,35 @@ void testPendingFilesModel() {
     expect(model.count() == 1, "a child must not be added after its parent folder");
 }
 
+// 여러 종류의 대기 항목을 비워도 원본과 폴더 내부가 보존되고 알림이 한 번만 발생하는지 검사하는 함수.
+void testClearPendingQueue() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "clear fixture should exist"); return; }
+    const auto source = directory.filePath("original.txt");
+    const auto folder = directory.filePath("bundle");
+    expect(QDir().mkpath(folder), "clear folder fixture");
+    const auto nested = QDir(folder).filePath("nested.txt");
+    for (const auto& path : {source, nested}) {
+        QFile file(path);
+        expect(file.open(QIODevice::WriteOnly) && file.write("original content") == 16, "clear source fixture");
+    }
+    nookbit::PendingFilesModel model;
+    model.restorePaths({source, folder, directory.filePath("missing.txt")});
+    expect(model.count() == 3 && model.unavailableCount() == 1, "clear includes files, folders and unavailable entries");
+    int resets{}, changes{};
+    QObject::connect(&model, &QAbstractItemModel::modelReset, &model, [&] { ++resets; });
+    QObject::connect(&model, &nookbit::PendingFilesModel::countChanged, &model, [&] { ++changes; });
+    model.clear();
+    expect(model.count() == 0 && model.filePaths().isEmpty() && model.unavailableCount() == 0 && resets == 1 && changes == 1,
+        "bulk clear empties the queue with one invalidation and one persistence notification");
+    model.clear();
+    expect(resets == 1 && changes == 1, "clearing an empty queue has no extra notifications or writes");
+    for (const auto& path : {source, nested}) {
+        QFile file(path);
+        expect(file.open(QIODevice::ReadOnly) && file.readAll() == "original content", "clearing preserves original files and folder contents");
+    }
+}
+
 // 목록을 재시작 복원하고 없는 파일·중복·빈 목록을 안전하게 처리하는지 검사하는 함수.
 void testPendingPersistence() {
     QTemporaryDir directory;
@@ -113,7 +142,7 @@ void testPendingPersistence() {
     model.removeAt(1);
     expect(repository.load().hasValue() && repository.load().value().size() == 1,
            "removed missing entry must not return on restart");
-    model.removeAt(0);
+    model.clear();
     expect(repository.load().hasValue() && repository.load().value().empty(),
            "cleared or fully moved list should remain empty after restart");
     model.addUrl(QUrl::fromLocalFile(source));
@@ -184,6 +213,7 @@ void testPendingQueueAdapter() {
 int main(int argc, char* argv[]) {
     QCoreApplication application(argc, argv);
     testPendingFilesModel();
+    testClearPendingQueue();
     testPendingPersistence();
     testPendingPersistenceFailures();
     testPendingQueueAdapter();
