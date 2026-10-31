@@ -56,6 +56,7 @@ private:
         case 10: return QStringLiteral("windows/recovery/size");
         case 11: return QStringLiteral("windows/notifications/size");
         case 12: return QStringLiteral("windows/modules/size");
+        case 14: return QStringLiteral("windows/allFeatures/size");
         default: return {};
         }
     }

@@ -21,9 +21,9 @@ Result<void> FolderWatchRuntime::registerUi(UiPageRegistry& registry) {
     }, uiLifetime_);
     if (!tutorial) return tutorial;
     return registry.addPage({"watch.settings", "folder-watch", 3,
-        QCoreApplication::translate("WatchUi", "폴더 감시 설정"), "folder", {}, 0,
+        QCoreApplication::translate("WatchUi", "폴더 감시"), "folder", QCoreApplication::translate("WatchUi", "파일 관리"), 35,
         QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/FolderWatchSettingsPage.qml")),
-        {{"controller", QVariant::fromValue(static_cast<QObject*>(&controller_))}}, false, UiPageHost::SettingsDetail}, uiLifetime_);
+        {{"controller", QVariant::fromValue(static_cast<QObject*>(&controller_))}}, true, UiPageHost::SettingsDetail}, uiLifetime_);
 }
 // 요약 문구와 입력 동작의 구성은 감시 기능이 소유하도록 제공하는 함수.
 QVariantMap FolderWatchRuntime::settingsEntryUi() {

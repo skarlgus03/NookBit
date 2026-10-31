@@ -118,7 +118,7 @@ QVariantMap UiPageRegistry::page(int route) const {
     const auto& entry = found.value();
     return {{"id", entry.id}, {"ownerId", entry.ownerId}, {"page", entry.page}, {"title", entry.title},
         {"label", entry.title}, {"icon", entry.icon}, {"section", entry.section}, {"order", entry.order},
-        {"source", entry.source}, {"properties", entry.properties}, {"inMenu", entry.inMenu},
+        {"source", entry.source}, {"properties", entry.properties}, {"inMenu", entry.inMenu}, {"homeShortcut", entry.homeShortcut},
         {"host", entry.host == UiPageHost::SettingsDetail ? QStringLiteral("settingsDetail") : QStringLiteral("extension")}};
 }
 

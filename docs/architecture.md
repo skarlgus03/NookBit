@@ -93,7 +93,17 @@ individual Companion controller globals. A scoped CompanionTrayAction owns the
 visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
 action selection, general settings and module management.
 FileOrganizerRuntime also registers sort/rules/history and auxiliary recovery/
-collision pages as one atomic batch. Only primary pages create home menu rows.
+collision pages as one atomic batch. Public entry points (`inMenu`) appear in the
+host's All Features catalog, grouped by their section. Internal recovery/collision
+routes remain hidden there. Modules may request a home shortcut with
+`homeShortcut`; it defaults to false, and the home shows at most the shared
+`UiMetrics.homeShortcutLimit` entries in deterministic menu order. Organizer's
+three main pages and Companion opt in. Adding modules therefore does not grow the
+home indefinitely. The summary and shortcuts scroll together above a fixed footer
+containing All Features and Settings, which remain reachable at minimum height.
+The catalog (host route 14) sends the same page requests as other navigation, so
+history preparation and Watch's settings-detail flow remain owned by their pages.
+Module Management is available both in the catalog and in Settings.
 Their small QML adapters own feature-internal screen wiring and recovery inspection
 preparation;
 the host supplies theme/guide/overlay services and routes navigation. Existing page

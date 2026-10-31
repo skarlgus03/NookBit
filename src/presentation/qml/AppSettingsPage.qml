@@ -98,6 +98,18 @@ ScrollView {
         }
         SettingsSection {
             Layout.fillWidth: true
+            title: qsTr("기능")
+            dark: page.dark
+            AppButton {
+                objectName: "settingsModulesButton"
+                text: qsTr("모듈 관리")
+                dark: page.dark
+                appearance: AppButton.Soft
+                onClicked: page.routeRequested(12)
+            }
+        }
+        SettingsSection {
+            Layout.fillWidth: true
             title: qsTr("정보")
             dark: page.dark
             Label {

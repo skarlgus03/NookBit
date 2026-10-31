@@ -18,7 +18,7 @@ Result<void> NotificationRuntime::registerUi(UiPageRegistry& registry) {
     }, uiLifetime_);
     if (!tutorial) return tutorial;
     return registry.addPage({"notifications.settings", "notifications", 11,
-        QCoreApplication::translate("NotificationUi", "알림"), "notifications", {}, 60,
+        QCoreApplication::translate("NotificationUi", "알림"), "notifications", QCoreApplication::translate("NotificationUi", "앱"), 60,
         QUrl(QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/NotificationsPage.qml")),
         {{"controller", QVariant::fromValue(static_cast<QObject*>(&controller_))}}}, uiLifetime_);
 }

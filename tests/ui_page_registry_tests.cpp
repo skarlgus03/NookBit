@@ -83,6 +83,7 @@ void testBatchRegistration() {
     hidden.inMenu = false;
     expect(registry.addPage(hidden, *owner).hasValue() && registry.contains(10)
         && !registry.page(10).value("inMenu").toBool(), "auxiliary page remains routable without requesting a home menu");
+    expect(!registry.page(7).value("homeShortcut").toBool(), "new module pages default to catalog-only instead of growing the home menu");
     owner.reset();
     expect(registry.pages().isEmpty() && changes == 4, "feature lifetime removes primary and auxiliary registrations");
 }

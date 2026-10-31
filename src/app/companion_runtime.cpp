@@ -301,7 +301,7 @@ Result<void> CompanionRuntime::registerUi(UiPageRegistry& registry) {
          {"settings", QVariant::fromValue(static_cast<QObject*>(&settings()))},
          {"placement", QVariant::fromValue(static_cast<QObject*>(&window()))},
          {"motion", QVariant::fromValue(static_cast<QObject*>(&motion()))},
-         {"edits", QVariant::fromValue(static_cast<QObject*>(&edits()))}}}, state_->connections);
+         {"edits", QVariant::fromValue(static_cast<QObject*>(&edits()))}}, true, UiPageHost::Extension, true}, state_->connections);
 }
 // 소유한 characterController 창구를 빌려주는 함수.
 CharacterController& CompanionRuntime::character() { return state_->characterController; }

@@ -24,6 +24,7 @@ struct UiPageContribution {
     QVariantMap properties;
     bool inMenu{true};
     UiPageHost host{UiPageHost::Extension};
+    bool homeShortcut{false};
 };
 /// 기능 명령이나 화면 객체를 담지 않는 모듈 소유의 읽기 전용 안내 페이지.
 struct UiTutorialStep {

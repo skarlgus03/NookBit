@@ -300,7 +300,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         QCoreApplication::sendEvent(extension, &release);
         QCoreApplication::processEvents();
     };
-    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}) {
+    for (const int page : {1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14}) {
         mainWindow->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         if (page == 3 || page == 8) {
@@ -313,7 +313,8 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
         const auto titleFont = title ? title->property("font").value<QFont>() : QFont();
         const auto sharedFont = metrics->property("applicationFont").value<QFont>();
         if (!title || titleFont.families() != sharedFont.families() || !titleFont.styleName().isEmpty() || titleFont.weight() != QFont::Bold) return false;
-        const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10) ? 8 : page;
+        const int expectedMenu = (page == 3 || page == 6 || page == 8 || page == 9 || page == 10 || page == 12) ? 8
+            : page == 11 ? 14 : page;
         if (!home || home->property("selectedPage").toInt() != expectedMenu) return false;
         if (page == 1) {
             auto* ruleTestButton = rules->findChild<QQuickItem*>(QStringLiteral("ruleTestButton"));
@@ -535,7 +536,7 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!settings) return false;
             const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
             const auto cards = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionCard"));
-            if (titles.size() != 4 || cards.size() != 4) return false;
+            if (titles.size() != 5 || cards.size() != 5) return false;
             auto* version = findUiChild<QObject*>(settings, QStringLiteral("applicationVersionLabel"));
             if (!version || version->property("text").toString() != "NookBit " + QCoreApplication::applicationVersion()) return false;
             for (auto* title : titles) {
@@ -686,7 +687,7 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
         for (auto* child : item->childItems()) if (auto* found = self(self, child, name)) return found;
         return nullptr;
     };
-    for (const int page : {7, 1, 4, 5, 8, 11, 12}) {
+    for (const int page : {7, 1, 4, 5, 8, 14}) {
         auto* button = find(find, home, QStringLiteral("homeNavigation%1").arg(page));
         auto* label = button ? find(find, button, QStringLiteral("homeMenuLabel")) : nullptr;
         auto* icon = button ? find(find, button, QStringLiteral("homeMenuIcon")) : nullptr;
@@ -948,7 +949,7 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << QDir::toNativeSeparators(defaultDestination) << Qt::endl;
         return EXIT_SUCCESS;
     }
-    nookbit::UiPageRegistry uiPages({2, 8, 9, 12, 13});
+    nookbit::UiPageRegistry uiPages({2, 8, 9, 12, 13, 14});
     const auto watchFolder = verifyFeatures ? QDir(appData).filePath("watch")
         : QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (verifyFeatures && startup.active.watch) QDir().mkpath(watchFolder);
@@ -1209,6 +1210,27 @@ int main(int argc, char* argv[]) {
         for (auto* action : trayMenu.actions()) if (action->objectName() == "companionVisibilityAction") ++companionActions;
         valid = valid && companionActions == (startup.active.companion ? 1 : 0);
         if (window) {
+            auto* catalogButton = findUiChild<QObject*>(window, "homeNavigation14");
+            auto* settingsButton = findUiChild<QObject*>(window, "homeNavigation8");
+            valid = valid && catalogButton && settingsButton && present("homeNavigationFooter")
+                && !present("homeNavigation12") && !present("homeNavigation11");
+            if (catalogButton) {
+                valid = QMetaObject::invokeMethod(catalogButton, "clicked") && valid;
+                valid = valid && window->property("currentPage").toInt() == 14 && present("allFeaturesPage")
+                    && present("featureNavigation7") == startup.active.organizer
+                    && present("featureNavigation1") == startup.active.organizer
+                    && present("featureNavigation4") == startup.active.organizer
+                    && present("featureNavigation3") == startup.active.watch
+                    && present("featureNavigation5") == startup.active.companion
+                    && present("featureNavigation11") == startup.active.notifications
+                    && !present("featureNavigation10") && !present("featureNavigation6");
+                auto* moduleButton = findUiChild<QObject*>(window, "featureNavigation12");
+                valid = valid && moduleButton;
+                if (moduleButton) valid = QMetaObject::invokeMethod(moduleButton, "clicked") && valid;
+                valid = valid && window->property("currentPage").toInt() == 12;
+                if (settingsButton) valid = QMetaObject::invokeMethod(settingsButton, "clicked") && valid;
+                valid = valid && window->property("currentPage").toInt() == 8;
+            }
             window->setProperty("currentPage", 8);
             QCoreApplication::processEvents();
             valid = valid && present("settingsPage") && present("globalDarkModeSwitch");
@@ -1223,10 +1245,12 @@ int main(int argc, char* argv[]) {
                 valid = valid && tutorialPage->property("stepCount").toInt() == tutorialSteps.size();
                 valid = tutorial.skip() && valid;
             }
-            window->setProperty("currentPage", 12);
+            auto* settingsModules = findUiChild<QObject*>(window, "settingsModulesButton");
+            valid = valid && settingsModules;
+            if (settingsModules) valid = QMetaObject::invokeMethod(settingsModules, "clicked") && valid;
             QCoreApplication::processEvents();
             valid = valid && window->property("currentPage").toInt() == 12 && present("moduleManagementPage")
-                && present("homeNavigation12") && present("moduleToggle_file-organizer") && present("moduleSaveButton");
+                && present("moduleToggle_file-organizer") && present("moduleSaveButton");
             // 임시 저장 복원 검사에서 실제 화면 요청이 저장만 하고 기능을 즉시 교체하지 않는지 확인한다.
             if (verifyFeaturePreferences) {
                 auto* toggle = findUiChild<QObject*>(window, "moduleToggle_companion");

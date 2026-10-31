@@ -45,6 +45,7 @@ QtObject {
     readonly property real dropOverlayOpacity: 0.28
     readonly property int navigationHeight: 48
     readonly property int mainNavigationHeight: navigationHeight
+    readonly property int homeShortcutLimit: 4
     readonly property int navigationIconSize: 24
     readonly property int textNavigation: typeEmphasis
     readonly property int mainMenuIconSize: navigationIconSize
@@ -140,7 +141,8 @@ QtObject {
         {width: 860, height: 700, minWidth: 720, minHeight: 540},
         {width: 560, height: 560, minWidth: 500, minHeight: 440},
         {width: 680, height: 760, minWidth: 540, minHeight: 520},
-        {width: 640, height: 720, minWidth: 560, minHeight: 560}
+        {width: 640, height: 720, minWidth: 560, minHeight: 560},
+        {width: 560, height: 640, minWidth: 500, minHeight: 440}
     ]
 
     // 규칙 캔버스의 글씨·블록 크기는 독립적인 표시 프리셋으로 관리한다.

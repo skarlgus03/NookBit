@@ -116,24 +116,39 @@ RegisteredPageHost {
 
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 660}});
     if (!home) return;
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().isEmpty(),
         "unregistered companion has no hardcoded home menu entry");
     auto menuEntry = registration;
     menuEntry.insert("label", "Companion"); menuEntry.insert("icon", "companion");
     menuEntry.insert("section", "Companion"); menuEntry.insert("order", 40);
+    menuEntry.insert("homeShortcut", true);
     home->setProperty("registeredPages", QVariantList{menuEntry});
     const auto entries = home->property("navigationEntries").value<QJSValue>().toVariant().toList();
-    expect(entries.size() == 3 && entries[0].toMap().value("page").toInt() == 37,
-        "registered menu is placed between file tools and app settings");
+    expect(entries.size() == 1 && entries[0].toMap().value("page").toInt() == 37,
+        "an opted-in module supplies its home shortcut without host settings in the scroll model");
     auto auxiliary = menuEntry;
     auxiliary["page"] = 10;
     auxiliary["inMenu"] = false;
     home->setProperty("registeredPages", QVariantList{menuEntry, auxiliary});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 3,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 1,
         "auxiliary routes do not create extra home menu entries");
     home->setProperty("registeredPages", QVariantList{});
-    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 2,
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().isEmpty(),
         "removing registration removes its home entry");
+    QVariantList manyPages;
+    for (int index = 0; index < 20; ++index) {
+        auto candidate = menuEntry;
+        candidate["page"] = 100 + index;
+        candidate["order"] = index;
+        manyPages.append(candidate);
+    }
+    home->setProperty("registeredPages", manyPages);
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().size() == 4,
+        "additional module registrations do not grow the home shortcut list beyond its shared limit");
+    menuEntry["homeShortcut"] = false;
+    home->setProperty("registeredPages", QVariantList{menuEntry});
+    expect(home->property("navigationEntries").value<QJSValue>().toVariant().toList().isEmpty(),
+        "catalog-only features never take a home shortcut slot");
 }
 
 // 전역 컴패니언 이름 없이 표시기를 생성하고 요청과 종료를 전달하는지 검사하는 함수.
@@ -552,10 +567,10 @@ int main(int argc, char** argv) {
 
     // 홈이 전달받은 값만으로 표시되고 상태 소유자를 변경하지 않는지 검사한다.
     const QVariantList registeredMenus{
-        QVariantMap{{"label", "Sort"}, {"page", 7}, {"icon", "folder"}, {"section", "Files"}, {"order", 10}},
-        QVariantMap{{"label", "Rules"}, {"page", 1}, {"icon", "rules"}, {"section", ""}, {"order", 20}},
-        QVariantMap{{"label", "History"}, {"page", 4}, {"icon", "history"}, {"section", ""}, {"order", 30}},
-        QVariantMap{{"label", "Companion"}, {"page", 5}, {"icon", "companion"}, {"section", "Companion"}, {"order", 40}},
+        QVariantMap{{"label", "Sort"}, {"page", 7}, {"icon", "folder"}, {"section", "Files"}, {"order", 10}, {"homeShortcut", true}},
+        QVariantMap{{"label", "Rules"}, {"page", 1}, {"icon", "rules"}, {"section", "Files"}, {"order", 20}, {"homeShortcut", true}},
+        QVariantMap{{"label", "History"}, {"page", 4}, {"icon", "history"}, {"section", "Files"}, {"order", 30}, {"homeShortcut", true}},
+        QVariantMap{{"label", "Companion"}, {"page", 5}, {"icon", "companion"}, {"section", "Companion"}, {"order", 40}, {"homeShortcut", true}},
         QVariantMap{{"label", "Notifications"}, {"page", 11}, {"icon", "notifications"}, {"section", ""}, {"order", 60}}};
     auto home = create(engine, "CompactHome", {{"width", 380}, {"height", 420}, {"pendingCount", 5},
         {"registeredPages", registeredMenus}, {"watchEnabled", true}, {"watchFolder", QStringLiteral("D:\\Downloads\\")}});
@@ -614,15 +629,29 @@ int main(int argc, char** argv) {
     home->setProperty("navigationEnabled", true);
     auto* scroll = find(find, homeItem, QStringLiteral("homeNavigationMenu"));
     auto* flickable = scroll ? scroll->property("contentItem").value<QQuickItem*>() : nullptr;
-    auto* lastMenu = find(find, homeItem, QStringLiteral("homeNavigation11"));
-    if (!flickable || !lastMenu) return 1;
+    auto* lastMenu = find(find, homeItem, QStringLiteral("homeNavigation5"));
+    auto* footer = find(find, homeItem, QStringLiteral("homeNavigationFooter"));
+    auto* catalogButton = find(find, homeItem, QStringLiteral("homeNavigation14"));
+    auto* settingsButton = find(find, homeItem, QStringLiteral("homeNavigation8"));
+    if (!flickable || !lastMenu || !footer || !catalogButton || !settingsButton) return 1;
+    const auto footerTop = footer->mapToItem(homeItem, QPointF()).y();
+    expect(footerTop >= 0 && footerTop + footer->height() <= homeItem->height()
+        && !find(find, homeItem, QStringLiteral("homeNavigation11")), "footer is visible at minimum height and catalog-only items stay off the home menu");
     const auto contentHeight = flickable->property("contentHeight").toDouble();
-    expect(contentHeight > flickable->height(), "short home windows keep card and all menus in one scroll area");
+    expect(contentHeight > flickable->height(), "short home windows scroll the summary and shortcuts above the fixed footer");
     flickable->setProperty("contentY", contentHeight - flickable->height());
     settle();
     expect(lastMenu->mapToItem(flickable, QPointF()).y() >= -1
         && lastMenu->mapToItem(flickable, QPointF(0, lastMenu->height())).y() <= flickable->height() + 1,
         "the final navigation entry remains reachable at minimum window height");
+    expect(footer->mapToItem(homeItem, QPointF()).y() == footerTop, "scrolling shortcuts never moves the catalog and settings footer");
+    QMetaObject::invokeMethod(catalogButton, "clicked");
+    expect(observer->property("lastPage").toInt() == 14, "fixed catalog button requests the catalog route");
+    QMetaObject::invokeMethod(settingsButton, "clicked");
+    expect(observer->property("lastPage").toInt() == 8, "fixed settings button requests settings");
+    home->setProperty("navigationEnabled", false);
+    expect(!catalogButton->isEnabled() && !settingsButton->isEnabled(), "busy navigation lock also disables the fixed footer");
+    home->setProperty("navigationEnabled", true);
 
     // 공유 아틀라스와 비중앙 피벗·미러가 있어도 정지 미리보기를 상자 안에 맞추는 검사.
     QTemporaryDir images;

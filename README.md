@@ -1,5 +1,10 @@
 # NookBit
 
+The compact home keeps **전체 기능 보기** and **설정** fixed at the bottom.
+Its main area shows up to four module-provided shortcuts. All Features lists the
+active public feature pages by category; additional modules appear there without
+growing the home menu. Module Management is also accessible from Settings.
+
 The first-launch **tutorial** explains the currently active built-in modules.
 Use Previous/Next or the contents selector to read about sorting, rules, history,
 companions and other enabled features. It never changes feature settings or moves

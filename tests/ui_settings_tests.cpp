@@ -28,10 +28,12 @@ int main(int argc, char** argv) {
     first.rememberExtensionSize(8, 560, 520);
     first.rememberExtensionSize(11, 620, 600);
     first.rememberExtensionSize(12, 700, 780);
+    first.rememberExtensionSize(14, 580, 680);
     QSettings reopened(directory.filePath("ui.ini"), QSettings::IniFormat);
     nookbit::UiSettingsController sized(reopened, true);
     if (sized.extensionSize(11, fallback) != QSize(620, 600)) return 1;
     if (sized.extensionSize(12, fallback) != QSize(700, 780)) return 1;
+    if (sized.extensionSize(14, fallback) != QSize(580, 680)) return 1;
     if (sized.extensionSize(1, fallback) != QSize(1200, 800)
         || sized.extensionSize(8, fallback) != QSize(560, 520)
         || sized.extensionSize(7, fallback) != fallback) return 1;

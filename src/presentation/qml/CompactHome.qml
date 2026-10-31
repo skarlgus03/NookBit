@@ -16,7 +16,8 @@ Rectangle {
     property var companionDescriptor: ({})
     property var registeredPages: []
     property int currentPage: 0
-    readonly property int selectedPage: [3, 6, 8, 9, 10].includes(currentPage) ? 8 : currentPage
+    readonly property int selectedPage: [3, 6, 8, 9, 10, 12, 13].includes(currentPage) ? 8
+        : navigationEntries.some(entry => entry.page === currentPage) ? currentPage : currentPage > 0 ? 14 : 0
     signal pageRequested(int page)
     signal historyRequested()
     signal moveRequested()
@@ -24,15 +25,12 @@ Rectangle {
     signal closeRequested()
     readonly property var theme: UiTheme.colors(dark)
     readonly property color foreground: theme.text
-    // 기존 메뉴와 모듈이 등록한 메뉴를 같은 순서 규격으로 합치는 함수형 바인딩.
+    // 모듈이 요청한 바로가기 중 공통 개수 제한 안의 항목만 메인에 표시하는 함수형 바인딩.
     readonly property var navigationEntries: {
-        const entries = [
-            {label: qsTr("설정"), page: 8, icon: "settings", section: qsTr("앱"), order: 50},
-            {label: qsTr("모듈 관리"), page: 12, icon: "modules", section: "", order: 55}
-        ]
+        const entries = []
         for (let i = 0; i < registeredPages.length; ++i)
-            if (registeredPages[i].inMenu !== false) entries.push(registeredPages[i])
-        return entries.sort((left, right) => left.order - right.order || left.page - right.page)
+            if (registeredPages[i].inMenu !== false && registeredPages[i].homeShortcut === true) entries.push(registeredPages[i])
+        return entries.sort((left, right) => left.order - right.order || left.page - right.page).slice(0, UiMetrics.homeShortcutLimit)
     }
     color: theme.home
     radius: UiMetrics.radiusControl
@@ -84,9 +82,10 @@ Rectangle {
                     model: home.navigationEntries
                     delegate: ColumnLayout {
                         required property var modelData
+                        required property int index
                         Layout.fillWidth: true
                         spacing: UiMetrics.spaceControl
-                        Label { visible: modelData.section.length > 0; text: modelData.section; color: home.theme.homeMuted; font.pixelSize: UiMetrics.textGroupTitle; font.weight: UiMetrics.groupTitleWeight }
+                        Label { visible: modelData.section.length > 0 && (index === 0 || home.navigationEntries[index - 1].section !== modelData.section); text: modelData.section; color: home.theme.homeMuted; font.pixelSize: UiMetrics.textGroupTitle; font.weight: UiMetrics.groupTitleWeight }
                         HomeMenuButton {
                             objectName: "homeNavigation" + modelData.page
                             selected: home.selectedPage === modelData.page
@@ -100,6 +99,31 @@ Rectangle {
                         }
                     }
                 }
+            }
+        }
+        ColumnLayout {
+            objectName: "homeNavigationFooter"
+            Layout.fillWidth: true
+            enabled: home.navigationEnabled
+            spacing: UiMetrics.spaceExtraSmall
+            Rectangle { Layout.fillWidth: true; implicitHeight: UiMetrics.borderNormal; color: home.theme.border }
+            HomeMenuButton {
+                objectName: "homeNavigation14"
+                Layout.fillWidth: true
+                text: qsTr("전체 기능 보기")
+                iconKind: "modules"
+                selected: home.selectedPage === 14
+                dark: home.dark
+                onClicked: home.pageRequested(14)
+            }
+            HomeMenuButton {
+                objectName: "homeNavigation8"
+                Layout.fillWidth: true
+                text: qsTr("설정")
+                iconKind: "settings"
+                selected: home.selectedPage === 8
+                dark: home.dark
+                onClicked: home.pageRequested(8)
             }
         }
     }

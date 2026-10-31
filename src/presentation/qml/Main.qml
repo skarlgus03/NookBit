@@ -56,7 +56,7 @@ ApplicationWindow {
     property int currentPage: 0
     property int tutorialReturnPage: 0
     readonly property var hostPageTitles: ({8: qsTr("설정"), 9: qsTr("개발 도구"), 12: qsTr("모듈 관리"),
-        13: tutorial.reviewing ? qsTr("튜토리얼 다시 보기") : qsTr("튜토리얼")})
+        13: tutorial.reviewing ? qsTr("튜토리얼 다시 보기") : qsTr("튜토리얼"), 14: qsTr("전체 기능")})
     Component.onCompleted: if (tutorial.required) currentPage = 13
     Connections {
         target: tutorial
@@ -67,7 +67,7 @@ ApplicationWindow {
         }
     }
     // 호스트 페이지와 현재 등록된 모듈 페이지만 열 수 있는지 확인하는 함수.
-    function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || page === 13 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
+    function pageAvailable(page) { return page === 0 || page === 8 || page === 12 || page === 13 || page === 14 || (page === 9 && organizerAvailable) || uiPages.contains(page) }
     // 복구 목록의 읽기 전용 검사는 전체 오버레이 대신 해당 페이지 안에서 표시한다.
     readonly property bool inlineRecoveryInspection: currentPage === 10 && root.workBusy && !root.fileWorkActive
     readonly property bool inlineSortConfirmation: currentPage === 7 && !!fileSortPane && fileSortPane.manualSortRequested
@@ -359,6 +359,15 @@ ApplicationWindow {
         onDialogRequested: function(dialogId) { root.openFeatureDialog(dialogId) }
     }
 
+    AllFeaturesPage {
+        parent: extensionHost
+        anchors.fill: parent
+        visible: root.currentPage === 14
+        enabled: !root.workBusy && !root.confirmationPending
+        registeredPages: uiPages.pages
+        dark: root.editorDark
+        onRouteRequested: function(page) { root.openPage(page) }
+    }
     ModuleManagementPage {
         parent: extensionHost
         anchors.fill: parent
