@@ -103,36 +103,62 @@ Item {
             Layout.minimumHeight: UiMetrics.fileSortListHeaderHeight + UiMetrics.pendingRowHeight * 3
             color: input.theme.window
             radius: UiMetrics.radiusCard
-            RowLayout {
+            Item {
                 id: queueHeader
+                objectName: "pendingQueueHeader"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.leftMargin: UiMetrics.spaceSection
                 anchors.rightMargin: UiMetrics.spaceSection
                 height: UiMetrics.fileSortListHeaderHeight
-                spacing: UiMetrics.spaceControl
-                Label {
-                    text: qsTr("대기 목록")
-                    font.pixelSize: UiMetrics.textEmphasis
-                    font.bold: true
-                    color: input.theme.text
+                RowLayout {
+                    anchors.left: parent.left
+                    anchors.right: clearQueue.left
+                    anchors.rightMargin: UiMetrics.spaceGroup
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: UiMetrics.spaceControl
+                    Label {
+                        text: qsTr("대기 목록")
+                        font.pixelSize: UiMetrics.textEmphasis
+                        font.bold: true
+                        color: input.theme.text
+                    }
+                    Label {
+                        text: qsTr("%1개").arg(input.pending.count)
+                        color: input.theme.muted
+                        font.pixelSize: UiMetrics.textBody
+                    }
+                    Item { Layout.fillWidth: true }
                 }
-                Label {
-                    text: qsTr("%1개").arg(input.pending.count)
-                    color: input.theme.muted
-                    font.pixelSize: UiMetrics.textBody
-                }
-                Item { Layout.fillWidth: true }
                 AppButton {
+                    id: clearQueue
                     objectName: "pendingQueueClearButton"
-                    text: qsTr("비우기")
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitWidth: UiMetrics.iconButtonSize
+                    implicitHeight: UiMetrics.iconButtonSize
+                    width: implicitWidth
+                    height: implicitHeight
+                    padding: UiMetrics.spaceSmall
+                    horizontalPadding: UiMetrics.spaceSmall
                     enabled: input.pending.count > 0 && !input.workBusy
                     dark: input.dark
-                    appearance: AppButton.Soft
+                    appearance: AppButton.Menu
                     Accessible.name: qsTr("대기 목록 비우기")
                     Accessible.description: qsTr("목록에서만 제외하며 원본 파일과 폴더는 그대로 둬요.")
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("대기 목록 비우기 · 원본 파일은 그대로 둬요")
                     onClicked: input.pending.clear()
+                    contentItem: Item {
+                        NavigationIcon {
+                            anchors.centerIn: parent
+                            width: UiMetrics.iconSize
+                            height: UiMetrics.iconSize
+                            kind: "trash"
+                            strokeColor: clearQueue.buttonForeground
+                        }
+                    }
                 }
             }
             ColumnLayout {

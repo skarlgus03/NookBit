@@ -32,6 +32,12 @@ Canvas {
             ctx.moveTo(12, 19); ctx.lineTo(12, 20)
         } else if (kind === "check") {
             ctx.moveTo(5, 12); ctx.lineTo(10, 17); ctx.lineTo(20, 6)
+        } else if (kind === "trash") {
+            ctx.moveTo(4, 6); ctx.lineTo(20, 6)
+            ctx.moveTo(9, 6); ctx.lineTo(9, 3); ctx.lineTo(15, 3); ctx.lineTo(15, 6)
+            ctx.moveTo(6, 6); ctx.lineTo(7, 21); ctx.lineTo(17, 21); ctx.lineTo(18, 6)
+            ctx.moveTo(10, 10); ctx.lineTo(10, 17)
+            ctx.moveTo(14, 10); ctx.lineTo(14, 17)
         } else if (kind === "undo") {
             ctx.moveTo(9, 5); ctx.lineTo(3, 11); ctx.lineTo(9, 17)
             ctx.moveTo(3, 11); ctx.lineTo(14, 11)

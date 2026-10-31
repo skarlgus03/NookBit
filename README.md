@@ -5,7 +5,7 @@ Its main area shows up to four module-provided shortcuts. All Features lists the
 active public feature pages by category; additional modules appear there without
 growing the home menu. Module Management is also accessible from Settings.
 
-In File Organizer, **대기 목록 → 비우기** removes all queued entries without
+In File Organizer, the **trash icon at the right of the queue header** removes all queued entries without
 deleting files or folder contents. The empty queue is saved through the normal
 persistence path, and its preview/approval is invalidated. Clearing is disabled
 while work or confirmation is pending.

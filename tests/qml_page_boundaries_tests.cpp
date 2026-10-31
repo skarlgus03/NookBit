@@ -709,7 +709,14 @@ int main(int argc, char** argv) {
             auto* sortAction = find(find, inputItem, "compactSortButton");
             auto* empty = find(find, inputItem, "pendingEmptyState");
             auto* clearQueue = find(find, inputItem, "pendingQueueClearButton");
-            if (!bar || !queue || !previewAction || !sortAction || !empty || !clearQueue) return 1;
+            auto* queueHeader = find(find, inputItem, "pendingQueueHeader");
+            if (!bar || !queue || !previewAction || !sortAction || !empty || !clearQueue || !queueHeader) return 1;
+            expect(std::abs(clearQueue->mapToItem(queue, QPointF(clearQueue->width(), 0)).x()
+                    - queue->width() + metrics->property("spaceSection").toInt()) <= 1
+                && std::abs(clearQueue->mapToItem(queueHeader, QPointF(0, clearQueue->height() / 2)).y() - queueHeader->height() / 2) <= 1
+                && clearQueue->width() == metrics->property("iconButtonSize").toInt()
+                && clearQueue->height() == clearQueue->width(),
+                "queue clear icon stays centered on the header and aligned to its trailing inset at every window width");
             expect(queue->mapToItem(inputItem, QPointF(0, queue->height())).y() <= bar->mapToItem(inputItem, QPointF()).y()
                 && bar->mapToItem(inputItem, QPointF(0, bar->height())).y() <= inputItem->height()
                 && sortAction->mapToItem(inputItem, QPointF(sortAction->width(), 0)).x() <= inputItem->width(),
