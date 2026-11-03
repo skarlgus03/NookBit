@@ -22,7 +22,8 @@ Real file work (including undo/recovery) selects the companion's working clip;
 inspection/approval preparation does not. Completion and failure use separate
 2.4-second cues, then return to the current behavior/offer. Packs can bind
 `file.work`, `file.work.completed` and `file.work.failed`. The bundled Nmoo uses
-temporary standing/blink artwork for work and completion until dedicated frames
+eight dedicated organizing frames for work (250 ms each, a 2-second loop) and
+temporary standing/blink artwork for completion until dedicated frames
 are available. Existing imported packs retain fallback artwork.
 
 The optional **먹이 주기** module adds a short reaction to the companion's

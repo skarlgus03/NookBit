@@ -186,10 +186,23 @@ void testWorkReactions() {
         && character.cueId() == "resting" && character.message() == "legacy done", "legacy artwork retains the result message through fallback");
     settleReaction();
     auto nmoo = loader.load(std::filesystem::path(profilePath("resources/imagepacks/nmoo/imagepack.json").toStdWString()));
-    if (!nmoo) { expect(false, "work placeholder pack loads"); return; }
+    if (!nmoo) { expect(false, "Nmoo work pack loads"); return; }
+    const auto& work = nmoo.value().animations.at("work-placeholder");
+    expect(work.steps.size() == 8, "Nmoo uses all eight supplied organizing frames");
+    int cycleDuration{};
+    for (std::size_t index = 0; index < work.steps.size(); ++index) {
+        const auto& step = work.steps[index];
+        const auto& frame = nmoo.value().frames.at(step.frameId);
+        cycleDuration += step.durationMs;
+        expect(step.frameId == "work-" + std::to_string(index + 1) && step.durationMs == 250
+            && frame.imageWidth == 1024 && frame.imageHeight == 1024
+            && frame.pivot.x == 128 && frame.pivot.y == 230,
+            "organizing frames preserve order, slow timing, canvas size and a shared table contact point");
+    }
+    expect(cycleDuration == 2000, "the default organizing loop lasts two seconds");
     expect(nmoo.value().animations.at("work-placeholder").loop && !nmoo.value().animations.at("complete-placeholder").loop,
         "work repeats while completion is a one-shot clip");
-    expect(bool(character.setImagePack(nmoo.value())), "apply placeholder pack");
+    expect(bool(character.setImagePack(nmoo.value())), "apply Nmoo work pack");
     reportWork(character, true);
     expect(character.animationId() == "work-placeholder", "work uses the pack-defined clip");
     reportWork(character, false);

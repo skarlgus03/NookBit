@@ -3,7 +3,7 @@
   "packType": "imagepack",
   "id": "nookbit.nmoo",
   "name": "Nmoo - Idle, Walk & Work",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "display": {
     "referenceSize": { "width": 256, "height": 256 },
     "pixelsPerUnit": 4,
@@ -21,7 +21,15 @@
     { "id": "walk-1", "kind": "image", "file": "images/walk-1.png" },
     { "id": "walk-2", "kind": "image", "file": "images/walk-2.png" },
     { "id": "walk-3", "kind": "image", "file": "images/walk-3.png" },
-    { "id": "notice", "kind": "image", "file": "images/notice.png" }
+    { "id": "notice", "kind": "image", "file": "images/notice.png" },
+    {"id": "work-1", "kind": "image", "file": "images/work-1.png"},
+    {"id": "work-2", "kind": "image", "file": "images/work-2.png"},
+    {"id": "work-3", "kind": "image", "file": "images/work-3.png"},
+    {"id": "work-4", "kind": "image", "file": "images/work-4.png"},
+    {"id": "work-5", "kind": "image", "file": "images/work-5.png"},
+    {"id": "work-6", "kind": "image", "file": "images/work-6.png"},
+    {"id": "work-7", "kind": "image", "file": "images/work-7.png"},
+    {"id": "work-8", "kind": "image", "file": "images/work-8.png"}
   ],
   "frames": [
     { "id": "eyes-open", "sourceId": "eyes-open", "region": { "type": "image" } },
@@ -29,7 +37,15 @@
     { "id": "walk-1", "sourceId": "walk-1", "region": { "type": "image" } },
     { "id": "walk-2", "sourceId": "walk-2", "region": { "type": "image" } },
     { "id": "walk-3", "sourceId": "walk-3", "region": { "type": "image" } },
-    { "id": "notice", "sourceId": "notice", "region": { "type": "image" } }
+    { "id": "notice", "sourceId": "notice", "region": { "type": "image" } },
+    {"id": "work-1", "sourceId": "work-1", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-2", "sourceId": "work-2", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-3", "sourceId": "work-3", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-4", "sourceId": "work-4", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-5", "sourceId": "work-5", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-6", "sourceId": "work-6", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-7", "sourceId": "work-7", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}},
+    {"id": "work-8", "sourceId": "work-8", "region": {"type": "image"}, "pivot": {"x": 128, "y": 230}}
   ],
   "animations": [
     {
@@ -54,8 +70,14 @@
       "id": "work-placeholder",
       "loop": true,
       "steps": [
-        { "frameId": "eyes-open", "durationMs": 650 },
-        { "frameId": "eyes-closed", "durationMs": 150 }
+        {"frameId": "work-1", "durationMs": 250},
+        {"frameId": "work-2", "durationMs": 250},
+        {"frameId": "work-3", "durationMs": 250},
+        {"frameId": "work-4", "durationMs": 250},
+        {"frameId": "work-5", "durationMs": 250},
+        {"frameId": "work-6", "durationMs": 250},
+        {"frameId": "work-7", "durationMs": 250},
+        {"frameId": "work-8", "durationMs": 250}
       ]
     },
     {
