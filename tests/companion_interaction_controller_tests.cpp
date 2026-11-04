@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     controller.setAvailable(true);
     ICharacterChannel& activity = character;
     expect(activity.publish({"work", "job", CharacterUpdateKind::Activity, true, {}, "file.work"}).hasValue(), "file work begins");
-    expect(controller.begin("companion.pet", 1, 2) && controller.active() && !character.reactionId().isEmpty(), "pet session overlays work");
+    expect(controller.begin("companion.pet", 1, 2) && controller.active() && character.reactionId().isEmpty(), "work presentation takes priority while pet session remains active");
     expect(character.behaviorId() == "working" && character.stateKey() == "working", "reaction preserves basic work state");
     expect(!controller.invoke("companion.click", 0, 0) && controller.active(), "concurrent input cannot replace gesture");
     expect(activity.publish({"work", "job", CharacterUpdateKind::Activity, false, {}, "file.work"}).hasValue() &&

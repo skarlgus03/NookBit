@@ -883,7 +883,6 @@ QtObject {
         blocks = blocks.concat(created);
         edges = edges.concat(created.slice(1).map((block, index) => ({from: created[index].id, to: block.id})));
         selectOnly(firstId);
-        fitAllNodes();
         statusText = folderInput ? qsTr("폴더 흐름을 추가했어요. 전체 저장 후 대기 목록에서 선택할 수 있어요.") : qsTr("분류 흐름을 추가했어요. 다른 영역의 분류 흐름 호출 노드에서 선택할 수 있어요.");
         repaintRequested();
     }

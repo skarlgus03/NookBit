@@ -343,8 +343,14 @@ int main(int argc, char** argv) {
         expect(selected.value("value").toString() == "file", "item type choice updates the selected graph node");
     }
     const auto beforeFlow = list(state.get(), "blocks").size();
+    state->setProperty("zoom", 0.73);
+    state->setProperty("panX", -185.0);
+    state->setProperty("panY", 92.0);
     call(engine, state.get(), "addBlock", {"folderFlow", 150, 500});
     settle();
+    expect(std::abs(state->property("zoom").toDouble() - 0.73) < 0.00001
+        && state->property("panX").toDouble() == -185.0 && state->property("panY").toDouble() == 92.0,
+        "adding a folder flow preserves the current zoom and camera position");
     const auto flowNodes = list(state.get(), "blocks");
     expect(flowNodes.size() == beforeFlow + 3, "one folder-flow action creates input, traversal and default call");
     const int flowStart = flowNodes[beforeFlow].toMap().value("id").toInt();
@@ -364,6 +370,13 @@ int main(int argc, char** argv) {
     call(engine, state.get(), "selectOnly", {flowStart});
     call(engine, state.get(), "removeSelectedBlock");
     expect(list(state.get(), "blocks").size() == beforeFlow, "deleting the flow input removes its complete region");
+    call(engine, state.get(), "addBlock", {"classificationFlow", 150, 500});
+    settle();
+    expect(list(state.get(), "blocks").size() == beforeFlow + 2
+        && std::abs(state->property("zoom").toDouble() - 0.73) < 0.00001
+        && state->property("panX").toDouble() == -185.0 && state->property("panY").toDouble() == 92.0,
+        "adding a separate classifier preserves the current zoom and camera position");
+    call(engine, state.get(), "removeSelectedBlock");
     call(engine, state.get(), "addBlock", {"folderFlow", 150, 500});
     const int editableRoot = state->property("selectedId").toInt();
     call(engine, state.get(), "selectOnly", {editableRoot + 2});
