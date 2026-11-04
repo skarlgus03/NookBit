@@ -279,7 +279,7 @@ Item {
                         }
                         Label {
                             visible: folderFlowId.length > 0
-                            text: qsTr("하위 파일 개별 정리")
+                            text: qsTr("사용자 지정 흐름")
                             font.pixelSize: UiMetrics.textBody
                             font.bold: true
                             color: input.theme.accent

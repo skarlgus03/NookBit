@@ -147,31 +147,6 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: canvas.editor.flowRegions()
-            delegate: Rectangle {
-                required property var modelData
-                objectName: "ruleFlowFrame_" + (modelData.id || "base")
-                x: canvas.editor.screenPoint(modelData.x, modelData.y).x
-                y: canvas.editor.screenPoint(modelData.x, modelData.y).y
-                width: modelData.width * canvas.editor.zoom
-                height: modelData.height * canvas.editor.zoom
-                color: "transparent"
-                radius: UiMetrics.radiusPanel
-                border.color: modelData.id ? canvas.theme.accent : canvas.borderColor
-                border.width: UiMetrics.borderNormal
-                Label {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.margins: UiMetrics.spaceGroup
-                    text: modelData.name
-                    textFormat: Text.PlainText
-                    color: modelData.id ? canvas.theme.accent : canvas.theme.muted
-                    font.pixelSize: canvas.editor.nodeFontSize * canvas.editor.zoom
-                    font.bold: true
-                }
-            }
-        }
 
         MouseArea {
             anchors.fill: parent
@@ -217,6 +192,36 @@ Rectangle {
             onCanceled: {
                 breakingEdge = false;
                 canvas.editor.marqueeActive = false;
+            }
+        }
+
+        Repeater {
+            model: canvas.editor.flowRegions()
+            delegate: Rectangle {
+                required property var modelData
+                objectName: "ruleFlowFrame_" + (modelData.id || "base")
+                x: canvas.editor.screenPoint(modelData.x, modelData.y).x
+                y: canvas.editor.screenPoint(modelData.x, modelData.y).y
+                width: modelData.width * canvas.editor.zoom
+                height: modelData.height * canvas.editor.zoom
+                color: "transparent"
+                radius: UiMetrics.radiusPanel
+                border.color: canvas.editor.editingFlowId === modelData.id ? canvas.theme.accent : canvas.borderColor
+                border.width: canvas.editor.editingFlowId === modelData.id ? UiMetrics.borderActive : UiMetrics.borderNormal
+                Label {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.margins: UiMetrics.spaceGroup
+                    text: modelData.name
+                    textFormat: Text.PlainText
+                    color: modelData.id ? canvas.theme.accent : canvas.theme.muted
+                    font.pixelSize: canvas.editor.nodeFontSize * canvas.editor.zoom
+                    font.bold: true
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { canvas.editor.selectOnly(modelData.startId); canvasViewport.forceActiveFocus(); }
+                    }
+                }
             }
         }
 

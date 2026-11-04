@@ -5,6 +5,7 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <algorithm>
+#include "modules/rules/processing_flow.hpp"
 
 namespace nookbit {
 
@@ -95,6 +96,8 @@ Result<OperationPlan> VerifySavedPlanUseCase::executeImpl(const PlanId& planId,
     }
     auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
+    const auto contexts = restoreProcessingSources(snapshot.value(), saved);
+    if (!contexts) return Result<OperationPlan>::failure(contexts.error());
     auto current = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!current) return Result<OperationPlan>::failure(current.error());
     if (saved.formatVersion == 2 && current.value().formatVersion == 1) {

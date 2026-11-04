@@ -411,9 +411,22 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
 }
 
 // 규칙 트리를 자동 배치와 저장된 좌표를 사용해 화면 그래프로 펼치는 함수.
-// 폴더 입력 흐름을 먼저 검증하고 기존 분류 트리는 기존 검사기에 전달하는 함수.
+// 일반 조건과 처리 흐름 조건이 같은 입력 검증을 사용하도록 어댑트하는 함수.
+Result<AtomicRuleCondition> flowCondition(const QVariantMap& value) {
+    auto condition = value;
+    condition["id"] = 2;
+    condition["ruleId"] = "condition-probe";
+    QVariantList blocks{QVariantMap{{"id", 1}, {"type", "start"}}, condition,
+        QVariantMap{{"id", 3}, {"type", "exclude"}}};
+    const auto checked = baseGraphRules(blocks, {QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 3}}});
+    if (!checked) return Result<AtomicRuleCondition>::failure(checked.error());
+    if (!checked.value()[0].atomicCondition) return Result<AtomicRuleCondition>::failure({"rules.flow_condition_invalid", "Expected one atomic condition."});
+    return Result<AtomicRuleCondition>::success(*checked.value()[0].atomicCondition);
+}
+
+// 처리 흐름을 먼저 검증하고 기본 분류 트리는 기존 검사기에 전달하는 함수.
 Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks, const QVariantList& edges) {
-    const auto split = splitFolderFlowGraph(blocks, edges);
+    const auto split = splitFolderFlowGraph(blocks, edges, flowCondition);
     if (!split) return Result<std::vector<RuleNode>>::failure(split.error());
     return baseGraphRules(split.value().blocks, split.value().edges);
 }
@@ -492,7 +505,8 @@ QVariantMap graphForRules(const RuleSet& rules,
                                {QStringLiteral("value"), QStringLiteral("정리할 파일")},
                                {QStringLiteral("x"), startPosition.x()},
                                {QStringLiteral("y"), startPosition.y()}});
-    appendFolderFlowGraph(rules.folderFlows, savedPositions, blocks, edges, nextId, 170 + nextRow * 170 + 200);
+    appendFolderFlowGraph(rules.folderFlows, savedPositions, blocks, edges, nextId, 170 + nextRow * 170 + 200,
+        [](const ProcessingNode& node, int id) { RuleNode condition; condition.id = node.id; condition.atomicCondition = node.condition; return graphBlockFor(condition, id); });
     return QVariantMap{{QStringLiteral("valid"), true},
                        {QStringLiteral("blocks"), blocks},
                        {QStringLiteral("edges"), edges},
@@ -777,7 +791,7 @@ bool RuleEditorController::importGraph(const QVariantList& blocks, const QVarian
         return false;
     }
     draft_.nodes = std::move(converted.value());
-    draft_.folderFlows = splitFolderFlowGraph(blocks, edges).value().flows;
+    draft_.folderFlows = splitFolderFlowGraph(blocks, edges, flowCondition).value().flows;
     dirty_ = true;
     message_ = QStringLiteral("노드 그래프를 규칙 초안으로 바꿨어요. 기존 편집기에서 확인한 뒤 저장해 주세요.");
     emit changed();
@@ -858,7 +872,7 @@ QVariantMap RuleEditorController::exportGraph(const QVariantList& blocks,
     RuleSet exported = draft_;
     exported.schemaVersion = 3;
     exported.nodes = std::move(checked.value());
-    exported.folderFlows = splitFolderFlowGraph(blocks, edges).value().flows;
+    exported.folderFlows = splitFolderFlowGraph(blocks, edges, flowCondition).value().flows;
     const auto saved = fileWriter_->saveFile(
         std::filesystem::path(fileUrl.toLocalFile().toStdWString()), exported);
     if (!saved) return {{QStringLiteral("ok"), false},
@@ -961,7 +975,7 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
         const auto type = block.value(QStringLiteral("type")).toString();
         QString key;
         if (!block.value("flowId").toString().isEmpty()) {
-            key = "flow:" + block.value("flowId").toString() + ":" + type;
+            key = "flow:" + block.value("flowId").toString() + ":" + block.value("flowNodeId", type).toString();
         } else if (type == QStringLiteral("start")) {
             key = QStringLiteral("start");
         } else if (type == QStringLiteral("destination") || type == QStringLiteral("exclude")) {

@@ -40,40 +40,83 @@ fallbacks that would move files (or explicitly exclude files). Folder destinatio
 or recursive-classification field inside a condition node. Optional folder input
 flows are described below; merely importing one never expands a queued folder.
 
-## Optional named folder input flows
+## Optional named processing flows
 
-Only when the user requests a selectable way to classify a folder's contents,
-add this optional top-level array (at most 24 entries):
+Use optional top-level `folderFlows` for reusable named processing graphs
+(maximum 24 flows and 1000 processing nodes total). Omit it for basic usage.
+The field name is retained for compatibility; a graph's `input` distinguishes
+folder entry points from reusable item classifiers. This member fragment shows
+an editable folder algorithm that moves only PNG files:
 
 ```text
-"folderFlows": [
-  {"id":"folder-contents","name":"Sort folder contents","kind":"recursiveFilesToDefault"}
-]
+"folderFlows": [{
+  "id": "extract-images", "name": "Extract PNG files", "kind": "graph",
+  "input": "folder", "entry": "input",
+  "nodes": [
+    {"id":"input", "type":"input", "next":["scan"]},
+    {"id":"scan", "type":"traverse", "recursive":true, "next":["png"]},
+    {"id":"png", "type":"condition", "when":{"type":"extension","values":["png"]}, "next":["out"]},
+    {"id":"out", "type":"destination", "destination":{"path":"Images","collisionPolicy":"inherit"}}
+  ]
+}]
 ```
 
-This is a JSON member fragment, not a complete rule document. `id` uses
-`[A-Za-z0-9._-]+` and must be unique among folder flows. `name` is a unique,
-trimmed display label of 1–60 characters; preserve the user's language.
-`kind` is exactly `recursiveFilesToDefault`; do not invent other kinds or fields.
-The editor represents it as a named region containing folder input → recursive
-file traversal → apply the document's ordinary `nodes`/`globalOtherwise` rules.
-It is an input-processing flow, not a predicate and not a sibling of a condition.
+This is a member fragment, not a complete document. Keep ordinary top-level
+`nodes` for the default classifier. Flow IDs use `[A-Za-z0-9._-]+` and are unique
+across flows; processing node IDs use the same syntax and are unique within
+their flow. Names are unique, trimmed labels of 1-60 characters. Preserve the
+user's language. `kind` is `graph`; `input` is `folder` or `item`; `entry` names
+exactly one input node. Use the following processing nodes and no other fields:
 
-Each queued folder defaults to **whole-folder** processing. Only an explicit
-per-folder user selection activates a named flow; ordinary files cannot select
-it. It recursively classifies regular files at every depth, not directories,
-and does not delete source directories or empty folders. Queue rows stay folded;
-preview lists the resulting individual file operations. Traversal errors or
-links interrupt this explicit expansion instead of silently classifying an
-incomplete folder. Preview is a snapshot: later-added files are not moved by
-that operation. All actual moves still require the usual preview/approval.
+| Type | Required fields besides `id`, `type` | Meaning |
+| --- | --- | --- |
+| `input` | `next` | Unique entry point; only the declared entry can use this type. |
+| `condition` | `when`, `next` | One atomic predicate from the earlier table. |
+| `otherwise` | `next` | Last sibling fallback when no ordinary sibling matches. |
+| `traverse` | `recursive`, `next` | Enumerate regular files in a folder. `true` includes all depths; `false` includes immediate files only. Subfolders themselves are not emitted. |
+| `call` | `target` | Terminal call: empty string selects default top-level rules; a flow ID calls that flow. No return continuation. |
+| `destination` | `destination` | Terminal destination object with the same path/permission/collision contract as ordinary rules. |
+| `exclude` | none | Terminal explicit do-not-move result. |
 
-Flow selections belong to their rule set. Removing a flow or switching to a
-different rule set resets affected queue entries to whole-folder processing
-with a visible notice. Changing a flow name preserves its stable ID. Older
-apps without this extension reject documents containing `folderFlows`; omit
-the member if no extra folder flow is needed. AND/OR/NOT nodes and custom
-traversal graphs are not supported by this contract revision.
+`next` is an ordered array of successor node IDs. Terminal nodes omit it or use
+`[]`; other nodes require successors. With multiple successors, all must be
+`condition` or `otherwise` nodes. Select the first matching condition, then
+continue only in that branch; no backtracking. A single processing successor
+executes directly. If no branch matches, leave the item unclassified; a graph
+never implicitly uses top-level `globalOtherwise`. Explicitly call the default
+classifier if its ordinary rules and fallback are wanted.
+
+Every node must be reachable, have at most one parent, and stay within its flow.
+Maximum graph depth is 32. Use a `call` node instead of cross-region wires.
+Node cycles, direct/indirect recursive flow calls, unknown references, unsupported
+types, dangling leaves and invalid input kinds are rejected. Traversal requires
+a folder input or a folder-type guard. Its output is file-only and cannot call
+a folder-only flow. Item flows must guard folder-only operations with an
+`itemType: folder` condition. Both inputs can call the default classifier.
+AND/OR/NOT operators, content-semantic analysis, scripts and third-party runtime
+node loading are not implemented; do not invent them. New primitive operations
+require app implementations, while users can compose the supported primitives.
+
+Only `input: folder` flows appear in each queued folder's optional selector.
+`input: item` flows are reusable classifiers selected in call nodes. Every queued
+folder defaults to whole-folder processing. Importing a graph never activates
+it for queued entries; the user must explicitly select it. Queue rows stay folded
+and preview lists actual resulting move sources. A graph without traversal can
+classify the whole folder. Traversal never deletes source directories. It fails
+on incomplete enumeration or links; overlapping parent/child targets are refused.
+Preview captures individual sources and resume points. Approval rechecks those
+same sources and the graph revision without silently enumerating new files.
+Later-added files remain untouched. Undo restores each original source path.
+
+Changing a flow name preserves its stable ID. Removing a selected flow, changing
+its input to `item`, or switching rule-set IDs resets affected queued folders
+to whole-folder mode with a visible notice. Older
+`{"id":"contents","name":"Contents","kind":"recursiveFilesToDefault"}`
+declarations remain readable and expand to the editable input -> recursive
+traversal -> default-call template. Saving an edited template writes `kind: graph`.
+Older apps may reject the extension; omit `folderFlows` if no named flow is needed.
+
+## Ordinary rule evaluation
 
 At each level, NookBit checks enabled ordinary siblings in array order and selects the **first** matching condition. If none matches, it selects the enabled `otherwise` sibling, if any. It then repeats this process among the selected node's children. Parent and child conditions therefore compose as AND. Once a sibling is selected, a miss among its children does **not** retry later siblings of the parent. A local `otherwise` child can catch that miss. If no child matches and `globalOtherwise` is absent, the file remains unclassified. Disabled nodes are ignored.
 

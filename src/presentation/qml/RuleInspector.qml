@@ -21,10 +21,10 @@ Frame {
     property int folderTargetId: -1
     property string externalFolder: ""
     readonly property string selectedType: editor.selectedBlock ? editor.selectedBlock.type : ""
-    readonly property string selectionKind: editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("폴더 처리 흐름") : selectedType === "start" ? qsTr("시작점")
+    readonly property string selectionKind: editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("처리 흐름") : selectedType === "start" ? qsTr("시작점")
         : ["destination", "exclude"].includes(selectedType) ? qsTr("종착점")
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
-    readonly property string valueLabel: selectedType === "flowStart" ? qsTr("폴더 처리 이름") : selectedType === "destination" ? qsTr("목적지 경로")
+    readonly property string valueLabel: selectedType === "flowStart" ? qsTr("흐름 이름") : selectedType === "destination" ? qsTr("목적지 경로")
         : selectedType === "extension" ? qsTr("확장자") : selectedType === "name" ? qsTr("이름에 포함할 글자")
         : selectedType === "itemType" ? qsTr("대상 종류")
         : selectedType === "size" ? qsTr("파일 크기") : selectedType === "age" ? qsTr("수정 후 경과일") : qsTr("표시 값")
@@ -99,7 +99,7 @@ Frame {
             Label {
                 Layout.fillWidth: true
                 visible: inspector.editor.selectedBlock !== null && !!inspector.editor.selectedBlock.flowId
-                text: qsTr("대기 목록의 폴더에서 이 흐름을 선택하면 하위 파일까지 각각 기본 규칙으로 분류해요. 원본 폴더는 남겨둬요. 폴더 입력 노드를 선택해 이름을 바꿀 수 있어요.")
+                text: qsTr("이 영역의 노드와 연결이 실제 처리 순서예요. 영역을 선택한 뒤 블록을 추가하고, 다른 영역은 분류 흐름 호출로 연결하세요. 입력 노드에서 이름과 입력 대상을 바꿀 수 있어요.")
                 wrapMode: Text.WordWrap
                 color: inspector.mutedText
                 font.pixelSize: UiMetrics.textBody
@@ -113,7 +113,7 @@ Frame {
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
-                         && !["folderScan", "applyDefault"].includes(inspector.selectedType)
+                         && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
             }
             AppTextField {
                 id: inspectorValue
@@ -123,14 +123,14 @@ Frame {
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
                          && inspector.selectedType !== "itemType"
-                         && !["folderScan", "applyDefault"].includes(inspector.selectedType)
+                         && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
                 enabled: visible
                 placeholderText: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
                                                                                                                   "사진/여행") :
                                                                                                               qsTr("D:/중요자료")) :
                                                      inspector.selectedType === "extension" ? qsTr("png, jpg, webp")
-                    : inspector.selectedType === "flowStart" ? qsTr("폴더 처리 이름")
+                    : inspector.selectedType === "flowStart" ? qsTr("흐름 이름")
                     : inspector.selectedType === "name" ? qsTr("포함할 글자") : qsTr("숫자 입력")
                 color: inspector.primaryText
                 placeholderTextColor: inspector.mutedText
@@ -138,6 +138,36 @@ Frame {
                     if (inspector.editor.selectedBlock)
                         inspector.editor.updateValue(inspector.editor.selectedBlock.id, text);
                 }
+            }
+            AppComboBox {
+                objectName: "flowInputKindCombo"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "flowStart"
+                model: [{text: qsTr("폴더 입력 · 대기 목록에서 선택"), value: "folder"}, {text: qsTr("파일·폴더 입력 · 다른 흐름에서 호출"), value: "item"}]
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.flowInput === "item" ? 1 : 0
+                onActivated: inspector.editor.updateProcessing(inspector.editor.selectedId, "flowInput", currentValue)
+            }
+            AppComboBox {
+                objectName: "flowTraversalDepthCombo"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "folderScan"
+                model: [{text: qsTr("하위 폴더의 파일까지 순회"), value: true}, {text: qsTr("바로 안의 파일만 순회"), value: false}]
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.recursive === false ? 1 : 0
+                onActivated: inspector.editor.updateProcessing(inspector.editor.selectedId, "recursive", currentValue)
+            }
+            AppComboBox {
+                objectName: "flowCallTargetCombo"
+                Layout.fillWidth: true
+                visible: ["callFlow", "applyDefault"].includes(inspector.selectedType)
+                model: inspector.editor.flowTargets()
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: inspector.editor.selectedBlock ? model.findIndex(option => option.value === (inspector.editor.selectedBlock.targetFlow || "")) : 0
+                onActivated: inspector.editor.updateProcessing(inspector.editor.selectedId, "targetFlow", currentValue)
             }
             AppComboBox {
                 objectName: "ruleItemTypeCombo"

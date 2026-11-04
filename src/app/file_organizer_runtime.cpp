@@ -95,7 +95,7 @@ struct FileOrganizerRuntime::State {
               verifyUi ? QString() : QDir(appData).filePath(QStringLiteral("rule-graph-layout.json")),
               &previewRules, &testRule, &previewRules),
           previewPlanner(previewRuleEngine, std::filesystem::path(appData.toStdWString()), CrossVolumeDrafts::Allow),
-          createPreview(previewRules, previewScanner, previewPlanner, &previewHasher, &transferCopy),
+          createPreview(previewRules, previewScanner, previewPlanner, &previewHasher, &transferCopy, &previewRuleEngine),
           history(databasePath, migrationPath),
           freezePreview(previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy),
           verifySavedPlan(previewRules, previewScanner, previewPlanner, previewHasher, history, &transferCopy),

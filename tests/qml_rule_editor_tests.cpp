@@ -259,6 +259,8 @@ int main(int argc, char** argv) {
             property string message: "Blocked"
             property int saves: 0
             property int layouts: 0
+            // 실제 파일시스템 없이 목적지 표시 문자열만 반환하는 대역 함수.
+            function resolvedPath(path, relative) { return relative ? "D:/Test/" + path : path }
             signal rulesSaved()
             // 파일을 저장하지 않고 허용 여부만 반환하는 대역 함수.
             function importGraph(blocks, edges) { return allowImport }
@@ -346,7 +348,7 @@ int main(int argc, char** argv) {
     const auto flowNodes = list(state.get(), "blocks");
     expect(flowNodes.size() == beforeFlow + 3, "one folder-flow action creates input, traversal and default call");
     const int flowStart = flowNodes[beforeFlow].toMap().value("id").toInt();
-    expect(value && value->isVisible() && inspector->property("valueLabel").toString() == QStringLiteral("폴더 처리 이름"),
+    expect(value && value->isVisible() && inspector->property("valueLabel").toString() == QStringLiteral("흐름 이름"),
         "folder flow name is editable in the inspector");
     call(engine, state.get(), "updateValue", {flowStart, "내 파일 따로 정리"});
     const auto regions = call(engine, state.get(), "flowRegions").toVariant().toList();
@@ -358,7 +360,31 @@ int main(int argc, char** argv) {
     call(engine, state.get(), "selectOnly", {flowStart + 1});
     expect(value && !value->isVisible(), "fixed traversal step has guidance instead of a meaningless value editor");
     call(engine, state.get(), "removeSelectedBlock");
-    expect(list(state.get(), "blocks").size() == beforeFlow, "deleting a flow step removes its complete group");
+    expect(list(state.get(), "blocks").size() == beforeFlow + 2, "individual processing steps are editable rather than locked in a preset");
+    call(engine, state.get(), "selectOnly", {flowStart});
+    call(engine, state.get(), "removeSelectedBlock");
+    expect(list(state.get(), "blocks").size() == beforeFlow, "deleting the flow input removes its complete region");
+    call(engine, state.get(), "addBlock", {"folderFlow", 150, 500});
+    const int editableRoot = state->property("selectedId").toInt();
+    call(engine, state.get(), "selectOnly", {editableRoot + 2});
+    auto* callTarget = inspector->findChild<QQuickItem*>("flowCallTargetCombo");
+    expect(callTarget && callTarget->isVisible() && callTarget->property("currentValue").toString().isEmpty(),
+        "classifier call uses an explicit target dropdown instead of fixed base behavior");
+    call(engine, state.get(), "updateProcessing", {editableRoot + 2, "targetFlow", "custom-classifier"});
+    expect(state->property("selectedBlock").value<QJSValue>().toVariant().toMap().value("targetFlow") == "custom-classifier",
+        "processing settings change the graph data");
+    call(engine, state.get(), "removeSelectedBlock");
+    call(engine, state.get(), "selectOnly", {editableRoot + 1});
+    call(engine, state.get(), "addBlock", {"extension", 450, 500});
+    const int customCondition = state->property("selectedId").toInt();
+    expect(call(engine, state.get(), "connectBlocks", {editableRoot + 1, customCondition}).toBool(),
+        "a traversal can connect to a custom condition");
+    call(engine, state.get(), "addBlock", {"destination", 750, 500});
+    const int customDestination = state->property("selectedId").toInt();
+    expect(call(engine, state.get(), "connectBlocks", {customCondition, customDestination}).toBool(),
+        "custom condition and destination can replace the preset call");
+    call(engine, state.get(), "selectOnly", {editableRoot});
+    call(engine, state.get(), "removeSelectedBlock");
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

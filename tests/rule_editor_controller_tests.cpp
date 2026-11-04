@@ -1,6 +1,7 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "presentation/folder_flow_graph.hpp"
+#include <algorithm>
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "modules/rules/rule_engine.hpp"
@@ -309,7 +310,7 @@ void testAiAuthoringExample() {
     expect(guide.open(QIODevice::ReadOnly) && example.open(QIODevice::ReadOnly),
            "AI guide and example should be readable");
     if (!guide.isOpen() || !example.isOpen()) return;
-    const auto text = guide.readAll();
+    const auto text = guide.readAll().replace("\r\n", "\n");
     const auto start = text.indexOf("```json\n");
     const auto end = text.indexOf("\n```", start + 8);
     expect(start >= 0 && end > start, "AI guide should contain one complete JSON example");
@@ -713,6 +714,32 @@ void testNamedFolderFlowGraph() {
     auto badEdges = edges;
     badEdges.append(QVariantMap{{"from", 1}, {"to", next - 3}});
     expect(!editor.importGraph(blocks, badEdges), "editor rejects cross-flow wiring before replacing draft");
+    // 기본 프리셋의 호출을 제거하고 실제 조건과 목적지로 바꿔 저장한다.
+    auto custom = editor.graph();
+    auto customBlocks = custom.value("blocks").toList();
+    auto customEdges = custom.value("edges").toList();
+    int scanId = -1, callId = -1, maximumId = 0;
+    QString scanKey;
+    for (const auto& value : customBlocks) {
+        const auto block = value.toMap(); const int id = block.value("id").toInt(); maximumId = std::max(maximumId, id);
+        if (block.value("flowId") != "my-contents") continue;
+        if (block.value("type") == "folderScan") { scanId = id; scanKey = block.value("flowNodeId").toString(); }
+        if (block.value("type") == "callFlow") callId = id;
+    }
+    for (int i = customBlocks.size() - 1; i >= 0; --i) if (customBlocks[i].toMap().value("id").toInt() == callId) customBlocks.removeAt(i);
+    for (int i = customEdges.size() - 1; i >= 0; --i) if (customEdges[i].toMap().value("to").toInt() == callId) customEdges.removeAt(i);
+    customBlocks.append(QVariantMap{{"id", maximumId + 1}, {"flowId", "my-contents"}, {"flowNodeId", "png"}, {"type", "extension"}, {"value", "png"}, {"x", 900}, {"y", 900}});
+    customBlocks.append(QVariantMap{{"id", maximumId + 2}, {"flowId", "my-contents"}, {"flowNodeId", "target"}, {"type", "destination"}, {"value", "MyImages"}, {"x", 1200}, {"y", 900}});
+    customEdges.append(QVariantMap{{"from", scanId}, {"to", maximumId + 1}});
+    customEdges.append(QVariantMap{{"from", maximumId + 1}, {"to", maximumId + 2}});
+    expect(editor.importGraph(customBlocks, customEdges) && editor.save(), "custom flow connections save instead of reverting to fixed pipeline");
+    const auto customRules = active.load();
+    nookbit::FileFact file; file.absolutePath = L"C:/test/photo.png"; file.processingFlowId = "my-contents"; file.processingAfterNode = scanKey.toStdString();
+    nookbit::RuleEngine flowEngine;
+    if (customRules) {
+        const auto decision = flowEngine.decide(file, customRules.value(), nookbit::MultiMatchPolicy::FirstMatch, 0);
+        expect(decision && decision.value() && decision.value()->destinationRelativePath == L"MyImages", "saved editor graph changes actual classification");
+    }
 }
 } // namespace
 

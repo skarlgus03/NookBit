@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     if (guides.suggestedFile("rules").fileName() != "NookBit-Rules-AI.md" ||
         guides.suggestedFile("character").fileName() != "NookBit-CharacterPack-Guide.md") return 1;
     // 규칙 다운로드가 일반 사용 설명이 아닌 독립적인 AI 작성 계약인지 확인한다.
-    const auto rules = guides.text("rules");
+    const auto rules = guides.text("rules").replace("\r\n", "\n");
     if (!rules.contains("Standalone authoring contract") || rules.contains("](../")) return 1;
     int ruleCursor = 0, ruleExampleCount = 0;
     bool checkedFolderExample = false;

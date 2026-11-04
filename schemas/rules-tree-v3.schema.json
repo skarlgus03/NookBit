@@ -3,23 +3,106 @@
   "title": "NookBit Single-Condition Rule Tree",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "ruleSetId", "version", "nodes"],
+  "required": [
+    "schemaVersion",
+    "ruleSetId",
+    "version",
+    "nodes"
+  ],
   "properties": {
-    "schemaVersion": { "const": 3 },
-    "ruleSetId": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" },
-    "version": { "type": "string", "format": "date-time" },
-    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "globalOtherwise": { "$ref": "#/$defs/destination" },
-    "folderFlows": {
-      "type": "array", "maxItems": 24,
+    "schemaVersion": {
+      "const": 3
+    },
+    "ruleSetId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]+$"
+    },
+    "version": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nodes": {
+      "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["id", "name", "kind"],
-        "properties": {
-          "id": {"type":"string", "pattern":"^[a-zA-Z0-9._-]+$"},
-          "name": {"type":"string", "minLength":1, "maxLength":60},
-          "kind": {"const":"recursiveFilesToDefault"}
-        }
+        "$ref": "#/$defs/node"
+      }
+    },
+    "globalOtherwise": {
+      "$ref": "#/$defs/destination"
+    },
+    "folderFlows": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "kind": {
+                "const": "recursiveFilesToDefault"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "input",
+              "entry",
+              "nodes"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "kind": {
+                "const": "graph"
+              },
+              "input": {
+                "enum": [
+                  "folder",
+                  "item"
+                ]
+              },
+              "entry": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              },
+              "nodes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1000,
+                "items": {
+                  "$ref": "#/$defs/processingNode"
+                }
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -27,60 +110,344 @@
     "node": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "enabled"],
+      "required": [
+        "id",
+        "enabled"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" },
-        "enabled": { "type": "boolean" },
-        "otherwise": { "const": true },
-        "when": { "$ref": "#/$defs/condition" },
-        "destination": { "$ref": "#/$defs/destination" },
-        "exclude": { "const": true },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]+$"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "otherwise": {
+          "const": true
+        },
+        "when": {
+          "$ref": "#/$defs/condition"
+        },
+        "destination": {
+          "$ref": "#/$defs/destination"
+        },
+        "exclude": {
+          "const": true
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
       }
     },
     "condition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "enum": ["extension", "nameContains", "size", "modifiedAgeDays", "itemType"] },
-        "kind": { "enum": ["file", "folder"] },
-        "values": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[a-zA-Z0-9]+$" }
+        "type": {
+          "enum": [
+            "extension",
+            "nameContains",
+            "size",
+            "modifiedAgeDays",
+            "itemType"
+          ]
         },
-        "text": { "type": "string", "minLength": 1 },
-        "comparison": { "enum": ["greaterThan", "atLeast", "lessThan", "atMost"] },
-        "bytes": { "type": "integer", "minimum": 0 },
-        "days": { "type": "integer", "minimum": 0 }
+        "kind": {
+          "enum": [
+            "file",
+            "folder"
+          ]
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9]+$"
+          }
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "comparison": {
+          "enum": [
+            "greaterThan",
+            "atLeast",
+            "lessThan",
+            "atMost"
+          ]
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "destination": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "collisionPolicy"],
+      "required": [
+        "path",
+        "collisionPolicy"
+      ],
       "oneOf": [
         {
           "properties": {
-            "base": { "const": "home" },
-            "path": { "not": { "pattern": "(^[A-Za-z]:)|(^[/\\\\])|(^|[/\\\\])\\.\\.([/\\\\]|$)" } }
+            "base": {
+              "const": "home"
+            },
+            "path": {
+              "not": {
+                "pattern": "(^[A-Za-z]:)|(^[/\\\\])|(^|[/\\\\])\\.\\.([/\\\\]|$)"
+              }
+            }
           }
         },
         {
-          "required": ["base"],
+          "required": [
+            "base"
+          ],
           "properties": {
-            "base": { "const": "absolute" },
-            "path": { "pattern": "(^[A-Za-z]:[/\\\\])|(^/)", "not": { "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)" } }
+            "base": {
+              "const": "absolute"
+            },
+            "path": {
+              "pattern": "(^[A-Za-z]:[/\\\\])|(^/)",
+              "not": {
+                "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)"
+              }
+            }
           }
         }
       ],
       "properties": {
-        "base": { "enum": ["home", "absolute"] },
-        "path": {
-          "type": "string", "minLength": 1
+        "base": {
+          "enum": [
+            "home",
+            "absolute"
+          ]
         },
-        "collisionPolicy": { "enum": ["inherit", "rename", "skip", "abort"] }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "collisionPolicy": {
+          "enum": [
+            "inherit",
+            "rename",
+            "skip",
+            "abort"
+          ]
+        }
       }
+    },
+    "processingNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "input"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "when"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "condition"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            },
+            "when": {
+              "$ref": "#/$defs/condition"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "otherwise"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "recursive"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "traverse"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            },
+            "recursive": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "target"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "call"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            },
+            "target": {
+              "type": "string",
+              "pattern": "^([a-zA-Z0-9._-]+)?$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "destination"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "destination"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            },
+            "destination": {
+              "$ref": "#/$defs/destination"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "type": {
+              "const": "exclude"
+            },
+            "next": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._-]+$"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

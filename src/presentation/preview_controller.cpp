@@ -258,7 +258,7 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
                    .arg(excludedCount).arg(warnings_.size());
     const auto pendingEntries = pendingFiles_.entries();
     if (std::any_of(pendingEntries.begin(), pendingEntries.end(), [](const PendingFileEntry& entry) { return !entry.folderFlowId.empty(); }))
-        message_.prepend(QStringLiteral("선택한 폴더는 하위 파일까지 개별 분류했어요. 원본 폴더는 남겨둬요. "));
+        message_.prepend(QStringLiteral("선택한 폴더 처리 흐름을 적용했어요. 이동 대상을 확인해 주세요. "));
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
 }

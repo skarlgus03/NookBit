@@ -5,6 +5,7 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <algorithm>
+#include "modules/rules/processing_flow.hpp"
 
 namespace nookbit {
 
@@ -63,6 +64,8 @@ Result<OperationPlan> FreezePreviewUseCase::execute(
 
     auto snapshot = scanner_.scan({{}, false, {}, selectedFiles});
     if (!snapshot) return Result<OperationPlan>::failure(snapshot.error());
+    const auto contexts = restoreProcessingSources(snapshot.value(), draft);
+    if (!contexts) return Result<OperationPlan>::failure(contexts.error());
     auto refreshed = planner_.buildPlan(snapshot.value(), settings, rules.value());
     if (!refreshed) return Result<OperationPlan>::failure(refreshed.error());
     if (draft.formatVersion == 2 && refreshed.value().formatVersion == 1) {

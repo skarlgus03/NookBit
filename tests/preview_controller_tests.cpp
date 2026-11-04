@@ -226,7 +226,7 @@ struct PreviewWorkflow {
     PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData, bool native = false)
         : rules(std::move(rulesPath), std::move(schemaPath)),
           planner(ruleEngine, appData, native ? nookbit::CrossVolumeDrafts::Allow : nookbit::CrossVolumeDrafts::Reject),
-          useCase(rules, scanner, planner, &hasher, native ? &copy : nullptr),
+          useCase(rules, scanner, planner, &hasher, native ? &copy : nullptr, &ruleEngine),
           history(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
                   projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql")),
           freezeUseCase(rules, scanner, planner, hasher, history, native ? &copy : nullptr),

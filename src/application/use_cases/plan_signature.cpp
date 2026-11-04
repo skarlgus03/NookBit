@@ -233,6 +233,23 @@ std::string PlanSignature::rules(const RuleSet& rules) {
                 append(output, flow.id);
                 append(output, flow.name);
                 append(output, "recursiveFilesToDefault");
+                if (!flow.nodes.empty()) {
+                    append(output, "processing-graph-v1");
+                    append(output, flow.entry);
+                    appendNumber(output, flow.folderInput);
+                    appendNumber(output, flow.nodes.size());
+                    for (const auto& node : flow.nodes) {
+                        append(output, node.id); append(output, node.type);
+                        appendNumber(output, node.next.size());
+                        for (const auto& next : node.next) append(output, next);
+                        appendNumber(output, node.condition.has_value());
+                        if (node.condition) appendAtomicCondition(output, *node.condition);
+                        appendNumber(output, node.destination.has_value());
+                        if (node.destination) appendDestination(output, *node.destination);
+                        append(output, node.targetFlow);
+                        if (node.type == "traverse") appendNumber(output, node.recursive);
+                    }
+                }
             }
         }
         return output;
@@ -302,6 +319,13 @@ std::string PlanSignature::planContents(const OperationPlan& plan) {
                 appendVolume(step.movement->destinationVolume);
                 appendNumber(output, step.movement->preservation);
             }
+        }
+    }
+    if (!plan.processingSources.empty()) {
+        append(output, "processing-sources-v1");
+        appendNumber(output, plan.processingSources.size());
+        for (const auto& source : plan.processingSources) {
+            appendPath(output, source.source); append(output, source.flowId); append(output, source.afterNode);
         }
     }
     appendNumber(output, plan.warnings.size());

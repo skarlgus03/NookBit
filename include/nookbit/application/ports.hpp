@@ -60,6 +60,15 @@ struct ScanSnapshot {
     std::vector<Error> warnings;
 };
 
+class IProcessingFlowRouter {
+public:
+    /// 처리 흐름 판단기를 인터페이스로 해제하는 함수.
+    virtual ~IProcessingFlowRouter() = default;
+    /// 파일 I/O 없이 다음 순회 요청 또는 최종 분류 결과를 반환하는 함수.
+    virtual Result<ProcessingRoute> route(const FileFact& file, const RuleSet& rules,
+                                          std::int64_t nowUtcMs) const = 0;
+};
+
 class IScanner {
 public:
     /// 구현체를 인터페이스 포인터로 안전하게 정리하는 소멸자.

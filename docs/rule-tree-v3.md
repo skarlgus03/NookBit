@@ -74,7 +74,8 @@ v2 노드에 조건 종류가 둘 이상 있으면 분리 시 형제 규칙 선�
 
 ## Named folder input flows
 
-The optional `folderFlows` member defines named `recursiveFilesToDefault` inputs.
-It does not change condition-node semantics or the whole-folder default. See
+The optional `folderFlows` member defines named editable processing graphs;
+legacy `recursiveFilesToDefault` declarations remain readable as templates.
+It does not change ordinary condition-node semantics or the whole-folder default. See
 [folder input flow behavior](folder-processing-flows.md) and the English
-[AI authoring contract](ai-rule-authoring-v3.md#optional-named-folder-input-flows).
+[AI authoring contract](ai-rule-authoring-v3.md#optional-named-processing-flows).

@@ -1,32 +1,31 @@
 #pragma once
-
 #include <nookbit/domain/model.hpp>
-#include <nookbit/domain/result.hpp>
+#include "modules/rules/processing_flow.hpp"
 #include <QHash>
 #include <QPointF>
-#include <QRegularExpression>
 #include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
+#include <functional>
+#include <algorithm>
 
 namespace nookbit {
-/// 기본 분류 그래프와 이름 있는 폴더 입력 흐름을 분리한 편집 값.
 struct FolderFlowGraph {
     QVariantList blocks;
     QVariantList edges;
     std::vector<RuleSet::FolderFlow> flows;
 };
+using FlowConditionParser = std::function<Result<AtomicRuleCondition>(const QVariantMap&)>;
+using FlowConditionFormatter = std::function<QVariantMap(const ProcessingNode&, int)>;
 
-// 폴더 흐름의 고정된 입력·순회·기본 규칙 호출 연결을 검사하는 함수.
-inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, const QVariantList& edges) {
+// 각 영역의 실제 노드와 연결을 처리 데이터로 변환하는 함수.
+inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, const QVariantList& edges,
+                                                    const FlowConditionParser& conditionParser = {}) {
     FolderFlowGraph result;
     QHash<int, QVariantMap> byId;
     QHash<QString, QVector<int>> groups;
-    const QRegularExpression identifier(QStringLiteral("^[a-zA-Z0-9._-]+$"));
-    // 잘못된 그룹을 UI 대신 저장·불러오기 경계에서 함께 거부하는 함수.
-    const auto invalid = [](const QString& message) {
-        return Result<FolderFlowGraph>::failure({"rules.folder_flow_graph_invalid", message.toStdString()});
-    };
+    QHash<int, QString> nodeIds;
+    const auto invalid = [](const QString& message) { return Result<FolderFlowGraph>::failure({"rules.folder_flow_graph_invalid", message.toStdString()}); };
     for (const auto& value : blocks) {
         const auto block = value.toMap();
         const int id = block.value("id").toInt();
@@ -34,78 +33,135 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         byId.insert(id, block);
         const auto flowId = block.value("flowId").toString();
         const auto type = block.value("type").toString();
-        const bool flowType = type == "flowStart" || type == "folderScan" || type == "applyDefault";
         if (flowId.isEmpty()) {
-            if (flowType) return invalid(QStringLiteral("폴더 처리 노드가 속할 흐름이 없어요."));
+            if (type == "flowStart" || type == "folderScan" || type == "callFlow" || type == "applyDefault")
+                return invalid(QStringLiteral("처리 노드는 이름 있는 흐름 안에 추가해 주세요."));
             result.blocks.append(value);
         } else {
-            if (!identifier.match(flowId).hasMatch() || !flowType)
-                return invalid(QStringLiteral("폴더 흐름에는 폴더 입력·내부 파일 순회·기본 정리 적용 노드를 사용해 주세요."));
             groups[flowId].append(id);
+            nodeIds[id] = block.value("flowNodeId", QStringLiteral("node-%1").arg(id)).toString();
         }
     }
-    if (groups.size() > 24) return invalid(QStringLiteral("폴더 처리 흐름은 24개까지 만들 수 있어요."));
     QHash<int, QVector<int>> outgoing;
-    QHash<int, int> incoming;
     for (const auto& value : edges) {
         const auto edge = value.toMap();
-        const int from = edge.value("from").toInt();
-        const int to = edge.value("to").toInt();
+        const int from = edge.value("from").toInt(), to = edge.value("to").toInt();
         if (!byId.contains(from) || !byId.contains(to)) return invalid(QStringLiteral("없는 노드로 연결된 선이 있어요."));
         const auto owner = byId.value(from).value("flowId").toString();
         if (owner != byId.value(to).value("flowId").toString())
-            return invalid(QStringLiteral("다른 흐름으로 직접 연결할 수 없어요. '기본 정리 적용' 노드를 사용해 주세요."));
+            return invalid(QStringLiteral("영역 사이에는 선 대신 '분류 흐름 호출' 노드를 사용해 주세요."));
         if (owner.isEmpty()) result.edges.append(value);
-        else {
-            outgoing[from].append(to);
-            ++incoming[to];
-        }
+        else outgoing[from].append(to);
     }
     QSet<QString> names;
-    // 화면의 시작점 순서대로 흐름을 저장하여 선택 메뉴 순서를 보존한다.
     for (const auto& value : blocks) {
         const auto root = value.toMap();
-        if (root.value("type").toString() != "flowStart") continue;
+        if (root.value("type") != "flowStart") continue;
         const auto flowId = root.value("flowId").toString();
         const auto name = root.value("value").toString().trimmed();
-        if (name.isEmpty() || name.size() > 60 || name.contains('\n') || names.contains(name.toCaseFolded()))
-            return invalid(QStringLiteral("폴더 처리 이름은 서로 다르게, 1~60자로 입력해 주세요."));
+        if (name.isEmpty() || name.size() > 60 || name.contains('\n') || names.contains(name.toCaseFolded()) || !groups.contains(flowId))
+            return invalid(QStringLiteral("흐름 이름은 서로 다르게, 1~60자로 입력하고 입력 노드는 하나만 두세요."));
         names.insert(name.toCaseFolded());
-        const auto members = groups.take(flowId);
-        const int rootId = root.value("id").toInt();
-        if (members.size() != 3 || incoming.value(rootId) || outgoing.value(rootId).size() != 1)
-            return invalid(QStringLiteral("폴더 흐름은 폴더 입력 → 내부 파일 순회 → 기본 정리 적용 순서로 연결해 주세요."));
-        const int scan = outgoing.value(rootId).front();
-        if (byId.value(scan).value("type").toString() != "folderScan" || incoming.value(scan) != 1 || outgoing.value(scan).size() != 1)
-            return invalid(QStringLiteral("폴더 입력 다음에는 내부 파일 순회를 연결해 주세요."));
-        const int apply = outgoing.value(scan).front();
-        if (byId.value(apply).value("type").toString() != "applyDefault" || incoming.value(apply) != 1 || !outgoing.value(apply).isEmpty())
-            return invalid(QStringLiteral("순회한 각 파일에는 기본 정리를 적용해 주세요."));
-        result.flows.push_back({flowId.toStdString(), name.toStdString()});
+        RuleSet::FolderFlow flow{flowId.toStdString(), name.toStdString()};
+        flow.entry = nodeIds.value(root.value("id").toInt()).toStdString();
+        if (root.value("flowInput", "folder") != "folder" && root.value("flowInput", "folder") != "item")
+            return invalid(QStringLiteral("흐름 입력에서 폴더 또는 파일·폴더를 선택해 주세요."));
+        flow.folderInput = root.value("flowInput", "folder").toString() == "folder";
+        for (const auto id : groups.take(flowId)) {
+            const auto block = byId.value(id);
+            const auto type = block.value("type").toString();
+            ProcessingNode node; node.id = nodeIds.value(id).toStdString();
+            for (const auto child : outgoing.value(id)) node.next.push_back(nodeIds.value(child).toStdString());
+            if (type == "flowStart") node.type = "input";
+            else if (type == "folderScan") { node.type = "traverse"; node.recursive = block.value("recursive", true).toBool(); }
+            else if (type == "callFlow" || type == "applyDefault") { node.type = "call"; node.targetFlow = block.value("targetFlow").toString().toStdString(); }
+            else if (type == "otherwise" || type == "exclude") node.type = type.toStdString();
+            else if (type == "destination") {
+                node.type = "destination";
+                const auto text = block.value("value").toString().trimmed();
+                const std::filesystem::path path(text.toStdWString());
+                const bool absolute = !block.value("homeRelative", true).toBool();
+                auto tokens = text; tokens.replace("{yyyy}", ""); tokens.replace("{MM}", "");
+                if (text.isEmpty() || (absolute ? !path.is_absolute() : path.has_root_path()) || tokens.contains('{') || tokens.contains('}'))
+                    return invalid(QStringLiteral("목적지 경로와 기준 폴더를 확인해 주세요."));
+                for (const auto& part : path) if (part == "..") return invalid(QStringLiteral("목적지에 상위 경로를 사용할 수 없어요."));
+                std::optional<CollisionPolicy> policy;
+                const auto collision = block.value("collisionPolicy", "inherit").toString();
+                if (collision == "rename") policy = CollisionPolicy::Rename;
+                else if (collision == "skip") policy = CollisionPolicy::Skip;
+                else if (collision == "abort") policy = CollisionPolicy::Abort;
+                else if (collision != "inherit") return invalid(QStringLiteral("충돌 처리 설정이 올바르지 않아요."));
+                node.destination = RuleDestination{path, policy, absolute};
+            } else {
+                if (!conditionParser) return invalid(QStringLiteral("알 수 없는 처리 노드예요."));
+                const auto condition = conditionParser(block);
+                if (!condition) return Result<FolderFlowGraph>::failure(condition.error());
+                node.type = "condition"; node.condition = condition.value();
+            }
+            flow.nodes.push_back(std::move(node));
+        }
+        result.flows.push_back(std::move(flow));
     }
-    if (!groups.isEmpty()) return invalid(QStringLiteral("폴더 흐름에 시작점이 없거나 중복돼요."));
+    if (!groups.isEmpty()) return invalid(QStringLiteral("흐름에 입력 노드가 없어요."));
+    RuleSet check; check.folderFlows = result.flows;
+    const auto valid = validateProcessingFlows(check);
+    if (!valid) return Result<FolderFlowGraph>::failure(valid.error());
     return Result<FolderFlowGraph>::success(std::move(result));
 }
 
-// 저장된 폴더 흐름을 이동 가능한 세 노드와 연결선으로 복원하는 함수.
+// 코어 그래프를 조건·순회·호출 노드와 실제 연결선으로 복원하는 함수.
 inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
-    const QHash<QString, QPointF>& positions, QVariantList& blocks, QVariantList& edges, int& nextId, double top) {
-    for (const auto& flow : flows) {
+    const QHash<QString, QPointF>& positions, QVariantList& blocks, QVariantList& edges, int& nextId, double top,
+    const FlowConditionFormatter& formatCondition = {}) {
+    for (const auto& value : flows) {
+        const auto flow = expandedFlow(value);
         const auto flowId = QString::fromStdString(flow.id);
-        const int start = nextId;
-        int column = 0;
-        for (const auto* typeName : {"flowStart", "folderScan", "applyDefault"}) {
-            const auto type = QString::fromLatin1(typeName);
-            const auto key = "flow:" + flowId + ":" + type;
-            const auto point = positions.value(key, QPointF(70 + column * 310, top));
-            blocks.append(QVariantMap{{"id", nextId++}, {"type", type}, {"flowId", flowId},
-                {"value", type == "flowStart" ? QString::fromStdString(flow.name) : QString()},
-                {"x", point.x()}, {"y", point.y()}});
-            ++column;
+        QHash<QString, int> ids;
+        for (const auto& node : flow.nodes) ids.insert(QString::fromStdString(node.id), nextId++);
+        int row = 0;
+        QHash<QString, QPointF> defaults;
+        std::function<double(const std::string&, int)> arrange;
+        // 자식의 중앙에 부모를 놓고 분기를 세로로 배치하는 함수.
+        arrange = [&](const std::string& key, int depth) {
+            const auto node = std::find_if(flow.nodes.begin(), flow.nodes.end(), [&](const auto& item) { return item.id == key; });
+            if (node == flow.nodes.end()) return top;
+            double y = top;
+            if (node->next.empty()) y += row++ * 170;
+            else {
+                double first = 0, last = 0;
+                for (std::size_t i = 0; i < node->next.size(); ++i) { last = arrange(node->next[i], depth + 1); if (i == 0) first = last; }
+                y = (first + last) / 2;
+            }
+            defaults.insert(QString::fromStdString(key), QPointF(70 + depth * 310, y));
+            return y;
+        };
+        arrange(flow.entry, 0);
+        for (const auto& node : flow.nodes) {
+            const auto key = QString::fromStdString(node.id);
+            const auto id = ids.value(key);
+            QVariantMap block;
+            if (node.type == "condition" && formatCondition) block = formatCondition(node, id);
+            else {
+                const auto type = node.type == "input" ? "flowStart" : node.type == "traverse" ? "folderScan" : node.type == "call" ? "callFlow" : node.type.c_str();
+                block = {{"id", id}, {"type", QString::fromUtf8(type)}, {"value", node.type == "input" ? QString::fromStdString(flow.name) : QString()}};
+            }
+            const auto type = block.value("type").toString();
+            const auto fallback = positions.value("flow:" + flowId + ":" + (type == "callFlow" ? "applyDefault" : type), defaults.value(key));
+            const auto point = positions.value("flow:" + flowId + ":" + key, fallback);
+            block.insert("flowId", flowId); block.insert("flowNodeId", key);
+            block.insert("flowInput", flow.folderInput ? "folder" : "item");
+            block.insert("x", point.x()); block.insert("y", point.y());
+            if (node.type == "call") block.insert("targetFlow", QString::fromStdString(node.targetFlow));
+            if (node.type == "traverse") block.insert("recursive", node.recursive);
+            if (node.destination) {
+                block.insert("value", QString::fromStdWString(node.destination->relativePath.wstring()));
+                block.insert("homeRelative", !node.destination->absolute);
+                block.insert("collisionPolicy", !node.destination->collisionPolicy ? "inherit" : *node.destination->collisionPolicy == CollisionPolicy::Rename ? "rename" : *node.destination->collisionPolicy == CollisionPolicy::Skip ? "skip" : "abort");
+            }
+            blocks.append(block);
+            for (const auto& child : node.next) edges.append(QVariantMap{{"from", id}, {"to", ids.value(QString::fromStdString(child))}});
         }
-        edges.append(QVariantMap{{"from", start}, {"to", start + 1}});
-        edges.append(QVariantMap{{"from", start + 1}, {"to", start + 2}});
-        top += 300;
+        top += std::max(1, row) * 170 + 200;
     }
 }
 }

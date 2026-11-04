@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include "modules/rules/processing_flow.hpp"
 #include <QUuid>
 
 #include <limits>
@@ -660,12 +661,35 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
                 !flowNames.insert(name.toCaseFolded()).second)
                 return Result<RuleSet>::failure({"rules.folder_flow_invalid",
                     "$.folderFlows[" + std::to_string(index) + "]: names and IDs must be nonempty and unique."});
-            result.folderFlows.push_back({id.toStdString(), name.toStdString()});
+            RuleSet::FolderFlow converted{id.toStdString(), name.toStdString()};
+            if (flow.value("kind").toString() == "graph") {
+                converted.entry = flow.value("entry").toString().toStdString();
+                converted.folderInput = flow.value("input").toString() == "folder";
+                for (const auto& value : flow.value("nodes").toArray()) {
+                    const auto object = value.toObject();
+                    ProcessingNode node;
+                    node.id = object.value("id").toString().toStdString();
+                    node.type = object.value("type").toString().toStdString();
+                    for (const auto& next : object.value("next").toArray()) node.next.push_back(next.toString().toStdString());
+                    if (node.type == "condition") {
+                        const auto condition = convertAtomicCondition(object.value("when").toObject());
+                        if (!condition) return Result<RuleSet>::failure(condition.error());
+                        node.condition = condition.value();
+                    }
+                    if (node.type == "destination") node.destination = convertDestination(object.value("destination").toObject());
+                    if (node.type == "call") node.targetFlow = object.value("target").toString().toStdString();
+                    if (node.type == "traverse") node.recursive = object.value("recursive").toBool();
+                    converted.nodes.push_back(std::move(node));
+                }
+            }
+            result.folderFlows.push_back(std::move(converted));
         }
         if (loaded.value().contains(QStringLiteral("globalOtherwise"))) {
             result.globalOtherwise = convertDestination(
                 loaded.value().value(QStringLiteral("globalOtherwise")).toObject());
         }
+        const auto flowsValid = validateProcessingFlows(result);
+        if (!flowsValid) return Result<RuleSet>::failure(flowsValid.error());
         return Result<RuleSet>::success(std::move(result));
     }
     if (result.schemaVersion != 1) {
@@ -740,6 +764,8 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
         {QStringLiteral("nodes"), nodes.value()},
     };
     if (!rules.folderFlows.empty()) {
+        const auto flowsValid = validateProcessingFlows(rules);
+        if (!flowsValid) return flowsValid;
         if (rules.schemaVersion != 3) return Result<void>::failure({"rules.folder_flow_version", "Folder flows require v3 rules."});
         QJsonArray flows;
         std::set<std::string> flowIds;
@@ -749,8 +775,33 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
             if (name.trimmed() != name || name.isEmpty() || !flowIds.insert(flow.id).second ||
                 !flowNames.insert(name.toCaseFolded()).second)
                 return Result<void>::failure({"rules.folder_flow_invalid", "Folder flow IDs and names must be unique and nonempty."});
-            flows.append(QJsonObject{{QStringLiteral("id"), QString::fromStdString(flow.id)},
-                {QStringLiteral("name"), name}, {QStringLiteral("kind"), QStringLiteral("recursiveFilesToDefault")}});
+            QJsonObject object{{"id", QString::fromStdString(flow.id)}, {"name", name},
+                {"kind", flow.nodes.empty() ? "recursiveFilesToDefault" : "graph"}};
+            if (!flow.nodes.empty()) {
+                object.insert("entry", QString::fromStdString(flow.entry));
+                object.insert("input", flow.folderInput ? "folder" : "item");
+                QJsonArray nodes;
+                for (const auto& node : flow.nodes) {
+                    QJsonArray next;
+                    for (const auto& id : node.next) next.append(QString::fromStdString(id));
+                    QJsonObject value{{"id", QString::fromStdString(node.id)}, {"type", QString::fromStdString(node.type)}, {"next", next}};
+                    if (node.condition) {
+                        const auto condition = atomicConditionObject(*node.condition);
+                        if (!condition) return Result<void>::failure(condition.error());
+                        value.insert("when", condition.value());
+                    }
+                    if (node.destination) {
+                        const auto destination = destinationObject(*node.destination);
+                        if (!destination) return Result<void>::failure(destination.error());
+                        value.insert("destination", destination.value());
+                    }
+                    if (node.type == "call") value.insert("target", QString::fromStdString(node.targetFlow));
+                    if (node.type == "traverse") value.insert("recursive", node.recursive);
+                    nodes.append(value);
+                }
+                object.insert("nodes", nodes);
+            }
+            flows.append(object);
         }
         object.insert(QStringLiteral("folderFlows"), flows);
     }

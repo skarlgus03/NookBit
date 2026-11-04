@@ -96,6 +96,8 @@ Result<OperationPlan> Planner::buildPlan(
     plan.ruleSetVersion = rules.version;
     plan.status = PlanStatus::Draft;
     plan.warnings = snapshot.warnings;
+    for (const auto& file : snapshot.files) if (!file.processingFlowId.empty())
+        plan.processingSources.push_back({file.absolutePath, file.processingFlowId, file.processingAfterNode});
 
     std::vector<std::filesystem::path> selectedFiles;
     selectedFiles.reserve(snapshot.files.size());

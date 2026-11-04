@@ -68,7 +68,7 @@ QVariantList PendingFilesModel::folderFlowOptions() const {
 // 현재 규칙의 흐름을 반영하며 사용할 수 없어진 선택만 기본값으로 되돌리는 함수.
 void PendingFilesModel::setFolderFlows(const QString& ruleSetId, const std::vector<RuleSet::FolderFlow>& flows) {
     QVariantList options;
-    for (const auto& flow : flows) options.append(QVariantMap{{"text", QString::fromStdString(flow.name)},
+    for (const auto& flow : flows) if (flow.folderInput) options.append(QVariantMap{{"text", QString::fromStdString(flow.name)},
         {"value", QString::fromStdString(flow.id)}});
     const bool changed = ruleSetId_ != ruleSetId || folderFlows_ != options;
     ruleSetId_ = ruleSetId;
@@ -107,7 +107,7 @@ void PendingFilesModel::setFolderFlow(int row, const QString& flowId) {
     emit dataChanged(index(row), index(row), {FolderFlowRole});
     emit selectionsChanged();
     setLastMessage(flowId.isEmpty() ? QStringLiteral("폴더 전체를 하나의 대상으로 정리해요.")
-        : QStringLiteral("하위 폴더의 파일까지 각각 분류해요. 원본 폴더는 자동 삭제하지 않아요."));
+        : QStringLiteral("선택한 처리 흐름으로 폴더를 분류해요. 미리보기에서 대상을 확인해 주세요."));
 }
 
 // 저장된 선택을 복원한 다음 현재 규칙으로 사용할 수 있는지 검사하는 함수.

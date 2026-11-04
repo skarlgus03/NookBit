@@ -39,7 +39,7 @@ struct Settings final : nookbit::ISettingsRepository {
 };
 
 // 실제 폴더를 펼친 뒤 기존 승인·이동·되돌리기가 원래 하위 경로를 복구하는지 검사하는 함수.
-void workflow() {
+void workflow(bool custom = false) {
     QTemporaryDir temp;
     expect(temp.isValid(), "temporary workspace");
     if (!temp.isValid()) return;
@@ -53,10 +53,21 @@ void workflow() {
     node.destination = nookbit::RuleDestination{L"Sorted", {}, false};
     rules.nodes.push_back(node);
     rules.folderFlows.push_back({"contents", "내용물 정리"});
+    if (custom) {
+        rules.folderFlows[0].entry = "input";
+        rules.folderFlows[0].nodes = {{"input", "input", {"scan"}}, {"scan", "traverse", {"call-images"}}, {"call-images", "call"}};
+        rules.folderFlows[0].nodes.back().targetFlow = "images";
+        nookbit::RuleSet::FolderFlow images{"images", "이미지 별도 분류"};
+        images.folderInput = false; images.entry = "input";
+        images.nodes = {{"input", "input", {"png"}}, {"png", "condition", {"destination"}}, {"destination", "destination"}};
+        images.nodes[1].condition = nookbit::ExtensionPredicate{{"png"}};
+        images.nodes[2].destination = nookbit::RuleDestination{L"CustomImages", {}, false};
+        rules.folderFlows.push_back(images);
+    }
     nookbit::JsonRuleSetRepository repository(temp.filePath("rules.json"), QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/schemas/rules-tree-v3.schema.json");
     expect(bool(repository.save(rules)), "save named flows");
     const auto loaded = repository.load();
-    expect(loaded && loaded.value().folderFlows.size() == 1 && loaded.value().folderFlows[0].name == "내용물 정리", "JSON preserves flow identity and name");
+    expect(loaded && loaded.value().folderFlows.size() == (custom ? 2 : 1) && loaded.value().folderFlows[0].name == "내용물 정리", "JSON preserves flow identity and name");
     auto changed = rules; changed.folderFlows[0].name = "이름 변경";
     expect(nookbit::PlanSignature::rules(rules) != nookbit::PlanSignature::rules(changed), "flow changes invalidate rule revision");
     auto invalid = rules; invalid.folderFlows.push_back({"other", "내용물 정리"});
@@ -66,13 +77,13 @@ void workflow() {
     Settings settings; settings.value.homeRoot = base / "organized";
     nookbit::Planner planner(engine, base / "app-data", nookbit::CrossVolumeDrafts::Allow);
     nookbit::WindowsStagedCopy volumes;
-    nookbit::CreatePreviewUseCase preview(repository, scanner, planner, &hasher, &volumes);
+    nookbit::CreatePreviewUseCase preview(repository, scanner, planner, &hasher, &volumes, &engine);
     nookbit::CreatePreviewRequest request{{}, {folder}, settings.value.homeRoot};
     const auto bundle = preview.execute(request);
     expect(bundle && bundle.value().steps.size() == 1 && bundle.value().steps[0].fingerprint.directory, "unselected folder remains one bundle");
     request.folderSelections = {{folder, "contents", rules.id}};
     const auto draft = preview.execute(request);
-    expect(draft && draft.value().steps.size() == 2, "selected flow traverses nested files");
+    expect(draft && draft.value().steps.size() == (custom ? 1 : 2), "selected flow interprets its own nodes instead of always applying base rules");
     if (!draft) { std::cerr << draft.error().message << '\n'; return; }
     std::vector<std::filesystem::path> selected;
     for (const auto& outcome : draft.value().previewOutcomes) selected.push_back(outcome.source);
@@ -90,12 +101,16 @@ void workflow() {
     if (!approval) return;
     const auto approved = history.loadPlan(frozen.value().id);
     if (!approved) { expect(false, "load approved plan"); return; }
+    expect(approved.value().processingSources.size() == selected.size(), "SQLite retains signed flow context for classified and unmatched files");
+    auto tampered = approved.value(); tampered.processingSources[0].flowId = "different-flow";
+    expect(nookbit::PlanSignature::approvalPayload(tampered) != nookbit::PlanSignature::approvalPayload(approved.value()), "changing flow context changes the approval signature");
     nookbit::SafeExecutor executor(settings, verify, scanner, hasher, history, base / "app-data", &volumes);
     const auto moved = executor.execute(approved.value(), approval.value(), selected);
     expect(bool(moved), "execute flow through existing mover");
     if (!moved) std::cerr << moved.error().message << '\n';
     expect(std::filesystem::exists(folder / "added-after-preview.txt") && std::filesystem::is_directory(folder / "nested/empty"), "new files and source folders stay untouched");
-    expect(std::filesystem::exists(settings.value.homeRoot / "Sorted/two.png"), "nested file gets base classification");
+    expect(std::filesystem::exists(settings.value.homeRoot / (custom ? "CustomImages/two.png" : "Sorted/two.png")), "nested file follows chosen classification algorithm");
+    if (custom) expect(std::filesystem::exists(folder / "one.txt"), "custom flow leaves unmatched file in place");
     expect(bool(executor.rollback(frozen.value().id)), "undo flow as one operation");
     expect(std::filesystem::exists(folder / "one.txt") && std::filesystem::exists(folder / "nested/two.png"), "undo restores original nested source paths");
     request.folderSelections[0].folderFlowId = "missing";
@@ -134,12 +149,23 @@ void graphContract() {
     expect(!nookbit::splitFolderFlowGraph(blocks, malformed), "cyclic folder flow rejected");
     blocks.removeLast();
     expect(!nookbit::splitFolderFlowGraph(blocks, edges), "incomplete folder flow rejected");
+    nookbit::RuleSet rules;
+    auto first = nookbit::expandedFlow({"a", "A"});
+    auto second = nookbit::expandedFlow({"b", "B"});
+    first.nodes.back().targetFlow = "b";
+    rules.folderFlows = {first, second};
+    expect(!nookbit::validateProcessingFlows(rules), "file output cannot call folder-only input");
+    first.nodes[0].next = {"apply"}; first.nodes.erase(first.nodes.begin() + 1);
+    second.nodes[0].next = {"apply"}; second.nodes.erase(second.nodes.begin() + 1);
+    second.nodes.back().targetFlow = "a";
+    rules.folderFlows = {first, second};
+    expect(!nookbit::validateProcessingFlows(rules), "cross-flow recursion rejected even when graph edges do not cycle");
 }
 }
 
 // 실제 파일과 저장소를 쓰는 폴더 흐름 검증을 실행하는 함수.
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
-    workflow(); graphContract();
+    workflow(); workflow(true); graphContract();
     return failures ? 1 : 0;
 }

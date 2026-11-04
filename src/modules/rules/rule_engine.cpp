@@ -1,4 +1,5 @@
 #include "modules/rules/rule_engine.hpp"
+#include "modules/rules/processing_flow.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -7,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <map>
 
 namespace nookbit {
 namespace {
@@ -238,12 +240,84 @@ Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const Rul
 
 } // namespace
 
+// 처리 그래프를 해석하되 실제 디렉터리 열기는 외부 작업에 남기는 함수.
+Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& rules, std::int64_t nowUtcMs) const {
+    const auto invalid = [](const std::string& message) { return Result<ProcessingRoute>::failure({"rules.flow_route_invalid", message}); };
+    std::map<std::string, RuleSet::FolderFlow> legacy;
+    const auto load = [&](const std::string& id) -> const RuleSet::FolderFlow* {
+        const auto found = std::find_if(rules.folderFlows.begin(), rules.folderFlows.end(), [&](const auto& flow) { return flow.id == id; });
+        if (found == rules.folderFlows.end()) return nullptr;
+        if (!found->nodes.empty()) return &*found;
+        return &legacy.emplace(id, expandedFlow(*found)).first->second;
+    };
+    auto flow = load(file.processingFlowId);
+    if (!flow) return invalid("Unknown processing flow.");
+    if (file.processingAfterNode.empty() && flow->folderInput && !file.fingerprint.directory)
+        return invalid("A folder-only flow cannot receive a file.");
+    const auto find = [](const RuleSet::FolderFlow& owner, const std::string& id) -> const ProcessingNode* {
+        const auto found = std::find_if(owner.nodes.begin(), owner.nodes.end(), [&](const auto& node) { return node.id == id; });
+        return found == owner.nodes.end() ? nullptr : &*found;
+    };
+    const auto* node = find(*flow, file.processingAfterNode.empty() ? flow->entry : file.processingAfterNode);
+    if (!node) return invalid("Unknown flow resume point.");
+    if (!file.processingAfterNode.empty() && (node->type != "traverse" || file.fingerprint.directory))
+        return invalid("Only enumerated files can resume after a traversal node.");
+    auto next = node->next;
+    for (int budget = 0; budget < 1000; ++budget) {
+        const ProcessingNode* selected = nullptr;
+        const ProcessingNode* fallback = nullptr;
+        for (const auto& id : next) {
+            const auto* candidate = find(*flow, id);
+            if (!candidate) return invalid("Unknown successor.");
+            if (candidate->type == "otherwise") fallback = candidate;
+            else if (candidate->type != "condition" || (candidate->condition && matchesAtomic(*candidate->condition, file, nowUtcMs))) {
+                selected = candidate; break;
+            }
+        }
+        node = selected ? selected : fallback;
+        if (!node) return Result<ProcessingRoute>::success({});
+        if (node->type == "traverse") {
+            if (!file.fingerprint.directory) return invalid("Traversal requires a folder.");
+            return Result<ProcessingRoute>::success({{}, true, flow->id, node->id, node->recursive});
+        }
+        if (node->type == "call") {
+            if (node->targetFlow.empty()) {
+                const auto decision = treeDecision(file, rules, nowUtcMs);
+                if (!decision) return Result<ProcessingRoute>::failure(decision.error());
+                return Result<ProcessingRoute>::success({decision.value()});
+            }
+            auto target = load(node->targetFlow);
+            if (!target || (target->folderInput && !file.fingerprint.directory)) return invalid("Called flow input type does not match.");
+            flow = target;
+            node = find(*flow, flow->entry);
+            if (!node) return invalid("Called flow entry is missing.");
+        } else if (node->type == "destination" || node->type == "exclude") {
+            const auto id = "flow-" + flow->id + "-" + node->id;
+            if (node->type == "exclude") return Result<ProcessingRoute>::success({RuleDecision{id, {}, "Excluded by processing flow.", {}, true}});
+            if (!node->destination) return invalid("Destination is missing.");
+            const auto& destination = *node->destination;
+            const auto path = destinationFor(destination.relativePath, file, destination.absolute);
+            if (!path) return Result<ProcessingRoute>::failure(path.error());
+            return Result<ProcessingRoute>::success({RuleDecision{id, path.value(), "Matched processing flow: " + flow->name,
+                destination.collisionPolicy, false, destination.absolute}});
+        }
+        next = node->next;
+    }
+    return invalid("Flow evaluation exceeded its execution budget.");
+}
+
 // 활성 규칙을 우선순위순으로 판단하고 선택된 목적지를 반환하는 함수.
 Result<std::optional<RuleDecision>> RuleEngine::decide(
     const FileFact& file,
     const RuleSet& rules,
     MultiMatchPolicy multiMatchPolicy,
     std::int64_t nowUtcMs) const {
+    if (!file.processingFlowId.empty()) {
+        const auto result = route(file, rules, nowUtcMs);
+        if (!result) return Result<std::optional<RuleDecision>>::failure(result.error());
+        if (result.value().traverse) return Result<std::optional<RuleDecision>>::failure({"rules.flow_not_expanded", "Folder traversal must be prepared before planning."});
+        return Result<std::optional<RuleDecision>>::success(result.value().decision);
+    }
     if (rules.schemaVersion == 2 || rules.schemaVersion == 3)
         return treeDecision(file, rules, nowUtcMs);
     if (rules.schemaVersion != 1) {

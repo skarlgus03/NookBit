@@ -305,6 +305,18 @@ Result<void> SqliteHistoryRepository::savePlan(const OperationPlan& plan) {
             return error;
         }
     }
+    if (!plan.processingSources.empty()) {
+        QJsonArray sources;
+        for (const auto& input : plan.processingSources) sources.append(QJsonObject{
+            {"source", pathString(input.source)}, {"flowId", QString::fromStdString(input.flowId)}, {"afterNode", QString::fromStdString(input.afterNode)}});
+        QSqlQuery context(database_);
+        context.prepare("INSERT INTO events(plan_id,occurred_at,event_type,payload_json) VALUES(?,?,?,?)");
+        context.addBindValue(QString::fromStdString(plan.id));
+        context.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        context.addBindValue(QStringLiteral("processing_inputs_v1"));
+        context.addBindValue(QString::fromUtf8(QJsonDocument(sources).toJson(QJsonDocument::Compact)));
+        if (!context.exec()) { auto error = sqlFailure("history.flow_context_failed", context); database_.rollback(); return error; }
+    }
     if (!database_.commit()) {
         database_.rollback();
         return Result<void>::failure({"history.commit_failed", database_.lastError().text().toStdString()});
@@ -946,6 +958,26 @@ Result<std::vector<OperationPlan>> SqliteHistoryRepository::readPlans(
         }
         plan.status = *status;
         plan.warnings = *warnings;
+        QSqlQuery contexts(database_);
+        contexts.prepare("SELECT payload_json FROM events WHERE plan_id=? AND event_type='processing_inputs_v1' ORDER BY id");
+        contexts.addBindValue(QString::fromStdString(plan.id));
+        if (!contexts.exec()) return Result<std::vector<OperationPlan>>::failure({"history.flow_context_failed", contexts.lastError().text().toStdString()});
+        if (contexts.next()) {
+            QJsonParseError error;
+            const auto data = QJsonDocument::fromJson(contexts.value(0).toString().toUtf8(), &error);
+            if (error.error != QJsonParseError::NoError || !data.isArray() || data.array().isEmpty())
+                return Result<std::vector<OperationPlan>>::failure({"history.flow_context_corrupt", "Invalid processing input audit."});
+            std::set<QString> sources;
+            for (const auto& value : data.array()) {
+                const auto input = value.toObject();
+                const auto path = input.value("source").toString();
+                if (!value.isObject() || input.size() != 3 || !QFileInfo(path).isAbsolute() ||
+                    input.value("flowId").toString().isEmpty() || !input.value("afterNode").isString() || !sources.insert(path).second)
+                    return Result<std::vector<OperationPlan>>::failure({"history.flow_context_corrupt", "Invalid or duplicate flow source."});
+                plan.processingSources.push_back({std::filesystem::path(path.toStdWString()), input.value("flowId").toString().toStdString(), input.value("afterNode").toString().toStdString()});
+            }
+            if (contexts.next()) return Result<std::vector<OperationPlan>>::failure({"history.flow_context_corrupt", "Duplicate processing input audits."});
+        }
         bool versionOk = false;
         plan.formatVersion = plans.value(7).toInt(&versionOk);
         if (!versionOk || plans.value(7).toDouble() != plan.formatVersion ||

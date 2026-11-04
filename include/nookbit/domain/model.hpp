@@ -72,6 +72,9 @@ struct FileFact {
     std::filesystem::path relativePath;
     std::string extension;
     FileFingerprint fingerprint;
+    // 명시적으로 선택한 처리 흐름과 순회 이후의 재개 위치. 비어 있으면 기본 분류다.
+    std::string processingFlowId;
+    std::string processingAfterNode;
 };
 
 struct RuleDecision {
@@ -167,6 +170,17 @@ struct RuleNode {
     bool exclude{false};
 };
 
+/// 조건·순회·다른 흐름 호출을 연결하는 Qt 독립 처리 노드.
+struct ProcessingNode {
+    std::string id;
+    std::string type;
+    std::vector<std::string> next;
+    std::optional<AtomicRuleCondition> condition;
+    std::optional<RuleDestination> destination;
+    std::string targetFlow;
+    bool recursive{true};
+};
+
 /// 버전이 있는 분류 규칙 묶음을 표현한다.
 struct RuleSet {
     std::string id;
@@ -175,10 +189,13 @@ struct RuleSet {
     int schemaVersion{1};
     std::vector<RuleNode> nodes;
     std::optional<RuleDestination> globalOtherwise;
-    /// 폴더를 펼쳐 각 파일에 기본 규칙을 적용하는 이름 있는 입력 흐름.
+    /// 이름 있는 처리 그래프. 노드가 없으면 이전 기본 프리셋으로 읽는다.
     struct FolderFlow {
         std::string id;
         std::string name;
+        std::vector<ProcessingNode> nodes;
+        std::string entry;
+        bool folderInput{true};
     };
     std::vector<FolderFlow> folderFlows;
 };
@@ -189,6 +206,22 @@ struct PendingFileEntry {
     std::string folderFlowId;
     std::string ruleSetId;
     bool operator==(const PendingFileEntry&) const = default;
+};
+
+/// 미리보기에서 확정한 개별 원본의 분류 흐름 재개 위치.
+struct ProcessingSource {
+    std::filesystem::path source;
+    std::string flowId;
+    std::string afterNode;
+};
+
+/// 순수 흐름 판단 결과. 실제 순회는 스캐너에 별도로 요청한다.
+struct ProcessingRoute {
+    std::optional<RuleDecision> decision;
+    bool traverse{false};
+    std::string flowId;
+    std::string nodeId;
+    bool recursive{true};
 };
 
 /// 승인에 고정할 이동 방식이며 실행 실패 시 다른 방식으로 바꾸지 않는다.
@@ -249,6 +282,7 @@ struct OperationPlan {
     PlanStatus status{PlanStatus::Draft};
     // 기존 저장 계획은 v1 그대로 읽어 승인 해시를 유지한다.
     int formatVersion{1};
+    std::vector<ProcessingSource> processingSources;
 };
 
 /// 저장된 작업 목록에 보여줄 최소한의 이력 정보.
