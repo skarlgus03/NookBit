@@ -1,6 +1,6 @@
 # NookBit rule-tree v3: AI authoring contract
 
-Contract revision: 2026-10-28. Instructions are in English; preserve user-supplied
+Contract revision: 2026-11-04. Instructions are in English; preserve user-supplied
 folder names, filename substrings and paths in their original language. This
 document works as a standalone attachment; no conversation history, model-specific
 memory, skill, API connection or MCP server is required to generate the JSON.
@@ -9,7 +9,7 @@ Standalone authoring contract for an LLM generating `nookbit_rules.json`. No oth
 
 ## Output shape
 
-The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
+The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise` and `folderFlows`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
 
 Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain exactly one `when` condition. An else node has `"otherwise": true` instead of `when`; at most one else node is allowed in each sibling array. Put it last for readability. A node either has a nonempty `children` array, is a leaf with `destination`, or is a leaf with `"exclude": true`. An internal node must not have `destination` or `exclude`. A leaf must not omit its terminal action, even if `globalOtherwise` exists. Do not add unlisted fields.
 
@@ -37,7 +37,43 @@ Use `itemType` to select files or folders, then optionally add `nameContains` or
 For folder-only organization, use an `itemType: folder` root and omit global
 fallbacks that would move files (or explicitly exclude files). Folder destination collisions always skip that folder, overriding
 `collisionPolicy`; files retain the documented policy. Do not invent a folder-size
-or recursive-classification field.
+or recursive-classification field inside a condition node. Optional folder input
+flows are described below; merely importing one never expands a queued folder.
+
+## Optional named folder input flows
+
+Only when the user requests a selectable way to classify a folder's contents,
+add this optional top-level array (at most 24 entries):
+
+```text
+"folderFlows": [
+  {"id":"folder-contents","name":"Sort folder contents","kind":"recursiveFilesToDefault"}
+]
+```
+
+This is a JSON member fragment, not a complete rule document. `id` uses
+`[A-Za-z0-9._-]+` and must be unique among folder flows. `name` is a unique,
+trimmed display label of 1–60 characters; preserve the user's language.
+`kind` is exactly `recursiveFilesToDefault`; do not invent other kinds or fields.
+The editor represents it as a named region containing folder input → recursive
+file traversal → apply the document's ordinary `nodes`/`globalOtherwise` rules.
+It is an input-processing flow, not a predicate and not a sibling of a condition.
+
+Each queued folder defaults to **whole-folder** processing. Only an explicit
+per-folder user selection activates a named flow; ordinary files cannot select
+it. It recursively classifies regular files at every depth, not directories,
+and does not delete source directories or empty folders. Queue rows stay folded;
+preview lists the resulting individual file operations. Traversal errors or
+links interrupt this explicit expansion instead of silently classifying an
+incomplete folder. Preview is a snapshot: later-added files are not moved by
+that operation. All actual moves still require the usual preview/approval.
+
+Flow selections belong to their rule set. Removing a flow or switching to a
+different rule set resets affected queue entries to whole-folder processing
+with a visible notice. Changing a flow name preserves its stable ID. Older
+apps without this extension reject documents containing `folderFlows`; omit
+the member if no extra folder flow is needed. AND/OR/NOT nodes and custom
+traversal graphs are not supported by this contract revision.
 
 At each level, NookBit checks enabled ordinary siblings in array order and selects the **first** matching condition. If none matches, it selects the enabled `otherwise` sibling, if any. It then repeats this process among the selected node's children. Parent and child conditions therefore compose as AND. Once a sibling is selected, a miss among its children does **not** retry later siblings of the parent. A local `otherwise` child can catch that miss. If no child matches and `globalOtherwise` is absent, the file remains unclassified. Disabled nodes are ignored.
 
@@ -94,7 +130,8 @@ For a folder-only request, use the following complete example instead of adding
 a broad name/date rule that could also match files. With no other root rules or
 `globalOtherwise`, files remain unclassified and stay in place. A nested name or
 modified-age node can refine the folder branch. Selecting a folder never
-reclassifies the files inside it.
+reclassifies the files inside it unless the user explicitly selects a named
+folder input flow in an app that supports the extension above.
 
 ```json
 {

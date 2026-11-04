@@ -5,6 +5,8 @@
 #include <QUrl>
 #include <QVector>
 #include <nookbit/domain/result.hpp>
+#include <nookbit/domain/model.hpp>
+#include <QVariantList>
 #include <filesystem>
 
 namespace nookbit {
@@ -16,6 +18,7 @@ class PendingFilesModel final : public QAbstractListModel {
     Q_PROPERTY(QString lastMessage READ lastMessage NOTIFY lastMessageChanged)
     Q_PROPERTY(QString storageNotice READ storageNotice NOTIFY storageNoticeChanged)
     Q_PROPERTY(int unavailableCount READ unavailableCount NOTIFY availabilityChanged)
+    Q_PROPERTY(QVariantList folderFlowOptions READ folderFlowOptions NOTIFY folderFlowsChanged)
 
 public:
     enum Role {
@@ -23,6 +26,7 @@ public:
         FullPathRole,
         AvailableRole,
         DirectoryRole,
+        FolderFlowRole,
     };
 
     /// 비어 있는 대기 목록을 생성하는 생성자.
@@ -45,6 +49,16 @@ public:
 
     /// 미리보기 요청에 넘길 대기 파일의 전체 경로를 반환하는 함수.
     [[nodiscard]] QStringList filePaths() const;
+    /// 경로와 폴더 처리 선택의 복사본을 저장·미리보기에 전달하는 함수.
+    [[nodiscard]] std::vector<PendingFileEntry> entries() const;
+    /// 기본 통째로 처리와 활성 규칙이 제공하는 흐름 선택지를 반환하는 함수.
+    [[nodiscard]] QVariantList folderFlowOptions() const;
+    /// 저장된 폴더별 선택을 경로와 함께 복원하고 활성 규칙과 대조하는 함수.
+    void restoreEntries(const std::vector<PendingFileEntry>& entries);
+    /// 활성 규칙의 선택지를 반영하고 사라진 흐름은 알린 뒤 기본값으로 돌리는 함수.
+    void setFolderFlows(const QString& ruleSetId, const std::vector<RuleSet::FolderFlow>& flows);
+    /// 폴더 하나에만 명시적인 흐름을 선택하고 낡은 계획을 무효화하는 함수.
+    Q_INVOKABLE void setFolderFlow(int row, const QString& flowId);
 
     /// 저장 상태에 관한 별도 경고를 반환하는 함수.
     [[nodiscard]] QString storageNotice() const;
@@ -76,12 +90,16 @@ signals:
     void lastMessageChanged();
     void storageNoticeChanged();
     void availabilityChanged();
+    void folderFlowsChanged();
+    void selectionsChanged();
 
 private:
     struct Entry {
         QString fileName;
         QString fullPath;
         bool available{true};
+        QString folderFlowId;
+        QString ruleSetId;
     };
 
     /// 화면에 보여줄 결과 문구를 갱신하는 함수.
@@ -90,6 +108,8 @@ private:
     QVector<Entry> entries_;
     QString lastMessage_;
     QString storageNotice_;
+    QString ruleSetId_;
+    QVariantList folderFlows_;
 };
 
 } // namespace nookbit

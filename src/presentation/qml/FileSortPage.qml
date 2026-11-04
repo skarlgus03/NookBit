@@ -16,6 +16,7 @@ Rectangle {
     property int departingStep: 0
     property real transitionProgress: 1
     property bool manualSortRequested: false
+    property bool sortAfterPreview: false
     property int confirmationReturnStep: 0
     property bool manualSession: false
     property bool sortSuccess: false
@@ -85,6 +86,11 @@ Rectangle {
         function onPreviewChanged() {
             // 작업 시작 알림과 결과 반영이 끝난 뒤 취소·준비 실패 여부를 확인하는 함수.
             Qt.callLater(function() {
+                if (home.sortAfterPreview && !home.progress.busy) {
+                    home.sortAfterPreview = false;
+                    if (home.controller.hasPreview && home.controller.hasMovableSteps && home.visible && home.workflowStep === 0)
+                        home.requestSort();
+                }
                 if (home.controller.awaitingConfirmation && home.manualSortRequested && home.visible)
                     home.showStep(2)
                 else if (!home.progress.busy && !home.controller.awaitingConfirmation && home.workflowStep < 3) {
@@ -96,6 +102,7 @@ Rectangle {
     }
     // 파일 정리를 벗어나면 임시 미리보기만 닫고 대기 목록·입력은 보존하는 함수.
     onVisibleChanged: {
+        if (!visible) sortAfterPreview = false
         if (!visible && workflowStep === 2) cancelConfirmation()
         if (!visible && workflowStep < 3) { manualSortRequested = false; showStep(0) }
     }
@@ -131,13 +138,14 @@ Rectangle {
         onUndoRequested: home.controller.undoLastMove()
         // 결과만 만들고 같은 창 안에 임시 화면을 표시하는 함수.
         onPreviewRequested: function(destination) {
+            home.sortAfterPreview = false
             home.controller.createPreview(destination)
             home.showStep(1)
         }
         // 미리보기·검사·최종 확인을 거친 요청만 이동 실행으로 전달하는 함수.
         onSortRequested: function(destination) {
+            home.sortAfterPreview = true
             home.controller.createPreview(destination)
-            if (home.controller.hasPreview && home.controller.hasMovableSteps) home.requestSort()
         }
     }
     DropArea {

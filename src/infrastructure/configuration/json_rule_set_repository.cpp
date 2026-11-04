@@ -649,6 +649,19 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
                            ids, 0, nodeCount);
         if (!nodes) return Result<RuleSet>::failure(nodes.error());
         result.nodes = std::move(nodes.value());
+        std::set<QString> flowIds;
+        std::set<QString> flowNames;
+        const auto flowArray = loaded.value().value(QStringLiteral("folderFlows")).toArray();
+        for (int index = 0; index < flowArray.size(); ++index) {
+            const auto flow = flowArray[index].toObject();
+            const auto id = flow.value(QStringLiteral("id")).toString();
+            const auto name = flow.value(QStringLiteral("name")).toString();
+            if (name.trimmed() != name || name.isEmpty() || !flowIds.insert(id).second ||
+                !flowNames.insert(name.toCaseFolded()).second)
+                return Result<RuleSet>::failure({"rules.folder_flow_invalid",
+                    "$.folderFlows[" + std::to_string(index) + "]: names and IDs must be nonempty and unique."});
+            result.folderFlows.push_back({id.toStdString(), name.toStdString()});
+        }
         if (loaded.value().contains(QStringLiteral("globalOtherwise"))) {
             result.globalOtherwise = convertDestination(
                 loaded.value().value(QStringLiteral("globalOtherwise")).toObject());
@@ -726,6 +739,21 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
         {QStringLiteral("version"), QString::fromStdString(rules.version)},
         {QStringLiteral("nodes"), nodes.value()},
     };
+    if (!rules.folderFlows.empty()) {
+        if (rules.schemaVersion != 3) return Result<void>::failure({"rules.folder_flow_version", "Folder flows require v3 rules."});
+        QJsonArray flows;
+        std::set<std::string> flowIds;
+        std::set<QString> flowNames;
+        for (const auto& flow : rules.folderFlows) {
+            const auto name = QString::fromStdString(flow.name);
+            if (name.trimmed() != name || name.isEmpty() || !flowIds.insert(flow.id).second ||
+                !flowNames.insert(name.toCaseFolded()).second)
+                return Result<void>::failure({"rules.folder_flow_invalid", "Folder flow IDs and names must be unique and nonempty."});
+            flows.append(QJsonObject{{QStringLiteral("id"), QString::fromStdString(flow.id)},
+                {QStringLiteral("name"), name}, {QStringLiteral("kind"), QStringLiteral("recursiveFilesToDefault")}});
+        }
+        object.insert(QStringLiteral("folderFlows"), flows);
+    }
     if (rules.globalOtherwise) {
         auto destination = destinationObject(*rules.globalOtherwise);
         if (!destination) return Result<void>::failure(destination.error());

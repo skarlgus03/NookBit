@@ -288,6 +288,11 @@ Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
             "scan.input_mode_invalid", "Provide either selected files or watch folders, but not both.",
         });
     }
+    for (const auto& folder : request.expandFolders) {
+        if (!hasSelectedFiles || std::none_of(request.selectedFiles.begin(), request.selectedFiles.end(),
+                [&](const auto& selected) { return pathKey(folder) == pathKey(selected); }))
+            return Result<ScanSnapshot>::failure({"scan.expansion_invalid", "Only explicitly selected folders may be expanded."});
+    }
     static std::atomic<std::uint64_t> nextId{0};
     const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -302,6 +307,19 @@ Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
             const bool directory = std::filesystem::is_directory(path, typeError);
             auto checked = validatePath(path, directory);
             if (!checked) return Result<ScanSnapshot>::failure(checked.error());
+            const bool expand = std::any_of(request.expandFolders.begin(), request.expandFolders.end(),
+                [&](const auto& folder) { return pathKey(folder) == pathKey(path); });
+            if (expand) {
+                if (!directory) return Result<ScanSnapshot>::failure({"scan.expansion_not_folder", "Folder flows require a folder."});
+                ScanRequest contents{{path}, true, {}, {}};
+                const auto warningCount = snapshot.warnings.size();
+                const auto scanned = scanFolder(path, contents, snapshot, seenFiles);
+                if (!scanned) return Result<ScanSnapshot>::failure(scanned.error());
+                // 불완전한 순회를 완전한 분류처럼 제시하지 않고 미리보기를 중단한다.
+                if (snapshot.warnings.size() != warningCount)
+                    return Result<ScanSnapshot>::failure({"scan.expansion_incomplete", "Folder contents could not be fully inspected; no files were moved."});
+                continue;
+            }
             auto fact = readFileFact(path, path.filename());
             if (!fact) return Result<ScanSnapshot>::failure(fact.error());
             snapshot.files.push_back(std::move(fact.value()));
@@ -316,6 +334,20 @@ Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
             [](const FileFact& left, const FileFact& right) {
                 return pathKey(left.absolutePath) < pathKey(right.absolutePath);
             });
+    }
+    // 펼친 폴더와 별도 선택이 겹쳐 부모와 자식이 함께 이동하지 않도록 검사한다.
+    if (!request.expandFolders.empty()) {
+        std::sort(snapshot.files.begin(), snapshot.files.end(), [](const auto& a, const auto& b) {
+            return pathKey(a.absolutePath) < pathKey(b.absolutePath);
+        });
+        for (std::size_t i = 0; i < snapshot.files.size(); ++i) {
+            if (!snapshot.files[i].fingerprint.directory) continue;
+            const auto prefix = pathKey(snapshot.files[i].absolutePath / "");
+            for (std::size_t j = 0; j < snapshot.files.size(); ++j) {
+                if (i != j && pathKey(snapshot.files[j].absolutePath).starts_with(prefix))
+                    return Result<ScanSnapshot>::failure({"scan.overlapping_selection", "A folder and its contents cannot be moved together."});
+            }
+        }
     }
     return Result<ScanSnapshot>::success(std::move(snapshot));
 }

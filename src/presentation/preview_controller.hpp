@@ -161,6 +161,8 @@ private:
     BackgroundTaskRunner* runner_{nullptr};
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
     void showError(const QString& message);
+    /// 스캔 완료 결과만 화면에 반영하고 실제 개별 원본 경로를 고정하는 함수.
+    void acceptPreview(const Result<OperationPlan>& result, const QString& homePath);
 
     PendingFilesModel& pendingFiles_;
     ICreatePreviewUseCase& createPreview_;
@@ -176,6 +178,7 @@ private:
     QString previewHomeRoot_;
     std::vector<std::filesystem::path> allowedDestinationRoots_;
     std::optional<OperationPlan> draft_;
+    std::vector<std::filesystem::path> previewSelectedFiles_;
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;
     QVariantList steps_;

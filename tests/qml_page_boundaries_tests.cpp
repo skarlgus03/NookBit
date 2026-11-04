@@ -7,6 +7,7 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QImage>
+#include <QQuickImageProvider>
 #include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -17,6 +18,20 @@
 
 namespace {
 int failures = 0;
+
+/// 실제 파일 없이 대기 목록의 아이콘 요청에 응답하는 시험용 제공자.
+class QueuePreviewFixture final : public QQuickImageProvider {
+public:
+    // 시험용 이미지 제공자를 만드는 생성자.
+    QueuePreviewFixture() : QQuickImageProvider(QQuickImageProvider::Image) {}
+    // 작은 투명 이미지를 반환해 파일시스템 접근 없이 행 배치를 검사하는 함수.
+    QImage requestImage(const QString&, QSize* size, const QSize&) override {
+        QImage image(32, 32, QImage::Format_ARGB32);
+        image.fill(Qt::transparent);
+        if (size) *size = image.size();
+        return image;
+    }
+};
 
 // 화면 경계가 지켜지지 않으면 설명과 함께 실패를 기록하는 함수.
 void expect(bool value, const char* message) {
@@ -680,8 +695,20 @@ int main(int argc, char** argv) {
         "home portrait reuses atlas rendering, fits mirrored arbitrary pivots and never runs an animation timer");
     // 최소 창에서도 목록과 하단 동작이 겹치지 않고 같은 버튼 규격을 유지하는지 검사한다.
     QQmlComponent pendingComponent(&engine);
+    engine.addImageProvider("filepreviews", new QueuePreviewFixture);
     pendingComponent.setData(R"(import QtQml.Models
-        ListModel { property int unavailableCount: 0; property string storageNotice: "" })", QUrl());
+        ListModel {
+            property int unavailableCount: 0
+            property string storageNotice: ""
+            property string lastMessage: ""
+            property var folderFlowOptions: [{text: "폴더 통째로", value: ""}, {text: "내용물 정리", value: "contents"}]
+            property int pickedRow: -1
+            function setFolderFlow(row, value) { pickedRow = row; setProperty(row, "folderFlowId", value) }
+            function addFolders() {
+                append({fileName:"first", fullPath:"D:/test/first", available:true, directory:true, folderFlowId:""})
+                append({fileName:"second", fullPath:"D:/test/second", available:true, directory:true, folderFlowId:""})
+            }
+        })", QUrl());
     std::unique_ptr<QObject> pending(pendingComponent.create());
     auto sortController = fake(engine, R"(
         property string activeRuleLabel: "A long imported sorting rule document name.json"
@@ -725,6 +752,20 @@ int main(int argc, char** argv) {
                 && empty->isVisible() && !previewAction->isEnabled() && !sortAction->isEnabled() && !clearQueue->isEnabled(),
                 "empty queues show guidance and disable equally sized sorting actions in both themes");
         }
+    }
+    QMetaObject::invokeMethod(pending.get(), "addFolders");
+    settle();
+    auto* folderChoice = find(find, inputItem, "pendingFolderFlow_0");
+    expect(folderChoice && folderChoice->isVisible() && folderChoice->property("currentIndex").toInt() == 0,
+        "queued folders offer a whole-folder default without unfolding rows");
+    if (folderChoice) {
+        folderChoice->setProperty("currentIndex", 1);
+        QMetaObject::invokeMethod(folderChoice, "activated", Q_ARG(int, 1));
+        expect(pending->property("pickedRow").toInt() == 0 && pending->property("count").toInt() == 2,
+            "choosing mode 1 updates queue row 0 rather than another folder");
+        input->setProperty("workBusy", true);
+        expect(!folderChoice->isEnabled(), "folder processing cannot change while work is busy");
+        input->setProperty("workBusy", false);
     }
     auto stepper = create(engine, "FileSortStepper", {{"workflowStep", 4}});
     expect(stepper && stepper->property("currentStep").toInt() == 3,

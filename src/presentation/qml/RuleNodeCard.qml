@@ -158,7 +158,9 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
         anchors.bottomMargin: 8
-        text: modelData.type === "destination" ? qsTr("도착") : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr(
+        text: modelData.type === "flowStart" ? qsTr("시작 →") : modelData.type === "folderScan" ? qsTr("파일별 →")
+            : modelData.type === "applyDefault" ? qsTr("기본 흐름 호출")
+            : modelData.type === "destination" ? qsTr("도착") : modelData.type === "exclude" ? qsTr("이동 안 함") : qsTr(
                                                                                                  "일치 →")
         font.pixelSize: UiMetrics.nodeCaptionSizes[blockCard.editor.fontPresetIndex]
         font.weight: Font.Medium
@@ -231,7 +233,7 @@ Rectangle {
     }
     Rectangle {
         id: inputPort
-        visible: modelData.type !== "start"
+        visible: modelData.type !== "start" && modelData.type !== "flowStart"
         x: -8
         y: parent.height / 2 - 8
         width: 16
@@ -241,6 +243,7 @@ Rectangle {
         border.width: 3
         border.color: blockCard.colorFor(modelData.type)
         MouseArea {
+            enabled: !modelData.flowId
             anchors.fill: parent
             anchors.margins: -12
             onClicked: {
@@ -253,7 +256,7 @@ Rectangle {
     }
     Rectangle {
         id: outputPort
-        visible: modelData.type !== "destination" && modelData.type !== "exclude"
+        visible: modelData.type !== "destination" && modelData.type !== "exclude" && modelData.type !== "applyDefault"
         x: parent.width - width / 2
         y: parent.height / 2 - height / 2
         width: modelData.type === "start" ? 22 : 16
@@ -264,6 +267,7 @@ Rectangle {
         border.color: blockCard.colorFor(modelData.type)
         MouseArea {
             objectName: "ruleOutputPort_" + modelData.id
+            enabled: !modelData.flowId
             anchors.fill: parent
             anchors.margins: -12
             preventStealing: true

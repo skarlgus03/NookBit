@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <utility>
+#include <algorithm>
 
 namespace nookbit {
 
@@ -22,12 +23,13 @@ QVariant PendingFilesModel::data(const QModelIndex& index, int role) const {
     if (role == FullPathRole) return entry.fullPath;
     if (role == AvailableRole) return entry.available;
     if (role == DirectoryRole) return QFileInfo(entry.fullPath).isDir();
+    if (role == FolderFlowRole) return entry.folderFlowId;
     return {};
 }
 
 // QML에서 사용할 역할 이름을 반환하는 함수.
 QHash<int, QByteArray> PendingFilesModel::roleNames() const {
-    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}, {DirectoryRole, "directory"}};
+    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}, {DirectoryRole, "directory"}, {FolderFlowRole, "folderFlowId"}};
 }
 
 // 현재 대기 중인 파일 개수를 반환하는 함수.
@@ -46,6 +48,85 @@ QStringList PendingFilesModel::filePaths() const {
     paths.reserve(entries_.size());
     for (const auto& entry : entries_) paths.append(entry.fullPath);
     return paths;
+}
+
+// 경로와 폴더별 선택을 값으로 반환하는 함수.
+std::vector<PendingFileEntry> PendingFilesModel::entries() const {
+    std::vector<PendingFileEntry> result;
+    for (const auto& entry : entries_) result.push_back({std::filesystem::path(entry.fullPath.toStdWString()),
+        entry.folderFlowId.toStdString(), entry.ruleSetId.toStdString()});
+    return result;
+}
+
+// 통째로 처리 기본값을 항상 첫 항목으로 제공하는 함수.
+QVariantList PendingFilesModel::folderFlowOptions() const {
+    QVariantList result{QVariantMap{{"text", QStringLiteral("폴더 통째로")}, {"value", QString()}}};
+    result.append(folderFlows_);
+    return result;
+}
+
+// 현재 규칙의 흐름을 반영하며 사용할 수 없어진 선택만 기본값으로 되돌리는 함수.
+void PendingFilesModel::setFolderFlows(const QString& ruleSetId, const std::vector<RuleSet::FolderFlow>& flows) {
+    QVariantList options;
+    for (const auto& flow : flows) options.append(QVariantMap{{"text", QString::fromStdString(flow.name)},
+        {"value", QString::fromStdString(flow.id)}});
+    const bool changed = ruleSetId_ != ruleSetId || folderFlows_ != options;
+    ruleSetId_ = ruleSetId;
+    folderFlows_ = options;
+    if (changed) emit folderFlowsChanged();
+    bool reset = false;
+    for (int row = 0; row < entries_.size(); ++row) {
+        auto& entry = entries_[row];
+        if (entry.folderFlowId.isEmpty()) continue;
+        const bool exists = entry.ruleSetId == ruleSetId_ && QFileInfo(entry.fullPath).isDir() &&
+            std::any_of(folderFlows_.begin(), folderFlows_.end(), [&](const QVariant& option) {
+                return option.toMap().value("value").toString() == entry.folderFlowId;
+            });
+        if (exists) continue;
+        entry.folderFlowId.clear();
+        entry.ruleSetId.clear();
+        emit dataChanged(index(row), index(row), {FolderFlowRole});
+        reset = true;
+    }
+    if (reset) {
+        setLastMessage(QStringLiteral("사용할 수 없는 폴더 처리 선택을 '폴더 통째로'로 되돌렸어요. 미리보기를 다시 확인해 주세요."));
+        emit selectionsChanged();
+    }
+}
+
+// 목록은 펼치지 않고 지정한 폴더의 처리 흐름만 바꾸는 함수.
+void PendingFilesModel::setFolderFlow(int row, const QString& flowId) {
+    if (row < 0 || row >= entries_.size() || !QFileInfo(entries_[row].fullPath).isDir()) return;
+    if (!flowId.isEmpty() && std::none_of(folderFlows_.begin(), folderFlows_.end(), [&](const QVariant& option) {
+        return option.toMap().value("value").toString() == flowId;
+    })) return;
+    auto& entry = entries_[row];
+    if (entry.folderFlowId == flowId) return;
+    entry.folderFlowId = flowId;
+    entry.ruleSetId = flowId.isEmpty() ? QString() : ruleSetId_;
+    emit dataChanged(index(row), index(row), {FolderFlowRole});
+    emit selectionsChanged();
+    setLastMessage(flowId.isEmpty() ? QStringLiteral("폴더 전체를 하나의 대상으로 정리해요.")
+        : QStringLiteral("하위 폴더의 파일까지 각각 분류해요. 원본 폴더는 자동 삭제하지 않아요."));
+}
+
+// 저장된 선택을 복원한 다음 현재 규칙으로 사용할 수 있는지 검사하는 함수.
+void PendingFilesModel::restoreEntries(const std::vector<PendingFileEntry>& entries) {
+    QStringList paths;
+    for (const auto& entry : entries) paths.append(QString::fromStdWString(entry.path.wstring()));
+    restorePaths(paths);
+    for (auto& restored : entries_) {
+        for (const auto& entry : entries) {
+            if (restored.fullPath.compare(QDir::cleanPath(QString::fromStdWString(entry.path.wstring())), Qt::CaseInsensitive) != 0) continue;
+            restored.folderFlowId = QString::fromStdString(entry.folderFlowId);
+            restored.ruleSetId = QString::fromStdString(entry.ruleSetId);
+            break;
+        }
+    }
+    std::vector<RuleSet::FolderFlow> flows;
+    for (const auto& option : folderFlows_) flows.push_back({option.toMap().value("value").toString().toStdString(), option.toMap().value("text").toString().toStdString()});
+    setFolderFlows(ruleSetId_, flows);
+    if (!entries_.isEmpty()) emit dataChanged(index(0), index(entries_.size() - 1), {FolderFlowRole});
 }
 
 // 저장 상태에 관한 별도 경고를 반환하는 함수.

@@ -71,3 +71,10 @@ v2 노드에 조건 종류가 둘 이상 있으면 분리 시 형제 규칙 선�
 계획 설정 서명에 반영한다. 드라이브 루트 전체 허용과 앱 데이터 이동은
 금지하며, 폴더 이름 접두사만 같은 다른 경로는 허용되지 않는다.
 규칙 불러오기와 규칙 시험은 외부 이동 권한을 부여하지 않는다.
+
+## Named folder input flows
+
+The optional `folderFlows` member defines named `recursiveFilesToDefault` inputs.
+It does not change condition-node semantics or the whole-folder default. See
+[folder input flow behavior](folder-processing-flows.md) and the English
+[AI authoring contract](ai-rule-authoring-v3.md#optional-named-folder-input-flows).

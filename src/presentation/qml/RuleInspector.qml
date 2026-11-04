@@ -21,10 +21,10 @@ Frame {
     property int folderTargetId: -1
     property string externalFolder: ""
     readonly property string selectedType: editor.selectedBlock ? editor.selectedBlock.type : ""
-    readonly property string selectionKind: selectedType === "start" ? qsTr("시작점")
+    readonly property string selectionKind: editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("폴더 처리 흐름") : selectedType === "start" ? qsTr("시작점")
         : ["destination", "exclude"].includes(selectedType) ? qsTr("종착점")
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
-    readonly property string valueLabel: selectedType === "destination" ? qsTr("목적지 경로")
+    readonly property string valueLabel: selectedType === "flowStart" ? qsTr("폴더 처리 이름") : selectedType === "destination" ? qsTr("목적지 경로")
         : selectedType === "extension" ? qsTr("확장자") : selectedType === "name" ? qsTr("이름에 포함할 글자")
         : selectedType === "itemType" ? qsTr("대상 종류")
         : selectedType === "size" ? qsTr("파일 크기") : selectedType === "age" ? qsTr("수정 후 경과일") : qsTr("표시 값")
@@ -98,6 +98,14 @@ Frame {
             }
             Label {
                 Layout.fillWidth: true
+                visible: inspector.editor.selectedBlock !== null && !!inspector.editor.selectedBlock.flowId
+                text: qsTr("대기 목록의 폴더에서 이 흐름을 선택하면 하위 파일까지 각각 기본 규칙으로 분류해요. 원본 폴더는 남겨둬요. 폴더 입력 노드를 선택해 이름을 바꿀 수 있어요.")
+                wrapMode: Text.WordWrap
+                color: inspector.mutedText
+                font.pixelSize: UiMetrics.textBody
+            }
+            Label {
+                Layout.fillWidth: true
                 text: inspector.valueLabel
                 font.pixelSize: UiMetrics.textBody
                 font.bold: true
@@ -105,6 +113,7 @@ Frame {
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
+                         && !["folderScan", "applyDefault"].includes(inspector.selectedType)
             }
             AppTextField {
                 id: inspectorValue
@@ -114,12 +123,14 @@ Frame {
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
                          && inspector.selectedType !== "itemType"
+                         && !["folderScan", "applyDefault"].includes(inspector.selectedType)
                 enabled: visible
                 placeholderText: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
                                                                                                                   "사진/여행") :
                                                                                                               qsTr("D:/중요자료")) :
                                                      inspector.selectedType === "extension" ? qsTr("png, jpg, webp")
+                    : inspector.selectedType === "flowStart" ? qsTr("폴더 처리 이름")
                     : inspector.selectedType === "name" ? qsTr("포함할 글자") : qsTr("숫자 입력")
                 color: inspector.primaryText
                 placeholderTextColor: inspector.mutedText
@@ -292,6 +303,7 @@ Frame {
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "destination"
                          && inspector.editor.selectedBlock.type !== "exclude"
+                         && !inspector.editor.selectedBlock.flowId
                 text: inspector.editor.selectedBlock && inspector.editor.selectedBlock.enabled === false ? qsTr(
                                                                                                                "규칙 사용하기") :
                                                                                                            qsTr("규칙 끄기")

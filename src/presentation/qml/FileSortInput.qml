@@ -13,9 +13,9 @@ Item {
     property bool workBusy: false
     readonly property var theme: UiTheme.colors(dark)
     readonly property bool hasUnavailable: pending.unavailableCount > 0
-    readonly property string notice: [pending.storageNotice,
+    readonly property string notice: [pending.storageNotice, pending.lastMessage,
         hasUnavailable ? qsTr("찾을 수 없는 파일을 목록에서 빼주세요.") : "", controller.message]
-        .filter(part => part.length > 0).join(" · ")
+        .filter(part => typeof part === "string" && part.length > 0).join(" · ")
     signal previewRequested(string destination)
     signal sortRequested(string destination)
     signal undoRequested()
@@ -205,11 +205,13 @@ Item {
                 spacing: UiMetrics.spaceExtraSmall
                 ScrollBar.vertical: ScrollBar {}
                 delegate: RowLayout {
+                    id: queueEntry
                     required property int index
                     required property string fileName
                     required property string fullPath
                     required property bool available
                     required property bool directory
+                    required property string folderFlowId
                     readonly property string extension: fileName.lastIndexOf(".") > 0 ? fileName.slice(fileName.lastIndexOf(".") + 1).toUpperCase() : ""
                     width: files.width - UiMetrics.spaceGroup
                     height: UiMetrics.pendingRowHeight
@@ -251,6 +253,7 @@ Item {
                         ToolTip.text: fullPath
                     }
                     Label {
+                        visible: !directory || (input.pending.folderFlowOptions || []).length <= 1
                         Layout.preferredWidth: UiMetrics.pendingTypeWidth
                         text: directory ? qsTr("폴더") : (extension.length > 0 ? extension : qsTr("파일"))
                         textFormat: Text.PlainText
@@ -258,6 +261,29 @@ Item {
                         horizontalAlignment: Text.AlignRight
                         font.pixelSize: UiMetrics.textBody
                         color: input.theme.muted
+                    }
+                    ColumnLayout {
+                        visible: directory && (input.pending.folderFlowOptions || []).length > 1
+                        Layout.preferredWidth: UiMetrics.dropdownMinWidth
+                        spacing: UiMetrics.spaceTiny
+                        AppComboBox {
+                            objectName: "pendingFolderFlow_" + index
+                            Layout.fillWidth: true
+                            enabled: !input.workBusy && available
+                            model: input.pending.folderFlowOptions || []
+                            textRole: "text"
+                            valueRole: "value"
+                            currentIndex: Math.max(0, model.findIndex(option => option.value === folderFlowId))
+                            Accessible.name: qsTr("%1 폴더 처리 방식").arg(fileName)
+                            onActivated: function(choiceIndex) { input.pending.setFolderFlow(queueEntry.index, currentValue) }
+                        }
+                        Label {
+                            visible: folderFlowId.length > 0
+                            text: qsTr("하위 파일 개별 정리")
+                            font.pixelSize: UiMetrics.textBody
+                            font.bold: true
+                            color: input.theme.accent
+                        }
                     }
                     AppButton {
                         text: "×"

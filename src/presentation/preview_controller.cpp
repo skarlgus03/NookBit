@@ -111,6 +111,8 @@ void PreviewController::setCollisionPolicy(const QString& policy) {
 void PreviewController::refreshActiveRules() {
     if (runner_ && runner_->busy()) return;
     const auto loaded = rules_.load();
+    pendingFiles_.setFolderFlows(loaded ? QString::fromStdString(loaded.value().id) : QString(),
+                                loaded ? loaded.value().folderFlows : std::vector<RuleSet::FolderFlow>{});
     const auto label = loaded
         ? QStringLiteral("%1 · %2").arg(QString::fromStdString(loaded.value().id),
                                           QString::fromStdString(loaded.value().version))
@@ -151,8 +153,26 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     for (const auto& path : paths) {
         request.selectedFiles.emplace_back(path.toStdWString());
     }
+    for (const auto& entry : pendingFiles_.entries())
+        if (!entry.folderFlowId.empty()) request.folderSelections.push_back(entry);
+    const auto homePath = homeInfo.absoluteFilePath();
+    if (runner_ && !request.folderSelections.empty()) {
+        const auto inputs = pendingFiles_.entries();
+        auto result = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure({"preview.pending", "Folder inspection pending."}));
+        dispatchOperation(runner_, this, [useCase = &createPreview_, request, result] {
+            *result = useCase->execute(request);
+            return *result ? Result<void>::success() : Result<void>::failure(result->error());
+        }, [this, result, homePath, inputs](const Result<void>&) {
+            if (inputs != pendingFiles_.entries()) { showError(QStringLiteral("검사 중 대기 목록이나 폴더 처리 방식이 바뀌었어요. 다시 미리보기를 만들어 주세요.")); return; }
+            acceptPreview(*result, homePath);
+        });
+        return;
+    }
+    acceptPreview(createPreview_.execute(request), homePath);
+}
 
-    const auto result = createPreview_.execute(request);
+// 검사 완료 결과를 미리보기로 반영하며 이후 승인은 펼쳐진 실제 원본만 검사하는 함수.
+void PreviewController::acceptPreview(const Result<OperationPlan>& result, const QString& homePath) {
     if (!result) {
         if (result.error().code == "path.destination_outside_home") {
             showError(QStringLiteral("외부 목적지가 아직 허용되지 않았어요. 규칙 편집기의 목적지 설정에서 해당 폴더를 허용해 주세요."));
@@ -167,7 +187,15 @@ void PreviewController::createPreview(const QString& destinationRoot) {
         return;
     }
     draft_ = result.value();
-    previewHomeRoot_ = homeInfo.absoluteFilePath();
+    previewHomeRoot_ = homePath;
+    previewSelectedFiles_.clear();
+    for (const auto& outcome : result.value().previewOutcomes) previewSelectedFiles_.push_back(outcome.source);
+    if (previewSelectedFiles_.empty()) {
+        for (const auto& step : result.value().steps) previewSelectedFiles_.push_back(step.source);
+    }
+    if (previewSelectedFiles_.empty()) {
+        for (const auto& path : pendingFiles_.filePaths()) previewSelectedFiles_.emplace_back(path.toStdWString());
+    }
 
     for (const auto& step : result.value().steps) {
         QVariantMap row;
@@ -228,6 +256,9 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     message_ = QStringLiteral("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
                    .arg(plannedCount).arg(skippedCount).arg(unmatchedCount)
                    .arg(excludedCount).arg(warnings_.size());
+    const auto pendingEntries = pendingFiles_.entries();
+    if (std::any_of(pendingEntries.begin(), pendingEntries.end(), [](const PendingFileEntry& entry) { return !entry.folderFlowId.empty(); }))
+        message_.prepend(QStringLiteral("선택한 폴더는 하위 파일까지 개별 분류했어요. 원본 폴더는 남겨둬요. "));
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
 }
@@ -301,9 +332,9 @@ void PreviewController::prepareSortInBackground() {
     settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    std::vector<std::filesystem::path> selected;
+    const auto selected = previewSelectedFiles_;
     const auto paths = pendingFiles_.filePaths();
-    for (const auto& path : paths) selected.emplace_back(path.toStdWString());
+    const auto selections = pendingFiles_.entries();
     auto prepared = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure({"sort.not_prepared", "Preparation did not complete."}));
     auto elapsedMs = std::make_shared<qint64>(-1);
     message_ = QStringLiteral("정리할 파일을 검사하고 있어요. 아직 이동하지 않았어요.");
@@ -314,13 +345,13 @@ void PreviewController::prepareSortInBackground() {
             *prepared = workflow->prepare(plan, frozen, selected, settings);
             *elapsedMs = timer.elapsed();
             return *prepared ? Result<void>::success() : Result<void>::failure(prepared->error());
-        }, [this, paths, prepared, elapsedMs](const Result<void>& result) {
+        }, [this, paths, selections, prepared, elapsedMs](const Result<void>& result) {
             if (!result) {
                 auto error = QStringLiteral("정리 준비 검사에 실패했어요: %1").arg(QString::fromStdString(result.error().message));
                 if (*elapsedMs >= 0) error += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 showError(error); return;
             }
-            if (pendingFiles_.filePaths() != paths) { showError(QStringLiteral("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
+            if (pendingFiles_.filePaths() != paths || pendingFiles_.entries() != selections) { showError(QStringLiteral("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
             draft_ = prepared->value(); hasFrozenPlan_ = true; awaitingConfirmation_ = true;
             message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
             message_ += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
@@ -335,8 +366,7 @@ void PreviewController::confirmSortInBackground() {
     settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    std::vector<std::filesystem::path> selected;
-    for (const auto& path : pendingFiles_.filePaths()) selected.emplace_back(path.toStdWString());
+    const auto selected = previewSelectedFiles_;
     const auto plan = *draft_;
     auto elapsedMs = std::make_shared<qint64>(-1);
     message_ = QStringLiteral("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
@@ -368,10 +398,7 @@ void PreviewController::freezePreview() {
     settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    std::vector<std::filesystem::path> selectedFiles;
-    const auto paths = pendingFiles_.filePaths();
-    selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
-    for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
+    const auto selectedFiles = previewSelectedFiles_;
 
     const auto result = freezePreview_.execute(*draft_, selectedFiles, settings);
     if (!result) {
@@ -397,10 +424,7 @@ bool PreviewController::verifySavedPlan() {
     settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    std::vector<std::filesystem::path> selectedFiles;
-    const auto paths = pendingFiles_.filePaths();
-    selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
-    for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
+    const auto selectedFiles = previewSelectedFiles_;
 
     const auto result = verifySavedPlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
@@ -427,10 +451,7 @@ void PreviewController::approvePlan() {
     settings.allowedDestinationRoots = allowedDestinationRoots_;
     settings.homeRoot = std::filesystem::path(previewHomeRoot_.toStdWString());
     settings.defaultCollisionPolicy = collisionPolicy_;
-    const auto paths = pendingFiles_.filePaths();
-    std::vector<std::filesystem::path> selectedFiles;
-    selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
-    for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
+    const auto selectedFiles = previewSelectedFiles_;
     const auto result = approvePlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
         message_ = QStringLiteral("승인하지 못했어요. 새 미리보기가 필요할 수 있어요: %1")
@@ -451,10 +472,7 @@ void PreviewController::moveApprovedFile() {
         emit previewChanged();
         return;
     }
-    const auto paths = pendingFiles_.filePaths();
-    std::vector<std::filesystem::path> selectedFiles;
-    selectedFiles.reserve(static_cast<std::size_t>(paths.size()));
-    for (const auto& path : paths) selectedFiles.emplace_back(path.toStdWString());
+    const auto selectedFiles = previewSelectedFiles_;
     const auto loaded = history_.loadPlan(draft_->id);
     if (!loaded || loaded.value().status != PlanStatus::Approved) {
         approval_.reset();
@@ -509,6 +527,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
             pendingFiles_.removeAt(index);
         }
     }
+    clear();
     undoPlanId_ = movedPlanId;
     message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
                    .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
@@ -572,6 +591,7 @@ void PreviewController::clear() {
     draft_.reset();
     approval_.reset();
     previewHomeRoot_.clear();
+    previewSelectedFiles_.clear();
     emit previewChanged();
 }
 
@@ -586,6 +606,7 @@ void PreviewController::showError(const QString& message) {
     draft_.reset();
     approval_.reset();
     previewHomeRoot_.clear();
+    previewSelectedFiles_.clear();
     message_ = message;
     emit previewChanged();
 }

@@ -225,6 +225,16 @@ std::string PlanSignature::rules(const RuleSet& rules) {
         for (const auto& node : rules.nodes) appendAtomicNode(output, node);
         appendNumber(output, rules.globalOtherwise.has_value());
         if (rules.globalOtherwise) appendDestination(output, *rules.globalOtherwise);
+        // 기존 규칙의 서명은 유지하고 새 흐름이 있을 때만 확장 내용을 고정한다.
+        if (!rules.folderFlows.empty()) {
+            append(output, "folder-flows-v1");
+            appendNumber(output, rules.folderFlows.size());
+            for (const auto& flow : rules.folderFlows) {
+                append(output, flow.id);
+                append(output, flow.name);
+                append(output, "recursiveFilesToDefault");
+            }
+        }
         return output;
     }
     if (rules.schemaVersion == 2) {

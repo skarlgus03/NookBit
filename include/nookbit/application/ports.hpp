@@ -25,6 +25,24 @@ public:
 
     /// 현재 대기 경로를 한 번에 저장하는 함수.
     [[nodiscard]] virtual Result<void> save(const std::vector<std::filesystem::path>& paths) const = 0;
+
+    /// 이전 경로 전용 저장소를 기본 폴더 처리로 읽는 호환 함수.
+    [[nodiscard]] virtual Result<std::vector<PendingFileEntry>> loadEntries() const {
+        const auto paths = load();
+        if (!paths) return Result<std::vector<PendingFileEntry>>::failure(paths.error());
+        std::vector<PendingFileEntry> entries;
+        for (const auto& path : paths.value()) entries.push_back({path, {}, {}});
+        return Result<std::vector<PendingFileEntry>>::success(std::move(entries));
+    }
+    /// 경로 전용 저장소에서 고급 선택을 조용히 잃지 않도록 거부하는 호환 함수.
+    [[nodiscard]] virtual Result<void> saveEntries(const std::vector<PendingFileEntry>& entries) const {
+        std::vector<std::filesystem::path> paths;
+        for (const auto& entry : entries) {
+            if (!entry.folderFlowId.empty() || !entry.ruleSetId.empty()) return Result<void>::failure({"pending.flow_storage_unsupported", "Folder selections require entry-aware storage."});
+            paths.push_back(entry.path);
+        }
+        return save(paths);
+    }
 };
 
 struct ScanRequest {
@@ -32,6 +50,8 @@ struct ScanRequest {
     bool recursive{false};
     std::vector<std::string> excludePatterns;
     std::vector<std::filesystem::path> selectedFiles;
+    // 직접 선택한 경로 중 명시적으로 하위 파일을 펼칠 폴더만 담는다.
+    std::vector<std::filesystem::path> expandFolders;
 };
 
 struct ScanSnapshot {

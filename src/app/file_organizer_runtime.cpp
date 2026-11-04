@@ -108,21 +108,18 @@ struct FileOrganizerRuntime::State {
           recoveryController(history, nullptr, &transferJournal, &fileOperations), historyController(history, history, fileOperations),
           classificationQuery(previewRules, previewRuleEngine, previewHasher) {
         if (!verifyUi) {
-            const auto restored = pendingRepository.load();
+            const auto restored = pendingRepository.loadEntries();
             if (restored) {
-                QStringList paths;
-                for (const auto& path : restored.value()) paths.append(QString::fromStdWString(path.wstring()));
-                pendingFiles.restorePaths(paths);
-                // 등록·제외·이동 완료로 목록이 바뀔 때 경로만 저장하는 함수.
-                QObject::connect(&pendingFiles, &PendingFilesModel::countChanged,
-                                 &connections, [this] {
-                    std::vector<std::filesystem::path> paths;
-                    for (const auto& path : pendingFiles.filePaths()) paths.emplace_back(path.toStdWString());
-                    const auto saved = pendingRepository.save(paths);
+                pendingFiles.restoreEntries(restored.value());
+                // 경로와 사용자가 고른 폴더 처리 흐름을 함께 저장하는 함수.
+                const auto persistPending = [this] {
+                    const auto saved = pendingRepository.saveEntries(pendingFiles.entries());
                     pendingFiles.setStorageNotice(saved ? QString() :
                         QStringLiteral("대기 목록을 저장하지 못했어요. 이번 변경은 재시작 후 복원되지 않을 수 있어요: %1")
                             .arg(QString::fromStdString(saved.error().message)));
-                });
+                };
+                QObject::connect(&pendingFiles, &PendingFilesModel::countChanged, &connections, persistPending);
+                QObject::connect(&pendingFiles, &PendingFilesModel::selectionsChanged, &connections, persistPending);
             } else {
                 pendingFiles.setStorageNotice(QStringLiteral("대기 목록을 복원하지 못했어요. 기존 저장 파일은 보존하며 이번 실행의 목록 변경은 저장하지 않아요: %1")
                     .arg(QString::fromStdString(restored.error().message)));

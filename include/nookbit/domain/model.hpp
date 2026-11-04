@@ -141,7 +141,7 @@ struct ModifiedAgePredicate {
     int days{0};
 };
 
-/// v3 노드는 이 네 조건 중 정확히 하나만 가진다.
+/// 파일 또는 폴더 중 한 대상 종류를 선택하는 조건.
 enum class ItemType { File, Folder };
 struct ItemTypePredicate { ItemType value{ItemType::File}; };
 
@@ -175,6 +175,20 @@ struct RuleSet {
     int schemaVersion{1};
     std::vector<RuleNode> nodes;
     std::optional<RuleDestination> globalOtherwise;
+    /// 폴더를 펼쳐 각 파일에 기본 규칙을 적용하는 이름 있는 입력 흐름.
+    struct FolderFlow {
+        std::string id;
+        std::string name;
+    };
+    std::vector<FolderFlow> folderFlows;
+};
+
+/// 대기 항목과 사용자가 명시적으로 선택한 폴더 흐름을 함께 보관한다.
+struct PendingFileEntry {
+    std::filesystem::path path;
+    std::string folderFlowId;
+    std::string ruleSetId;
+    bool operator==(const PendingFileEntry&) const = default;
 };
 
 /// 승인에 고정할 이동 방식이며 실행 실패 시 다른 방식으로 바꾸지 않는다.

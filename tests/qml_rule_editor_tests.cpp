@@ -340,6 +340,25 @@ int main(int argc, char** argv) {
         const auto selected = state->property("selectedBlock").value<QJSValue>().toVariant().toMap();
         expect(selected.value("value").toString() == "file", "item type choice updates the selected graph node");
     }
+    const auto beforeFlow = list(state.get(), "blocks").size();
+    call(engine, state.get(), "addBlock", {"folderFlow", 150, 500});
+    settle();
+    const auto flowNodes = list(state.get(), "blocks");
+    expect(flowNodes.size() == beforeFlow + 3, "one folder-flow action creates input, traversal and default call");
+    const int flowStart = flowNodes[beforeFlow].toMap().value("id").toInt();
+    expect(value && value->isVisible() && inspector->property("valueLabel").toString() == QStringLiteral("폴더 처리 이름"),
+        "folder flow name is editable in the inspector");
+    call(engine, state.get(), "updateValue", {flowStart, "내 파일 따로 정리"});
+    const auto regions = call(engine, state.get(), "flowRegions").toVariant().toList();
+    expect(regions.size() == 2 && regions.last().toMap().value("name").toString() == QStringLiteral("내 파일 따로 정리"),
+        "named frame reflects edits without creating another window");
+    const auto edgeCount = list(state.get(), "edges").size();
+    expect(!call(engine, state.get(), "connectBlocks", {1, flowStart}).toBool() && list(state.get(), "edges").size() == edgeCount,
+        "folder flow cannot be wired into the base tree as a condition");
+    call(engine, state.get(), "selectOnly", {flowStart + 1});
+    expect(value && !value->isVisible(), "fixed traversal step has guidance instead of a meaningless value editor");
+    call(engine, state.get(), "removeSelectedBlock");
+    expect(list(state.get(), "blocks").size() == beforeFlow, "deleting a flow step removes its complete group");
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

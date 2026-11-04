@@ -1,5 +1,6 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "presentation/rule_editor_controller.hpp"
+#include "presentation/folder_flow_graph.hpp"
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "modules/rules/rule_engine.hpp"
@@ -678,6 +679,41 @@ void testItemTypeRules() {
         expect(!active.loadFile(std::filesystem::path(badFile.fileName().toStdWString())), "invalid item type rejected on JSON import");
     }
 }
+// 폴더 흐름의 이름·고유 ID·위치가 저장과 JSON 입출력에서 유지되는지 검사하는 함수.
+void testNamedFolderFlowGraph() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    const auto initial = defaults.load();
+    if (!initial) { expect(false, "flow initial rules"); return; }
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"), schema);
+    expect(bool(active.save(initial.value())), "initialize flow rule fixture");
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, directory.filePath("layout.json"), &active, nullptr, &active);
+    auto graph = editor.graph();
+    auto blocks = graph.value("blocks").toList();
+    auto edges = graph.value("edges").toList();
+    int next = graph.value("nextId").toInt();
+    nookbit::appendFolderFlowGraph({{"my-contents", "내용물만 정리"}}, {}, blocks, edges, next, 900);
+    expect(editor.importGraph(blocks, edges) && editor.save(), "save named folder flow from graph");
+    expect(editor.saveGraphLayout(blocks, edges), "save positions of flow nodes");
+    auto saved = active.load();
+    expect(saved && saved.value().folderFlows.size() == 1 && saved.value().folderFlows[0].id == "my-contents", "active JSON retains flow identity");
+    editor.reload();
+    const auto restored = editor.graph().value("blocks").toList();
+    bool found = false;
+    for (const auto& value : restored) {
+        const auto block = value.toMap();
+        if (block.value("type") == "flowStart") found = block.value("value") == "내용물만 정리" && block.value("y").toDouble() == 900;
+    }
+    expect(found, "reload restores group name and layout");
+    const auto exported = editor.exportGraph(blocks, edges, QUrl::fromLocalFile(directory.filePath("export.json")));
+    expect(exported.value("ok").toBool(), "export includes folder flows");
+    const auto imported = editor.importJsonFile(QUrl::fromLocalFile(directory.filePath("export.json")));
+    expect(imported.value("ok").toBool(), "exported folder flow imports through normal validation");
+    auto badEdges = edges;
+    badEdges.append(QVariantMap{{"from", 1}, {"to", next - 3}});
+    expect(!editor.importGraph(blocks, badEdges), "editor rejects cross-flow wiring before replacing draft");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -694,5 +730,6 @@ int main(int argc, char* argv[]) {
     testSizeUnits();
     testExternalDestinations();
     testItemTypeRules();
+    testNamedFolderFlowGraph();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -11,6 +11,11 @@ QtObject {
     signal destinationUpdated(int blockId, string value)
     readonly property var nodeAddGroups: [
         {
+            title: qsTr("폴더 처리 흐름"),
+            hint: qsTr("대기 목록의 폴더에서 선택할 별도 흐름을 만들어요."),
+            nodes: [{ type: "folderFlow", title: qsTr("폴더 내용물 정리 흐름") }]
+        },
+        {
             title: qsTr("조건 검사"),
             hint: qsTr("조건이 맞으면 다음 노드로 진행해요."),
             nodes: [
@@ -220,6 +225,8 @@ QtObject {
 
     // 노드 종류에 맞는 입력값과 비교 방식을 카드에 표시하는 함수.
     function displayValue(block) {
+        if (block.type === "folderScan") return qsTr("하위 폴더의 파일까지");
+        if (block.type === "applyDefault") return qsTr("각 파일을 기본 정리로");
         if (block.type === "itemType")
             return block.value === "folder" ? qsTr("폴더만") : qsTr("파일만");
         if (block.type === "size" || block.type === "age") {
@@ -336,6 +343,9 @@ QtObject {
     // 종류에 따라 블록 제목을 정하는 함수.
     function titleFor(type) {
         switch (type) {
+        case "flowStart": return qsTr("폴더 입력");
+        case "folderScan": return qsTr("내부 파일 순회");
+        case "applyDefault": return qsTr("기본 정리 적용");
         case "start":
             return qsTr("파일 입력");
         case "extension":
@@ -360,6 +370,10 @@ QtObject {
 
     // 우클릭 메뉴에서 고른 종류의 임시 블록을 기억한 위치에 추가하는 함수.
     function addBlock(type, worldX, worldY) {
+        if (type === "folderFlow") {
+            addFolderFlow(worldX, worldY);
+            return;
+        }
         const examples = {
             itemType: "folder",
             extension: "png, jpg",
@@ -387,7 +401,7 @@ QtObject {
 
     // 선택한 시작 노드 이외의 블록과 그 사이 연결선만 내부 복사본으로 보관하는 함수.
     function copySelectedBlocks() {
-        const chosen = blocks.filter(block => selectedIds.includes(block.id) && block.type !== "start");
+        const chosen = blocks.filter(block => selectedIds.includes(block.id) && block.type !== "start" && !block.flowId);
         if (chosen.length === 0) {
             statusText = qsTr("복사할 블록을 먼저 선택해 주세요. 파일 입력 블록은 복사할 수 없어요.");
             return;
@@ -572,7 +586,7 @@ QtObject {
         if (!incoming)
             return -1;
         const block = blockForId(id);
-        if (!block || block.type === "destination" || block.type === "exclude" || block.type === "otherwise")
+        if (!block || block.flowId || block.type === "destination" || block.type === "exclude" || block.type === "otherwise")
             return -1;
         let order = 0;
         for (const edge of edges) {
@@ -624,6 +638,10 @@ QtObject {
     function connectBlocks(fromId, toId) {
         const source = blockForId(fromId);
         const target = blockForId(toId);
+        if ((source && source.flowId) || (target && target.flowId)) {
+            statusText = qsTr("폴더 흐름은 내부 파일을 순회해 기본 정리를 호출해요. 기본 분류 노드와 직접 연결하지 않아요.");
+            return false;
+        }
         if (!source || !target || source.type === "destination" || source.type === "exclude" || target.type === "start")
             return false;
         if (fromId === toId || hasPath(toId, fromId)) {
@@ -699,7 +717,8 @@ QtObject {
 
     // 선택한 블록들과 이어진 선을 임시 그래프에서 함께 제거하는 함수.
     function removeSelectedBlock() {
-        const removed = selectedIds.filter(id => id !== 1);
+        const selectedFlows = blocks.filter(block => selectedIds.includes(block.id) && block.flowId).map(block => block.flowId);
+        const removed = blocks.filter(block => block.type !== "start" && (selectedIds.includes(block.id) || selectedFlows.includes(block.flowId))).map(block => block.id);
         if (removed.length === 0)
             return;
         blocks = blocks.filter(block => !removed.includes(block.id));
@@ -821,11 +840,53 @@ QtObject {
     function disconnectHoveredEdge() {
         if (hoveredEdgeIndex < 0 || hoveredEdgeIndex >= edges.length)
             return false;
+        const source = blockForId(edges[hoveredEdgeIndex].from);
+        if (source && source.flowId) {
+            statusText = qsTr("폴더 흐름은 한 묶음이에요. 흐름을 제거하려면 노드를 선택하고 Delete를 눌러 주세요.");
+            return false;
+        }
         edges = edges.filter((edge, index) => index !== hoveredEdgeIndex);
         hoveredEdgeIndex = -1;
         statusText = qsTr("선 하나를 끊었어요. 연결을 다시 잇거나 저장본을 다시 열 수 있어요.");
         repaintRequested();
         return true;
+    }
+
+    // 이름 있는 폴더 흐름을 입력·순회·기본 규칙 호출의 한 묶음으로 추가하는 함수.
+    function addFolderFlow(worldX, worldY) {
+        const roots = blocks.filter(block => block.type === "flowStart");
+        if (roots.length >= 24) { statusText = qsTr("폴더 처리 흐름은 24개까지 만들 수 있어요."); return; }
+        let number = 1;
+        let name = qsTr("폴더 내용물 정리");
+        while (roots.some(block => block.value === name)) name = qsTr("폴더 내용물 정리 %1").arg(++number);
+        const firstId = nextId;
+        const flowId = "folder-flow-" + Date.now() + "-" + firstId;
+        const types = ["flowStart", "folderScan", "applyDefault"];
+        const created = types.map((type, column) => ({id: nextId++, type: type, flowId: flowId,
+            value: column === 0 ? name : "", x: worldX + column * (blockWidth + 80), y: worldY}));
+        blocks = blocks.concat(created);
+        edges = edges.concat([{from: firstId, to: firstId + 1}, {from: firstId + 1, to: firstId + 2}]);
+        selectOnly(firstId);
+        fitAllNodes();
+        statusText = qsTr("폴더 흐름을 추가했어요. 오른쪽에서 이름을 바꾸고 전체 저장하면 대기 목록에서 선택할 수 있어요.");
+        repaintRequested();
+    }
+
+    // 노드 위치와 드래그 중 좌표로 기본 정리 및 폴더 흐름의 표시 영역을 계산하는 함수.
+    function flowRegions() {
+        const groups = [{id: "", name: qsTr("기본 정리"), startId: 1}].concat(
+            blocks.filter(block => block.type === "flowStart").map(block => ({id: block.flowId, name: block.value, startId: block.id})));
+        return groups.map(group => {
+            const members = blocks.filter(block => (block.flowId || "") === group.id);
+            if (members.length === 0) return null;
+            const points = members.map(block => positionFor(block));
+            const inset = UiMetrics.spaceSection * 2;
+            const left = Math.min(...points.map(point => point.x)) - inset;
+            const top = Math.min(...points.map(point => point.y)) - inset - UiMetrics.controlHeight;
+            const right = Math.max(...points.map(point => point.x)) + blockWidth + inset;
+            const bottom = Math.max(...points.map(point => point.y)) + blockHeight + inset;
+            return {id: group.id, name: group.name, startId: group.startId, x: left, y: top, width: right - left, height: bottom - top};
+        }).filter(group => group !== null);
     }
 
     // 현재 편집 초안의 규칙을 노드와 선으로 다시 펼치는 함수.

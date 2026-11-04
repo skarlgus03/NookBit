@@ -244,6 +244,51 @@ struct PreviewWorkflow {
                           projectPath("schemas/rules.schema.json"), std::move(appData)) {}
 };
 
+// 폴더 한 줄을 유지하면서 비동기 검사와 개별 파일 승인·이동·되돌리기를 연결하는 함수.
+void testNamedFolderFlowPreview() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "folder controller fixture"); return; }
+    const auto folder = directory.filePath("bundle");
+    const auto nested = folder + "/nested";
+    expect(QDir().mkpath(nested), "create nested flow fixture");
+    for (const auto& path : {folder + "/first.png", nested + "/second.jpg"}) {
+        QFile file(path); expect(file.open(QIODevice::WriteOnly), "open flow source"); file.write("individual source");
+    }
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto active = directory.filePath("rules.json");
+    const auto home = directory.filePath("organized");
+    PreviewWorkflow workflow(active, schema, std::filesystem::path(directory.filePath("appdata").toStdWString()));
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    auto rules = defaults.load();
+    if (!rules) { expect(false, "load flow controller rules"); return; }
+    rules.value().folderFlows.push_back({"contents", "내용물 정리"});
+    expect(bool(workflow.rules.save(rules.value())), "save flow controller rules");
+    nookbit::PendingFilesModel pending;
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase,
+        workflow.verifyUseCase, workflow.approveUseCase, workflow.history, workflow.operations, active, schema, home);
+    controller.setTaskRunner(&runner);
+    pending.addUrl(QUrl::fromLocalFile(folder));
+    expect(pending.count() == 1 && pending.folderFlowOptions().size() == 2, "one folder row exposes active rule flows");
+    pending.setFolderFlow(0, "contents");
+    controller.createPreview(home);
+    expect(runner.busy(), "folder contents are inspected off the screen thread");
+    expect(waitForBackground(runner) && controller.hasPreview() && controller.steps().size() == 2 && pending.count() == 1,
+        "async preview expands only planning targets, not queue rows");
+    pending.setFolderFlow(0, "");
+    expect(!controller.hasPreview(), "changing input processing invalidates prior preview");
+    pending.setFolderFlow(0, "contents");
+    controller.createPreview(home);
+    expect(waitForBackground(runner) && controller.hasPreview(), "recreate flow preview after selection change");
+    controller.setTaskRunner(nullptr);
+    expect(controller.prepareSort() && controller.confirmationSteps().size() == 2, "confirmation uses captured individual paths");
+    controller.confirmSort();
+    expect(controller.canUndo() && !controller.hasPreview() && pending.count() == 1 && QDir(nested).exists()
+        && !QFile::exists(folder + "/first.png") && !QFile::exists(nested + "/second.jpg"), "flow moves files and retains the input folder and queue entry");
+    controller.undoLastMove();
+    expect(QFile::exists(folder + "/first.png") && QFile::exists(nested + "/second.jpg"), "UI undo restores original subfolder paths");
+}
+
 // 외부 목적지 허용 뒤 실제 이동·되돌리기와 허용 해제를 검사하는 함수.
 void testExternalDestinationWorkflow() {
     QTemporaryDir directory;
@@ -1914,6 +1959,7 @@ int main(int argc, char* argv[]) {
     else expect(false, "native v2 same-volume UI fixture");
     testCommonCollisionPolicyWorkflow();
     testExternalDestinationWorkflow();
+    testNamedFolderFlowPreview();
     testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();

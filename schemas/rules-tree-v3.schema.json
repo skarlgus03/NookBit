@@ -9,7 +9,19 @@
     "ruleSetId": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" },
     "version": { "type": "string", "format": "date-time" },
     "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "globalOtherwise": { "$ref": "#/$defs/destination" }
+    "globalOtherwise": { "$ref": "#/$defs/destination" },
+    "folderFlows": {
+      "type": "array", "maxItems": 24,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "kind"],
+        "properties": {
+          "id": {"type":"string", "pattern":"^[a-zA-Z0-9._-]+$"},
+          "name": {"type":"string", "minLength":1, "maxLength":60},
+          "kind": {"const":"recursiveFilesToDefault"}
+        }
+      }
+    }
   },
   "$defs": {
     "node": {

@@ -3,6 +3,7 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <utility>
+#include <algorithm>
 
 namespace nookbit {
 
@@ -70,6 +71,16 @@ Result<OperationPlan> CreatePreviewUseCase::execute(
     }
 
     ScanRequest scanRequest{{}, false, {}, request.selectedFiles};
+    for (const auto& selection : request.folderSelections) {
+        if (selection.folderFlowId.empty()) continue;
+        const auto& active = rules.value();
+        const auto flow = std::find_if(active.folderFlows.begin(), active.folderFlows.end(),
+            [&](const RuleSet::FolderFlow& item) { return item.id == selection.folderFlowId; });
+        if (active.schemaVersion != 3 || selection.ruleSetId != active.id || flow == active.folderFlows.end() ||
+            std::find(request.selectedFiles.begin(), request.selectedFiles.end(), selection.path) == request.selectedFiles.end())
+            return Result<OperationPlan>::failure({"preview.folder_flow_invalid", "Selected folder flow is unavailable in the active rules. Select it again."});
+        scanRequest.expandFolders.push_back(selection.path);
+    }
 
     auto snapshot = scanner_.scan(scanRequest);
     if (!snapshot) {
