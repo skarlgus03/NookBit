@@ -20,6 +20,15 @@ struct FolderFlowGraph {
 using FlowConditionParser = std::function<Result<AtomicRuleCondition>(const QVariantMap&)>;
 using FlowConditionFormatter = std::function<QVariantMap(const ProcessingNode&, int)>;
 
+// 논리 블록과 중첩된 조건 카드에 필요한 자동 배치 줄 수를 구하는 함수.
+inline int logicalGraphRows(const QVariantMap& block) {
+    int rows = 1;
+    for (const auto& operand : block.value("operands").toList()) {
+        rows += logicalGraphRows(operand.toMap());
+    }
+    return rows;
+}
+
 // 각 영역의 실제 노드와 연결을 처리 데이터로 변환하는 함수.
 inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, const QVariantList& edges,
                                                     const FlowConditionParser& conditionParser = {}) {
@@ -137,19 +146,27 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
         QHash<QString, int> ids;
         for (const auto& node : flow.nodes) ids.insert(QString::fromStdString(node.id), nextId++);
         int row = 0;
+        int logicalGroups = 0;
         QHash<QString, QPointF> defaults;
         std::function<double(const std::string&, int)> arrange;
         // 자식의 중앙에 부모를 놓고 분기를 세로로 배치하는 함수.
         arrange = [&](const std::string& key, int depth) {
             const auto node = std::find_if(flow.nodes.begin(), flow.nodes.end(), [&](const auto& item) { return item.id == key; });
             if (node == flow.nodes.end()) return top;
+            const int rows = node->type == "condition" && formatCondition
+                ? logicalGraphRows(formatCondition(*node, ids.value(QString::fromStdString(key)))) : 1;
+            const int groupsBeforeChildren = logicalGroups;
             double y = top;
-            if (node->next.empty()) y += row++ * 170;
-            else {
+            if (!node->next.empty()) {
                 double first = 0, last = 0;
                 for (std::size_t i = 0; i < node->next.size(); ++i) { last = arrange(node->next[i], depth + 1); if (i == 0) first = last; }
                 y = (first + last) / 2;
             }
+            if (node->next.empty() || rows > 1 || logicalGroups != groupsBeforeChildren) {
+                y = top + row * 170;
+                row += rows;
+            }
+            if (rows > 1) ++logicalGroups;
             defaults.insert(QString::fromStdString(key), QPointF(70 + depth * 310, y));
             return y;
         };

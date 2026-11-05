@@ -856,6 +856,29 @@ void testLogicalGraph() {
     expect(editor.importGraph(blocks,edges)&&editor.save(),"nested condition graph saves");
     expect(editor.saveGraphLayout(blocks,edges),"nested condition positions save");
     const auto loaded=active.load();expect(loaded && std::holds_alternative<nookbit::LogicalPredicatePtr>(*loaded.value().nodes[0].atomicCondition),"JSON logical condition round trip");
+    if (loaded) {
+        auto automaticRules = loaded.value();
+        auto sibling = automaticRules.nodes.front();
+        sibling.id = "next-logical-rule";
+        automaticRules.nodes.push_back(sibling);
+        nookbit::JsonRuleSetRepository automatic(directory.filePath("automatic.json"), schema);
+        expect(automatic.save(automaticRules).hasValue(), "adjacent logical rules save");
+        nookbit::RuleEditorController automaticEditor(automatic, automatic);
+        const auto automaticBlocks = automaticEditor.graph().value("blocks").toList();
+        double lastFirstY = -1;
+        double firstNextY = -1;
+        for (const auto& value : automaticBlocks) {
+            const auto block = value.toMap();
+            const auto ruleId = block.value("ruleId").toString();
+            const auto y = block.value("y").toDouble();
+            if (ruleId == "next-logical-rule") firstNextY = y;
+            else if (ruleId.contains("-operand-") && !ruleId.startsWith("next-logical-rule-")) {
+                lastFirstY = std::max(lastFirstY, y);
+            }
+        }
+        expect(lastFirstY >= 0 && firstNextY - lastFirstY >= 170,
+               "the next rule starts after all nested condition cards");
+    }
     QFile encoded(directory.filePath("rules.json"));
     if (encoded.open(QIODevice::ReadOnly)) {
         const auto original=QJsonDocument::fromJson(encoded.readAll()).object();encoded.close();

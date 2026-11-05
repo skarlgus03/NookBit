@@ -493,12 +493,15 @@ QVariantMap graphForRules(const RuleSet& rules,
     QVariantList edges;
     int nextId = 2;
     int nextRow = 0;
+    int logicalGroups = 0;
     int incompleteLeaves = 0;
     std::function<std::pair<int, double>(const RuleNode&, int)> appendNode;
     // 자식의 화면 위치를 먼저 구해 부모를 그 가운데에 놓는 함수.
     appendNode = [&](const RuleNode& node, int depth) -> std::pair<int, double> {
         const int id = nextId++;
         auto block = graphBlockFor(node, id);
+        const int rows = logicalGraphRows(block);
+        const int groupsBeforeChildren = logicalGroups;
         double y = 0;
         if (!node.children.empty()) {
             double firstY = -1;
@@ -511,8 +514,13 @@ QVariantMap graphForRules(const RuleSet& rules,
                 lastY = childY;
             }
             y = (firstY + lastY) / 2;
-        } else {
-            y = 170 + nextRow++ * 170;
+        }
+        if (node.children.empty() || rows > 1 || logicalGroups != groupsBeforeChildren) {
+            y = 170 + nextRow * 170;
+            nextRow += rows;
+        }
+        if (rows > 1) ++logicalGroups;
+        if (node.children.empty()) {
             if (node.destination || node.exclude) {
                 const int terminalId = nextId++;
                 const auto terminalKey = QStringLiteral("terminal:") + QString::fromStdString(node.id);
@@ -554,7 +562,7 @@ QVariantMap graphForRules(const RuleSet& rules,
         lastRootY = y;
     }
     const auto startPosition = graphPosition(savedPositions, QStringLiteral("start"),
-        70, firstRootY < 0 ? 220 : (firstRootY + lastRootY) / 2);
+        70, logicalGroups > 0 ? 0 : firstRootY < 0 ? 220 : (firstRootY + lastRootY) / 2);
     blocks.prepend(QVariantMap{{QStringLiteral("id"), 1},
                                {QStringLiteral("type"), QStringLiteral("start")},
                                {QStringLiteral("value"), QStringLiteral("정리할 파일")},
@@ -562,20 +570,21 @@ QVariantMap graphForRules(const RuleSet& rules,
                                {QStringLiteral("y"), startPosition.y()}});
     appendFolderFlowGraph(rules.folderFlows, savedPositions, blocks, edges, nextId, 170 + nextRow * 170 + 200,
         [](const ProcessingNode& node, int id) { RuleNode condition; condition.id = node.id; condition.atomicCondition = node.condition; return graphBlockFor(condition, id); });
-    std::function<void(QVariantMap, int, const QString&, const QString&, int)> appendOperands;
+    std::function<void(const QVariantMap&, int, const QString&, const QString&, int, double, int&)> appendOperands;
     // 저장된 논리식을 독립 조건 카드와 조건 계산 선으로 복원하는 함수.
-    appendOperands = [&](QVariantMap owner, int ownerId, const QString& key, const QString& flowId, int depth) {
-        int row = 0;
+    appendOperands = [&](const QVariantMap& owner, int ownerId, const QString& key, const QString& flowId,
+                         int depth, double top, int& row) {
+        int operandIndex = 0;
         for (const auto& operand : owner.value("operands").toList()) {
             auto block = operand.toMap(); const int id = nextId++;
-            const auto stable = key + "-operand-" + QString::number(row++);
+            const auto stable = key + "-operand-" + QString::number(operandIndex++);
             const auto position = graphPosition(savedPositions, "node:" + stable,
-                owner.value("x").toDouble() - 310, owner.value("y").toDouble() + (row - 1) * 150);
+                owner.value("x").toDouble() - 310, top + row++ * 170);
             block["id"] = id; block["ruleId"] = stable;
             if (!flowId.isEmpty()) { block["flowId"] = flowId; block["flowNodeId"] = stable; }
             block["x"] = position.x(); block["y"] = position.y();
             blocks.append(block); edges.append(QVariantMap{{"from", id}, {"to", ownerId}, {"kind", "predicate"}});
-            if (depth < 32) appendOperands(block, id, stable, flowId, depth + 1);
+            if (depth < 32) appendOperands(block, id, stable, flowId, depth + 1, top, row);
         }
     };
     const auto owners = blocks;
@@ -583,7 +592,9 @@ QVariantMap graphForRules(const RuleSet& rules,
         const auto owner = value.toMap();
         if (!logicalOperatorFor(owner.value("type").toString().toStdString())) continue;
         const auto key = owner.value("ruleId", owner.value("flowNodeId")).toString();
-        appendOperands(owner, owner.value("id").toInt(), key, owner.value("flowId").toString(), 0);
+        int row = 0;
+        appendOperands(owner, owner.value("id").toInt(), key, owner.value("flowId").toString(),
+                       0, owner.value("y").toDouble(), row);
     }
     return QVariantMap{{QStringLiteral("valid"), true},
                        {QStringLiteral("blocks"), blocks},
