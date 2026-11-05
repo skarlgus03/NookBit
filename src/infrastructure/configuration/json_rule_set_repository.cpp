@@ -168,6 +168,14 @@ Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object) {
             condition.values.push_back(value.toString().toLower().toStdString());
         return Result<AtomicRuleCondition>::success(std::move(condition));
     }
+    if (type == QStringLiteral("sourceFolder") && object.size() == 3 &&
+        object.value("path").isString() && object.value("recursive").isBool()) {
+        const auto text = object.value("path").toString();
+        const std::filesystem::path folder(text.toStdWString());
+        bool valid = !text.contains(QChar(0)) && folder.is_absolute();
+        for (const auto& part : folder) if (part == "..") valid = false;
+        if (valid) return Result<AtomicRuleCondition>::success(SourceFolderPredicate{folder, object.value("recursive").toBool()});
+    }
     if (type == QStringLiteral("nameContains") && object.size() == 2 &&
         object.contains(QStringLiteral("text"))) {
         return Result<AtomicRuleCondition>::success(NameContainsPredicate{
@@ -414,6 +422,13 @@ Result<QJsonObject> atomicConditionObject(const AtomicRuleCondition& condition) 
         return Result<QJsonObject>::success(QJsonObject{
             {QStringLiteral("type"), QStringLiteral("extension")},
             {QStringLiteral("values"), values}});
+    }
+    if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
+        const auto text = QString::fromStdWString(source->folder.wstring());
+        bool valid = !text.contains(QChar(0)) && source->folder.is_absolute();
+        for (const auto& part : source->folder) if (part == "..") valid = false;
+        if (!valid) return Result<QJsonObject>::failure({"rules.condition_invalid", "Source folder needs an absolute path without parent traversal."});
+        return Result<QJsonObject>::success(QJsonObject{{"type", "sourceFolder"}, {"path", text}, {"recursive", source->recursive}});
     }
     if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
         if (name->text.empty()) return Result<QJsonObject>::failure({

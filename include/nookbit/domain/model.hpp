@@ -148,8 +148,14 @@ struct ModifiedAgePredicate {
 enum class ItemType { File, Folder };
 struct ItemTypePredicate { ItemType value{ItemType::File}; };
 
+/// 원본 대상이 지정한 폴더 안에 있는지 경로 구성요소로 비교하는 조건.
+struct SourceFolderPredicate {
+    std::filesystem::path folder;
+    bool recursive{true};
+};
+
 using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredicate,
-                                         SizePredicate, ModifiedAgePredicate, ItemTypePredicate>;
+                                         SizePredicate, ModifiedAgePredicate, ItemTypePredicate, SourceFolderPredicate>;
 
 /// 리프 또는 전체 예외가 정한 목적지와 충돌 정책을 표현한다.
 struct RuleDestination {

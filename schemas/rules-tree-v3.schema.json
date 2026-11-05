@@ -155,7 +155,8 @@
             "nameContains",
             "size",
             "modifiedAgeDays",
-            "itemType"
+            "itemType",
+            "sourceFolder"
           ]
         },
         "kind": {
@@ -192,6 +193,13 @@
         "days": {
           "type": "integer",
           "minimum": 0
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recursive": {
+          "type": "boolean"
         }
       }
     },

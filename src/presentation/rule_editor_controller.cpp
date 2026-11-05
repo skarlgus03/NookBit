@@ -224,6 +224,15 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
                 if (value != QStringLiteral("file") && value != QStringLiteral("folder"))
                     return graphError(id, QStringLiteral("대상 종류에서 파일 또는 폴더를 선택해 주세요."));
                 node.atomicCondition = ItemTypePredicate{value == QStringLiteral("folder") ? ItemType::Folder : ItemType::File};
+            } else if (type == QStringLiteral("sourceFolder")) {
+                const std::filesystem::path folder(value.toStdWString());
+                if (!folder.is_absolute() || value.contains(QChar(0)))
+                    return graphError(id, QStringLiteral("원본 폴더의 전체 경로를 입력해 주세요."));
+                for (const auto& part : folder) if (part == "..")
+                    return graphError(id, QStringLiteral("원본 경로에 상위 경로(..)를 사용할 수 없어요."));
+                if (block.contains("recursive") && block.value("recursive").metaType().id() != QMetaType::Bool)
+                    return graphError(id, QStringLiteral("하위 폴더 포함 설정이 올바르지 않아요."));
+                node.atomicCondition = SourceFolderPredicate{folder, block.value("recursive", true).toBool()};
             } else if (type == QStringLiteral("name")) {
                 if (value.isEmpty()) return graphError(id, QStringLiteral("포함할 이름을 입력해 주세요."));
                 node.atomicCondition = NameContainsPredicate{value.toStdString()};
@@ -386,6 +395,10 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
         } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
             block.insert(QStringLiteral("type"), QStringLiteral("extension"));
             block.insert(QStringLiteral("value"), extensionText(*extension));
+        } else if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
+            block.insert("type", "sourceFolder");
+            block.insert("value", QString::fromStdWString(source->folder.wstring()));
+            block.insert("recursive", source->recursive);
         } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
             block.insert(QStringLiteral("type"), QStringLiteral("name"));
             block.insert(QStringLiteral("value"), QString::fromStdString(name->text));
@@ -582,6 +595,10 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
     } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("extension"));
         result.insert(QStringLiteral("value"), extensionText(*extension));
+    } else if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
+        result.insert("type", "sourceFolder");
+        result.insert("value", QString::fromStdWString(source->folder.wstring()));
+        result.insert("comparison", source->recursive ? "recursive" : "direct");
     } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("nameContains"));
         result.insert(QStringLiteral("value"), QString::fromStdString(name->text));
@@ -639,6 +656,12 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
         } else if (type == QStringLiteral("itemType")) {
             if (value == QStringLiteral("folder") || value == QStringLiteral("file"))
                 condition = ItemTypePredicate{value == QStringLiteral("folder") ? ItemType::Folder : ItemType::File};
+        } else if (type == QStringLiteral("sourceFolder")) {
+            const std::filesystem::path folder(value.trimmed().toStdWString());
+            bool valid = folder.is_absolute() && !value.contains(QChar(0));
+            for (const auto& part : folder) if (part == "..") valid = false;
+            if (valid && (comparison == "recursive" || comparison == "direct"))
+                condition = SourceFolderPredicate{folder, comparison == "recursive"};
         } else if (type == QStringLiteral("nameContains")) {
             if (!value.trimmed().isEmpty())
                 condition = NameContainsPredicate{value.trimmed().toStdString()};

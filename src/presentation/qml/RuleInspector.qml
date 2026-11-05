@@ -26,6 +26,7 @@ Frame {
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
     readonly property string valueLabel: selectedType === "flowStart" ? qsTr("흐름 이름") : selectedType === "destination" ? qsTr("목적지 경로")
         : selectedType === "extension" ? qsTr("확장자") : selectedType === "name" ? qsTr("이름에 포함할 글자")
+        : selectedType === "sourceFolder" ? qsTr("원본 폴더 경로")
         : selectedType === "itemType" ? qsTr("대상 종류")
         : selectedType === "size" ? qsTr("파일 크기") : selectedType === "age" ? qsTr("수정 후 경과일") : qsTr("표시 값")
     padding: UiMetrics.spaceSection
@@ -129,6 +130,7 @@ Frame {
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
                                                                                                                   "사진/여행") :
                                                                                                               qsTr("D:/중요자료")) :
+                                                     inspector.selectedType === "sourceFolder" ? qsTr("C:/Users/이름/Downloads") :
                                                      inspector.selectedType === "extension" ? qsTr("png, jpg, webp")
                     : inspector.selectedType === "flowStart" ? qsTr("흐름 이름")
                     : inspector.selectedType === "name" ? qsTr("포함할 글자") : qsTr("숫자 입력")
@@ -178,6 +180,26 @@ Frame {
                 model: [{ text: qsTr("파일만"), value: "file" }, { text: qsTr("폴더만"), value: "folder" }]
                 currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.value === "file" ? 0 : 1
                 onActivated: inspector.editor.updateValue(inspector.editor.selectedId, currentValue)
+            }
+            AppComboBox {
+                objectName: "sourceFolderDepthCombo"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "sourceFolder"
+                model: [{text: qsTr("하위 폴더까지 포함"), value: true}, {text: qsTr("바로 안의 대상만"), value: false}]
+                textRole: "text"
+                valueRole: "value"
+                currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.recursive === false ? 1 : 0
+                onActivated: inspector.editor.updateProcessing(inspector.editor.selectedId, "recursive", currentValue)
+            }
+            ThemeButton {
+                objectName: "sourceFolderChooseButton"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "sourceFolder"
+                text: qsTr("폴더 선택")
+                onClicked: {
+                    inspector.folderTargetId = inspector.editor.selectedId;
+                    sourceFolderDialog.open();
+                }
             }
             CheckBox {
                 objectName: "destinationHomeCheck"
@@ -399,6 +421,7 @@ Frame {
     // 페이지를 떠나면 목적지 선택·외부 폴더 승인창을 닫는 함수.
     function dismissTransientUi() {
         destinationFolderDialog.close();
+        sourceFolderDialog.close();
         externalDestinationConfirm.close();
     }
     component ThemeButton: RuleEditorButton {
@@ -416,6 +439,11 @@ Frame {
             externalFolder = path;
             externalDestinationConfirm.open();
         }
+    }
+    FolderDialog {
+        id: sourceFolderDialog
+        title: qsTr("원본 폴더 선택")
+        onAccepted: inspector.editor.updateValue(inspector.folderTargetId, inspector.destinations.folderPath(selectedFolder))
     }
     FolderDialog {
         id: destinationFolderDialog

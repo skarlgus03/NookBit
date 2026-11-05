@@ -16,6 +16,7 @@ QtObject {
             { type: "size", title: qsTr("파일 크기") },
             { type: "name", title: qsTr("이름 포함") },
             { type: "age", title: qsTr("수정 경과일") },
+            { type: "sourceFolder", title: qsTr("원본 경로") },
             { type: "otherwise", title: qsTr("그 외 (예외)") }
         ] },
         { title: qsTr("결과"), nodes: [
@@ -199,6 +200,7 @@ QtObject {
             return block.targetFlow ? (target ? target.value : qsTr("없는 흐름: %1").arg(block.targetFlow)) : qsTr("기본 정리");
         }
         if (block.type === "applyDefault") return qsTr("각 파일을 기본 정리로");
+        if (block.type === "sourceFolder") return (block.value || qsTr("폴더를 지정하세요")) + (block.recursive === false ? qsTr(" · 바로 안") : qsTr(" · 하위 포함"));
         if (block.type === "itemType")
             return block.value === "folder" ? qsTr("폴더만") : qsTr("파일만");
         if (block.type === "size" || block.type === "age") {
@@ -323,6 +325,7 @@ QtObject {
             return qsTr("파일 입력");
         case "extension":
             return qsTr("확장자");
+        case "sourceFolder": return qsTr("원본 경로");
         case "itemType":
             return qsTr("대상 종류");
         case "size":
@@ -354,6 +357,7 @@ QtObject {
         const examples = {
             folderScan: "", callFlow: "",
             itemType: "folder",
+            sourceFolder: "",
             extension: "png, jpg",
             size: "5",
             name: "report",

@@ -316,6 +316,32 @@ void testItemTypeConditions() {
     std::get<nookbit::ItemTypePredicate>(*rules.nodes[0].atomicCondition).value = nookbit::ItemType::File;
     expect(signedFolder != nookbit::PlanSignature::rules(rules), "item type choice affects approval signature");
 }
+// 원본 폴더 경계·하위 포함·폴더 대상과 승인 서명 변화를 검사하는 함수.
+void testSourceFolder() {
+    nookbit::RuleSet rules; rules.id="source"; rules.version="v3"; rules.schemaVersion=3;
+    nookbit::RuleNode node; node.id="source";
+    node.atomicCondition=nookbit::SourceFolderPredicate{L"C:/Input/Project/", true};
+    node.destination=nookbit::RuleDestination{L"Projects", std::nullopt}; rules.nodes={node};
+    nookbit::RuleEngine engine; auto file=sampleFile();
+    // 상대 표시 경로와 무관하게 실제 원본 위치를 판정하는 함수.
+    const auto matches=[&](const wchar_t* path) {
+        file.absolutePath=path; file.relativePath=L"unrelated/name.txt";
+        const auto decision=engine.decide(file,rules,nookbit::MultiMatchPolicy::FirstMatch,0);
+        return decision && decision.value().has_value();
+    };
+    expect(matches(L"c:/input/project/a.txt"), "source folder matches direct file with ASCII case normalization");
+    expect(matches(L"C:/Input/Project/sub/a.txt"), "source folder includes nested files");
+    expect(!matches(L"C:/Input/ProjectBackup/a.txt"), "source folder cannot match string prefixes");
+    expect(!matches(L"C:/Input/Other/a.txt"), "other original folders do not match");
+    expect(matches(L"C:/Input/Project/./sub/../a.txt"), "source metadata is lexically normalized");
+    const auto signature=nookbit::PlanSignature::rules(rules);
+    std::get<nookbit::SourceFolderPredicate>(*rules.nodes[0].atomicCondition).recursive=false;
+    expect(signature!=nookbit::PlanSignature::rules(rules), "source folder depth changes approval signature");
+    expect(matches(L"C:/Input/Project/a.txt") && !matches(L"C:/Input/Project/sub/a.txt"), "direct mode excludes descendants");
+    file.fingerprint.directory=true;
+    expect(matches(L"C:/Input/Project/Subfolder") && !matches(L"C:/Input/Project"), "folder targets compare their containing folder");
+}
+
 } // namespace
 
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
@@ -325,6 +351,7 @@ int main() {
     testUnsafeDestination();
     testOrderedTreeAndOtherwise();
     testAtomicConditionTree();
+    testSourceFolder();
     testItemTypeConditions();
     if (failures == 0) {
         std::cout << "All rule-engine tests passed.\n";

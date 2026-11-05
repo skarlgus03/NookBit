@@ -426,6 +426,18 @@ int main(int argc, char** argv) {
         "custom condition and destination can replace the preset call");
     call(engine, state.get(), "selectOnly", {editableRoot});
     call(engine, state.get(), "removeSelectedBlock");
+    call(engine, state.get(), "addBlock", {"sourceFolder", 150, 500});
+    settle();
+    auto* sourceDepth = inspector->findChild<QQuickItem*>("sourceFolderDepthCombo");
+    auto* sourceChoose = inspector->findChild<QQuickItem*>("sourceFolderChooseButton");
+    expect(sourceDepth && sourceDepth->isVisible() && sourceChoose && sourceChoose->isVisible()
+        && value && value->isVisible(), "source folder has path entry, folder picker and depth selector");
+    if (sourceDepth) {
+        sourceDepth->setProperty("currentIndex", 1);
+        QMetaObject::invokeMethod(sourceDepth, "activated", Q_ARG(int, 1));
+        expect(!state->property("selectedBlock").value<QJSValue>().toVariant().toMap().value("recursive").toBool(),
+            "source depth selection updates the graph");
+    }
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

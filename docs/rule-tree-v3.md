@@ -12,6 +12,7 @@ v3 규칙은 노드 하나가 조건 종류 하나만 검사한다. 자식으로
 | 종류 | 입력 | 의미 |
 | --- | --- | --- |
 | `extension` | `values` 배열 | 확장자가 목록 중 하나와 일치 |
+| `sourceFolder` | `path`, `recursive` | 정리 전 원본 폴더 경로 및 하위 폴더 포함 여부 |
 | `nameContains` | `text` | 파일 이름에 글자가 포함됨 |
 | `size` | `comparison`, `bytes` | 파일 크기를 바이트 단위로 비교 |
 | `modifiedAgeDays` | `comparison`, `days` | 마지막 수정 후 경과한 온전한 일수 비교 |
@@ -79,3 +80,14 @@ legacy `recursiveFilesToDefault` declarations remain readable as templates.
 It does not change ordinary condition-node semantics or the whole-folder default. See
 [folder input flow behavior](folder-processing-flows.md) and the English
 [AI authoring contract](ai-rule-authoring-v3.md#optional-named-processing-flows).
+
+## Original source folder condition
+
+`{"type":"sourceFolder","path":"C:/Input/Project","recursive":true}` compares the
+original absolute parent folder of a file or folder bundle. `recursive: false`
+requires a direct child; `true` includes descendants. The chosen folder itself
+is not a child. Relative display paths and destination paths are ignored.
+Paths are compared lexically by components, with ASCII case folding; junctions
+and symlinks are not resolved. Absolute paths and Boolean `recursive` are required;
+parent traversal (`..`) is rejected. This predicate does not scan folder contents.
+It works in ordinary trees and named processing flows. Old apps may reject it.

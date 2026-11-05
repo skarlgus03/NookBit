@@ -464,7 +464,7 @@ Rectangle {
                                         objectName: "addNode_" + modelData.type
                                         width: nodeChildren.width
                                         glyph: modelData.type === "age" ? "history"
-                                            : ["destination", "folderScan", "folderFlow", "itemType"].includes(modelData.type) ? "folder"
+                                            : ["destination", "folderScan", "folderFlow", "itemType", "sourceFolder"].includes(modelData.type) ? "folder"
                                             : modelData.type === "exclude" ? "undo" : "rules"
                                         text: modelData.title
                                         onClicked: {

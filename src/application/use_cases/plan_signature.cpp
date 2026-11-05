@@ -63,6 +63,9 @@ void appendAtomicCondition(std::string& output, const AtomicRuleCondition& condi
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
         appendNumber(output, extension->values.size());
         for (const auto& value : extension->values) append(output, value);
+    } else if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
+        appendPath(output, source->folder);
+        appendNumber(output, source->recursive);
     } else if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
         append(output, name->text);
     } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {

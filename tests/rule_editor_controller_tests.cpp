@@ -741,6 +741,66 @@ void testNamedFolderFlowGraph() {
         expect(decision && decision.value() && decision.value()->destinationRelativePath == L"MyImages", "saved editor graph changes actual classification");
     }
 }
+// 경로 조건의 편집·JSON 왕복·잘못된 입력 및 처리 흐름 재사용을 검사하는 함수.
+void testSourceFolderGraph() {
+    QTemporaryDir directory;
+    const auto schema=projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"),schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"),schema);
+    auto initial=defaults.load(); if(!initial){expect(false,"source fixture");return;}
+    initial.value().globalOtherwise.reset(); expect(active.save(initial.value()).hasValue(),"source fixture saved");
+    nookbit::RuleEditorController editor(active,active);
+    QVariantList blocks{QVariantMap{{"id",1},{"type","start"}},
+        QVariantMap{{"id",2},{"type","sourceFolder"},{"value","C:/Input/프로젝트"},{"recursive",false}},
+        QVariantMap{{"id",3},{"type","destination"},{"value","Projects"}}};
+    const QVariantList edges{QVariantMap{{"from",1},{"to",2}},QVariantMap{{"from",2},{"to",3}}};
+    expect(editor.importGraph(blocks,edges)&&editor.save(),"source graph saves through JSON validation");
+    const auto loaded=active.load();
+    expect(loaded && std::holds_alternative<nookbit::SourceFolderPredicate>(*loaded.value().nodes[0].atomicCondition)
+        && !std::get<nookbit::SourceFolderPredicate>(*loaded.value().nodes[0].atomicCondition).recursive,"source depth survives JSON round trip");
+    bool restored=false;
+    for(const auto& b:editor.graph().value("blocks").toList()) if(b.toMap().value("type")=="sourceFolder")
+        restored=b.toMap().value("value")=="C:/Input/프로젝트" && !b.toMap().value("recursive").toBool();
+    expect(restored,"source graph preserves Unicode path and depth");
+    QFile serialized(directory.filePath("rules.json"));
+    if (serialized.open(QIODevice::ReadOnly)) {
+        const auto original=QJsonDocument::fromJson(serialized.readAll()).object();
+        serialized.close();
+        for (const auto& invalid: {QJsonObject{{"type","sourceFolder"},{"path","relative/path"},{"recursive",true}},
+            QJsonObject{{"type","sourceFolder"},{"path","C:/Input"},{"recursive","false"}},
+            QJsonObject{{"type","sourceFolder"},{"path","C:/Input"}},
+            QJsonObject{{"type","sourceFolder"},{"path","C:/Input/../Other"},{"recursive",true}}}) {
+            auto document=original; auto nodes=document["nodes"].toArray();auto node=nodes[0].toObject();
+            node["when"]=invalid;nodes[0]=node;document["nodes"]=nodes;
+            QFile bad(directory.filePath("bad.json"));expect(bad.open(QIODevice::WriteOnly),"source invalid fixture");
+            bad.write(QJsonDocument(document).toJson());bad.close();
+            expect(!active.loadFile(std::filesystem::path(bad.fileName().toStdWString())),"invalid source JSON rejected");
+        }
+    }
+    auto flowBlocks=blocks;
+    flowBlocks.append(QVariantMap{{"id",4},{"type","flowStart"},{"flowId","source-flow"},{"flowNodeId","input"},{"value","Source flow"}});
+    flowBlocks.append(QVariantMap{{"id",5},{"type","sourceFolder"},{"flowId","source-flow"},{"flowNodeId","source"},{"value","C:/Input"},{"recursive",false}});
+    flowBlocks.append(QVariantMap{{"id",6},{"type","destination"},{"flowId","source-flow"},{"flowNodeId","dest"},{"value","Other"}});
+    auto flowEdges=edges;flowEdges.append(QVariantMap{{"from",4},{"to",5}});flowEdges.append(QVariantMap{{"from",5},{"to",6}});
+    const bool flowSaved=editor.importGraph(flowBlocks,flowEdges)&&editor.save();
+    if (!flowSaved) std::cerr << editor.message().toStdString() << "\n";
+    expect(flowSaved,"source predicate works inside named processing flows");
+    bool flowRestored=false;
+    for(const auto& block:editor.graph().value("blocks").toList()) {
+        const auto map=block.toMap();
+        if(map.value("type")=="sourceFolder" && map.value("flowId")=="source-flow")
+            flowRestored=map.value("value")=="C:/Input" && !map.value("recursive").toBool();
+    }
+    expect(flowRestored,"named processing flow preserves source-folder depth");
+
+    for(const auto& invalid: {QString(),QString("relative/folder"),QString("C:/Input/../Other")}) {
+        auto b=blocks[1].toMap(); b["value"]=invalid; blocks[1]=b;
+        expect(!editor.importGraph(blocks,edges),"source graph rejects empty relative and parent traversal paths");
+    }
+    auto b=blocks[1].toMap();b["value"]="C:/Input";b["recursive"]="false";blocks[1]=b;
+    expect(!editor.importGraph(blocks,edges),"source graph rejects string booleans");
+}
+
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -756,6 +816,7 @@ int main(int argc, char* argv[]) {
     testGraphRoundTripAndLayout();
     testSizeUnits();
     testExternalDestinations();
+    testSourceFolderGraph();
     testItemTypeRules();
     testNamedFolderFlowGraph();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

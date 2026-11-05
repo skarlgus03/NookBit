@@ -115,6 +115,24 @@ bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
                 return normalizedExtension(value) == actual;
             });
     }
+    if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
+        if (!source->folder.is_absolute() || !file.absolutePath.is_absolute()) return false;
+        // 경로를 정규화한 구성요소 목록으로 바꾸고 ASCII 대소문자를 통일하는 함수.
+        const auto parts = [](const std::filesystem::path& path) {
+            std::vector<std::wstring> result;
+            for (const auto& part : path.lexically_normal()) {
+                auto text = part.wstring();
+                if (text.empty() || text == L".") continue;
+                for (auto& ch : text) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
+                result.push_back(std::move(text));
+            }
+            return result;
+        };
+        const auto base = parts(source->folder);
+        const auto parent = parts(file.absolutePath.parent_path());
+        return parent.size() >= base.size() && (source->recursive || parent.size() == base.size())
+            && std::equal(base.begin(), base.end(), parent.begin());
+    }
     if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
         const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
         auto actual = utf8Path(path.filename());
