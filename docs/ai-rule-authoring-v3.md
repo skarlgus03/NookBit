@@ -98,11 +98,10 @@ Maximum graph depth is 32. Use a `call` node instead of cross-region wires.
 Node cycles, direct/indirect recursive flow calls, unknown references, unsupported
 types, dangling leaves and invalid input kinds are rejected. Traversal requires
 a folder input or a folder-type guard. Its output is file-only and cannot call
-a folder-only flow. Item flows must guard folder-only operations with an
-`itemType: folder` condition. Both inputs can call the default classifier.
-AND/OR/NOT operators, content-semantic analysis, scripts and third-party runtime
-node loading are not implemented; do not invent them. New primitive operations
-require app implementations, while users can compose the supported primitives.
+a folder-only flow. Use an `itemType: folder` guard for folder-only operations
+in item flows. Both inputs can call the default classifier. Flow conditions
+use the same `when` objects as the default tree, including AND, OR, and NOT.
+Compose rules from the listed operations and conditions.
 
 Only `input: folder` flows appear in each queued folder's optional selector.
 `input: item` flows are reusable classifiers selected in call nodes. Every queued
@@ -127,7 +126,7 @@ Older apps may reject the extension; omit `folderFlows` if no named flow is need
 
 At each level, NookBit checks enabled ordinary siblings in array order and selects the **first** matching condition. If none matches, it selects the enabled `otherwise` sibling, if any. It then repeats this process among the selected node's children. Parent and child conditions therefore compose as AND. Once a sibling is selected, a miss among its children does **not** retry later siblings of the parent. A local `otherwise` child can catch that miss. If no child matches and `globalOtherwise` is absent, the file remains unclassified. Disabled nodes are ignored.
 
-Put more specific or higher-priority rules before broad ones. For example, a root “over 20 MiB” rule before a root “PNG/JPG” rule sends a 25 MiB PNG to the large-files destination. To express “PNG/JPG over 5 MiB,” use an extension node with a size child (or the reverse), not two conditions inside one node. Do not invent unsupported conditions such as creation date, regex, MIME type, or arbitrary expressions.
+Put more specific or higher-priority rules before broad ones. For example, a root “over 20 MiB” rule before a root “PNG/JPG” rule sends a 25 MiB PNG to the large-files destination. To express “PNG/JPG over 5 MiB,” use an extension node with a size child or a single `all` expression with both conditions. `not` negates its own input. `otherwise` selects the fallback when the enabled ordinary siblings at that level all fail.
 
 ## Complete example
 
@@ -210,6 +209,11 @@ skip the occupied folder even if another collision policy was requested.
 > Create one NookBit rule-tree v3 JSON object for the classification requirements below. Follow the attached authoring contract exactly. Choose a clear root and sibling order, one condition per node, unique IDs, and an explicit destination or exclusion at every leaf. Do not invent conditions. If a requirement cannot be expressed, ask about it before producing JSON. Output JSON only. Requirements: [describe desired classification here]
 
 The app checks JSON syntax, Schema constraints, and additional tree/editor constraints on import. A successful import replaces only the **unsaved editor draft**; the user must choose **Save All** to make it active. Importing or saving rules does not move files. Preview and file-operation approval remain separate steps.
+
+In the editor, **Edit → Inspect rules** shows structural errors and provably
+unreachable branches. Structural errors block saving, and unreachable branches
+produce warnings. **Test rules → View condition results** shows which conditions
+matched, failed, or were skipped for one sample in the default classification.
 
 ## Final checks before output
 

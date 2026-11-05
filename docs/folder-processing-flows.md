@@ -55,10 +55,10 @@ input mismatches are rejected. A traversal requires a folder input or a folder
 condition guard; it emits only files. Typed inputs distinguish folder entry
 points from reusable item classifiers.
 
-Additional algorithms can be composed from the current primitives. New primitive
-node kinds require implementations and matching schema/editor/validation support;
-this is not yet a dynamic plugin loader or arbitrary scripting engine. Logical
-AND/OR/NOT and semantic content analyzers remain separate future work.
+Combine supported conditions with AND, OR, and NOT in named flows. Use
+**Edit → Inspect rules** to check for structural errors and provably unreachable
+branches, including conditions within a flow. New primitive node kinds require
+matching runtime, schema, editor, and validation support.
 
 Tests cover editable graph round trips, scoped queue choices, custom PNG-only
 classification through another flow, default bundle preservation, signed context

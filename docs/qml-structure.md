@@ -113,8 +113,9 @@
 | `RuleConnectionGeometry.js` | 줌·간격에 맞는 곡선 제어점과 같은 곡선의 포인터 거리 계산 |
 | `RuleNodeCard.qml` | 노드 하나의 표시와 드래그·연결점 입력 |
 | `RuleInspector.qml` | 선택 노드 입력 필드와 목적지 폴더 선택·외부 경로 확인창 |
-| `RuleEditorToolbar.qml` | 제목·명령 메뉴·도움말, 저장·불러오기·시험 요청 |
-| `RuleTestPanel.qml` | 실제·가상 시험 입력, 시험용 파일 선택창, 떠 있는 패널 위치 |
+| `RuleEditorToolbar.qml` | 제목·명령 메뉴·도움말, 저장·불러오기·검사·시험 요청 |
+| `RuleTestPanel.qml` | 실제·가상 시험 입력, 조건별 결과 창, 시험용 파일 선택창, 떠 있는 패널 위치 |
+| `RuleEditorPage.qml` | 편집 부품 연결, 규칙 검사 결과 창과 해당 노드 이동 |
 | `RuleDocumentActions.qml` | 저장·재열기·JSON 입출력, 가이드, 관련 확인·오류 창 |
 | `RuleEditorButton.qml` / `RuleEditorMenu.qml` | 공통 명령 부품의 규격과 테마 |
 
@@ -132,7 +133,7 @@ Canvas·입력 필드·Controller를 참조하지 않는다. 화면은 상태 �
 필요한 viewport만 전달받고, 초점·다시 그리기는 시그널로 요청한다. 노드 카드는
 다른 노드나 설정 패널을 직접 조작하지 않는다.
 
-도구 모음은 저장·입출력·시험·추가 메뉴·캔버스 초점을 시그널로 요청하고 페이지가
+도구 모음은 저장·입출력·검사·시험·추가 메뉴·캔버스 초점을 시그널로 요청하고 페이지가
 알맞은 담당에 연결한다. 설정 패널은 경로 관련 Controller만, 시험 패널과 문서
 작업은 규칙 Controller만 명시적으로 받는다. C++의 분류·검증·저장 계약은 그대로다.
 이 연결을 위해 일반적인 그래프 편집 코드를 C++로 이동하지 않았다.
