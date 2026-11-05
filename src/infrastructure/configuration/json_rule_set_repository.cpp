@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include "modules/rules/processing_flow.hpp"
+#include "modules/rules/logical_predicate.hpp"
 #include <QUuid>
 
 #include <limits>
@@ -159,11 +160,12 @@ Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object, in
     if (depth > 32) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Logical condition nesting exceeds 32."});
     const auto type = object.value(QStringLiteral("type")).toString();
     const auto comparison = object.value(QStringLiteral("comparison")).toString();
-    if ((type == "all" || type == "any") && object.size() == 2 && object.value("conditions").isArray()) {
+    if (const auto operation = logicalOperatorFor(type.toStdString())) {
         const auto inputs = object.value("conditions").toArray();
-        if (inputs.size() < 2 || inputs.size() > 1000)
-            return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "AND/OR needs 2 to 1000 conditions."});
-        auto logical = std::make_shared<LogicalPredicate>(); logical->all = type == "all";
+        if (object.size() != 2 || !validLogicalArity(*operation, static_cast<std::size_t>(inputs.size())))
+            return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "NOT needs exactly one condition. AND/OR needs 2 to 1000 conditions."});
+        auto logical = std::make_shared<LogicalPredicate>();
+        logical->operation = *operation;
         for (const auto& input : inputs) {
             if (!input.isObject()) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Expected a condition object."});
             auto parsed = convertAtomicCondition(input.toObject(), depth + 1, count);
@@ -436,15 +438,15 @@ Result<QJsonObject> atomicConditionObject(const AtomicRuleCondition& condition, 
     if (++*count > 1000) return Result<QJsonObject>::failure({"rules.condition_invalid", "Condition expression exceeds 1000 nodes."});
     if (depth > 32) return Result<QJsonObject>::failure({"rules.condition_invalid", "Logical condition nesting exceeds 32."});
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-        if (!*logical || (*logical)->operands.size() < 2 || (*logical)->operands.size() > 1000)
-            return Result<QJsonObject>::failure({"rules.condition_invalid", "AND/OR needs 2 to 1000 conditions."});
+        if (!*logical || !validLogicalArity((*logical)->operation, (*logical)->operands.size()))
+            return Result<QJsonObject>::failure({"rules.condition_invalid", "NOT needs exactly one condition. AND/OR needs 2 to 1000 conditions."});
         QJsonArray inputs;
         for (const auto& operand : (*logical)->operands) {
             const auto encoded = atomicConditionObject(operand, depth + 1, count);
             if (!encoded) return encoded;
             inputs.append(encoded.value());
         }
-        return Result<QJsonObject>::success(QJsonObject{{"type", (*logical)->all ? "all" : "any"}, {"conditions", inputs}});
+        return Result<QJsonObject>::success(QJsonObject{{"type", logicalOperatorName((*logical)->operation)}, {"conditions", inputs}});
     }
     if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
         return Result<QJsonObject>::success(QJsonObject{

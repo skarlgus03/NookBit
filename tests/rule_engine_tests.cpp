@@ -359,7 +359,7 @@ void testLogicalPredicates() {
     expect(matches(L"report.png","png"),"AND accepts all true");
     expect(!matches(L"photo.png","png")&&!matches(L"report.txt","txt")&&!matches(L"other.txt","txt"),"AND rejects any false");
     const auto allSignature=nookbit::PlanSignature::rules(rules);
-    auto any=std::make_shared<nookbit::LogicalPredicate>(*logical);any->all=false;
+    auto any=std::make_shared<nookbit::LogicalPredicate>(*logical);any->operation=nookbit::LogicalOperator::Any;
     rules.nodes[0].atomicCondition=nookbit::LogicalPredicatePtr(any);
     expect(matches(L"photo.png","png")&&matches(L"report.txt","txt")&&matches(L"report.png","png")&&!matches(L"other.txt","txt"),"OR truth table");
     expect(allSignature!=nookbit::PlanSignature::rules(rules),"AND and OR have distinct signatures");

@@ -1,4 +1,5 @@
 #include "modules/rules/rule_engine.hpp"
+#include "modules/rules/logical_predicate.hpp"
 #include "modules/rules/processing_flow.hpp"
 
 #include <algorithm>
@@ -164,16 +165,22 @@ bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
                    std::int64_t nowUtcMs, ConditionEvaluation* evaluation = nullptr) {
     bool matched = false;
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-        if (*logical && (*logical)->operands.size() >= 2) {
+        if (*logical && validLogicalArity((*logical)->operation, (*logical)->operands.size())) {
             const auto& group = **logical;
             if (evaluation) evaluation->operands.resize(group.operands.size());
-            matched = group.all;
-            for (std::size_t index = 0; index < group.operands.size(); ++index) {
-                auto* child = evaluation ? &evaluation->operands[index] : nullptr;
-                const bool childMatched = matchesAtomic(group.operands[index], file, nowUtcMs, child);
-                if (childMatched != group.all) {
-                    matched = childMatched;
-                    break;
+            if (group.operation == LogicalOperator::Not) {
+                auto* child = evaluation ? &evaluation->operands.front() : nullptr;
+                matched = !matchesAtomic(group.operands.front(), file, nowUtcMs, child);
+            } else {
+                const bool all = group.operation == LogicalOperator::All;
+                matched = all;
+                for (std::size_t index = 0; index < group.operands.size(); ++index) {
+                    auto* child = evaluation ? &evaluation->operands[index] : nullptr;
+                    const bool childMatched = matchesAtomic(group.operands[index], file, nowUtcMs, child);
+                    if (childMatched != all) {
+                        matched = childMatched;
+                        break;
+                    }
                 }
             }
         }

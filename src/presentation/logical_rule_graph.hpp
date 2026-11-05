@@ -1,5 +1,6 @@
 #pragma once
 #include <nookbit/domain/result.hpp>
+#include "modules/rules/logical_predicate.hpp"
 #include <QHash>
 #include <QSet>
 #include <QVariantList>
@@ -26,7 +27,7 @@ inline Result<LogicalRuleGraph> prepareLogicalGraph(const QVariantList& blocks, 
     QHash<int, QList<int>> operands;
     QSet<int> consumed, executionTargets, executionSources;
     LogicalRuleGraph result;
-    const QStringList conditions{"extension", "name", "size", "age", "itemType", "sourceFolder", "all", "any"};
+    const QStringList conditions{"extension", "name", "size", "age", "itemType", "sourceFolder"};
     for (const auto& value : edges) {
         const auto edge = value.toMap(); const int from = edge.value("from").toInt(), to = edge.value("to").toInt();
         if (!nodes.contains(from) || !nodes.contains(to)) return invalid(from, QStringLiteral("존재하지 않는 노드로 이어진 선이에요."));
@@ -34,9 +35,10 @@ inline Result<LogicalRuleGraph> prepareLogicalGraph(const QVariantList& blocks, 
         if (kind.isEmpty()) {
             result.edges.append(value); executionTargets.insert(to); executionSources.insert(from); continue;
         }
-        if (kind != "predicate" || !conditions.contains(nodes[from].value("type").toString())
-            || !QStringList{"all", "any"}.contains(nodes[to].value("type").toString()))
-            return invalid(to, QStringLiteral("조건 계산 선은 조건에서 AND·OR로만 연결할 수 있어요."));
+        const auto sourceType = nodes[from].value("type").toString();
+        if (kind != "predicate" || (!conditions.contains(sourceType) && !logicalOperatorFor(sourceType.toStdString()))
+            || !logicalOperatorFor(nodes[to].value("type").toString().toStdString()))
+            return invalid(to, QStringLiteral("조건 계산 선은 조건에서 AND·OR·NOT으로만 연결할 수 있어요."));
         if (nodes[from].value("flowId").toString() != nodes[to].value("flowId").toString())
             return invalid(to, QStringLiteral("조건 묶음은 같은 흐름 안에서 연결해 주세요."));
         if (consumed.contains(from)) return invalid(from, QStringLiteral("조건 출력은 묶음 하나에만 연결할 수 있어요."));
@@ -49,12 +51,19 @@ inline Result<LogicalRuleGraph> prepareLogicalGraph(const QVariantList& blocks, 
     std::function<Result<QVariantMap>(int, int)> build;
     // 조건 입력만 따라가며 순환·개수·깊이를 검사하는 함수.
     build = [&](int id, int depth) -> Result<QVariantMap> {
-        if (depth > 32 || visiting.contains(id)) return Result<QVariantMap>::failure({"rules.logical_graph_invalid", "AND/OR 조건 연결에 순환이 있거나 깊이가 32를 넘었어요."});
-        auto block = nodes.value(id); const auto type = block.value("type").toString();
-        if (type != "all" && type != "any") return Result<QVariantMap>::success(block);
-        if (operands.value(id).size() < 2) return Result<QVariantMap>::failure({"rules.logical_graph_invalid", QStringLiteral("블록 %1: AND·OR에는 조건을 두 개 이상 연결해 주세요.").arg(id).toStdString()});
+        if (depth > 32 || visiting.contains(id))
+            return Result<QVariantMap>::failure(invalid(id, QStringLiteral("논리 조건 연결에 순환이 있거나 깊이가 32를 넘었어요.")).error());
+        auto block = nodes.value(id);
+        const auto operation = logicalOperatorFor(block.value("type").toString().toStdString());
+        if (!operation) return Result<QVariantMap>::success(block);
+        const auto inputsForBlock = operands.value(id);
+        if (!validLogicalArity(*operation, static_cast<std::size_t>(inputsForBlock.size()))) {
+            const auto reason = *operation == LogicalOperator::Not ? QStringLiteral("NOT에는 조건을 하나만 연결해 주세요.")
+                : QStringLiteral("AND·OR에는 조건을 두 개 이상 연결해 주세요.");
+            return Result<QVariantMap>::failure(invalid(id, reason).error());
+        }
         visiting.insert(id); QVariantList inputs;
-        for (const int input : operands.value(id)) {
+        for (const int input : inputsForBlock) {
             const auto child = build(input, depth + 1); if (!child) return child;
             inputs.append(child.value());
         }

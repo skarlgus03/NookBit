@@ -19,6 +19,7 @@ QtObject {
             { type: "sourceFolder", title: qsTr("원본 경로") },
             { type: "all", title: qsTr("AND · 모두 만족") },
             { type: "any", title: qsTr("OR · 하나 이상 만족") },
+            { type: "not", title: qsTr("NOT · 조건 뒤집기") },
             { type: "otherwise", title: qsTr("그 외 (예외)") }
         ] },
         { title: qsTr("결과"), nodes: [
@@ -257,7 +258,7 @@ QtObject {
     }
 
     // 논리 연산 노드는 일반 카드보다 작은 공통 규격을 사용하는 함수.
-    function isLogical(block) { return block && ["all", "any"].includes(block.type); }
+    function isLogical(block) { return block && ["all", "any", "not"].includes(block.type); }
     // 카드의 실제 너비를 반환하는 함수.
     function widthFor(block) { return isLogical(block) ? UiMetrics.logicalNodeWidth : blockWidth; }
     // 카드의 실제 높이를 반환하는 함수.
@@ -359,6 +360,7 @@ QtObject {
             return qsTr("확장자");
         case "all": return "AND";
         case "any": return "OR";
+        case "not": return "NOT";
         case "sourceFolder": return qsTr("원본 경로");
         case "itemType":
             return qsTr("대상 종류");
@@ -391,7 +393,7 @@ QtObject {
         const examples = {
             folderScan: "", callFlow: "",
             itemType: "folder",
-            sourceFolder: "", all: "", any: "",
+            sourceFolder: "", all: "", any: "", not: "",
             extension: "png, jpg",
             size: "5",
             name: "report",
@@ -667,8 +669,12 @@ QtObject {
             return false;
         }
         if (kind === "predicate") {
-            if (!isLogical(target) || !["extension", "name", "size", "age", "itemType", "sourceFolder", "all", "any"].includes(source.type))
+            if (!isLogical(target) || (!isLogical(source) && !["extension", "name", "size", "age", "itemType", "sourceFolder"].includes(source.type)))
                 return false;
+            if (target.type === "not" && edges.some(edge => edge.to === toId && edge.kind === "predicate")) {
+                statusText = qsTr("NOT에는 조건을 하나만 연결할 수 있어요.");
+                return false;
+            }
             if (edges.some(edge => edge.from === fromId || (edge.to === fromId && !edge.kind))) {
                 statusText = qsTr("묶음에 넣을 조건의 기존 실행 연결을 먼저 끊어 주세요.");
                 return false;
@@ -678,7 +684,7 @@ QtObject {
         }
         if (edges.some(edge => edge.from === fromId && edge.kind === "predicate")
             || edges.some(edge => edge.from === toId && edge.kind === "predicate")) {
-            statusText = qsTr("AND·OR에 묶인 조건에는 실행 선을 함께 연결할 수 없어요.");
+            statusText = qsTr("논리 노드에 연결된 조건에는 실행 선을 함께 연결할 수 없어요.");
             return false;
         }
         for (const edge of edges) {

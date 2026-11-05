@@ -95,14 +95,16 @@ It works in ordinary trees and named processing flows. Old apps may reject it.
 ## Logical condition expressions
 
 An atomic `when` may be replaced by `{"type":"all","conditions":[...conditions]}`
-(AND) or `{"type":"any","conditions":[...conditions]}` (OR). At least two inputs
-are required. Inputs may be atomic or logical conditions; no actions are allowed.
+(AND), `{"type":"any","conditions":[...conditions]}` (OR), or
+`{"type":"not","conditions":[condition]}` (NOT). AND and OR require at least two
+inputs. NOT requires exactly one input and reverses its result. Inputs may be
+atomic or logical conditions.
 Evaluation short-circuits, preserving outer sibling first-match/no-backtracking
 semantics. Each expression is bounded to 1000 nodes and nesting depth 32.
 Logical conditions also work in named processing graphs. Older apps may reject them.
 
 The editor represents operands as independent condition nodes connected to the
-compact AND/OR node's square input. Round sockets are execution flow. Predicate
+compact logical node's square input. Round sockets are execution flow. Predicate
 edges use `kind: "predicate"` in editor graphs only; JSON rules store nested values.
 An operand belongs to one logical owner and cannot also have execution edges.
 Save/reopen restores the separate operand cards and their layout. Copy/paste keeps

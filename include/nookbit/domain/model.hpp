@@ -87,7 +87,7 @@ struct RuleDecision {
     bool absoluteDestination{false};
 };
 
-/// 조건 하나의 결과와 AND·OR 입력의 결과를 기록한다.
+/// 조건 하나의 결과와 논리 입력의 결과를 기록한다.
 struct ConditionEvaluation {
     // 비어 있으면 단락 평가로 검사하지 않은 조건이다.
     std::optional<bool> matched;
@@ -174,9 +174,12 @@ using LogicalPredicatePtr = std::shared_ptr<const LogicalPredicate>;
 using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredicate,
                                          SizePredicate, ModifiedAgePredicate, ItemTypePredicate, SourceFolderPredicate, LogicalPredicatePtr>;
 
-/// 조건 노드들의 AND 또는 OR 계산만 표현하며 실행 순서는 소유하지 않는다.
+// 기존 서명이 기록하던 OR=0, AND=1을 유지한다.
+enum class LogicalOperator { Any = 0, All = 1, Not = 2 };
+
+/// 조건 노드들의 논리 계산만 표현하며 실행 순서는 소유하지 않는다.
 struct LogicalPredicate {
-    bool all{true};
+    LogicalOperator operation{LogicalOperator::All};
     std::vector<AtomicRuleCondition> operands;
 };
 

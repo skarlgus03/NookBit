@@ -128,15 +128,16 @@ Result<std::vector<RuleNode>> graphError(int id, const QString& description) {
 
 Result<AtomicRuleCondition> flowCondition(const QVariantMap& value);
 
-// AND·OR 입력을 원자 조건 또는 중첩 논리 조건으로 해석하는 함수.
+// 논리 입력을 원자 조건 또는 중첩 논리 조건으로 해석하는 함수.
 Result<AtomicRuleCondition> logicalGraphCondition(const QVariantMap& value, int depth = 0) {
     if (depth > 32) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Logical condition depth exceeds 32."});
-    const auto type = value.value("type").toString();
-    if (type != "all" && type != "any") return flowCondition(value);
+    const auto operation = logicalOperatorFor(value.value("type").toString().toStdString());
+    if (!operation) return flowCondition(value);
     const auto operands = value.value("operands").toList();
-    if (operands.size() < 2 || operands.size() > 1000)
-        return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "AND/OR needs at least two input conditions."});
-    auto logical = std::make_shared<LogicalPredicate>(); logical->all = type == "all";
+    if (!validLogicalArity(*operation, static_cast<std::size_t>(operands.size())))
+        return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "NOT needs exactly one input condition. AND/OR needs at least two."});
+    auto logical = std::make_shared<LogicalPredicate>();
+    logical->operation = *operation;
     for (const auto& operand : operands) {
         auto parsed = logicalGraphCondition(operand.toMap(), depth + 1);
         if (!parsed) return parsed;
@@ -227,7 +228,7 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
             node.enabled = block.value(QStringLiteral("enabled"), true).toBool();
             node.otherwise = type == QStringLiteral("otherwise");
             const auto value = block.value(QStringLiteral("value")).toString().trimmed();
-            if (type == "all" || type == "any") {
+            if (logicalOperatorFor(type.toStdString())) {
                 auto parsed = logicalGraphCondition(block);
                 if (!parsed) return Result<std::vector<RuleNode>>::failure(parsed.error());
                 node.atomicCondition = std::move(parsed.value());
@@ -415,7 +416,7 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
     } else if (node.atomicCondition) {
         const auto& condition = *node.atomicCondition;
         if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-            block.insert("type", *logical && (*logical)->all ? "all" : "any");
+            block.insert("type", *logical ? logicalOperatorName((*logical)->operation) : "any");
             QVariantList operands;
             if (*logical) for (const auto& operand : (*logical)->operands) {
                 RuleNode term; term.atomicCondition = operand;
@@ -580,7 +581,7 @@ QVariantMap graphForRules(const RuleSet& rules,
     const auto owners = blocks;
     for (const auto& value : owners) {
         const auto owner = value.toMap();
-        if (owner.value("type") != "all" && owner.value("type") != "any") continue;
+        if (!logicalOperatorFor(owner.value("type").toString().toStdString())) continue;
         const auto key = owner.value("ruleId", owner.value("flowNodeId")).toString();
         appendOperands(owner, owner.value("id").toInt(), key, owner.value("flowId").toString(), 0);
     }
@@ -654,7 +655,7 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
     if (!node->atomicCondition) return result;
     const auto& condition = *node->atomicCondition;
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-        result.insert("type", *logical && (*logical)->all ? "all" : "any");
+        result.insert("type", *logical ? logicalOperatorName((*logical)->operation) : "any");
     } else if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("itemType"));
         result.insert(QStringLiteral("value"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file"));
@@ -703,7 +704,7 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
     }
     std::optional<AtomicRuleCondition> condition;
     if (!node->otherwise) {
-        if ((type == "all" || type == "any") && node->atomicCondition
+        if (logicalOperatorFor(type.toStdString()) && node->atomicCondition
             && std::holds_alternative<LogicalPredicatePtr>(*node->atomicCondition)) {
             condition = *node->atomicCondition;
         } else if (type == QStringLiteral("extension")) {

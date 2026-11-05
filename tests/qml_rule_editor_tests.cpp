@@ -481,6 +481,15 @@ int main(int argc, char** argv) {
     expect(logicalCard && logicalCard->property("width").toDouble()<state->property("blockWidth").toDouble()
         && logicalCard->property("height").toDouble()<state->property("blockHeight").toDouble(),"AND node is smaller than ordinary condition cards");
     expect(logicalCard && logicalCard->findChild<QObject*>(QString("rulePredicatePort_%1").arg(andId)),"logical node exposes a separate condition socket");
+    call(engine, state.get(), "addBlock", {"not", 600, 650});
+    const int notId = state->property("selectedId").toInt();
+    call(engine, state.get(), "addBlock", {"name", 150, 650});
+    const int notInput = state->property("selectedId").toInt();
+    call(engine, state.get(), "addBlock", {"extension", 150, 800});
+    const int extraInput = state->property("selectedId").toInt();
+    expect(call(engine, state.get(), "connectBlocks", {notInput, notId, "predicate"}).toBool()
+        && !call(engine, state.get(), "connectBlocks", {extraInput, notId, "predicate"}).toBool(),
+        "NOT accepts one condition and rejects a second");
     auto inspectionPage = create(engine, "RuleEditorPage", {
         {"controller", QVariant::fromValue(controller.get())}, {"destinations", QVariant::fromValue(controller.get())},
         {"guideService", QVariant::fromValue(controller.get())}, {"width", 828}, {"height", 600}

@@ -1,4 +1,5 @@
 #include "modules/rules/processing_flow.hpp"
+#include "modules/rules/logical_predicate.hpp"
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -12,7 +13,7 @@ std::size_t predicateSize(const AtomicRuleCondition& condition, int depth = 0) {
     if (depth > 32) return 1001;
     std::size_t total = 1;
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-        if (!*logical || (*logical)->operands.size() < 2) return 1001;
+        if (!*logical || !validLogicalArity((*logical)->operation, (*logical)->operands.size())) return 1001;
         for (const auto& operand : (*logical)->operands) {
             total += predicateSize(operand, depth + 1);
             if (total > 1000) break;
@@ -21,15 +22,20 @@ std::size_t predicateSize(const AtomicRuleCondition& condition, int depth = 0) {
     return total;
 }
 // 논리식이 통과시킬 수 있는 대상 종류를 보수적으로 계산하는 함수.
-int acceptedTypes(const AtomicRuleCondition& condition) {
-    if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) return type->value == ItemType::Folder ? 2 : 1;
-    if (std::holds_alternative<ExtensionPredicate>(condition) || std::holds_alternative<SizePredicate>(condition)) return 1;
+int acceptedTypes(const AtomicRuleCondition& condition, bool negated = false) {
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
+        return (type->value == ItemType::Folder) != negated ? 2 : 1;
+    if (std::holds_alternative<ExtensionPredicate>(condition) || std::holds_alternative<SizePredicate>(condition))
+        return negated ? 3 : 1;
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
         if (!*logical) return 0;
-        int types = (*logical)->all ? 3 : 0;
+        if ((*logical)->operation == LogicalOperator::Not)
+            return acceptedTypes((*logical)->operands.front(), !negated);
+        const bool all = ((*logical)->operation == LogicalOperator::All) != negated;
+        int types = all ? 3 : 0;
         for (const auto& input : (*logical)->operands) {
-            const int child = acceptedTypes(input);
-            types = (*logical)->all ? types & child : types | child;
+            const int child = acceptedTypes(input, negated);
+            types = all ? types & child : types | child;
         }
         return types;
     }

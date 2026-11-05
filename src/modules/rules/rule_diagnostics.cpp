@@ -23,6 +23,7 @@ struct Facts {
     Range size;
     Range age;
     std::optional<std::set<std::string>> extensions;
+    std::set<std::string> excludedExtensions;
 };
 
 using Alternatives = std::vector<Facts>;
@@ -48,7 +49,12 @@ std::optional<Facts> intersect(const Facts& left, const Facts& right) {
                 right.extensions->begin(), right.extensions->end(),
                 std::inserter(*result.extensions, result.extensions->end()));
         }
+    }
+    result.excludedExtensions.insert(right.excludedExtensions.begin(), right.excludedExtensions.end());
+    if (result.extensions) {
+        for (const auto& excluded : result.excludedExtensions) result.extensions->erase(excluded);
         if (result.extensions->empty()) return std::nullopt;
+        result.excludedExtensions.clear();
     }
     return result;
 }
@@ -63,14 +69,53 @@ Alternatives combine(const Alternatives& left, const Alternatives& right, bool g
     return result;
 }
 
-// 지원하는 조건을 범위로 바꾸고, 그 밖의 조건은 추측하지 않는 함수.
-Alternatives project(const AtomicRuleCondition& condition, bool guaranteed) {
+// 지원하는 원자 조건을 만족하지 않는 대상 범위를 구하는 함수.
+Alternatives complement(const Facts& facts) {
+    Alternatives result;
+    Facts otherTypes;
+    otherTypes.types &= ~facts.types;
+    if (otherTypes.types) result.push_back(otherTypes);
+
+    // 수치 범위 바깥의 양쪽 구간을 같은 대상 종류에 추가하는 함수.
+    const auto appendOutside = [&](Range Facts::* field) {
+        const auto& range = facts.*field;
+        if (range.minimum > 0) {
+            Facts lower;
+            lower.types = facts.types;
+            (lower.*field).maximumValue = range.minimum - 1;
+            result.push_back(std::move(lower));
+        }
+        if (range.maximumValue < maximum) {
+            Facts upper;
+            upper.types = facts.types;
+            (upper.*field).minimum = range.maximumValue + 1;
+            result.push_back(std::move(upper));
+        }
+    };
+    appendOutside(&Facts::size);
+    appendOutside(&Facts::age);
+    if (facts.extensions) {
+        Facts otherExtensions;
+        otherExtensions.types = facts.types;
+        otherExtensions.excludedExtensions = *facts.extensions;
+        result.push_back(std::move(otherExtensions));
+    }
+    return result;
+}
+
+// 지원하는 조건을 범위로 바꾸고, 부정은 AND·OR의 반대 연산으로 전파하는 함수.
+Alternatives project(const AtomicRuleCondition& condition, bool guaranteed, bool negated = false) {
     if (const auto* expression = std::get_if<LogicalPredicatePtr>(&condition)) {
         if (!*expression) return unknown(guaranteed);
-        Alternatives result = (*expression)->all ? Alternatives{Facts{}} : Alternatives{};
-        for (const auto& operand : (*expression)->operands) {
-            auto child = project(operand, guaranteed);
-            if ((*expression)->all) {
+        const auto& group = **expression;
+        if (group.operation == LogicalOperator::Not)
+            return group.operands.size() == 1 ? project(group.operands.front(), guaranteed, !negated)
+                : unknown(guaranteed);
+        const bool all = (group.operation == LogicalOperator::All) != negated;
+        Alternatives result = all ? Alternatives{Facts{}} : Alternatives{};
+        for (const auto& operand : group.operands) {
+            auto child = project(operand, guaranteed, negated);
+            if (all) {
                 result = combine(result, child, guaranteed);
                 if (result.empty()) break;
             } else {
@@ -91,24 +136,24 @@ Alternatives project(const AtomicRuleCondition& condition, bool guaranteed) {
             for (auto& ch : value) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
             facts.extensions->insert(std::move(value));
         }
-        if (facts.extensions->empty()) return {};
+        if (facts.extensions->empty()) return negated ? Alternatives{Facts{}} : Alternatives{};
     } else if (const auto* size = std::get_if<SizePredicate>(&condition)) {
         facts.types = fileType;
         switch (size->comparison) {
         case SizeComparison::GreaterThan:
-            if (size->bytes == maximum) return {};
+            if (size->bytes == maximum) return negated ? Alternatives{Facts{}} : Alternatives{};
             facts.size.minimum = size->bytes + 1;
             break;
         case SizeComparison::AtLeast: facts.size.minimum = size->bytes; break;
         case SizeComparison::LessThan:
-            if (size->bytes == 0) return {};
+            if (size->bytes == 0) return negated ? Alternatives{Facts{}} : Alternatives{};
             facts.size.maximumValue = size->bytes - 1;
             break;
         case SizeComparison::AtMost: facts.size.maximumValue = size->bytes; break;
         }
     } else if (const auto* age = std::get_if<ModifiedAgePredicate>(&condition)) {
         if (age->comparison == AgeComparison::LessThan) {
-            if (age->days <= 0) return {};
+            if (age->days <= 0) return negated ? Alternatives{Facts{}} : Alternatives{};
             facts.age.maximumValue = static_cast<std::uintmax_t>(age->days - 1);
         } else if (age->days > 0) {
             facts.age.minimum = static_cast<std::uintmax_t>(age->days);
@@ -116,14 +161,21 @@ Alternatives project(const AtomicRuleCondition& condition, bool guaranteed) {
     } else {
         return unknown(guaranteed);
     }
-    return {std::move(facts)};
+    return negated ? complement(facts) : Alternatives{std::move(facts)};
 }
 
 // 앞 조건이 뒤 조건의 가능한 범위를 모두 포함하는지 확인하는 함수.
 bool covers(const Facts& earlier, const Facts& later) {
+    const bool respectsExclusions = earlier.excludedExtensions.empty()
+        || (later.extensions
+            ? std::none_of(later.extensions->begin(), later.extensions->end(),
+                [&](const std::string& value) { return earlier.excludedExtensions.contains(value); })
+            : std::includes(later.excludedExtensions.begin(), later.excludedExtensions.end(),
+                earlier.excludedExtensions.begin(), earlier.excludedExtensions.end()));
     return (earlier.types & later.types) == later.types
         && earlier.size.minimum <= later.size.minimum && earlier.size.maximumValue >= later.size.maximumValue
         && earlier.age.minimum <= later.age.minimum && earlier.age.maximumValue >= later.age.maximumValue
+        && respectsExclusions
         && (!earlier.extensions || (later.extensions && std::includes(earlier.extensions->begin(),
             earlier.extensions->end(), later.extensions->begin(), later.extensions->end())));
 }

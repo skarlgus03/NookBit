@@ -192,9 +192,18 @@ void graphContract() {
         {"scan","traverse",{"apply"}},{"apply","call"}};
     rules.folderFlows={guarded};
     expect(nookbit::validateProcessingFlows(rules).hasValue(),"AND folder guard safely narrows traversal input");
-    auto alternative=std::make_shared<nookbit::LogicalPredicate>(*condition);alternative->all=false;
+    auto alternative=std::make_shared<nookbit::LogicalPredicate>(*condition);alternative->operation=nookbit::LogicalOperator::Any;
     rules.folderFlows[0].nodes[1].condition=nookbit::LogicalPredicatePtr(alternative);
     expect(!nookbit::validateProcessingFlows(rules),"OR name match cannot allow files into a folder traversal");
+    auto negation = std::make_shared<nookbit::LogicalPredicate>();
+    negation->operation = nookbit::LogicalOperator::Not;
+    negation->operands = {nookbit::ItemTypePredicate{nookbit::ItemType::File}};
+    rules.folderFlows[0].nodes[1].condition = nookbit::LogicalPredicatePtr(negation);
+    expect(nookbit::validateProcessingFlows(rules).hasValue(), "NOT file is a valid folder guard");
+    auto notExtension = std::make_shared<nookbit::LogicalPredicate>(*negation);
+    notExtension->operands = {nookbit::ExtensionPredicate{{"png"}}};
+    rules.folderFlows[0].nodes[1].condition = nookbit::LogicalPredicatePtr(notExtension);
+    expect(!nookbit::validateProcessingFlows(rules), "NOT PNG can still admit files to traversal");
 
 }
 }

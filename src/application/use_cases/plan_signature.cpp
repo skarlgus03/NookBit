@@ -59,7 +59,7 @@ void appendAtomicCondition(std::string& output, const AtomicRuleCondition& condi
     if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
         appendNumber(output, static_cast<bool>(*logical));
         if (*logical) {
-            appendNumber(output, (*logical)->all);
+            appendNumber(output, (*logical)->operation);
             appendNumber(output, (*logical)->operands.size());
             for (const auto& operand : (*logical)->operands) appendAtomicCondition(output, operand);
         }

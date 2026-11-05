@@ -862,7 +862,9 @@ void testLogicalGraph() {
         auto shallow=QJsonObject{{"type","all"},{"conditions",QJsonArray{QJsonObject{{"type","nameContains"},{"text","x"}}}}};
         QJsonObject deep{{"type","nameContains"},{"text","x"}};
         for(int i=0;i<34;++i)deep=QJsonObject{{"type","any"},{"conditions",QJsonArray{deep,QJsonObject{{"type","nameContains"},{"text","x"}}}}};
-        for(const auto& invalid:{shallow,deep}) {
+        const QJsonObject atom{{"type", "nameContains"}, {"text", "temp"}};
+        const QJsonObject twoNotInputs{{"type", "not"}, {"conditions", QJsonArray{atom, atom}}};
+        for(const auto& invalid:{shallow,deep,twoNotInputs}) {
             auto document=original;auto nodes=document["nodes"].toArray();auto node=nodes[0].toObject();node["when"]=invalid;nodes[0]=node;document["nodes"]=nodes;
             QFile bad(directory.filePath("invalid-logical.json"));expect(bad.open(QIODevice::WriteOnly),"invalid logical fixture");bad.write(QJsonDocument(document).toJson());bad.close();
             expect(!active.loadFile(std::filesystem::path(bad.fileName().toStdWString())),"invalid logical arity or nesting rejected on JSON import");
@@ -884,6 +886,53 @@ void testLogicalGraph() {
     flowBlocks.append(QVariantMap{{"id",10},{"type","exclude"},{"x",0},{"y",0}});
     auto flowEdges=edges;flowEdges[0]=QVariantMap{{"from",8},{"to",2}};flowEdges.append(QVariantMap{{"from",1},{"to",9}});flowEdges.append(QVariantMap{{"from",9},{"to",10}});
     expect(editor.importGraph(flowBlocks,flowEdges)&&editor.save(),"logical predicates work in named processing graphs");
+
+    QVariantList notBlocks{
+        QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "not"}},
+        QVariantMap{{"id", 3}, {"type", "name"}, {"value", "temp"}},
+        QVariantMap{{"id", 4}, {"type", "destination"}, {"value", "Kept"}}
+    };
+    const QVariantList notEdges{
+        QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 4}},
+        QVariantMap{{"from", 3}, {"to", 2}, {"kind", "predicate"}}
+    };
+    const auto keep = editor.testGraph(notBlocks, notEdges, {}, "report.png", "10", "0");
+    const auto reject = editor.testGraph(notBlocks, notEdges, {}, "temp.png", "10", "0");
+    expect(keep.value("destination") == "Kept" && conditionStatuses(keep) == QStringList{"2=matched", "3=notMatched"},
+        "NOT passes when its operand fails");
+    expect(reject.value("outcome") == "unclassified" && conditionStatuses(reject) == QStringList{"2=notMatched", "3=matched"},
+        "NOT trace shows the matching operand and opposite result");
+    expect(editor.importGraph(notBlocks, notEdges) && editor.save(), "NOT graph saves");
+    editor.reload();
+    const auto notRestored = editor.graph();
+    const auto restoredResult = editor.testGraph(notRestored.value("blocks").toList(), notRestored.value("edges").toList(),
+        {}, "temp.png", "10", "0");
+    expect(restoredResult.value("outcome") == "unclassified" && restoredResult.value("conditions").toList().size() == 2,
+        "NOT and its operand survive rule reload");
+    auto invalidNot = notEdges;
+    invalidNot.removeLast();
+    expect(!editor.importGraph(notBlocks, invalidNot), "NOT without an input is rejected");
+    notBlocks.append(QVariantMap{{"id", 6}, {"type", "extension"}, {"value", "png"}});
+    invalidNot = notEdges;
+    invalidNot.append(QVariantMap{{"from", 6}, {"to", 2}, {"kind", "predicate"}});
+    expect(editor.inspectGraph(notBlocks, invalidNot).value("blockId") == 2 && !editor.importGraph(notBlocks, invalidNot),
+        "NOT with two inputs is rejected at the NOT node");
+
+    notBlocks.append(QVariantMap{{"id", 5}, {"type", "all"}});
+    notBlocks[2] = QVariantMap{{"id", 3}, {"type", "extension"}, {"value", "png"}};
+    const QVariantList contradiction{
+        QVariantMap{{"from", 1}, {"to", 5}}, QVariantMap{{"from", 5}, {"to", 4}},
+        QVariantMap{{"from", 3}, {"to", 2}, {"kind", "predicate"}},
+        QVariantMap{{"from", 2}, {"to", 5}, {"kind", "predicate"}},
+        QVariantMap{{"from", 6}, {"to", 5}, {"kind", "predicate"}}
+    };
+    const auto warnings = editor.inspectGraph(notBlocks, contradiction).value("warnings").toList();
+    expect(warnings.size() == 1 && warnings.first().toMap().value("blockId") == 5,
+        "PNG and NOT PNG are diagnosed as contradictory");
+    notBlocks[2] = QVariantMap{{"id", 3}, {"type", "extension"}, {"value", "jpg"}};
+    expect(editor.inspectGraph(notBlocks, contradiction).value("warnings").toList().isEmpty(),
+        "PNG and NOT JPG can match");
 }
 // 모순과 가려짐을 경고하고 구조 오류는 저장을 막는지 검사하는 함수.
 void testRuleInspection() {

@@ -114,6 +114,7 @@ Frame {
                 visible: inspector.editor.selectedBlock !== null && inspector.editor.selectedBlock.type !== "start"
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
+                         && !inspector.editor.isLogical(inspector.editor.selectedBlock)
                          && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
             }
             AppTextField {
@@ -124,7 +125,7 @@ Frame {
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
                          && inspector.selectedType !== "itemType"
-                         && !["all", "any"].includes(inspector.selectedType)
+                         && !inspector.editor.isLogical(inspector.editor.selectedBlock)
                          && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
                 enabled: visible
                 placeholderText: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type
@@ -144,8 +145,10 @@ Frame {
             }
             Label {
                 Layout.fillWidth: true
-                visible: ["all", "any"].includes(inspector.selectedType)
-                text: qsTr("네모 입력에 조건을 두 개 이상 연결하세요. AND는 모두 만족, OR는 하나 이상 만족하면 둥근 출력으로 진행해요.")
+                visible: inspector.editor.isLogical(inspector.editor.selectedBlock)
+                text: inspector.selectedType === "not"
+                    ? qsTr("네모 입력에 조건을 하나 연결하세요. 조건이 맞지 않으면 둥근 출력으로 진행해요.")
+                    : qsTr("네모 입력에 조건을 두 개 이상 연결하세요. AND는 모두 만족, OR는 하나 이상 만족하면 둥근 출력으로 진행해요.")
                 color: inspector.mutedText
                 wrapMode: Text.Wrap
             }
