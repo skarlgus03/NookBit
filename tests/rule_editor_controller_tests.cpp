@@ -818,7 +818,10 @@ void testLogicalGraph() {
     nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"),schema);
     auto initial=defaults.load();if(!initial){expect(false,"logical fixture");return;}
     initial.value().globalOtherwise.reset();expect(active.save(initial.value()).hasValue(),"logical fixture saved");
-    nookbit::RuleEditorController editor(active,active,nullptr,nullptr,directory.filePath("layout.json"));
+    nookbit::FilesystemScanner scanner;
+    nookbit::RuleEngine engine;
+    nookbit::TestRuleUseCase tester(scanner, engine);
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, directory.filePath("layout.json"), &active, &tester);
     QVariantList blocks{QVariantMap{{"id",1},{"type","start"},{"x",0},{"y",0}},
         QVariantMap{{"id",2},{"type","all"},{"x",600},{"y",0}},
         QVariantMap{{"id",3},{"type","any"},{"x",300},{"y",0}},
@@ -829,6 +832,27 @@ void testLogicalGraph() {
     QVariantList edges{QVariantMap{{"from",1},{"to",2}},QVariantMap{{"from",2},{"to",7}},
         QVariantMap{{"from",4},{"to",3},{"kind","predicate"}},QVariantMap{{"from",5},{"to",3},{"kind","predicate"}},
         QVariantMap{{"from",3},{"to",2},{"kind","predicate"}},QVariantMap{{"from",6},{"to",2},{"kind","predicate"}}};
+    // 결과의 조건 ID와 상태를 화면에 전달된 순서로 비교하는 함수.
+    const auto conditionStatuses = [](const QVariantMap& report) {
+        QStringList statuses;
+        for (const auto& value : report.value("conditions").toList()) {
+            const auto row = value.toMap();
+            statuses.append(QStringLiteral("%1=%2").arg(row.value("blockId").toInt()).arg(row.value("status").toString()));
+        }
+        return statuses;
+    };
+    const auto passed = editor.testGraph(blocks, edges, {}, "report.png", "10", "0");
+    expect(passed.value("destination") == "Matched" && conditionStatuses(passed) ==
+        QStringList{"2=matched", "3=matched", "4=matched", "5=skipped", "6=matched"},
+        "OR skips its remaining operand after a match and AND continues");
+    const auto tooSmall = editor.testGraph(blocks, edges, {}, "report.txt", "9", "0");
+    expect(tooSmall.value("outcome") == "unclassified" && conditionStatuses(tooSmall) ==
+        QStringList{"2=notMatched", "3=matched", "4=notMatched", "5=matched", "6=notMatched"},
+        "failed size condition explains a failed AND despite a matching nested OR");
+    const auto rejected = editor.testGraph(blocks, edges, {}, "other.txt", "10", "0");
+    expect(rejected.value("outcome") == "unclassified" && conditionStatuses(rejected) ==
+        QStringList{"2=notMatched", "3=notMatched", "4=notMatched", "5=notMatched", "6=skipped"},
+        "failed nested OR skips the remaining AND operand");
     expect(editor.importGraph(blocks,edges)&&editor.save(),"nested condition graph saves");
     expect(editor.saveGraphLayout(blocks,edges),"nested condition positions save");
     const auto loaded=active.load();expect(loaded && std::holds_alternative<nookbit::LogicalPredicatePtr>(*loaded.value().nodes[0].atomicCondition),"JSON logical condition round trip");

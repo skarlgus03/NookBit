@@ -1064,6 +1064,43 @@ QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QV
     QVariantList path;
     for (const auto& id : trace.value().selectedNodeIds)
         path.append(QString::fromStdString(id));
+    QHash<int, QList<int>> operandIds;
+    QSet<int> operands;
+    for (const auto& value : edges) {
+        const auto edge = value.toMap();
+        if (edge.value("kind") != "predicate") continue;
+        const int source = edge.value("from").toInt();
+        operandIds[edge.value("to").toInt()].append(source);
+        operands.insert(source);
+    }
+    QHash<QString, int> conditionIds;
+    for (const auto& value : blocks) {
+        const auto block = value.toMap();
+        const int id = block.value("id").toInt();
+        if (!block.value("flowId").toString().isEmpty() || operands.contains(id)) continue;
+        const auto type = block.value("type").toString();
+        if (type == "start" || type == "destination" || type == "exclude" || type == "otherwise") continue;
+        const auto ruleId = block.value("ruleId").toString();
+        conditionIds.insert(ruleId.isEmpty() ? QStringLiteral("graph-%1").arg(id) : ruleId, id);
+    }
+    QVariantList conditions;
+    std::function<void(int, const ConditionEvaluation*, int)> appendCondition;
+    // 엔진이 반환한 평가 순서를 캔버스의 조건 노드와 짝지어 표시하는 함수.
+    appendCondition = [&](int id, const ConditionEvaluation* result, int depth) {
+        const auto status = !result || !result->matched.has_value() ? "skipped"
+            : *result->matched ? "matched" : "notMatched";
+        conditions.append(QVariantMap{{"blockId", id}, {"depth", depth}, {"status", QString::fromLatin1(status)}});
+        const auto children = operandIds.value(id);
+        for (qsizetype index = 0; index < children.size(); ++index) {
+            const auto* child = result && static_cast<std::size_t>(index) < result->operands.size()
+                ? &result->operands[static_cast<std::size_t>(index)] : nullptr;
+            appendCondition(children[index], child, depth + 1);
+        }
+    };
+    for (const auto& condition : trace.value().conditions) {
+        const int id = conditionIds.value(QString::fromStdString(condition.nodeId));
+        if (id > 0) appendCondition(id, &condition.result, 0);
+    }
     const auto& decision = trace.value().decision;
     const QString outcome = !decision ? QStringLiteral("unclassified")
         : decision->excluded ? QStringLiteral("excluded") : QStringLiteral("destination");
@@ -1074,6 +1111,7 @@ QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QV
             {QStringLiteral("destination"), decision && !decision->excluded
                 ? QString::fromStdWString(decision->destinationRelativePath.wstring()) : QString()},
             {QStringLiteral("path"), path},
+            {QStringLiteral("conditions"), conditions},
             {QStringLiteral("fileName"), fileUrl.isEmpty() ? fileName.trimmed()
                 : fileUrl.fileName()}};
 }

@@ -100,16 +100,9 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
     return true;
 }
 
-// v3 노드의 단일 조건 하나만 파일 정보와 비교하는 함수.
-bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
-                   std::int64_t nowUtcMs) {
-    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
-        if (!*logical || (*logical)->operands.size() < 2) return false;
-        // 연결된 조건을 단락 평가하며 분류 가지 순서는 바꾸지 않는 함수.
-        const auto matches = [&](const AtomicRuleCondition& operand) { return matchesAtomic(operand, file, nowUtcMs); };
-        return (*logical)->all ? std::all_of((*logical)->operands.begin(), (*logical)->operands.end(), matches)
-            : std::any_of((*logical)->operands.begin(), (*logical)->operands.end(), matches);
-    }
+// 묶음에 속하지 않는 개별 조건 하나를 파일 정보와 비교하는 함수.
+bool matchesLeaf(const AtomicRuleCondition& condition, const FileFact& file,
+                 std::int64_t nowUtcMs) {
     if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
         return file.fingerprint.directory == (type->value == ItemType::Folder);
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
@@ -166,6 +159,31 @@ bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
     return age.comparison == AgeComparison::AtLeast ? days >= age.days : days < age.days;
 }
 
+// 실제 분류와 같은 순서로 조건을 판단하고, 시험 중에만 각 판단을 기록하는 함수.
+bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
+                   std::int64_t nowUtcMs, ConditionEvaluation* evaluation = nullptr) {
+    bool matched = false;
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        if (*logical && (*logical)->operands.size() >= 2) {
+            const auto& group = **logical;
+            if (evaluation) evaluation->operands.resize(group.operands.size());
+            matched = group.all;
+            for (std::size_t index = 0; index < group.operands.size(); ++index) {
+                auto* child = evaluation ? &evaluation->operands[index] : nullptr;
+                const bool childMatched = matchesAtomic(group.operands[index], file, nowUtcMs, child);
+                if (childMatched != group.all) {
+                    matched = childMatched;
+                    break;
+                }
+            }
+        }
+    } else {
+        matched = matchesLeaf(condition, file, nowUtcMs);
+    }
+    if (evaluation) evaluation->matched = matched;
+    return matched;
+}
+
 // 목적지 문자열 안의 날짜 토큰을 파일 수정일 기준으로 치환하는 함수.
 void replaceToken(std::wstring& destination, const std::wstring& token,
                   const std::wstring& replacement) {
@@ -217,15 +235,15 @@ Result<std::filesystem::path> destinationFor(const std::filesystem::path& relati
 
 // 같은 높이에서 처음 맞는 일반 가지를 고르고, 없으면 else 가지를 고르는 함수.
 const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const FileFact& file,
-                                  std::int64_t nowUtcMs, int schemaVersion) {
+                                  std::int64_t nowUtcMs, int schemaVersion, RuleTrace* trace) {
     const RuleNode* otherwise = nullptr;
     for (const auto& node : nodes) {
         if (!node.enabled) continue;
         if (node.otherwise) {
             otherwise = &node;
-        } else if (schemaVersion == 3 && node.atomicCondition &&
-                   matchesAtomic(*node.atomicCondition, file, nowUtcMs)) {
-            return &node;
+        } else if (schemaVersion == 3 && node.atomicCondition) {
+            auto* evaluation = trace ? &trace->conditions.emplace_back(node.id).result : nullptr;
+            if (matchesAtomic(*node.atomicCondition, file, nowUtcMs, evaluation)) return &node;
         } else if (schemaVersion == 2 && matchesRule(node.condition, file, nowUtcMs)) {
             return &node;
         }
@@ -236,12 +254,12 @@ const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const File
 // 선택한 리프의 목적지를 파일별 분류 결과로 변환하는 함수.
 Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const RuleSet& rules,
                                                   std::int64_t nowUtcMs,
-                                                  std::vector<std::string>* selectedIds = nullptr) {
-    const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs, rules.schemaVersion);
-    if (node && selectedIds) selectedIds->push_back(node->id);
+                                                  RuleTrace* trace = nullptr) {
+    const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs, rules.schemaVersion, trace);
+    if (node && trace) trace->selectedNodeIds.push_back(node->id);
     while (node && !node->children.empty()) {
-        node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion);
-        if (node && selectedIds) selectedIds->push_back(node->id);
+        node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion, trace);
+        if (node && trace) trace->selectedNodeIds.push_back(node->id);
     }
     if (node && node->exclude) {
         return Result<std::optional<RuleDecision>>::success(RuleDecision{
@@ -382,7 +400,7 @@ Result<RuleTrace> RuleEngine::trace(const FileFact& file, const RuleSet& rules,
     if (rules.schemaVersion != 3) return Result<RuleTrace>::failure({
         "rules.schema_version", "Rule testing requires a v3 rule tree."});
     RuleTrace trace;
-    auto decision = treeDecision(file, rules, nowUtcMs, &trace.selectedNodeIds);
+    auto decision = treeDecision(file, rules, nowUtcMs, &trace);
     if (!decision) return Result<RuleTrace>::failure(decision.error());
     trace.decision = std::move(decision.value());
     return Result<RuleTrace>::success(std::move(trace));

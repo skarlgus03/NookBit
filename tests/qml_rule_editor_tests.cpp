@@ -506,6 +506,32 @@ int main(int argc, char** argv) {
                 && inspectionPage->property("zoom").toDouble() == 1.25, "warning selects its node and preserves zoom");
         }
     }
+    auto testPanel = create(engine, "RuleTestPanel", {
+        {"editor", QVariant::fromValue(state.get())}, {"controller", QVariant::fromValue(controller.get())},
+        {"parent", QVariant::fromValue(host.contentItem())}
+    });
+    if (!testPanel) return 1;
+    const QVariantMap conditionResult{{"ok", true}, {"outcome", "unclassified"}, {"path", QVariantList{}},
+        {"conditions", QVariantList{QVariantMap{{"blockId", andId}, {"depth", 0}, {"status", "notMatched"}}}}};
+    call(engine, state.get(), "applyTestResult", {conditionResult});
+    QMetaObject::invokeMethod(testPanel.get(), "open");
+    settle();
+    auto* resultButton = testPanel->findChild<QQuickItem*>("ruleConditionResultsButton");
+    auto* resultDialog = testPanel->findChild<QObject*>("ruleConditionResultsDialog");
+    expect(resultButton && resultButton->isVisible() && resultDialog, "tested conditions expose the results action");
+    if (resultButton && resultDialog) {
+        QMetaObject::invokeMethod(resultButton, "clicked");
+        settle();
+        auto* content = resultDialog->property("contentItem").value<QQuickItem*>();
+        auto* row = findMenuItem(findMenuItem, content, "ruleConditionResultRow");
+        expect(resultDialog->property("opened").toBool() && row && row->isVisible(), "condition report lists the tested node");
+        if (row) {
+            QMetaObject::invokeMethod(row, "clicked");
+            settle();
+            expect(!resultDialog->property("visible").toBool() && !testPanel->property("visible").toBool()
+                && state->property("selectedId").toInt() == andId, "condition result reveals its canvas node");
+        }
+    }
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

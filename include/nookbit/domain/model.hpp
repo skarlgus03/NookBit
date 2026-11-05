@@ -87,10 +87,23 @@ struct RuleDecision {
     bool absoluteDestination{false};
 };
 
-/// 규칙 시험 결과와 실제로 선택된 노드 ID의 순서를 표현한다.
+/// 조건 하나의 결과와 AND·OR 입력의 결과를 기록한다.
+struct ConditionEvaluation {
+    // 비어 있으면 단락 평가로 검사하지 않은 조건이다.
+    std::optional<bool> matched;
+    std::vector<ConditionEvaluation> operands;
+};
+
+struct RuleConditionEvaluation {
+    std::string nodeId;
+    ConditionEvaluation result;
+};
+
+/// 규칙 시험의 분류 결과와 실제 판단 순서를 표현한다.
 struct RuleTrace {
     std::optional<RuleDecision> decision;
     std::vector<std::string> selectedNodeIds;
+    std::vector<RuleConditionEvaluation> conditions{};
 };
 
 /// JSON 분류 규칙 하나를 코어에서 사용할 수 있게 표현한다.

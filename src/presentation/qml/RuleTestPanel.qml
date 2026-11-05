@@ -231,6 +231,13 @@ Popup {
                                                                                                "선택 경로: 파일 입력 → 일치하는 규칙 없음")
                 wrapMode: Text.WordWrap
             }
+            ThemeButton {
+                objectName: "ruleConditionResultsButton"
+                Layout.fillWidth: true
+                visible: conditionResults.rows.length > 0
+                text: qsTr("조건별 결과 보기")
+                onClicked: conditionResults.open()
+            }
         }
         Label {
             Layout.fillWidth: true
@@ -246,6 +253,7 @@ Popup {
     }
     // 입력 파일 선택창까지 포함해 페이지 소유 보조 창을 닫는 함수.
     function dismissTransientUi() {
+        conditionResults.close();
         close();
         ruleTestFileDialog.close();
     }
@@ -278,6 +286,66 @@ Popup {
     }
     component ThemeButton: RuleEditorButton {
         dark: panel.dark
+    }
+    Dialog {
+        id: conditionResults
+        objectName: "ruleConditionResultsDialog"
+        readonly property var rows: panel.editor.testResult.conditions || []
+        parent: panel.parent
+        anchors.centerIn: parent
+        width: Math.max(1, Math.min(parent.width - UiMetrics.spaceSection * 2, UiMetrics.ruleHelpWidth))
+        height: Math.max(1, Math.min(implicitHeight, parent.height - UiMetrics.spaceSection * 2))
+        title: qsTr("기본 정리 · 조건별 결과")
+        modal: true
+        standardButtons: Dialog.Close
+        contentItem: ScrollView {
+            contentWidth: availableWidth
+            implicitHeight: conditionRows.implicitHeight
+            clip: true
+            Column {
+                id: conditionRows
+                width: parent.width
+                spacing: UiMetrics.spaceExtraSmall
+                Repeater {
+                    model: conditionResults.rows
+                    delegate: ThemeButton {
+                        id: conditionRow
+                        objectName: "ruleConditionResultRow"
+                        required property var modelData
+                        readonly property var block: panel.editor.blockForId(modelData.blockId)
+                        width: conditionRows.width
+                        leftPadding: UiMetrics.controlPadding + Math.min(modelData.depth, 3) * UiMetrics.spaceControl
+                        text: block ? panel.editor.titleFor(block.type) : ""
+                        contentItem: RowLayout {
+                            Label {
+                                text: conditionRow.modelData.status === "matched" ? qsTr("일치")
+                                    : conditionRow.modelData.status === "notMatched" ? qsTr("불일치") : qsTr("검사 생략")
+                                color: conditionRow.modelData.status === "matched" ? panel.theme.success
+                                    : conditionRow.modelData.status === "notMatched" ? panel.theme.warning : panel.mutedText
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                color: panel.primaryText
+                                text: {
+                                    if (!conditionRow.block)
+                                        return "";
+                                    const detail = panel.editor.displayValue(conditionRow.block);
+                                    return detail ? conditionRow.text + " · " + detail : conditionRow.text;
+                                }
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                        onClicked: {
+                            conditionResults.close();
+                            panel.close();
+                            panel.editor.focusBlock(modelData.blockId);
+                        }
+                    }
+                }
+            }
+        }
+        onRowsChanged: if (!rows.length) close()
     }
     FileDialog {
         id: ruleTestFileDialog
