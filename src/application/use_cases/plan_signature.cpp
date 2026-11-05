@@ -259,7 +259,11 @@ std::string PlanSignature::rules(const RuleSet& rules) {
                         appendNumber(output, node.destination.has_value());
                         if (node.destination) appendDestination(output, *node.destination);
                         append(output, node.targetFlow);
-                        if (node.type == "traverse") appendNumber(output, node.recursive);
+                        if (node.type == "traverse") {
+                            // 기존 값 0과 1을 보존하고 깊이 제한에는 2 이상의 값을 고정한다.
+                            const auto scope = node.maxDepth ? static_cast<long long>(*node.maxDepth) + 1 : node.recursive ? 1 : 0;
+                            appendNumber(output, scope);
+                        }
                     }
                 }
             }

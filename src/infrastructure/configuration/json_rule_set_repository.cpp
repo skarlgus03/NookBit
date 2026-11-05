@@ -734,7 +734,10 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
                     }
                     if (node.type == "destination") node.destination = convertDestination(object.value("destination").toObject());
                     if (node.type == "call") node.targetFlow = object.value("target").toString().toStdString();
-                    if (node.type == "traverse") node.recursive = object.value("recursive").toBool();
+                    if (node.type == "traverse") {
+                        node.recursive = object.value("recursive").toBool();
+                        if (object.contains("maxDepth")) node.maxDepth = object.value("maxDepth").toInt();
+                    }
                     converted.nodes.push_back(std::move(node));
                 }
             }
@@ -852,7 +855,10 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
                         value.insert("destination", destination.value());
                     }
                     if (node.type == "call") value.insert("target", QString::fromStdString(node.targetFlow));
-                    if (node.type == "traverse") value.insert("recursive", node.recursive);
+                    if (node.type == "traverse") {
+                        value.insert("recursive", node.recursive);
+                        if (node.maxDepth) value.insert("maxDepth", *node.maxDepth);
+                    }
                     nodes.append(value);
                 }
                 object.insert("nodes", nodes);

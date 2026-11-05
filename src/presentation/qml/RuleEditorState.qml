@@ -206,7 +206,10 @@ QtObject {
 
     // 노드 종류에 맞는 입력값과 비교 방식을 카드에 표시하는 함수.
     function displayValue(block) {
-        if (block.type === "folderScan") return block.recursive === false ? qsTr("바로 안의 파일만") : qsTr("하위 폴더의 파일까지");
+        if (block.type === "folderScan") {
+            if (block.recursive === false) return qsTr("바로 안의 파일만");
+            return block.maxDepth ? qsTr("하위 폴더 %1단계까지").arg(block.maxDepth) : qsTr("모든 하위 폴더");
+        }
         if (block.type === "callFlow" || block.type === "applyDefault") {
             const target = blocks.find(item => item.type === "flowStart" && item.flowId === block.targetFlow);
             return block.targetFlow ? (target ? target.value : qsTr("없는 흐름: %1").arg(block.targetFlow)) : qsTr("기본 정리");
@@ -912,6 +915,21 @@ QtObject {
     function updateProcessing(id, key, value) {
         blocks = blocks.map(block => block.id === id ? Object.assign({}, block, {[key]: value}) : block);
         statusText = qsTr("처리 흐름을 바꿨어요. 전체 저장 후 적용돼요.");
+    }
+
+    // 순회 범위를 바꾸며 단계 지정 모드에서만 깊이를 저장하는 함수.
+    function setTraversalScope(id, scope) {
+        blocks = blocks.map(block => {
+            if (block.id !== id || block.type !== "folderScan")
+                return block;
+            const next = Object.assign({}, block, {recursive: scope !== "direct"});
+            if (scope === "limited")
+                next.maxDepth = block.maxDepth || 1;
+            else
+                delete next.maxDepth;
+            return next;
+        });
+        statusText = qsTr("순회 범위를 바꿨어요. 전체 저장 후 적용돼요.");
     }
 
     // 노드 위치와 드래그 중 좌표로 기본 정리 및 폴더 흐름의 표시 영역을 계산하는 함수.

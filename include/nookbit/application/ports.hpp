@@ -52,6 +52,8 @@ struct ScanRequest {
     std::vector<std::filesystem::path> selectedFiles;
     // 직접 선택한 경로 중 명시적으로 하위 파일을 펼칠 폴더만 담는다.
     std::vector<std::filesystem::path> expandFolders;
+    // 순회 시작 폴더를 0단계로 세며 값이 없으면 기존 순회 범위를 사용한다.
+    std::optional<int> maxDepth{};
 };
 
 struct ScanSnapshot {

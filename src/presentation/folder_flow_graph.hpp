@@ -8,6 +8,8 @@
 #include <QVariantMap>
 #include <functional>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace nookbit {
 struct FolderFlowGraph {
@@ -73,7 +75,23 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
             ProcessingNode node; node.id = nodeIds.value(id).toStdString();
             for (const auto child : outgoing.value(id)) node.next.push_back(nodeIds.value(child).toStdString());
             if (type == "flowStart") node.type = "input";
-            else if (type == "folderScan") { node.type = "traverse"; node.recursive = block.value("recursive", true).toBool(); }
+            else if (type == "folderScan") {
+                node.type = "traverse";
+                node.recursive = block.value("recursive", true).toBool();
+                if (block.contains("maxDepth")) {
+                    const auto value = block.value("maxDepth");
+                    const auto kind = value.metaType().id();
+                    const double depth = value.toDouble();
+                    const bool numeric = kind == QMetaType::Int || kind == QMetaType::UInt ||
+                        kind == QMetaType::LongLong || kind == QMetaType::ULongLong ||
+                        kind == QMetaType::Double || kind == QMetaType::Float;
+                    if (!numeric ||
+                        !std::isfinite(depth) || depth < 1 || depth > std::numeric_limits<int>::max() ||
+                        std::floor(depth) != depth || !node.recursive)
+                        return invalid(QStringLiteral("블록 %1: 하위 폴더 깊이는 1 이상의 정수로 입력해 주세요.").arg(id));
+                    node.maxDepth = static_cast<int>(depth);
+                }
+            }
             else if (type == "callFlow" || type == "applyDefault") { node.type = "call"; node.targetFlow = block.value("targetFlow").toString().toStdString(); }
             else if (type == "otherwise" || type == "exclude") node.type = type.toStdString();
             else if (type == "destination") {
@@ -152,7 +170,10 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
             block.insert("flowInput", flow.folderInput ? "folder" : "item");
             block.insert("x", point.x()); block.insert("y", point.y());
             if (node.type == "call") block.insert("targetFlow", QString::fromStdString(node.targetFlow));
-            if (node.type == "traverse") block.insert("recursive", node.recursive);
+            if (node.type == "traverse") {
+                block.insert("recursive", node.recursive);
+                if (node.maxDepth) block.insert("maxDepth", *node.maxDepth);
+            }
             if (node.destination) {
                 block.insert("value", QString::fromStdWString(node.destination->relativePath.wstring()));
                 block.insert("homeRelative", !node.destination->absolute);

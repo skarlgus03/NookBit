@@ -16,7 +16,8 @@ An item-input flow can be called by other flows to reuse a classifier.
   Moving a node geometrically does not change its owner.
 - Select an input node to edit the name and folder/item input kind. Only folder
   entry points appear in the queue's selector. Whole-folder mode stays the default.
-- Select a traversal to choose immediate files or recursive files; neither mode
+- Select a traversal to choose immediate files, all subfolders, or a limited
+  number of subfolder levels. Level 1 includes immediate subfolders. No mode
   emits directories. Select a call to choose default rules or another named flow.
 - Delete individual steps to customize the graph; deleting an input removes its
   region. Invalid or missing references are errors, not silent fallback choices.

@@ -195,6 +195,8 @@ struct ProcessingNode {
     std::optional<RuleDestination> destination;
     std::string targetFlow;
     bool recursive{true};
+    // 선택한 폴더를 0단계로 세는 하위 폴더 깊이 제한.
+    std::optional<int> maxDepth{};
 };
 
 /// 버전이 있는 분류 규칙 묶음을 표현한다.
@@ -238,6 +240,7 @@ struct ProcessingRoute {
     std::string flowId;
     std::string nodeId;
     bool recursive{true};
+    std::optional<int> maxDepth{};
 };
 
 /// 승인에 고정할 이동 방식이며 실행 실패 시 다른 방식으로 바꾸지 않는다.

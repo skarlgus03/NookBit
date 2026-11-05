@@ -251,7 +251,8 @@ Result<void> scanFolder(const std::filesystem::path& root, const ScanRequest& re
         const std::filesystem::recursive_directory_iterator end;
         while (iterator != end) {
             const auto path = iterator->path();
-            if (!collectFolderEntry(*iterator, root, request, snapshot, seenFiles)) {
+            const bool directory = collectFolderEntry(*iterator, root, request, snapshot, seenFiles);
+            if (!directory || (request.maxDepth && iterator.depth() >= *request.maxDepth)) {
                 iterator.disable_recursion_pending();
             }
             iterator.increment(error);
@@ -281,6 +282,8 @@ Result<void> scanFolder(const std::filesystem::path& root, const ScanRequest& re
 
 // 직접 선택한 파일 또는 감시 폴더 중 한 입력 방식만 읽는 함수.
 Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
+    if (request.maxDepth && (!request.recursive || *request.maxDepth < 1))
+        return Result<ScanSnapshot>::failure({"scan.depth_invalid", "A depth limit requires recursive scanning and a positive integer."});
     const bool hasSelectedFiles = !request.selectedFiles.empty();
     const bool hasRoots = !request.roots.empty();
     if (hasSelectedFiles == hasRoots) {
@@ -311,7 +314,7 @@ Result<ScanSnapshot> FilesystemScanner::scan(const ScanRequest& request) {
                 [&](const auto& folder) { return pathKey(folder) == pathKey(path); });
             if (expand) {
                 if (!directory) return Result<ScanSnapshot>::failure({"scan.expansion_not_folder", "Folder flows require a folder."});
-                ScanRequest contents{{path}, true, {}, {}};
+                ScanRequest contents{{path}, true, {}, {}, {}, request.maxDepth};
                 const auto warningCount = snapshot.warnings.size();
                 const auto scanned = scanFolder(path, contents, snapshot, seenFiles);
                 if (!scanned) return Result<ScanSnapshot>::failure(scanned.error());

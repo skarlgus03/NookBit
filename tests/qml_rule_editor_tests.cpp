@@ -395,6 +395,24 @@ int main(int argc, char** argv) {
         "folder flow cannot be wired into the base tree as a condition");
     call(engine, state.get(), "selectOnly", {flowStart + 1});
     expect(value && !value->isVisible(), "fixed traversal step has guidance instead of a meaningless value editor");
+    auto* traversalScope = inspector->findChild<QObject*>("flowTraversalDepthCombo");
+    auto* traversalDepth = inspector->findChild<QQuickItem*>("flowTraversalMaxDepth");
+    expect(traversalScope && traversalDepth && !traversalDepth->isVisible(), "unlimited traversal hides the depth input");
+    if (traversalScope && traversalDepth) {
+        traversalScope->setProperty("currentIndex", 2);
+        QMetaObject::invokeMethod(traversalScope, "activated", Q_ARG(int, 2));
+        expect(traversalDepth->isVisible() && traversalDepth->property("value").toInt() == 1,
+            "limited traversal opens the depth input at one level");
+        traversalDepth->setProperty("value", 2);
+        QMetaObject::invokeMethod(traversalDepth, "valueModified");
+        auto selected = state->property("selectedBlock").value<QJSValue>().toVariant().toMap();
+        expect(selected.value("maxDepth") == 2 && selected.value("recursive").toBool(), "depth edits update the graph");
+        traversalScope->setProperty("currentIndex", 1);
+        QMetaObject::invokeMethod(traversalScope, "activated", Q_ARG(int, 1));
+        selected = state->property("selectedBlock").value<QJSValue>().toVariant().toMap();
+        expect(!selected.contains("maxDepth") && !selected.value("recursive").toBool(),
+            "immediate-only traversal clears the saved limit");
+    }
     call(engine, state.get(), "removeSelectedBlock");
     expect(list(state.get(), "blocks").size() == beforeFlow + 2, "individual processing steps are editable rather than locked in a preset");
     call(engine, state.get(), "selectOnly", {flowStart});

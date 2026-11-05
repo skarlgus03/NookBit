@@ -79,6 +79,8 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
             if (visited.contains(key)) return fail("nodes may have only one parent: " + key);
             if (!nodes.contains(key)) return fail("unknown node: " + key);
             const auto& node = *nodes.at(key);
+            if (node.maxDepth && (node.type != "traverse" || !node.recursive || *node.maxDepth < 1))
+                return fail("maxDepth requires a recursive traversal and a positive integer at " + key);
             const bool conditional = node.type == "condition";
             const bool terminal = node.type == "destination" || node.type == "exclude" || node.type == "call";
             if (node.type != "input" && node.type != "traverse" && !conditional && node.type != "otherwise" && !terminal)

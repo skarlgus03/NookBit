@@ -163,11 +163,32 @@ Frame {
                 objectName: "flowTraversalDepthCombo"
                 Layout.fillWidth: true
                 visible: inspector.selectedType === "folderScan"
-                model: [{text: qsTr("하위 폴더의 파일까지 순회"), value: true}, {text: qsTr("바로 안의 파일만 순회"), value: false}]
+                model: [{text: qsTr("모든 하위 폴더"), value: "all"},
+                    {text: qsTr("바로 안의 파일만"), value: "direct"},
+                    {text: qsTr("하위 폴더 단계 지정"), value: "limited"}]
                 textRole: "text"
                 valueRole: "value"
-                currentIndex: inspector.editor.selectedBlock && inspector.editor.selectedBlock.recursive === false ? 1 : 0
-                onActivated: inspector.editor.updateProcessing(inspector.editor.selectedId, "recursive", currentValue)
+                currentIndex: !inspector.editor.selectedBlock ? 0
+                    : inspector.editor.selectedBlock.recursive === false ? 1
+                    : inspector.editor.selectedBlock.maxDepth > 0 ? 2 : 0
+                onActivated: inspector.editor.setTraversalScope(inspector.editor.selectedId, currentValue)
+            }
+            AppSpinBox {
+                objectName: "flowTraversalMaxDepth"
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "folderScan" && inspector.editor.selectedBlock.maxDepth > 0
+                from: 1
+                to: 2147483647
+                editable: true
+                value: visible ? inspector.editor.selectedBlock.maxDepth : 1
+                onValueModified: inspector.editor.updateProcessing(inspector.editor.selectedId, "maxDepth", value)
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "folderScan" && inspector.editor.selectedBlock.maxDepth > 0
+                text: qsTr("1단계는 선택한 폴더 바로 아래의 하위 폴더까지 포함해요.")
+                color: inspector.mutedText
+                wrapMode: Text.WordWrap
             }
             AppComboBox {
                 objectName: "flowCallTargetCombo"

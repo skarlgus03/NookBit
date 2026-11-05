@@ -79,7 +79,7 @@ exactly one input node. Use the following processing nodes and no other fields:
 | `input` | `next` | Unique entry point; only the declared entry can use this type. |
 | `condition` | `when`, `next` | One atomic predicate from the earlier table. |
 | `otherwise` | `next` | Last sibling fallback when no ordinary sibling matches. |
-| `traverse` | `recursive`, `next` | Enumerate regular files in a folder. `true` includes all depths; `false` includes immediate files only. Subfolders themselves are not emitted. |
+| `traverse` | `recursive`, optional `maxDepth`, `next` | Enumerate regular files in a folder. `recursive: false` includes immediate files only. `recursive: true` without `maxDepth` includes all depths. With `recursive: true`, set integer `maxDepth` from 1 to 2147483647 to limit subfolder depth. The selected folder is depth 0. `maxDepth: 1` includes its files and those in its immediate subfolders. Subfolders themselves are not emitted. |
 | `call` | `target` | Terminal call: empty string selects default top-level rules; a flow ID calls that flow. No return continuation. |
 | `destination` | `destination` | Terminal destination object with the same path/permission/collision contract as ordinary rules. |
 | `exclude` | none | Terminal explicit do-not-move result. |

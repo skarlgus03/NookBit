@@ -695,6 +695,13 @@ void testNamedFolderFlowGraph() {
     auto edges = graph.value("edges").toList();
     int next = graph.value("nextId").toInt();
     nookbit::appendFolderFlowGraph({{"my-contents", "내용물만 정리"}}, {}, blocks, edges, next, 900);
+    for (auto& value : blocks) {
+        auto block = value.toMap();
+        if (block.value("type") == "folderScan") {
+            block["maxDepth"] = 1;
+            value = block;
+        }
+    }
     expect(editor.importGraph(blocks, edges) && editor.save(), "save named folder flow from graph");
     expect(editor.saveGraphLayout(blocks, edges), "save positions of flow nodes");
     auto saved = active.load();
@@ -702,11 +709,14 @@ void testNamedFolderFlowGraph() {
     editor.reload();
     const auto restored = editor.graph().value("blocks").toList();
     bool found = false;
+    bool depthRestored = false;
     for (const auto& value : restored) {
         const auto block = value.toMap();
         if (block.value("type") == "flowStart") found = block.value("value") == "내용물만 정리" && block.value("y").toDouble() == 900;
+        if (block.value("type") == "folderScan") depthRestored = block.value("maxDepth") == 1;
     }
     expect(found, "reload restores group name and layout");
+    expect(depthRestored, "reload restores the traversal depth on the canvas");
     const auto exported = editor.exportGraph(blocks, edges, QUrl::fromLocalFile(directory.filePath("export.json")));
     expect(exported.value("ok").toBool(), "export includes folder flows");
     const auto imported = editor.importJsonFile(QUrl::fromLocalFile(directory.filePath("export.json")));

@@ -113,7 +113,11 @@ Result<OperationPlan> CreatePreviewUseCase::execute(
                 const auto route = flows_->route(file, rules.value(), now);
                 if (!route) return Result<OperationPlan>::failure(route.error());
                 if (route.value().traverse) {
-                    const auto contents = scanner_.scan({{file.absolutePath}, route.value().recursive, {}, {}});
+                    ScanRequest traversal;
+                    traversal.roots = {file.absolutePath};
+                    traversal.recursive = route.value().recursive;
+                    traversal.maxDepth = route.value().maxDepth;
+                    const auto contents = scanner_.scan(traversal);
                     if (!contents) return Result<OperationPlan>::failure(contents.error());
                     if (!contents.value().warnings.empty()) return Result<OperationPlan>::failure({"preview.flow_scan_incomplete", "Folder traversal was incomplete; no files were moved."});
                     for (auto child : contents.value().files) {

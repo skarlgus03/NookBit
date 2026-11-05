@@ -113,6 +113,31 @@ void workflow(bool custom = false) {
     if (custom) expect(std::filesystem::exists(folder / "one.txt"), "custom flow leaves unmatched file in place");
     expect(bool(executor.rollback(frozen.value().id)), "undo flow as one operation");
     expect(std::filesystem::exists(folder / "one.txt") && std::filesystem::exists(folder / "nested/two.png"), "undo restores original nested source paths");
+    if (custom) {
+        write(folder / "nested/empty/three.png");
+        auto bounded = rules;
+        auto& traversal = bounded.folderFlows[0].nodes[1];
+        traversal.maxDepth = 1;
+        const auto oneLevelSignature = nookbit::PlanSignature::rules(bounded);
+        expect(oneLevelSignature != nookbit::PlanSignature::rules(rules), "bounded depth changes the approval signature");
+        expect(bool(repository.save(bounded)), "save one-level traversal");
+        const auto persisted = repository.load();
+        expect(persisted && persisted.value().folderFlows[0].nodes[1].maxDepth == 1, "JSON preserves the traversal limit");
+        const auto oneLevel = preview.execute(request);
+        expect(oneLevel && oneLevel.value().previewOutcomes.size() == 3 && oneLevel.value().steps.size() == 1
+            && oneLevel.value().steps[0].source == folder / "nested/two.png", "preview includes level one and omits deeper files");
+        traversal.maxDepth = 2;
+        expect(nookbit::PlanSignature::rules(bounded) != oneLevelSignature, "changing the depth changes the approval signature");
+        expect(bool(repository.save(bounded)), "save two-level traversal");
+        const auto twoLevels = preview.execute(request);
+        expect(twoLevels && twoLevels.value().previewOutcomes.size() == 4 && twoLevels.value().steps.size() == 2,
+            "expanding the limit reaches the next level");
+        traversal.maxDepth = 0;
+        expect(!repository.save(bounded), "zero depth rejected");
+        traversal.maxDepth = 1;
+        traversal.recursive = false;
+        expect(!repository.save(bounded), "depth cannot be set on immediate-only traversal");
+    }
     request.folderSelections[0].folderFlowId = "missing";
     expect(!preview.execute(request), "unknown flow cannot silently expand a folder");
     request.folderSelections[0] = {folder, "contents", "different-rules"};

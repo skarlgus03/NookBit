@@ -303,7 +303,7 @@ Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& r
         if (!node) return Result<ProcessingRoute>::success({});
         if (node->type == "traverse") {
             if (!file.fingerprint.directory) return invalid("Traversal requires a folder.");
-            return Result<ProcessingRoute>::success({{}, true, flow->id, node->id, node->recursive});
+            return Result<ProcessingRoute>::success({{}, true, flow->id, node->id, node->recursive, node->maxDepth});
         }
         if (node->type == "call") {
             if (node->targetFlow.empty()) {
