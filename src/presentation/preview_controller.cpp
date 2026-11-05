@@ -245,6 +245,12 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
             row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
             break;
+        case PreviewDisposition::AlreadyAtDestination:
+            ++excludedCount;
+            row.insert(QStringLiteral("status"), QStringLiteral("이미 목적지에 있음"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
+            row.insert(QStringLiteral("reason"), QStringLiteral("현재 위치가 규칙의 목적지와 같아서 그대로 두어요."));
+            break;
         }
         outcomes_.append(row);
     }

@@ -145,7 +145,16 @@ Result<OperationPlan> Planner::buildPlan(
             / file.absolutePath.filename();
         auto safety = PathSafetyValidator::validateMove(
             file.absolutePath, requestedDestination, selectedFiles, settings.homeRoot, appDataRoot_, settings.allowedDestinationRoots);
-        if (!safety) return Result<OperationPlan>::failure(safety.error());
+        if (!safety) {
+            // 정확히 같은 경로만 제외하고, 폴더를 자기 하위로 보내는 경우는 계속 차단한다.
+            if (safety.error().code != "path.same_source_and_destination" ||
+                pathKey(file.absolutePath) != pathKey(requestedDestination)) {
+                return Result<OperationPlan>::failure(safety.error());
+            }
+            plan.previewOutcomes.push_back({file.absolutePath, requestedDestination,
+                                            chosen.matchedRuleId, PreviewDisposition::AlreadyAtDestination});
+            continue;
+        }
         // 통합 백엔드만 초안을 허용하며 실제 이동 방식은 후속 볼륨 계약 준비가 결정한다.
         if (crossVolumeDrafts_ == CrossVolumeDrafts::Reject &&
             pathKey(file.absolutePath.root_name()) != pathKey(requestedDestination.root_name())) {

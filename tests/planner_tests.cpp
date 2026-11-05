@@ -3,6 +3,7 @@
 #include "modules/planner/planner.hpp"
 #include "modules/rules/rule_engine.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -177,6 +178,34 @@ void testCollisionPolicies() {
            "collision planning must not move source files");
 }
 
+// 이미 목적지에 있는 파일은 그대로 두고 나머지 이동을 계획하는지 검사하는 함수.
+void testAlreadyAtDestination() {
+    FixtureDirectory fixture;
+    if (!fixture.created) { expect(false, "temporary destination fixture"); return; }
+    const auto home = fixture.path / "organized";
+    const auto existing = home / "Pictures" / "existing.jpg";
+    const auto incoming = fixture.path / "incoming.jpg";
+    std::filesystem::create_directories(existing.parent_path());
+    expect(writeFile(existing, "existing") && writeFile(incoming, "incoming"), "destination fixtures");
+    nookbit::FilesystemScanner scanner;
+    const auto snapshot = scanner.scan({{}, false, {}, {existing, incoming}});
+    if (!snapshot) { expect(false, "destination fixtures scan"); return; }
+    nookbit::RuleEngine engine;
+    nookbit::Planner planner(engine, fixture.path / "app-data");
+    nookbit::UserSettings settings;
+    settings.homeRoot = home;
+    settings.defaultCollisionPolicy = nookbit::CollisionPolicy::Abort;
+    const auto plan = planner.buildPlan(snapshot.value(), settings, imageRules());
+    expect(plan && plan.value().steps.size() == 1 &&
+               plan.value().steps.front().destination == existing.parent_path() / incoming.filename(),
+           "an item at its destination cannot block other moves");
+    expect(plan && std::any_of(plan.value().previewOutcomes.begin(), plan.value().previewOutcomes.end(),
+               [&](const auto& outcome) {
+                   return outcome.source == existing &&
+                          outcome.disposition == nookbit::PreviewDisposition::AlreadyAtDestination;
+               }), "preview identifies the item already at its destination");
+}
+
 // 규칙에 맞지 않는 파일의 처리 방식을 설정대로 적용하는지 검사하는 함수.
 void testUnmatchedPolicy() {
     FixtureDirectory fixture;
@@ -282,6 +311,7 @@ void testAppDataIsProtected() {
 int main() {
     testPreviewWorkflowWithoutMoving();
     testCollisionPolicies();
+    testAlreadyAtDestination();
     testUnmatchedPolicy();
     testExplicitExclusion();
     testAppDataIsProtected();
