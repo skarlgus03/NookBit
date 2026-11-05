@@ -47,6 +47,7 @@ Item {
         inspector.dismissTransientUi();
         testPanel.dismissTransientUi();
         documents.dismissTransientUi();
+        inspection.close();
     }
     onVisibleChanged: if (!visible && pageInitialized)
                           dismissTransientUi()
@@ -89,6 +90,10 @@ Item {
             hasUnsavedChanges: session.graphDirty || page.controller.dirty || page.oldEditorFormDirty
             onSaveRequested: documents.requestSave()
             onTestRequested: testPanel.visible ? testPanel.close() : testPanel.open()
+            onInspectRequested: {
+                inspection.report = page.controller.inspectGraph(session.blocks, session.edges);
+                inspection.open();
+            }
             onImportRequested: documents.requestImport()
             onExportRequested: documents.requestExport()
             onReloadRequested: documents.requestReload()
@@ -150,5 +155,69 @@ Item {
         editor: session
         controller: page.controller
         dark: page.darkMode
+    }
+    Dialog {
+        id: inspection
+        objectName: "ruleInspectionDialog"
+        property var report: ({})
+        readonly property var warnings: report.warnings || []
+        parent: page
+        anchors.centerIn: parent
+        width: Math.max(1, Math.min(page.width - UiMetrics.spaceSection * 2, UiMetrics.ruleHelpWidth))
+        height: Math.max(1, Math.min(implicitHeight, page.height - UiMetrics.spaceSection * 2))
+        title: qsTr("규칙 검사")
+        modal: true
+        standardButtons: Dialog.Close
+        contentItem: ColumnLayout {
+            spacing: UiMetrics.spaceControl
+            Label {
+                Layout.fillWidth: true
+                text: inspection.report.error ? qsTr("구조 오류 · 저장할 수 없어요")
+                    : inspection.warnings.length ? qsTr("경고 %1개 · 저장할 수 있어요").arg(inspection.warnings.length)
+                    : qsTr("검사한 항목에서 오류나 경고를 찾지 못했어요.")
+                font.bold: true
+                wrapMode: Text.Wrap
+                color: inspection.report.error ? page.theme.danger
+                    : inspection.warnings.length ? page.theme.warning : page.theme.text
+            }
+            ScrollView {
+                visible: !!inspection.report.error || inspection.warnings.length > 0
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredHeight: inspectionRows.implicitHeight
+                contentWidth: availableWidth
+                clip: true
+                Column {
+                    id: inspectionRows
+                    width: parent.width
+                    spacing: UiMetrics.spaceExtraSmall
+                    Repeater {
+                        model: inspection.report.error
+                            ? [{blockId: inspection.report.blockId, reason: inspection.report.error}]
+                            : inspection.warnings
+                        delegate: RuleEditorButton {
+                            required property var modelData
+                            objectName: "ruleInspectionRow"
+                            width: inspectionRows.width
+                            dark: page.darkMode
+                            labelAlignment: Text.AlignLeft
+                            enabled: modelData.blockId > 0
+                            text: inspection.report.error ? modelData.reason
+                                : qsTr("노드 %1 · %2").arg(modelData.blockId).arg(modelData.reason)
+                            onClicked: {
+                                inspection.close();
+                                session.focusBlock(modelData.blockId);
+                                canvas.focusCanvas();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Connections {
+            target: session
+            function onBlocksChanged() { inspection.close(); }
+            function onEdgesChanged() { inspection.close(); }
+        }
     }
 }

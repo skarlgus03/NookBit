@@ -12,6 +12,7 @@ ColumnLayout {
     property bool hasUnsavedChanges: false
     signal saveRequested
     signal testRequested
+    signal inspectRequested
     signal importRequested
     signal exportRequested
     signal reloadRequested
@@ -263,6 +264,14 @@ ColumnLayout {
         id: editMenu
         objectName: "ruleEditMenu"
         anchorButton: editMenuButton
+        MenuAction {
+            text: qsTr("규칙 검사")
+            objectName: "ruleInspectAction"
+            onClicked: {
+                editMenu.close();
+                toolbar.inspectRequested();
+            }
+        }
         MenuAction {
             text: qsTr("블록 추가")
             onClicked: {

@@ -298,6 +298,8 @@ int main(int argc, char** argv) {
             function saveGraphLayout(blocks, edges) { ++layouts; return true }
             // 파일을 읽지 않고 고정된 저장본을 반환하는 대역 함수.
             function graph() { return {valid: true, blocks: [{id: 1, type: "start", x: 70, y: 220, value: "Input"}], edges: [], nextId: 2, incompleteLeaves: 0} }
+            // 화면 이동을 시험할 검사 결과를 반환하는 대역 함수.
+            function inspectGraph(blocks, edges) { return {warnings: [{blockId: 1, reason: "Warning"}]} }
         })", QUrl());
     std::unique_ptr<QObject> controller(stub.create());
     if (!controller) { std::cerr << stub.errorString().toStdString(); return 1; }
@@ -461,6 +463,31 @@ int main(int argc, char** argv) {
     expect(logicalCard && logicalCard->property("width").toDouble()<state->property("blockWidth").toDouble()
         && logicalCard->property("height").toDouble()<state->property("blockHeight").toDouble(),"AND node is smaller than ordinary condition cards");
     expect(logicalCard && logicalCard->findChild<QObject*>(QString("rulePredicatePort_%1").arg(andId)),"logical node exposes a separate condition socket");
+    auto inspectionPage = create(engine, "RuleEditorPage", {
+        {"controller", QVariant::fromValue(controller.get())}, {"destinations", QVariant::fromValue(controller.get())},
+        {"guideService", QVariant::fromValue(controller.get())}, {"width", 828}, {"height", 600}
+    });
+    if (!inspectionPage) return 1;
+    qobject_cast<QQuickItem*>(inspectionPage.get())->setParentItem(host.contentItem());
+    settle();
+    inspectionPage->setProperty("zoom", 1.25);
+    auto* inspectAction = inspectionPage->findChild<QObject*>("ruleInspectAction");
+    auto* inspection = inspectionPage->findChild<QObject*>("ruleInspectionDialog");
+    expect(inspectAction && inspection, "inspection command and results dialog are present");
+    if (inspectAction && inspection) {
+        QMetaObject::invokeMethod(inspectAction, "clicked");
+        settle();
+        auto* content = inspection->property("contentItem").value<QQuickItem*>();
+        auto* row = findMenuItem(findMenuItem, content, "ruleInspectionRow");
+        expect(inspection->property("opened").toBool() && row && row->isVisible(), "inspection opens with a navigable warning");
+        if (row) {
+            QMetaObject::invokeMethod(row, "clicked");
+            settle();
+            const auto selected = inspectionPage->property("selectedBlock").value<QJSValue>().toVariant().toMap();
+            expect(!inspection->property("visible").toBool() && selected.value("id") == 1
+                && inspectionPage->property("zoom").toDouble() == 1.25, "warning selects its node and preserves zoom");
+        }
+    }
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

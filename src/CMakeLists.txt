@@ -28,6 +28,7 @@ add_library(nookbit_core STATIC
   application/use_cases/finalize_transfer_use_case.cpp
   application/use_cases/rollback_transfer_use_case.cpp
   modules/rules/rule_engine.cpp
+  modules/rules/rule_diagnostics.cpp
   modules/rules/processing_flow.cpp
   modules/watch/watch_evaluator.cpp
   modules/watch/watch_file_readiness.cpp

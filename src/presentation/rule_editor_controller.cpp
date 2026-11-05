@@ -2,6 +2,7 @@
 #include "presentation/rule_editor_controller.hpp"
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "presentation/folder_flow_graph.hpp"
+#include "modules/rules/rule_diagnostics.hpp"
 
 #include <QDateTime>
 #include <QDir>
@@ -971,7 +972,51 @@ QVariantMap RuleEditorController::exportGraph(const QVariantList& blocks,
     return {{QStringLiteral("ok"), true}};
 }
 
-// 미저장 그래프를 검증한 뒤 선택 파일 또는 가상 파일의 분류 경로만 계산하는 함수.
+// 미저장 그래프의 구조 오류와 도달 불가 경고를 화면 번호와 함께 반환하는 함수.
+QVariantMap RuleEditorController::inspectGraph(const QVariantList& blocks, const QVariantList& edges) const {
+    // 기존 그래프 오류에 붙은 캔버스 번호를 검사 결과에 함께 전달하는 함수.
+    const auto reportError = [](const Error& error) -> QVariantMap {
+        const auto message = QString::fromStdString(error.message);
+        const QRegularExpression nodePrefix(QStringLiteral(R"(^(?:노드|블록) (\d+):)"));
+        return {{"error", message}, {"blockId", nodePrefix.match(message).captured(1).toInt()}};
+    };
+    const auto split = splitEditableGraph(blocks, edges, flowCondition);
+    if (!split) return reportError(split.error());
+    const auto nodes = baseGraphRules(split.value().blocks, split.value().edges);
+    if (!nodes) return reportError(nodes.error());
+
+    QSet<int> operands;
+    for (const auto& value : edges) {
+        const auto edge = value.toMap();
+        if (edge.value("kind") == "predicate") operands.insert(edge.value("from").toInt());
+    }
+    QHash<QString, QHash<QString, int>> blockIds;
+    for (const auto& value : blocks) {
+        const auto block = value.toMap();
+        const int id = block.value("id").toInt();
+        if (operands.contains(id)) continue;
+        const auto flow = block.value("flowId").toString();
+        auto key = block.value(flow.isEmpty() ? "ruleId" : "flowNodeId").toString();
+        if (key.isEmpty()) key = QStringLiteral("%1-%2").arg(flow.isEmpty() ? "graph" : "node").arg(id);
+        blockIds[flow].insert(key, id);
+    }
+    RuleSet rules;
+    rules.nodes = nodes.value();
+    rules.folderFlows = split.value().flows;
+    QVariantList warnings;
+    for (const auto& warning : inspectRules(rules)) {
+        const auto& ids = blockIds[QString::fromStdString(warning.flowId)];
+        const int target = ids.value(QString::fromStdString(warning.nodeId));
+        const int earlier = ids.value(QString::fromStdString(warning.earlierNodeId));
+        const auto reason = earlier
+            ? QStringLiteral("앞의 노드 %1이 같은 입력을 모두 먼저 선택해요.").arg(earlier)
+            : QStringLiteral("이 노드에 적용되는 조건을 동시에 만족하는 대상이 없어요.");
+        warnings.append(QVariantMap{{"blockId", target}, {"earlierBlockId", earlier}, {"reason", reason}});
+    }
+    return {{"warnings", warnings}};
+}
+
+// 주어진 파일이 초안에서 어느 분류 경로를 타는지 시험하는 함수.
 QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QVariantList& edges,
                                             const QUrl& fileUrl, const QString& fileName,
                                             const QString& sizeBytes, const QString& ageDays, bool directory) const {

@@ -159,6 +159,16 @@ QtObject {
         if (block) editingFlowId = block.flowId || "";
     }
 
+    // 현재 확대율을 유지하며 검사 결과의 노드를 캔버스 가운데로 이동하는 함수.
+    function focusBlock(id) {
+        const block = blockForId(id);
+        if (!block)
+            return;
+        selectOnly(id);
+        panX = viewportWidth / 2 - (block.x + widthFor(block) / 2) * zoom;
+        panY = viewportHeight / 2 - (block.y + heightFor(block) / 2) * zoom;
+    }
+
     // 파일 입력 바로 아래에 연결된 최상위 조건 블록인지 확인하는 함수.
     function isRootBlock(id) {
         return edges.some(edge => edge.from === 1 && edge.to === id);

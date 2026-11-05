@@ -851,6 +851,57 @@ void testLogicalGraph() {
     auto flowEdges=edges;flowEdges[0]=QVariantMap{{"from",8},{"to",2}};flowEdges.append(QVariantMap{{"from",1},{"to",9}});flowEdges.append(QVariantMap{{"from",9},{"to",10}});
     expect(editor.importGraph(flowBlocks,flowEdges)&&editor.save(),"logical predicates work in named processing graphs");
 }
+// 모순과 가려짐을 경고하고 구조 오류는 저장을 막는지 검사하는 함수.
+void testRuleInspection() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"), schema);
+    const auto initial = defaults.load();
+    if (!initial || !active.save(initial.value())) {
+        expect(false, "inspection fixture saved");
+        return;
+    }
+    nookbit::RuleEditorController editor(active, active);
+    QVariantList blocks{
+        QVariantMap{{"id", 1}, {"type", "start"}},
+        QVariantMap{{"id", 2}, {"type", "extension"}, {"value", "PNG"}},
+        QVariantMap{{"id", 3}, {"type", "exclude"}},
+        QVariantMap{{"id", 4}, {"type", "all"}},
+        QVariantMap{{"id", 5}, {"type", "extension"}, {"value", "png"}},
+        QVariantMap{{"id", 6}, {"type", "size"}, {"value", "5"}, {"unit", "MB"}, {"comparison", "greaterThan"}},
+        QVariantMap{{"id", 7}, {"type", "destination"}, {"value", "Images"}}
+    };
+    const QVariantList edges{
+        QVariantMap{{"from", 1}, {"to", 2}}, QVariantMap{{"from", 2}, {"to", 3}},
+        QVariantMap{{"from", 1}, {"to", 4}}, QVariantMap{{"from", 4}, {"to", 7}},
+        QVariantMap{{"from", 5}, {"to", 4}, {"kind", "predicate"}},
+        QVariantMap{{"from", 6}, {"to", 4}, {"kind", "predicate"}}
+    };
+    auto report = editor.inspectGraph(blocks, edges);
+    auto warnings = report.value("warnings").toList();
+    expect(warnings.size() == 1 && warnings.first().toMap().value("blockId") == 4
+        && warnings.first().toMap().value("earlierBlockId") == 2, "earlier PNG shadows narrower AND branch");
+    expect(editor.importGraph(blocks, edges) && editor.save(), "warnings allow save");
+
+    blocks[1] = QVariantMap{{"id", 2}, {"type", "name"}, {"value", "report"}};
+    expect(editor.inspectGraph(blocks, edges).value("warnings").toList().isEmpty(),
+        "unknown earlier condition does not falsely shadow a branch");
+    blocks[4] = QVariantMap{{"id", 5}, {"type", "size"}, {"value", "5"}, {"unit", "MB"}, {"comparison", "atMost"}};
+    warnings = editor.inspectGraph(blocks, edges).value("warnings").toList();
+    expect(warnings.size() == 1 && warnings.first().toMap().value("blockId") == 4
+        && warnings.first().toMap().value("earlierBlockId") == 0, "exclusive size boundaries are contradictory");
+    auto inclusive = blocks[5].toMap();
+    inclusive["comparison"] = "atLeast";
+    blocks[5] = inclusive;
+    expect(editor.inspectGraph(blocks, edges).value("warnings").toList().isEmpty(),
+        "equal inclusive boundaries have a valid match");
+    auto broken = edges;
+    broken.removeLast();
+    report = editor.inspectGraph(blocks, broken);
+    expect(!report.value("error").toString().isEmpty() && report.value("blockId") == 4
+        && !editor.importGraph(blocks, broken), "incomplete AND reports a navigable structural error and cannot save");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -867,6 +918,7 @@ int main(int argc, char* argv[]) {
     testSizeUnits();
     testExternalDestinations();
     testLogicalGraph();
+    testRuleInspection();
     testSourceFolderGraph();
     testItemTypeRules();
     testNamedFolderFlowGraph();

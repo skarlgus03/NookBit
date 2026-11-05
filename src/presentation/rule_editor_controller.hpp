@@ -64,6 +64,8 @@ public:
     Q_INVOKABLE bool remove(const QString& path);
     /// 노드 화면의 연결과 입력을 검사한 뒤 편집 초안으로 변환하는 함수.
     Q_INVOKABLE bool importGraph(const QVariantList& blocks, const QVariantList& edges);
+    // 현재 캔버스의 구조 오류와 도달 불가 경고를 반환하는 함수.
+    Q_INVOKABLE QVariantMap inspectGraph(const QVariantList& blocks, const QVariantList& edges) const;
     /// 외부 v3 JSON을 검증하고 성공한 경우에만 편집 초안으로 불러오는 함수.
     Q_INVOKABLE QVariantMap importJsonFile(const QUrl& fileUrl);
     /// 현재 화면 그래프를 검증해 활성 규칙을 바꾸지 않고 별도 JSON으로 내보내는 함수.
