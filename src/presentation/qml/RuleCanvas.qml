@@ -325,6 +325,7 @@ Rectangle {
         const point = editor.worldPoint(screenX, screenY);
         editor.addMenuWorldX = point.x;
         editor.addMenuWorldY = point.y;
+        addNodeMenu.expandedGroupIndex = -1;
         addNodeMenu.x = Math.max(0, Math.min(screenX, canvasViewport.width - addNodeMenu.width));
         addNodeMenu.y = Math.max(0, Math.min(screenY, canvasViewport.height - addNodeMenu.height));
         addNodeMenu.open();
@@ -348,12 +349,14 @@ Rectangle {
     Popup {
         id: addNodeMenu
         objectName: "addNodeMenu"
+        property int expandedGroupIndex: -1
         parent: canvasViewport
         width: UiMetrics.nodeAddMenuWidth
         height: Math.min(nodeAddColumn.implicitHeight + topPadding + bottomPadding, Math.max(UiMetrics.controlHeight, canvasViewport.height
                                                                                              - UiMetrics.spaceControl
                                                                                              * 2))
         padding: UiMetrics.buttonPadding
+        onHeightChanged: y = Math.max(0, Math.min(y, canvasViewport.height - height))
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -370,22 +373,23 @@ Rectangle {
             Column {
                 id: nodeAddColumn
                 width: nodeAddScroll.availableWidth
-                spacing: UiMetrics.spaceGroup
+                spacing: UiMetrics.spaceExtraSmall
                 Repeater {
                     model: canvas.editor.nodeAddGroups
                     delegate: Column {
                         id: nodeGroup
                         required property var modelData
+                        required property int index
                         width: nodeAddColumn.width
                         spacing: UiMetrics.spaceExtraSmall
-                        Label {
-                            objectName: "nodeAddGroupHeading"
+                        ThemeButton {
+                            objectName: "nodeAddGroup_" + nodeGroup.index
                             width: parent.width
-                            leftPadding: UiMetrics.spaceControl
-                            text: nodeGroup.modelData.title
-                            font.pixelSize: UiMetrics.textCaption
-                            font.bold: true
-                            color: canvas.theme.muted
+                            appearance: AppButton.Menu
+                            labelAlignment: Text.AlignLeft
+                            text: (addNodeMenu.expandedGroupIndex === nodeGroup.index ? "▾  " : "▸  ") + nodeGroup.modelData.title
+                            selected: addNodeMenu.expandedGroupIndex === nodeGroup.index
+                            onClicked: addNodeMenu.expandedGroupIndex = selected ? -1 : nodeGroup.index
                         }
                         Repeater {
                             model: nodeGroup.modelData.nodes
@@ -393,10 +397,11 @@ Rectangle {
                                 required property var modelData
                                 objectName: "addNode_" + modelData.type
                                 width: nodeGroup.width
-                                text: "+ " + modelData.title
-                                hoverEnabled: true
-                                ToolTip.visible: hovered
-                                ToolTip.text: nodeGroup.modelData.hint
+                                visible: addNodeMenu.expandedGroupIndex === nodeGroup.index
+                                appearance: AppButton.Menu
+                                labelAlignment: Text.AlignLeft
+                                leftPadding: UiMetrics.controlPadding + UiMetrics.spaceGroup
+                                text: modelData.title
                                 onClicked: {
                                     canvas.editor.addBlock(modelData.type, canvas.editor.addMenuWorldX,
                                                            canvas.editor.addMenuWorldY);

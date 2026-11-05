@@ -10,64 +10,26 @@ QtObject {
     signal repaintRequested
     signal destinationUpdated(int blockId, string value)
     readonly property var nodeAddGroups: [
-        {
-            title: qsTr("폴더 처리 흐름"),
-            hint: qsTr("대기 목록의 폴더에서 선택할 별도 흐름을 만들어요."),
-            nodes: [{ type: "folderFlow", title: qsTr("폴더 내용물 정리 흐름") },
-                { type: "classificationFlow", title: qsTr("별도 분류 흐름") },
-                { type: "folderScan", title: qsTr("내부 파일 순회") },
-                { type: "callFlow", title: qsTr("분류 흐름 호출") }]
-        },
-        {
-            title: qsTr("조건 검사"),
-            hint: qsTr("조건이 맞으면 다음 노드로 진행해요."),
-            nodes: [
-                {
-                    type: "itemType",
-                    title: qsTr("대상 종류 (파일 / 폴더)")
-                },
-                {
-                    type: "extension",
-                    title: qsTr("확장자")
-                },
-                {
-                    type: "size",
-                    title: qsTr("크기")
-                },
-                {
-                    type: "name",
-                    title: qsTr("이름 포함")
-                },
-                {
-                    type: "age",
-                    title: qsTr("수정 경과일")
-                }
-            ]
-        },
-        {
-            title: qsTr("분기"),
-            hint: qsTr("같은 부모의 다른 조건이 모두 맞지 않을 때 진행해요."),
-            nodes: [
-                {
-                    type: "otherwise",
-                    title: qsTr("그 외")
-                }
-            ]
-        },
-        {
-            title: qsTr("종착점"),
-            hint: qsTr("여기서 분류가 끝나요. 자식 노드를 연결할 수 없어요."),
-            nodes: [
-                {
-                    type: "destination",
-                    title: qsTr("목적지")
-                },
-                {
-                    type: "exclude",
-                    title: qsTr("정리 제외")
-                }
-            ]
-        }
+        { title: qsTr("조건 추가"), nodes: [
+            { type: "itemType", title: qsTr("파일 / 폴더 구분") },
+            { type: "extension", title: qsTr("확장자") },
+            { type: "size", title: qsTr("파일 크기") },
+            { type: "name", title: qsTr("이름 포함") },
+            { type: "age", title: qsTr("수정 경과일") },
+            { type: "otherwise", title: qsTr("그 외 (예외)") }
+        ] },
+        { title: qsTr("결과 추가"), nodes: [
+            { type: "destination", title: qsTr("목적지") },
+            { type: "exclude", title: qsTr("정리하지 않음") }
+        ] },
+        { title: qsTr("처리 단계 추가"), nodes: [
+            { type: "folderScan", title: qsTr("폴더 내부 순회") },
+            { type: "callFlow", title: qsTr("분류 흐름 호출") }
+        ] },
+        { title: qsTr("새 흐름 만들기"), nodes: [
+            { type: "folderFlow", title: qsTr("폴더 내용물 정리") },
+            { type: "classificationFlow", title: qsTr("별도 분류") }
+        ] }
     ]
     property int fontPresetIndex: 1
     readonly property int nodeFontSize: UiMetrics.nodeTextSizes[fontPresetIndex]

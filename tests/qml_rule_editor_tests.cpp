@@ -234,6 +234,34 @@ int main(int argc, char** argv) {
     auto* addMenu = canvas->findChild<QObject*>("addNodeMenu");
     expect(addMenu && !addMenu->property("visible").toBool() && state->property("panX").toInt() == 40
         && state->property("panY").toInt() == 25, "right drag pans without opening the add menu");
+    call(engine, canvas.get(), "openAddMenu", {50, 40});
+    settle();
+    // 반복 생성된 메뉴 항목을 팝업의 실제 화면 트리에서 찾는 함수.
+    const auto findMenuItem = [&](auto&& self, QQuickItem* root, const QString& name) -> QQuickItem* {
+        if (!root) return nullptr;
+        if (root->objectName() == name) return root;
+        for (auto* child : root->childItems()) if (auto* found = self(self, child, name)) return found;
+        return nullptr;
+    };
+    auto* menuContent = addMenu ? addMenu->property("contentItem").value<QQuickItem*>() : nullptr;
+    auto* conditionGroup = findMenuItem(findMenuItem, menuContent, "nodeAddGroup_0");
+    auto* resultGroup = findMenuItem(findMenuItem, menuContent, "nodeAddGroup_1");
+    auto* extensionEntry = findMenuItem(findMenuItem, menuContent, "addNode_extension");
+    auto* destinationEntry = findMenuItem(findMenuItem, menuContent, "addNode_destination");
+    expect(conditionGroup && resultGroup && extensionEntry && destinationEntry
+        && !extensionEntry->isVisible() && !destinationEntry->isVisible(),
+        "node menu initially shows categories with node lists collapsed");
+    if (conditionGroup && resultGroup && extensionEntry && destinationEntry) {
+        QMetaObject::invokeMethod(conditionGroup, "clicked");
+        settle();
+        expect(extensionEntry->isVisible() && !destinationEntry->isVisible(), "clicking a category expands its node list");
+        QMetaObject::invokeMethod(resultGroup, "clicked");
+        settle();
+        expect(!extensionEntry->isVisible() && destinationEntry->isVisible(), "switching categories keeps the menu compact");
+        QMetaObject::invokeMethod(resultGroup, "clicked");
+        expect(!destinationEntry->isVisible(), "clicking the expanded category collapses it");
+    }
+    call(engine, canvas.get(), "dismissTransientUi");
     auto card = create(engine, "RuleNodeCard", {{"editor", QVariant::fromValue(state.get())},
         {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))}, {"modelData", list(state.get(), "blocks").first()}});
     if (!card) return 1;

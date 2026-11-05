@@ -374,10 +374,10 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
                     return false;
                 }
             }
-            // 추가 메뉴가 조건·분기·종착점을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
+            // 추가 메뉴가 조건·결과·처리·새 흐름을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
             const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
             if (groups.size() != 4) return false;
-            const QStringList expectedTypes{"folderFlow", "classificationFlow", "folderScan", "callFlow", "itemType", "extension", "size", "name", "age", "otherwise", "destination", "exclude"};
+            const QStringList expectedTypes{"itemType", "extension", "size", "name", "age", "otherwise", "destination", "exclude", "folderScan", "callFlow", "folderFlow", "classificationFlow"};
             QStringList actualTypes;
             for (const auto& group : groups) {
                 for (const auto& node : group.toMap().value("nodes").toList())
