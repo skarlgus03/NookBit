@@ -35,13 +35,9 @@ Rectangle {
                                                                                                                blockCard.editor.selectedIds.includes(
                                                                                                                    modelData.id)
                                                                                                                ? 3 : 1
-    border.color: blockCard.editor.testTraceBlockIds.includes(modelData.id) ? blockCard.theme.edgeTrace : modelData.type
-                                                                              === "start"
-                                                                              ? blockCard.theme.nodeInputBorder :
-                                                                                blockCard.editor.selectedIds.includes(
-                                                                                    modelData.id) ? blockCard.colorFor(
-                                                                                                        modelData.type) :
-                                                                                                    blockCard.borderColor
+    border.color: blockCard.editor.testTraceBlockIds.includes(modelData.id) ? theme.edgeTrace
+        : blockCard.editor.selectedIds.includes(modelData.id) ? (theme.nodeSelectionKinds[modelData.type] || theme.nodeSelectionKinds.fallback)
+        : modelData.type === "start" ? theme.nodeInputBorder : blockCard.borderColor
 
     // 유일한 파일 입력은 조건 카드와 구별되는 캡슐형 시작점으로 표시한다.
     Row {

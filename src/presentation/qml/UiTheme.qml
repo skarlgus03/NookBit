@@ -53,6 +53,11 @@ QtObject {
     // 기본 팔레트를 화면·상태·버튼·캔버스가 공유할 의미별 색상표로 변환하는 함수.
     function buildTheme(p, isDark) {
         const accentColor = isDark ? darkAccentColor : lightAccentColor
+        const nodeSelectionKinds = {}
+        for (const kind of Object.keys(nodePalette)) {
+            const base = nodePalette[kind]
+            nodeSelectionKinds[kind] = isDark ? Qt.lighter(base, 1.7) : Qt.darker(base, 1.25)
+        }
         return {
             window: p.window, surface: p.surface, alternate: p.raised, home: p.window,
             inspectionVeil: white, text: p.text, contentText: p.text, muted: p.muted, homeMuted: p.muted,
@@ -78,7 +83,7 @@ QtObject {
             success: p.success, successSurface: p.successSoft, successBorder: p.success,
             warning: p.warning, warningSurface: p.warningSoft, danger: p.danger, dangerSurface: p.dangerSoft,
             bubbleSurface: p.surface, bubbleBorder: p.border, bubbleAction: p.accent,
-            nodeSurface: p.surface, nodeKinds: nodePalette, onNode: white,
+            nodeSurface: p.surface, nodeKinds: nodePalette, nodeSelectionKinds: nodeSelectionKinds, onNode: white,
             edge: p.accent, edgePending: p.muted,
             edgeDisconnect: p.warning, edgeTrace: p.success, snap: p.success,
             nodeInputSurface: p.successSoft, nodeInputBorder: p.success, nodeInputIcon: nodePalette.start,
