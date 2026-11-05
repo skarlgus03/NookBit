@@ -342,6 +342,33 @@ void testSourceFolder() {
     expect(matches(L"C:/Input/Project/Subfolder") && !matches(L"C:/Input/Project"), "folder targets compare their containing folder");
 }
 
+// 논리 묶음의 진리표·중첩·승인 서명과 기존 우선순위를 검사하는 함수.
+void testLogicalPredicates() {
+    nookbit::RuleSet rules; rules.id="logic"; rules.version="v3"; rules.schemaVersion=3;
+    auto logical=std::make_shared<nookbit::LogicalPredicate>();
+    logical->operands={nookbit::ExtensionPredicate{{"png"}},nookbit::NameContainsPredicate{"report"}};
+    nookbit::RuleNode node;node.id="combined";node.atomicCondition=nookbit::LogicalPredicatePtr(logical);
+    node.destination=nookbit::RuleDestination{L"Combined",std::nullopt};rules.nodes={node};
+    nookbit::RuleEngine engine;auto file=sampleFile();
+    // 같은 파일 정보로 묶음 조건의 분류 여부를 반환하는 함수.
+    const auto matches=[&](const wchar_t* name,const char* extension) {
+        file.absolutePath=std::filesystem::path(L"C:/Input")/name;file.relativePath=name;file.extension=extension;
+        const auto decision=engine.decide(file,rules,nookbit::MultiMatchPolicy::FirstMatch,0);
+        return decision && decision.value().has_value();
+    };
+    expect(matches(L"report.png","png"),"AND accepts all true");
+    expect(!matches(L"photo.png","png")&&!matches(L"report.txt","txt")&&!matches(L"other.txt","txt"),"AND rejects any false");
+    const auto allSignature=nookbit::PlanSignature::rules(rules);
+    auto any=std::make_shared<nookbit::LogicalPredicate>(*logical);any->all=false;
+    rules.nodes[0].atomicCondition=nookbit::LogicalPredicatePtr(any);
+    expect(matches(L"photo.png","png")&&matches(L"report.txt","txt")&&matches(L"report.png","png")&&!matches(L"other.txt","txt"),"OR truth table");
+    expect(allSignature!=nookbit::PlanSignature::rules(rules),"AND and OR have distinct signatures");
+    auto nested=std::make_shared<nookbit::LogicalPredicate>();
+    nested->operands={nookbit::LogicalPredicatePtr(any),nookbit::SizePredicate{nookbit::SizeComparison::AtLeast,10}};
+    rules.nodes[0].atomicCondition=nookbit::LogicalPredicatePtr(nested);file.fingerprint.size=10;
+    expect(matches(L"report.txt","txt"),"nested AND with OR accepts matching metadata");
+    file.fingerprint.size=9;expect(!matches(L"report.png","png"),"nested AND still requires outer condition");
+}
 } // namespace
 
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
@@ -351,6 +378,7 @@ int main() {
     testUnsafeDestination();
     testOrderedTreeAndOtherwise();
     testAtomicConditionTree();
+    testLogicalPredicates();
     testSourceFolder();
     testItemTypeConditions();
     if (failures == 0) {

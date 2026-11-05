@@ -103,6 +103,13 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
 // v3 노드의 단일 조건 하나만 파일 정보와 비교하는 함수.
 bool matchesAtomic(const AtomicRuleCondition& condition, const FileFact& file,
                    std::int64_t nowUtcMs) {
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        if (!*logical || (*logical)->operands.size() < 2) return false;
+        // 연결된 조건을 단락 평가하며 분류 가지 순서는 바꾸지 않는 함수.
+        const auto matches = [&](const AtomicRuleCondition& operand) { return matchesAtomic(operand, file, nowUtcMs); };
+        return (*logical)->all ? std::all_of((*logical)->operands.begin(), (*logical)->operands.end(), matches)
+            : std::any_of((*logical)->operands.begin(), (*logical)->operands.end(), matches);
+    }
     if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
         return file.fingerprint.directory == (type->value == ItemType::Folder);
     if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {

@@ -6,6 +6,37 @@
 #include <regex>
 
 namespace nookbit {
+namespace {
+// 논리 입력까지 포함한 조건 수를 제한해 편집 그래프가 과도하게 커지는 것을 막는 함수.
+std::size_t predicateSize(const AtomicRuleCondition& condition, int depth = 0) {
+    if (depth > 32) return 1001;
+    std::size_t total = 1;
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        if (!*logical || (*logical)->operands.size() < 2) return 1001;
+        for (const auto& operand : (*logical)->operands) {
+            total += predicateSize(operand, depth + 1);
+            if (total > 1000) break;
+        }
+    }
+    return total;
+}
+// 논리식이 통과시킬 수 있는 대상 종류를 보수적으로 계산하는 함수.
+int acceptedTypes(const AtomicRuleCondition& condition) {
+    if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) return type->value == ItemType::Folder ? 2 : 1;
+    if (std::holds_alternative<ExtensionPredicate>(condition) || std::holds_alternative<SizePredicate>(condition)) return 1;
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        if (!*logical) return 0;
+        int types = (*logical)->all ? 3 : 0;
+        for (const auto& input : (*logical)->operands) {
+            const int child = acceptedTypes(input);
+            types = (*logical)->all ? types & child : types | child;
+        }
+        return types;
+    }
+    return 3;
+}
+}
+
 // 이전 프리셋을 기본 입력·순회·호출 그래프로 변환하는 함수.
 RuleSet::FolderFlow expandedFlow(const RuleSet::FolderFlow& value) {
     if (!value.nodes.empty()) return value;
@@ -29,6 +60,7 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
         if (!std::regex_match(flow.id, id) || flow.name.empty() || !flows.emplace(flow.id, flow).second)
             return invalid("$.folderFlows: missing or duplicate flow ID/name.");
         total += flow.nodes.size();
+        for (const auto& node : flow.nodes) if (node.condition) total += predicateSize(*node.condition) - 1;
     }
     if (total > 1000) return invalid("$.folderFlows: total node limit is 1000.");
     std::map<std::string, std::set<std::string>> calls;
@@ -63,10 +95,7 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
             }
             visiting.insert(key);
             int outputTypes = node.type == "traverse" ? 1 : inputTypes;
-            if (node.condition) {
-                if (const auto* type = std::get_if<ItemTypePredicate>(&*node.condition)) outputTypes &= type->value == ItemType::Folder ? 2 : 1;
-                else if (std::holds_alternative<ExtensionPredicate>(*node.condition) || std::holds_alternative<SizePredicate>(*node.condition)) outputTypes &= 1;
-            }
+            if (node.condition) outputTypes &= acceptedTypes(*node.condition);
             bool otherwiseSeen = false;
             for (std::size_t index = 0; index < node.next.size(); ++index) {
                 const auto& child = node.next[index];

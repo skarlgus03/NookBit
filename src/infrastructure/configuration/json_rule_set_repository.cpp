@@ -152,9 +152,27 @@ bool legacyConditionEmpty(const RuleCondition& condition) {
 }
 
 // v3 JSON의 조건 종류별 입력을 정확히 하나의 조건 모델로 변환하는 함수.
-Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object) {
+Result<AtomicRuleCondition> convertAtomicCondition(const QJsonObject& object, int depth = 0, int* count = nullptr) {
+    int localCount = 0;
+    if (!count) count = &localCount;
+    if (++*count > 1000) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Condition expression exceeds 1000 nodes."});
+    if (depth > 32) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Logical condition nesting exceeds 32."});
     const auto type = object.value(QStringLiteral("type")).toString();
     const auto comparison = object.value(QStringLiteral("comparison")).toString();
+    if ((type == "all" || type == "any") && object.size() == 2 && object.value("conditions").isArray()) {
+        const auto inputs = object.value("conditions").toArray();
+        if (inputs.size() < 2 || inputs.size() > 1000)
+            return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "AND/OR needs 2 to 1000 conditions."});
+        auto logical = std::make_shared<LogicalPredicate>(); logical->all = type == "all";
+        for (const auto& input : inputs) {
+            if (!input.isObject()) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Expected a condition object."});
+            auto parsed = convertAtomicCondition(input.toObject(), depth + 1, count);
+            if (!parsed) return parsed;
+            logical->operands.push_back(std::move(parsed.value()));
+        }
+        return Result<AtomicRuleCondition>::success(LogicalPredicatePtr(logical));
+    }
+
     if (type == QStringLiteral("itemType") && object.size() == 2) {
         const auto kind = object.value(QStringLiteral("kind")).toString();
         if (kind == QStringLiteral("file") || kind == QStringLiteral("folder"))
@@ -249,7 +267,11 @@ Result<std::vector<RuleNode>> convertAtomicNodes(const QJsonArray& array,
                 return Result<std::vector<RuleNode>>::failure(atRuleLocation(
                     nodePath + QStringLiteral(".when"),
                     {"rules.condition_missing", "A normal rule node needs one condition."}));
-            auto condition = convertAtomicCondition(object.value(QStringLiteral("when")).toObject());
+            int conditionCount = 0;
+            auto condition = convertAtomicCondition(object.value(QStringLiteral("when")).toObject(), 0, &conditionCount);
+            nodeCount += conditionCount - 1;
+            if (nodeCount >= 1000) return Result<std::vector<RuleNode>>::failure(atRuleLocation(
+                nodePath + QStringLiteral(".when"), {"rules.tree_too_large", "Rule tree including logical operands exceeds 1000 nodes."}));
             if (!condition) return Result<std::vector<RuleNode>>::failure(
                 atRuleLocation(nodePath + QStringLiteral(".when"), condition.error()));
             node.atomicCondition = std::move(condition.value());
@@ -408,7 +430,22 @@ Result<QJsonObject> conditionObject(const RuleCondition& condition) {
 }
 
 // v3 단일 조건 모델을 종류별 JSON 필드로 변환하고 입력값을 검사하는 함수.
-Result<QJsonObject> atomicConditionObject(const AtomicRuleCondition& condition) {
+Result<QJsonObject> atomicConditionObject(const AtomicRuleCondition& condition, int depth = 0, int* count = nullptr) {
+    int localCount = 0;
+    if (!count) count = &localCount;
+    if (++*count > 1000) return Result<QJsonObject>::failure({"rules.condition_invalid", "Condition expression exceeds 1000 nodes."});
+    if (depth > 32) return Result<QJsonObject>::failure({"rules.condition_invalid", "Logical condition nesting exceeds 32."});
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        if (!*logical || (*logical)->operands.size() < 2 || (*logical)->operands.size() > 1000)
+            return Result<QJsonObject>::failure({"rules.condition_invalid", "AND/OR needs 2 to 1000 conditions."});
+        QJsonArray inputs;
+        for (const auto& operand : (*logical)->operands) {
+            const auto encoded = atomicConditionObject(operand, depth + 1, count);
+            if (!encoded) return encoded;
+            inputs.append(encoded.value());
+        }
+        return Result<QJsonObject>::success(QJsonObject{{"type", (*logical)->all ? "all" : "any"}, {"conditions", inputs}});
+    }
     if (const auto* type = std::get_if<ItemTypePredicate>(&condition))
         return Result<QJsonObject>::success(QJsonObject{
             {QStringLiteral("type"), QStringLiteral("itemType")},
@@ -487,7 +524,11 @@ Result<QJsonArray> atomicNodesObject(const std::vector<RuleNode>& nodes,
         } else {
             if (!node.atomicCondition) return Result<QJsonArray>::failure({
                 "rules.condition_missing", "A normal rule node needs one condition."});
-            auto condition = atomicConditionObject(*node.atomicCondition);
+            int conditionCount = 0;
+            auto condition = atomicConditionObject(*node.atomicCondition, 0, &conditionCount);
+            nodeCount += conditionCount - 1;
+            if (nodeCount >= 1000) return Result<QJsonArray>::failure({
+                "rules.tree_too_large", "Rule tree including logical operands exceeds 1000 nodes."});
             if (!condition) return Result<QJsonArray>::failure(condition.error());
             object.insert(QStringLiteral("when"), condition.value());
         }

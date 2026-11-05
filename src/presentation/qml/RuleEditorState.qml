@@ -17,6 +17,8 @@ QtObject {
             { type: "name", title: qsTr("이름 포함") },
             { type: "age", title: qsTr("수정 경과일") },
             { type: "sourceFolder", title: qsTr("원본 경로") },
+            { type: "all", title: qsTr("AND · 모두 만족") },
+            { type: "any", title: qsTr("OR · 하나 이상 만족") },
             { type: "otherwise", title: qsTr("그 외 (예외)") }
         ] },
         { title: qsTr("결과"), nodes: [
@@ -183,8 +185,8 @@ QtObject {
         const hits = blocks.filter(block => {
             const pos = positionFor(block);
             const screen = screenPoint(pos.x, pos.y);
-            return screen.x < right && screen.x + blockWidth * zoom > left && screen.y < bottom && screen.y
-                    + blockHeight * zoom > top;
+            return screen.x < right && screen.x + widthFor(block) * zoom > left && screen.y < bottom && screen.y
+                    + heightFor(block) * zoom > top;
         }).map(block => block.id);
         const next = addToSelection ? selectedIds.concat(hits.filter(id => !selectedIds.includes(id))) : hits;
         selectedIds = next;
@@ -238,7 +240,24 @@ QtObject {
 
     // 블록 입력점에 다른 블록의 선이 연결되었는지 반환하는 함수.
     function hasIncoming(id) {
-        return edges.some(edge => edge.to === id);
+        return edges.some(edge => edge.to === id && !edge.kind);
+    }
+
+    // 논리 연산 노드는 일반 카드보다 작은 공통 규격을 사용하는 함수.
+    function isLogical(block) { return block && ["all", "any"].includes(block.type); }
+    // 카드의 실제 너비를 반환하는 함수.
+    function widthFor(block) { return isLogical(block) ? UiMetrics.logicalNodeWidth : blockWidth; }
+    // 카드의 실제 높이를 반환하는 함수.
+    function heightFor(block) { return isLogical(block) ? UiMetrics.logicalNodeHeight : blockHeight; }
+    // 출력 연결점의 화면 좌표를 반환하는 함수.
+    function outputPoint(block) {
+        const p = positionFor(block);
+        return screenPoint(p.x + widthFor(block), p.y + heightFor(block) / 2);
+    }
+    // 실행 입력과 조건 계산 입력의 화면 좌표를 구별하는 함수.
+    function inputPoint(block, kind) {
+        const p = positionFor(block);
+        return screenPoint(p.x, p.y + heightFor(block) * (isLogical(block) ? (kind === "predicate" ? 0.75 : 0.25) : 0.5));
     }
 
     // 블록 출력점에서 다른 블록으로 선이 이어지는지 반환하는 함수.
@@ -303,8 +322,8 @@ QtObject {
             const pos = positionFor(block);
             left = Math.min(left, pos.x);
             top = Math.min(top, pos.y);
-            right = Math.max(right, pos.x + blockWidth);
-            bottom = Math.max(bottom, pos.y + blockHeight);
+            right = Math.max(right, pos.x + widthFor(block));
+            bottom = Math.max(bottom, pos.y + heightFor(block));
         }
         const margin = 80;
         zoom = Math.max(0.05, Math.min(2.5, Math.min((viewportWidth - margin * 2) / Math.max(1, right - left), (
@@ -325,6 +344,8 @@ QtObject {
             return qsTr("파일 입력");
         case "extension":
             return qsTr("확장자");
+        case "all": return "AND";
+        case "any": return "OR";
         case "sourceFolder": return qsTr("원본 경로");
         case "itemType":
             return qsTr("대상 종류");
@@ -357,7 +378,7 @@ QtObject {
         const examples = {
             folderScan: "", callFlow: "",
             itemType: "folder",
-            sourceFolder: "",
+            sourceFolder: "", all: "", any: "",
             extension: "png, jpg",
             size: "5",
             name: "report",
@@ -420,7 +441,7 @@ QtObject {
             idMap[block.id] = copy.id;
             return copy;
         });
-        const copiedConnections = copiedEdges.map(edge => ({
+        const copiedConnections = copiedEdges.map(edge => Object.assign({}, edge, {
             from: idMap[edge.from],
             to: idMap[edge.to]
         }));
@@ -566,7 +587,7 @@ QtObject {
 
     // 같은 부모 아래 일반 조건의 검사 순서를 반환하는 함수.
     function orderFor(id) {
-        const incoming = edges.find(edge => edge.to === id);
+        const incoming = edges.find(edge => edge.to === id && !edge.kind);
         if (!incoming)
             return -1;
         const block = blockForId(id);
@@ -619,7 +640,7 @@ QtObject {
     }
 
     // 한 부모와 한 자식 사이에 순환 없는 임시 연결을 만드는 함수.
-    function connectBlocks(fromId, toId) {
+    function connectBlocks(fromId, toId, kind = "") {
         const source = blockForId(fromId);
         const target = blockForId(toId);
         if (source && target && (source.flowId || "") !== (target.flowId || "")) {
@@ -632,13 +653,28 @@ QtObject {
             statusText = qsTr("자기 자신이나 조상 블록으로 연결할 수 없어요.");
             return false;
         }
+        if (kind === "predicate") {
+            if (!isLogical(target) || !["extension", "name", "size", "age", "itemType", "sourceFolder", "all", "any"].includes(source.type))
+                return false;
+            if (edges.some(edge => edge.from === fromId || (edge.to === fromId && !edge.kind))) {
+                statusText = qsTr("묶음에 넣을 조건의 기존 실행 연결을 먼저 끊어 주세요.");
+                return false;
+            }
+            edges = edges.concat([{from: fromId, to: toId, kind: "predicate"}]);
+            cancelConnection(); repaintRequested(); return true;
+        }
+        if (edges.some(edge => edge.from === fromId && edge.kind === "predicate")
+            || edges.some(edge => edge.from === toId && edge.kind === "predicate")) {
+            statusText = qsTr("AND·OR에 묶인 조건에는 실행 선을 함께 연결할 수 없어요.");
+            return false;
+        }
         for (const edge of edges) {
-            if (edge.to === toId) {
+            if (edge.to === toId && !edge.kind) {
                 statusText = qsTr("입력 하나에는 부모 블록 하나만 연결할 수 있어요.");
                 return false;
             }
         }
-        const existing = edges.filter(edge => edge.from === fromId);
+        const existing = edges.filter(edge => edge.from === fromId && !edge.kind);
         const terminal = ["destination", "exclude", "callFlow", "applyDefault", "folderScan"].includes(target.type);
         if (source.type === "start" && terminal) {
             statusText = qsTr("파일 입력 뒤에는 조건 또는 '그 외' 노드를 먼저 연결해 주세요.");
@@ -689,7 +725,11 @@ QtObject {
         const sourceId = connectingFrom;
         cancelConnection();
         for (const block of blocks) {
-            if (!["start", "flowStart"].includes(block.type) && Math.abs(x - block.x) < 28 && Math.abs(y - (block.y + blockHeight / 2))
+            const p = positionFor(block);
+            if (isLogical(block) && Math.abs(x - p.x) < 20 && Math.abs(y - (p.y + heightFor(block) * 0.75)) < 14) {
+                connectBlocks(sourceId, block.id, "predicate"); return;
+            }
+            if (!["start", "flowStart"].includes(block.type) && Math.abs(x - p.x) < 28 && Math.abs(y - (p.y + heightFor(block) * (isLogical(block) ? 0.25 : 0.5)))
                     < 28) {
                 connectBlocks(sourceId, block.id);
                 return;
@@ -798,8 +838,8 @@ QtObject {
                 continue;
             const a = positionFor(source);
             const b = positionFor(target);
-            const from = screenPoint(a.x + blockWidth, a.y + blockHeight / 2);
-            const to = screenPoint(b.x, b.y + blockHeight / 2);
+            const from = outputPoint(source);
+            const to = inputPoint(target, edge.kind);
             const current = connectionStyle === 1
                 ? ConnectionGeometry.distanceToSegment(screenX, screenY, from.x, from.y, to.x, to.y)
                 : ConnectionGeometry.distanceToCurve(screenX, screenY, connectionSegments(from.x, from.y, to.x, to.y))

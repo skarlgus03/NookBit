@@ -1,3 +1,4 @@
+#include "logical_rule_graph.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "presentation/folder_flow_graph.hpp"
@@ -124,6 +125,25 @@ Result<std::vector<RuleNode>> graphError(int id, const QString& description) {
         "rules.graph_invalid", message.toStdString()});
 }
 
+Result<AtomicRuleCondition> flowCondition(const QVariantMap& value);
+
+// AND·OR 입력을 원자 조건 또는 중첩 논리 조건으로 해석하는 함수.
+Result<AtomicRuleCondition> logicalGraphCondition(const QVariantMap& value, int depth = 0) {
+    if (depth > 32) return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "Logical condition depth exceeds 32."});
+    const auto type = value.value("type").toString();
+    if (type != "all" && type != "any") return flowCondition(value);
+    const auto operands = value.value("operands").toList();
+    if (operands.size() < 2 || operands.size() > 1000)
+        return Result<AtomicRuleCondition>::failure({"rules.condition_invalid", "AND/OR needs at least two input conditions."});
+    auto logical = std::make_shared<LogicalPredicate>(); logical->all = type == "all";
+    for (const auto& operand : operands) {
+        auto parsed = logicalGraphCondition(operand.toMap(), depth + 1);
+        if (!parsed) return parsed;
+        logical->operands.push_back(std::move(parsed.value()));
+    }
+    return Result<AtomicRuleCondition>::success(LogicalPredicatePtr(logical));
+}
+
 // 화면의 블록과 선을 순서 있는 단일 조건 규칙 트리로 바꾸는 함수.
 Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
                                          const QVariantList& edges) {
@@ -206,7 +226,11 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
             node.enabled = block.value(QStringLiteral("enabled"), true).toBool();
             node.otherwise = type == QStringLiteral("otherwise");
             const auto value = block.value(QStringLiteral("value")).toString().trimmed();
-            if (type == QStringLiteral("extension")) {
+            if (type == "all" || type == "any") {
+                auto parsed = logicalGraphCondition(block);
+                if (!parsed) return Result<std::vector<RuleNode>>::failure(parsed.error());
+                node.atomicCondition = std::move(parsed.value());
+            } else if (type == QStringLiteral("extension")) {
                 ExtensionPredicate extension;
                 for (const auto& part : value.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
                     QString token = part.trimmed().toLower();
@@ -389,7 +413,15 @@ QVariantMap graphBlockFor(const RuleNode& node, int id) {
         block.insert(QStringLiteral("value"), QStringLiteral("조건 없음"));
     } else if (node.atomicCondition) {
         const auto& condition = *node.atomicCondition;
-        if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
+        if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+            block.insert("type", *logical && (*logical)->all ? "all" : "any");
+            QVariantList operands;
+            if (*logical) for (const auto& operand : (*logical)->operands) {
+                RuleNode term; term.atomicCondition = operand;
+                operands.append(graphBlockFor(term, 0));
+            }
+            block.insert("operands", operands);
+        } else if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
             block.insert(QStringLiteral("type"), QStringLiteral("itemType"));
             block.insert(QStringLiteral("value"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file"));
         } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
@@ -437,9 +469,17 @@ Result<AtomicRuleCondition> flowCondition(const QVariantMap& value) {
     return Result<AtomicRuleCondition>::success(*checked.value()[0].atomicCondition);
 }
 
+// 조건 계산 선을 먼저 검사한 뒤 이름 있는 흐름과 실행 트리를 분리하는 함수.
+Result<FolderFlowGraph> splitEditableGraph(const QVariantList& blocks, const QVariantList& edges,
+                                         const FlowConditionParser& parser) {
+    const auto prepared = prepareLogicalGraph(blocks, edges);
+    if (!prepared) return Result<FolderFlowGraph>::failure(prepared.error());
+    return splitFolderFlowGraph(prepared.value().blocks, prepared.value().edges, parser);
+}
+
 // 처리 흐름을 먼저 검증하고 기본 분류 트리는 기존 검사기에 전달하는 함수.
 Result<std::vector<RuleNode>> graphRules(const QVariantList& blocks, const QVariantList& edges) {
-    const auto split = splitFolderFlowGraph(blocks, edges, flowCondition);
+    const auto split = splitEditableGraph(blocks, edges, flowCondition);
     if (!split) return Result<std::vector<RuleNode>>::failure(split.error());
     return baseGraphRules(split.value().blocks, split.value().edges);
 }
@@ -520,6 +560,29 @@ QVariantMap graphForRules(const RuleSet& rules,
                                {QStringLiteral("y"), startPosition.y()}});
     appendFolderFlowGraph(rules.folderFlows, savedPositions, blocks, edges, nextId, 170 + nextRow * 170 + 200,
         [](const ProcessingNode& node, int id) { RuleNode condition; condition.id = node.id; condition.atomicCondition = node.condition; return graphBlockFor(condition, id); });
+    std::function<void(QVariantMap, int, const QString&, const QString&, int)> appendOperands;
+    // 저장된 논리식을 독립 조건 카드와 조건 계산 선으로 복원하는 함수.
+    appendOperands = [&](QVariantMap owner, int ownerId, const QString& key, const QString& flowId, int depth) {
+        int row = 0;
+        for (const auto& operand : owner.value("operands").toList()) {
+            auto block = operand.toMap(); const int id = nextId++;
+            const auto stable = key + "-operand-" + QString::number(row++);
+            const auto position = graphPosition(savedPositions, "node:" + stable,
+                owner.value("x").toDouble() - 310, owner.value("y").toDouble() + (row - 1) * 150);
+            block["id"] = id; block["ruleId"] = stable;
+            if (!flowId.isEmpty()) { block["flowId"] = flowId; block["flowNodeId"] = stable; }
+            block["x"] = position.x(); block["y"] = position.y();
+            blocks.append(block); edges.append(QVariantMap{{"from", id}, {"to", ownerId}, {"kind", "predicate"}});
+            if (depth < 32) appendOperands(block, id, stable, flowId, depth + 1);
+        }
+    };
+    const auto owners = blocks;
+    for (const auto& value : owners) {
+        const auto owner = value.toMap();
+        if (owner.value("type") != "all" && owner.value("type") != "any") continue;
+        const auto key = owner.value("ruleId", owner.value("flowNodeId")).toString();
+        appendOperands(owner, owner.value("id").toInt(), key, owner.value("flowId").toString(), 0);
+    }
     return QVariantMap{{QStringLiteral("valid"), true},
                        {QStringLiteral("blocks"), blocks},
                        {QStringLiteral("edges"), edges},
@@ -589,7 +652,9 @@ QVariantMap RuleEditorController::detail(const QString& path) const {
     };
     if (!node->atomicCondition) return result;
     const auto& condition = *node->atomicCondition;
-    if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
+    if (const auto* logical = std::get_if<LogicalPredicatePtr>(&condition)) {
+        result.insert("type", *logical && (*logical)->all ? "all" : "any");
+    } else if (const auto* type = std::get_if<ItemTypePredicate>(&condition)) {
         result.insert(QStringLiteral("type"), QStringLiteral("itemType"));
         result.insert(QStringLiteral("value"), type->value == ItemType::Folder ? QStringLiteral("folder") : QStringLiteral("file"));
     } else if (const auto* extension = std::get_if<ExtensionPredicate>(&condition)) {
@@ -637,7 +702,10 @@ bool RuleEditorController::edit(const QString& path, const QString& id, bool ena
     }
     std::optional<AtomicRuleCondition> condition;
     if (!node->otherwise) {
-        if (type == QStringLiteral("extension")) {
+        if ((type == "all" || type == "any") && node->atomicCondition
+            && std::holds_alternative<LogicalPredicatePtr>(*node->atomicCondition)) {
+            condition = *node->atomicCondition;
+        } else if (type == QStringLiteral("extension")) {
             ExtensionPredicate parsed;
             for (const auto& part : value.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
                 QString extension = part.trimmed().toLower();
@@ -814,7 +882,7 @@ bool RuleEditorController::importGraph(const QVariantList& blocks, const QVarian
         return false;
     }
     draft_.nodes = std::move(converted.value());
-    draft_.folderFlows = splitFolderFlowGraph(blocks, edges, flowCondition).value().flows;
+    draft_.folderFlows = splitEditableGraph(blocks, edges, flowCondition).value().flows;
     dirty_ = true;
     message_ = QStringLiteral("노드 그래프를 규칙 초안으로 바꿨어요. 기존 편집기에서 확인한 뒤 저장해 주세요.");
     emit changed();
@@ -895,7 +963,7 @@ QVariantMap RuleEditorController::exportGraph(const QVariantList& blocks,
     RuleSet exported = draft_;
     exported.schemaVersion = 3;
     exported.nodes = std::move(checked.value());
-    exported.folderFlows = splitFolderFlowGraph(blocks, edges, flowCondition).value().flows;
+    exported.folderFlows = splitEditableGraph(blocks, edges, flowCondition).value().flows;
     const auto saved = fileWriter_->saveFile(
         std::filesystem::path(fileUrl.toLocalFile().toStdWString()), exported);
     if (!saved) return {{QStringLiteral("ok"), false},
@@ -992,12 +1060,36 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
         parent.insert(edge.value(QStringLiteral("to")).toInt(),
                       edge.value(QStringLiteral("from")).toInt());
     }
+    QHash<int, int> predicateOwner, operandOrder;
+    QHash<int, int> operandCounts;
+    for (const auto& value : edges) {
+        const auto edge = value.toMap(); if (edge.value("kind") != "predicate") continue;
+        const int source = edge.value("from").toInt(), target = edge.value("to").toInt();
+        predicateOwner[source] = target; operandOrder[source] = operandCounts[target]++;
+    }
+    std::function<QString(int, int)> expressionKey;
+    // 입력 노드 번호가 바뀌어도 같은 조건 위치에 저장 좌표를 대응시키는 함수.
+    expressionKey = [&](int id, int depth) -> QString {
+        if (depth > 32) return {};
+        if (predicateOwner.contains(id)) {
+            const auto owner = expressionKey(predicateOwner[id], depth + 1);
+            return owner.isEmpty() ? QString() : owner + "-operand-" + QString::number(operandOrder[id]);
+        }
+        const auto block = byId.value(id);
+        return block.value("flowId").toString().isEmpty()
+            ? block.value("ruleId", QStringLiteral("graph-%1").arg(id)).toString()
+            : block.value("flowNodeId", QStringLiteral("node-%1").arg(id)).toString();
+    };
     QJsonObject positions;
     for (auto it = byId.cbegin(); it != byId.cend(); ++it) {
         const auto block = it.value();
         const auto type = block.value(QStringLiteral("type")).toString();
         QString key;
-        if (!block.value("flowId").toString().isEmpty()) {
+        if (predicateOwner.contains(it.key())) {
+            const auto stable = expressionKey(it.key(), 0);
+            if (stable.isEmpty()) return false;
+            key = "node:" + stable;
+        } else if (!block.value("flowId").toString().isEmpty()) {
             key = "flow:" + block.value("flowId").toString() + ":" + block.value("flowNodeId", type).toString();
         } else if (type == QStringLiteral("start")) {
             key = QStringLiteral("start");

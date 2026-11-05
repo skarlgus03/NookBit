@@ -801,6 +801,56 @@ void testSourceFolderGraph() {
     expect(!editor.importGraph(blocks,edges),"source graph rejects string booleans");
 }
 
+// 조건 계산 선의 중첩·저장·재복원·배치·잘못된 연결을 검사하는 함수.
+void testLogicalGraph() {
+    QTemporaryDir directory;const auto schema=projectPath("schemas/rules-tree-v3.schema.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"),schema);
+    nookbit::JsonRuleSetRepository active(directory.filePath("rules.json"),schema);
+    auto initial=defaults.load();if(!initial){expect(false,"logical fixture");return;}
+    initial.value().globalOtherwise.reset();expect(active.save(initial.value()).hasValue(),"logical fixture saved");
+    nookbit::RuleEditorController editor(active,active,nullptr,nullptr,directory.filePath("layout.json"));
+    QVariantList blocks{QVariantMap{{"id",1},{"type","start"},{"x",0},{"y",0}},
+        QVariantMap{{"id",2},{"type","all"},{"x",600},{"y",0}},
+        QVariantMap{{"id",3},{"type","any"},{"x",300},{"y",0}},
+        QVariantMap{{"id",4},{"type","extension"},{"value","png"},{"x",0},{"y",100}},
+        QVariantMap{{"id",5},{"type","name"},{"value","report"},{"x",0},{"y",200}},
+        QVariantMap{{"id",6},{"type","size"},{"value","10"},{"unit","B"},{"comparison","atLeast"},{"x",300},{"y",300}},
+        QVariantMap{{"id",7},{"type","destination"},{"value","Matched"},{"x",900},{"y",0}}};
+    QVariantList edges{QVariantMap{{"from",1},{"to",2}},QVariantMap{{"from",2},{"to",7}},
+        QVariantMap{{"from",4},{"to",3},{"kind","predicate"}},QVariantMap{{"from",5},{"to",3},{"kind","predicate"}},
+        QVariantMap{{"from",3},{"to",2},{"kind","predicate"}},QVariantMap{{"from",6},{"to",2},{"kind","predicate"}}};
+    expect(editor.importGraph(blocks,edges)&&editor.save(),"nested condition graph saves");
+    expect(editor.saveGraphLayout(blocks,edges),"nested condition positions save");
+    const auto loaded=active.load();expect(loaded && std::holds_alternative<nookbit::LogicalPredicatePtr>(*loaded.value().nodes[0].atomicCondition),"JSON logical condition round trip");
+    QFile encoded(directory.filePath("rules.json"));
+    if (encoded.open(QIODevice::ReadOnly)) {
+        const auto original=QJsonDocument::fromJson(encoded.readAll()).object();encoded.close();
+        auto shallow=QJsonObject{{"type","all"},{"conditions",QJsonArray{QJsonObject{{"type","nameContains"},{"text","x"}}}}};
+        QJsonObject deep{{"type","nameContains"},{"text","x"}};
+        for(int i=0;i<34;++i)deep=QJsonObject{{"type","any"},{"conditions",QJsonArray{deep,QJsonObject{{"type","nameContains"},{"text","x"}}}}};
+        for(const auto& invalid:{shallow,deep}) {
+            auto document=original;auto nodes=document["nodes"].toArray();auto node=nodes[0].toObject();node["when"]=invalid;nodes[0]=node;document["nodes"]=nodes;
+            QFile bad(directory.filePath("invalid-logical.json"));expect(bad.open(QIODevice::WriteOnly),"invalid logical fixture");bad.write(QJsonDocument(document).toJson());bad.close();
+            expect(!active.loadFile(std::filesystem::path(bad.fileName().toStdWString())),"invalid logical arity or nesting rejected on JSON import");
+        }
+    }
+    const auto graph=editor.graph();int predicateEdges=0;bool positionRestored=false;
+    for(const auto& edge:graph.value("edges").toList())if(edge.toMap().value("kind")=="predicate")++predicateEdges;
+    for(const auto& value:graph.value("blocks").toList()){const auto b=value.toMap();if(b.value("type")=="name")positionRestored=b.value("x").toInt()==0&&b.value("y").toInt()==200;}
+    expect(predicateEdges==4&&positionRestored,"logical graph restores separate conditions and exact operand positions");
+    expect(editor.importGraph(graph.value("blocks").toList(),graph.value("edges").toList())&&editor.save(),"restored logical graph is editable and saves again");
+    auto invalid=edges;invalid.removeLast();expect(!editor.importGraph(blocks,invalid),"one-input AND rejected");
+    invalid=edges;invalid.append(QVariantMap{{"from",1},{"to",4}});expect(!editor.importGraph(blocks,invalid),"condition cannot also participate in execution flow");
+    invalid=edges;invalid.append(QVariantMap{{"from",7},{"to",2},{"kind","predicate"}});expect(!editor.importGraph(blocks,invalid),"destination cannot become an operand");
+    invalid=edges;invalid.append(QVariantMap{{"from",2},{"to",3},{"kind","predicate"}});expect(!editor.importGraph(blocks,invalid),"logical cycles rejected");
+    auto flowBlocks=blocks;for(int i=1;i<flowBlocks.size();++i){auto b=flowBlocks[i].toMap();b["flowId"]="logical-flow";b["flowNodeId"]=QString("n%1").arg(i);flowBlocks[i]=b;}
+    flowBlocks.append(QVariantMap{{"id",8},{"type","flowStart"},{"flowId","logical-flow"},{"flowNodeId","input"},{"flowInput","item"},{"value","Logic flow"},{"x",0},{"y",0}});
+    // 기본 트리도 유지하고 같은 논리 묶음을 별도 흐름에서 재사용한다.
+    flowBlocks.append(QVariantMap{{"id",9},{"type","name"},{"value","base"},{"x",0},{"y",0}});
+    flowBlocks.append(QVariantMap{{"id",10},{"type","exclude"},{"x",0},{"y",0}});
+    auto flowEdges=edges;flowEdges[0]=QVariantMap{{"from",8},{"to",2}};flowEdges.append(QVariantMap{{"from",1},{"to",9}});flowEdges.append(QVariantMap{{"from",9},{"to",10}});
+    expect(editor.importGraph(flowBlocks,flowEdges)&&editor.save(),"logical predicates work in named processing graphs");
+}
 } // namespace
 
 // 규칙 편집 컨트롤러 테스트를 실행하는 함수.
@@ -816,6 +866,7 @@ int main(int argc, char* argv[]) {
     testGraphRoundTripAndLayout();
     testSizeUnits();
     testExternalDestinations();
+    testLogicalGraph();
     testSourceFolderGraph();
     testItemTypeRules();
     testNamedFolderFlowGraph();

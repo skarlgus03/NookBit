@@ -21,8 +21,8 @@ Rectangle {
                                         modelData).y).x
     y: blockCard.editor.screenPoint(blockCard.editor.positionFor(modelData).x, blockCard.editor.positionFor(
                                         modelData).y).y
-    width: blockCard.editor.blockWidth
-    height: blockCard.editor.blockHeight
+    width: blockCard.editor.widthFor(modelData)
+    height: blockCard.editor.heightFor(modelData)
     scale: blockCard.editor.zoom
     transformOrigin: Item.TopLeft
     radius: modelData.type === "start" ? height / 2 : 12
@@ -79,9 +79,37 @@ Rectangle {
             }
         }
     }
+    Label {
+        anchors.centerIn: parent
+        visible: blockCard.editor.isLogical(modelData)
+        text: (blockCard.editor.orderFor(modelData.id) > 0 ? blockCard.editor.orderFor(modelData.id) + " · " : "") + blockCard.editor.titleFor(modelData.type)
+        font.bold: true
+        font.pixelSize: blockCard.editor.nodeFontSize
+        color: blockCard.primaryText
+    }
+    Rectangle {
+        id: predicatePort
+        z: 2
+        visible: blockCard.editor.isLogical(modelData)
+        width: 16; height: 16
+        x: -width / 2; y: parent.height * 0.75 - height / 2
+        radius: UiMetrics.spaceTiny
+        color: blockCard.editor.edges.some(edge => edge.to === modelData.id && edge.kind === "predicate") ? blockCard.theme.editorAccent : blockCard.nodeColor
+        border.width: UiMetrics.borderActive
+        border.color: blockCard.theme.editorAccent
+        MouseArea {
+            objectName: "rulePredicatePort_" + modelData.id
+            anchors.fill: parent
+            hoverEnabled: true
+            ToolTip.visible: containsMouse
+            ToolTip.text: qsTr("조건 입력 · 조건 출력점을 여기에 연결하세요")
+            onClicked: if (blockCard.editor.connectingFrom >= 0)
+                blockCard.editor.connectBlocks(blockCard.editor.connectingFrom, modelData.id, "predicate")
+        }
+    }
     Rectangle {
         id: cardHeader
-        visible: modelData.type !== "start"
+        visible: modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
         x: 1
         y: 1
         width: parent.width - 2
@@ -138,7 +166,7 @@ Rectangle {
         }
     }
     Label {
-        visible: modelData.type !== "start"
+        visible: modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: cardHeader.bottom
@@ -153,7 +181,7 @@ Rectangle {
         color: blockCard.primaryText
     }
     Label {
-        visible: modelData.type !== "start"
+        visible: modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
@@ -235,7 +263,7 @@ Rectangle {
         id: inputPort
         visible: modelData.type !== "start" && modelData.type !== "flowStart"
         x: -8
-        y: parent.height / 2 - 8
+        y: parent.height * (blockCard.editor.isLogical(modelData) ? 0.25 : 0.5) - 8
         width: 16
         height: 16
         radius: UiMetrics.radiusControl

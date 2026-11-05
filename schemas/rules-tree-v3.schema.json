@@ -156,7 +156,9 @@
             "size",
             "modifiedAgeDays",
             "itemType",
-            "sourceFolder"
+            "sourceFolder",
+            "all",
+            "any"
           ]
         },
         "kind": {
@@ -200,6 +202,14 @@
         },
         "recursive": {
           "type": "boolean"
+        },
+        "conditions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
         }
       }
     },

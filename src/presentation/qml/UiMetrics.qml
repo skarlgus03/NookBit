@@ -32,6 +32,8 @@ QtObject {
     readonly property int numericInputWidth: 180
     readonly property int numericStepSize: 28
     readonly property int nodeAddMenuWidth: 280
+    readonly property int logicalNodeWidth: 110
+    readonly property int logicalNodeHeight: 64
     readonly property int menuRowHeight: 34
     readonly property int menuIconSize: 16
     readonly property int ruleMenuWidth: 260

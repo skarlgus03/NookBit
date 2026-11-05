@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <memory>
 #include <variant>
 #include <string>
 #include <vector>
@@ -154,8 +155,17 @@ struct SourceFolderPredicate {
     bool recursive{true};
 };
 
+struct LogicalPredicate;
+using LogicalPredicatePtr = std::shared_ptr<const LogicalPredicate>;
+
 using AtomicRuleCondition = std::variant<ExtensionPredicate, NameContainsPredicate,
-                                         SizePredicate, ModifiedAgePredicate, ItemTypePredicate, SourceFolderPredicate>;
+                                         SizePredicate, ModifiedAgePredicate, ItemTypePredicate, SourceFolderPredicate, LogicalPredicatePtr>;
+
+/// 조건 노드들의 AND 또는 OR 계산만 표현하며 실행 순서는 소유하지 않는다.
+struct LogicalPredicate {
+    bool all{true};
+    std::vector<AtomicRuleCondition> operands;
+};
 
 /// 리프 또는 전체 예외가 정한 목적지와 충돌 정책을 표현한다.
 struct RuleDestination {

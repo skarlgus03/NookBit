@@ -438,6 +438,29 @@ int main(int argc, char** argv) {
         expect(!state->property("selectedBlock").value<QJSValue>().toVariant().toMap().value("recursive").toBool(),
             "source depth selection updates the graph");
     }
+    call(engine, state.get(), "addBlock", {"all", 600, 500});
+    const int andId=state->property("selectedId").toInt();
+    call(engine, state.get(), "addBlock", {"extension", 150, 500});
+    const int firstOperand=state->property("selectedId").toInt();
+    call(engine, state.get(), "addBlock", {"name", 150, 700});
+    const int secondOperand=state->property("selectedId").toInt();
+    expect(call(engine,state.get(),"connectBlocks",{firstOperand,andId,"predicate"}).toBool()
+        && call(engine,state.get(),"connectBlocks",{secondOperand,andId,"predicate"}).toBool(),"separate condition nodes connect to the logical input");
+    expect(!call(engine,state.get(),"connectBlocks",{1,firstOperand}).toBool(),"operand cannot also receive execution flow");
+    expect(call(engine,state.get(),"connectBlocks",{1,andId}).toBool(),"logical node has an independent execution input");
+    state->setProperty("selectedIds", engine.toScriptValue(QVariantList{andId,firstOperand,secondOperand}).toVariant());
+    call(engine,state.get(),"copySelectedBlocks");
+    const int beforePaste=list(state.get(),"edges").size();
+    call(engine,state.get(),"pasteCopiedBlocks");
+    const auto pastedEdges=list(state.get(),"edges");
+    expect(pastedEdges.size()==beforePaste+2 && pastedEdges.last().toMap().value("kind")=="predicate",
+        "copy and paste preserves condition edge types");
+    const auto logicalBlock=call(engine,state.get(),"blockForId",{andId}).toVariant();
+    auto logicalCard=create(engine,"RuleNodeCard",{{"editor",QVariant::fromValue(state.get())},
+        {"viewport",QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))},{"modelData",logicalBlock}});
+    expect(logicalCard && logicalCard->property("width").toDouble()<state->property("blockWidth").toDouble()
+        && logicalCard->property("height").toDouble()<state->property("blockHeight").toDouble(),"AND node is smaller than ordinary condition cards");
+    expect(logicalCard && logicalCard->findChild<QObject*>(QString("rulePredicatePort_%1").arg(andId)),"logical node exposes a separate condition socket");
     expect(cleanBindings, "editor parts load and react without outer page ids or binding errors");
     return failures ? 1 : 0;
 }

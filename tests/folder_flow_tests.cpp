@@ -160,6 +160,17 @@ void graphContract() {
     second.nodes.back().targetFlow = "a";
     rules.folderFlows = {first, second};
     expect(!nookbit::validateProcessingFlows(rules), "cross-flow recursion rejected even when graph edges do not cycle");
+    auto condition=std::make_shared<nookbit::LogicalPredicate>();
+    condition->operands={nookbit::ItemTypePredicate{nookbit::ItemType::Folder},nookbit::NameContainsPredicate{"Project"}};
+    nookbit::RuleSet::FolderFlow guarded;guarded.id="guarded";guarded.name="Guarded";guarded.entry="input";guarded.folderInput=false;
+    guarded.nodes={{"input","input",{"guard"}},{"guard","condition",{"scan"},nookbit::LogicalPredicatePtr(condition)},
+        {"scan","traverse",{"apply"}},{"apply","call"}};
+    rules.folderFlows={guarded};
+    expect(nookbit::validateProcessingFlows(rules).hasValue(),"AND folder guard safely narrows traversal input");
+    auto alternative=std::make_shared<nookbit::LogicalPredicate>(*condition);alternative->all=false;
+    rules.folderFlows[0].nodes[1].condition=nookbit::LogicalPredicatePtr(alternative);
+    expect(!nookbit::validateProcessingFlows(rules),"OR name match cannot allow files into a folder traversal");
+
 }
 }
 

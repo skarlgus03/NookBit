@@ -126,20 +126,20 @@ Rectangle {
                     if (source && target) {
                         const sourcePos = canvas.editor.positionFor(source);
                         const targetPos = canvas.editor.positionFor(target);
-                        const from = canvas.editor.screenPoint(sourcePos.x + canvas.editor.blockWidth, sourcePos.y
-                                                               + canvas.editor.blockHeight / 2);
-                        const to = canvas.editor.screenPoint(targetPos.x, targetPos.y + canvas.editor.blockHeight / 2);
+                        const from = canvas.editor.outputPoint(source);
+                        const to = canvas.editor.inputPoint(target, edge.kind);
+                        context.setLineDash(edge.kind === "predicate" ? [UiMetrics.spaceSmall * canvas.editor.zoom, UiMetrics.spaceExtraSmall * canvas.editor.zoom] : []);
                         canvas.drawEdge(context, from.x, from.y, to.x, to.y, false, canvas.editor.altHeld && index
                                         === canvas.editor.hoveredEdgeIndex, canvas.editor.testTraceBlockIds.includes(
                                             edge.from) && canvas.editor.testTraceBlockIds.includes(edge.to));
+                        context.setLineDash([]);
                     }
                 }
                 if (canvas.editor.connectingFrom >= 0 && canvas.editor.draggingConnection) {
                     const source = canvas.editor.blockForId(canvas.editor.connectingFrom);
                     if (source) {
                         const sourcePos = canvas.editor.positionFor(source);
-                        const from = canvas.editor.screenPoint(sourcePos.x + canvas.editor.blockWidth, sourcePos.y
-                                                               + canvas.editor.blockHeight / 2);
+                        const from = canvas.editor.outputPoint(source);
                         const to = canvas.editor.screenPoint(canvas.editor.pointerX, canvas.editor.pointerY);
                         canvas.drawEdge(context, from.x, from.y, to.x, to.y, true, false, false);
                     }
