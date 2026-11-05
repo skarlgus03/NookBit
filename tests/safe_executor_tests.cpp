@@ -938,7 +938,10 @@ void testMetadataRename(int scenario) {
         const auto path = directory.filePath(QString("owned-%1.jpg").arg(i));
         expect(writeFile(path, "owned metadata bytes"), "metadata owned file"); selected.emplace_back(path.toStdWString());
     }
+    const auto unmatched = directory.filePath("owned-unclassified.txt");
     if (scenario == 0) {
+        expect(writeFile(unmatched, "leave unclassified"), "metadata unclassified fixture");
+        selected.emplace_back(unmatched.toStdWString());
         const auto handle = CreateFileW(selected[0].c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         expect(handle != INVALID_HANDLE_VALUE, "owned sparse size fixture");
         if (handle != INVALID_HANDLE_VALUE) {
@@ -958,6 +961,13 @@ void testMetadataRename(int scenario) {
     if (!frozen) { expect(false, "metadata freeze: " + frozen.error().message); return; }
     nookbit::VerifySavedPlanUseCase verify(rules, scanner, planner, hasher, history, &volumes);
     nookbit::ApprovePlanUseCase approve(verify, history);
+    if (scenario == 0) {
+        auto changedSelection = selected;
+        changedSelection.erase(changedSelection.begin());
+        const auto rejected = approve.execute(frozen.value().id, changedSelection, settings.settings);
+        expect(!rejected && rejected.error().code == "verify.selection_changed",
+            "metadata approval still rejects a missing planned source");
+    }
     const auto approved = approve.execute(frozen.value().id, selected, settings.settings);
     if (!approved) { expect(false, "metadata approval"); return; }
     auto loaded = history.loadPlan(frozen.value().id);
@@ -990,6 +1000,8 @@ void testMetadataRename(int scenario) {
     nookbit::IHistoryRepository& executionHistory = scenario == 5 ? static_cast<nookbit::IHistoryRepository&>(failingHistory) : history;
     nookbit::SafeExecutor executor(settings, verify, scanner, hasher, executionHistory, appData, &volumes);
     const auto result = executor.execute(loaded.value(), approved.value(), selected);
+    if (scenario == 0) expect(QFile::exists(unmatched) && loaded.value().steps.size() == 3,
+        "metadata execution leaves the unclassified selection in place");
     if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
     expect(result.hasValue() == (scenario == 0), "metadata batch success/failure");
     const auto after = history.loadPlan(frozen.value().id);

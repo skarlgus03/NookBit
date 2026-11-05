@@ -5,6 +5,7 @@
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 #include "modules/rules/processing_flow.hpp"
 
 namespace nookbit {
@@ -88,9 +89,10 @@ Result<OperationPlan> VerifySavedPlanUseCase::executeImpl(const PlanId& planId,
     }
 
     if (PlanSignature::isMetadataRenamePlan(saved)) {
-        // 경로만 고정하고 개별 파일의 접근/객체/이동 실패는 실제 시도에서 처리한다.
-        if (selectedFiles.size() != saved.steps.size() || std::any_of(saved.steps.begin(), saved.steps.end(), [&](const MoveStep& step) {
-            return std::find(selectedFiles.begin(), selectedFiles.end(), step.source) == selectedFiles.end();
+        // 선택에 남은 미분류 항목은 허용하고, 고정된 모든 단계의 원본 경로가 있는지 검사한다.
+        const std::unordered_set<std::filesystem::path> selectedPaths(selectedFiles.begin(), selectedFiles.end());
+        if (std::any_of(saved.steps.begin(), saved.steps.end(), [&](const MoveStep& step) {
+            return !selectedPaths.contains(step.source);
         })) return Result<OperationPlan>::failure({"verify.selection_changed", "Selected paths differ from the frozen metadata plan."});
         return Result<OperationPlan>::success(saved);
     }
