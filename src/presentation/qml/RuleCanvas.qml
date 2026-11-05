@@ -320,6 +320,47 @@ Rectangle {
     component ThemeButton: RuleEditorButton {
         dark: canvas.dark
     }
+    // 노드 메뉴의 제목과 항목을 같은 행 규격으로 표시하는 부품.
+    component NodeMenuButton: Button {
+        id: menuButton
+        property string glyph: "rules"
+        property bool heading: false
+        property bool expanded: false
+        implicitHeight: UiMetrics.menuRowHeight
+        padding: UiMetrics.spaceControl
+        hoverEnabled: true
+        font.family: UiMetrics.applicationFont.family
+        font.pixelSize: UiMetrics.textBody
+        font.bold: heading
+        background: Rectangle {
+            radius: UiMetrics.radiusControl
+            color: menuButton.down ? canvas.theme.buttonPressed
+                : menuButton.hovered || menuButton.visualFocus ? canvas.theme.buttonHover : "transparent"
+            border.width: menuButton.visualFocus ? UiMetrics.borderActive : 0
+            border.color: canvas.theme.buttonFocus
+        }
+        contentItem: RowLayout {
+            spacing: UiMetrics.spaceControl
+            NavigationIcon {
+                kind: menuButton.glyph
+                Layout.preferredWidth: UiMetrics.menuIconSize
+                Layout.preferredHeight: UiMetrics.menuIconSize
+                strokeColor: menuButton.heading && menuButton.expanded ? canvas.theme.editorAccent : canvas.theme.muted
+            }
+            Text {
+                Layout.fillWidth: true
+                text: menuButton.text
+                font: menuButton.font
+                color: menuButton.heading && menuButton.expanded ? canvas.theme.editorAccent : canvas.theme.text
+            }
+            Text {
+                visible: menuButton.heading
+                text: menuButton.expanded ? "⌄" : "›"
+                font: menuButton.font
+                color: canvas.theme.muted
+            }
+        }
+    }
     // 화면의 지정 위치에서 블록 추가 메뉴를 열고 삽입 좌표를 기억하는 함수.
     function openAddMenu(screenX, screenY) {
         const point = editor.worldPoint(screenX, screenY);
@@ -374,6 +415,16 @@ Rectangle {
                 id: nodeAddColumn
                 width: nodeAddScroll.availableWidth
                 spacing: UiMetrics.spaceExtraSmall
+                Label {
+                    width: parent.width
+                    padding: UiMetrics.spaceControl
+                    bottomPadding: UiMetrics.spaceGroup
+                    text: qsTr("노드 추가")
+                    font.family: UiMetrics.applicationFont.family
+                    font.pixelSize: UiMetrics.textBody
+                    font.bold: true
+                    color: canvas.theme.text
+                }
                 Repeater {
                     model: canvas.editor.nodeAddGroups
                     delegate: Column {
@@ -382,31 +433,47 @@ Rectangle {
                         required property int index
                         width: nodeAddColumn.width
                         spacing: UiMetrics.spaceExtraSmall
-                        ThemeButton {
+                        NodeMenuButton {
                             objectName: "nodeAddGroup_" + nodeGroup.index
                             width: parent.width
-                            appearance: AppButton.Menu
-                            labelAlignment: Text.AlignLeft
-                            text: (addNodeMenu.expandedGroupIndex === nodeGroup.index ? "▾  " : "▸  ") + nodeGroup.modelData.title
-                            selected: addNodeMenu.expandedGroupIndex === nodeGroup.index
-                            onClicked: addNodeMenu.expandedGroupIndex = selected ? -1 : nodeGroup.index
+                            heading: true
+                            glyph: ["rules", "folder", "settings", "modules"][nodeGroup.index]
+                            text: nodeGroup.modelData.title
+                            expanded: addNodeMenu.expandedGroupIndex === nodeGroup.index
+                            onClicked: addNodeMenu.expandedGroupIndex = expanded ? -1 : nodeGroup.index
                         }
-                        Repeater {
-                            model: nodeGroup.modelData.nodes
-                            delegate: ThemeButton {
-                                required property var modelData
-                                objectName: "addNode_" + modelData.type
-                                width: nodeGroup.width
-                                visible: addNodeMenu.expandedGroupIndex === nodeGroup.index
-                                appearance: AppButton.Menu
-                                labelAlignment: Text.AlignLeft
-                                leftPadding: UiMetrics.controlPadding + UiMetrics.spaceGroup
-                                text: modelData.title
-                                onClicked: {
-                                    canvas.editor.addBlock(modelData.type, canvas.editor.addMenuWorldX,
-                                                           canvas.editor.addMenuWorldY);
-                                    addNodeMenu.close();
-                                    canvasViewport.forceActiveFocus();
+                        Item {
+                            width: nodeGroup.width
+                            implicitHeight: nodeChildren.implicitHeight + UiMetrics.spaceSmall
+                            visible: addNodeMenu.expandedGroupIndex === nodeGroup.index
+                            Rectangle {
+                                x: UiMetrics.spaceControl + UiMetrics.menuIconSize / 2
+                                y: UiMetrics.spaceTiny
+                                width: UiMetrics.borderNormal
+                                height: nodeChildren.height
+                                color: canvas.theme.border
+                            }
+                            Column {
+                                id: nodeChildren
+                                x: UiMetrics.spaceControl + UiMetrics.menuIconSize + UiMetrics.spaceTiny
+                                width: parent.width - x
+                                Repeater {
+                                    model: nodeGroup.modelData.nodes
+                                    delegate: NodeMenuButton {
+                                        required property var modelData
+                                        objectName: "addNode_" + modelData.type
+                                        width: nodeChildren.width
+                                        glyph: modelData.type === "age" ? "history"
+                                            : ["destination", "folderScan", "folderFlow", "itemType"].includes(modelData.type) ? "folder"
+                                            : modelData.type === "exclude" ? "undo" : "rules"
+                                        text: modelData.title
+                                        onClicked: {
+                                            canvas.editor.addBlock(modelData.type, canvas.editor.addMenuWorldX,
+                                                                   canvas.editor.addMenuWorldY);
+                                            addNodeMenu.close();
+                                            canvasViewport.forceActiveFocus();
+                                        }
+                                    }
                                 }
                             }
                         }

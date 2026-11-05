@@ -10,7 +10,7 @@ QtObject {
     signal repaintRequested
     signal destinationUpdated(int blockId, string value)
     readonly property var nodeAddGroups: [
-        { title: qsTr("조건 추가"), nodes: [
+        { title: qsTr("조건"), nodes: [
             { type: "itemType", title: qsTr("파일 / 폴더 구분") },
             { type: "extension", title: qsTr("확장자") },
             { type: "size", title: qsTr("파일 크기") },
@@ -18,15 +18,15 @@ QtObject {
             { type: "age", title: qsTr("수정 경과일") },
             { type: "otherwise", title: qsTr("그 외 (예외)") }
         ] },
-        { title: qsTr("결과 추가"), nodes: [
+        { title: qsTr("결과"), nodes: [
             { type: "destination", title: qsTr("목적지") },
             { type: "exclude", title: qsTr("정리하지 않음") }
         ] },
-        { title: qsTr("처리 단계 추가"), nodes: [
+        { title: qsTr("처리 단계"), nodes: [
             { type: "folderScan", title: qsTr("폴더 내부 순회") },
             { type: "callFlow", title: qsTr("분류 흐름 호출") }
         ] },
-        { title: qsTr("새 흐름 만들기"), nodes: [
+        { title: qsTr("새 흐름"), nodes: [
             { type: "folderFlow", title: qsTr("폴더 내용물 정리") },
             { type: "classificationFlow", title: qsTr("별도 분류") }
         ] }
