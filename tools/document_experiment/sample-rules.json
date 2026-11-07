@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 3,
+  "ruleSetId": "document-experiment",
+  "version": "2026-11-07T00:00:00Z",
+  "nodes": [
+    {
+      "id": "meeting",
+      "enabled": true,
+      "when": {"type": "nameContains", "text": "회의"},
+      "destination": {"path": "회의록", "collisionPolicy": "inherit"}
+    },
+    {
+      "id": "presentation",
+      "enabled": true,
+      "when": {"type": "nameContains", "text": "발표"},
+      "destination": {"path": "발표자료", "collisionPolicy": "inherit"}
+    },
+    {
+      "id": "manual",
+      "enabled": true,
+      "when": {"type": "nameContains", "text": "매뉴얼"},
+      "destination": {"path": "매뉴얼", "collisionPolicy": "inherit"}
+    }
+  ]
+}

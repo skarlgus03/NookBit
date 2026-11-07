@@ -100,6 +100,15 @@ if(NOOKBIT_BUILD_QT_APP)
     target_include_directories(nookbit_json_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(nookbit_json_config PUBLIC nookbit_core Qt6::Core PRIVATE Qt6::Gui)
 
+    # 문서 분류 실험 도구는 명시적으로 요청할 때만 빌드한다.
+    add_executable(nookbit_document_experiment EXCLUDE_FROM_ALL
+      ${PROJECT_SOURCE_DIR}/tools/document_experiment/main.cpp)
+    target_include_directories(nookbit_document_experiment PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(nookbit_document_experiment PRIVATE nookbit_json_config)
+    if(MSVC)
+      target_compile_options(nookbit_document_experiment PRIVATE /utf-8)
+    endif()
+
     add_library(nookbit_history STATIC
       infrastructure/cryptography/qt_plan_hasher.cpp
       infrastructure/persistence_sqlite/sqlite_history_repository.cpp
