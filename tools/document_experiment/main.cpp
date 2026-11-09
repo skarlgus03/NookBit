@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -32,7 +33,11 @@ struct Document {
 };
 
 using Terms = QMap<QString, double>;
-using Predict = std::function<QStringList(const Document&)>;
+struct Prediction {
+    QStringList ranked;
+    std::optional<double> bestScore;
+};
+using Predict = std::function<Prediction(const Document&)>;
 
 // 파일 내용을 수정하지 않고 바이트를 읽는 함수.
 QByteArray readFile(const QString& path) {
@@ -120,7 +125,7 @@ Terms prepareProfiles(std::vector<Profile>& profiles) {
 }
 
 // 유사도가 있는 폴더를 순위대로 최대 3개 반환하는 함수.
-QStringList recommend(const QString& text, const std::vector<Profile>& profiles, const Terms& idf) {
+Prediction recommend(const QString& text, const std::vector<Profile>& profiles, const Terms& idf) {
     const auto query = vectorize(text, idf);
     std::vector<std::pair<double, QString>> scored;
     for (const auto& profile : profiles) {
@@ -131,10 +136,11 @@ QStringList recommend(const QString& text, const std::vector<Profile>& profiles,
     }
     std::stable_sort(scored.begin(), scored.end(),
         [](const auto& left, const auto& right) { return left.first > right.first; });
-    QStringList ranked;
+    Prediction result;
+    if (!scored.empty()) result.bestScore = scored.front().first;
     for (std::size_t i = 0; i < std::min<std::size_t>(3, scored.size()); ++i)
-        ranked.append(scored[i].second);
-    return ranked;
+        result.ranked.append(scored[i].second);
+    return result;
 }
 
 // CSV의 쉼표, 따옴표와 줄바꿈을 보존하는 함수.
@@ -150,8 +156,9 @@ void evaluate(const QString& method, const std::vector<Document>& documents, con
     for (const auto& document : documents) {
         QElapsedTimer timer;
         timer.start();
-        const auto ranked = predict(document);
+        const auto prediction = predict(document);
         const auto elapsed = timer.nsecsElapsed();
+        const auto& ranked = prediction.ranked;
         predictionNs += elapsed;
         const auto first = ranked.value(0);
         const bool hit = first == document.expected;
@@ -162,7 +169,9 @@ void evaluate(const QString& method, const std::vector<Document>& documents, con
         wrongOnAbstain += document.expected.isEmpty() && !ranked.isEmpty();
         csv << method << ',' << csvField(document.fileName) << ',' << csvField(document.expected);
         for (int i = 0; i < 3; ++i) csv << ',' << csvField(ranked.value(i));
-        csv << ',' << (hit ? 1 : 0) << ',' << QString::number(static_cast<double>(elapsed) / 1e6, 'f', 4) << '\n';
+        csv << ',' << (hit ? 1 : 0) << ',' << QString::number(static_cast<double>(elapsed) / 1e6, 'f', 4) << ',';
+        if (prediction.bestScore) csv << QString::number(*prediction.bestScore, 'g', 16);
+        csv << '\n';
     }
     summary << method << ": top1=" << correct << '/' << documents.size()
             << ", top3=" << topThree << '/' << documents.size()
@@ -228,15 +237,15 @@ int main(int argc, char* argv[]) {
             throw std::runtime_error("Cannot create the CSV. Choose a path that does not exist.");
         QTextStream csv(&output);
         csv.setGenerateByteOrderMark(true);
-        csv << "method,file,expected,top1,top2,top3,correct,prediction_ms\n";
+        csv << "method,file,expected,top1,top2,top3,correct,prediction_ms,best_score\n";
         const nookbit::RuleEngine engine;
         const auto now = QDateTime::currentMSecsSinceEpoch();
-        evaluate("rules", documents, [&](const Document& document) -> QStringList {
+        evaluate("rules", documents, [&](const Document& document) -> Prediction {
             const auto decision = engine.decide(document.fact, rules.value(), nookbit::MultiMatchPolicy::FirstMatch, now);
             if (!decision) throw std::runtime_error(decision.error().message);
             if (!decision.value() || decision.value()->excluded) return {};
             const auto folder = QString::fromStdWString(decision.value()->destinationRelativePath.generic_wstring());
-            return {folder};
+            return {{folder}, std::nullopt};
         }, csv, summary);
         evaluate("tfidf_filename", documents, [&](const Document& document) {
             return recommend(document.fileName, profiles, idf);
