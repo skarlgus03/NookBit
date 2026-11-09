@@ -23,3 +23,25 @@ CSV는 새 경로를 지정해야 합니다. 예제는 가상 문서 10개로 �
 - 요약에는 Top-1·Top-3, 추천 건수, 보류가 정답인데 추천한 건수, 입력 준비·방법별 초기화·추론 시간이 표시됩니다. 보류가 정답인 문서는 빈 추천을 정답으로 계산합니다.
 
 샘플 점수는 실제 분류 성능의 근거로 쓰기 어렵습니다. 실제 문서 평가에서는 후보 폴더 설명을 먼저 고정하고 별도로 모은 문서에서 점수를 비교합니다.
+
+## CPU Transformer 비교
+
+같은 목록 파일을 `transformer.py`에 전달하면 Windows에서 E5 모델의 추천과 시간을 측정할 수 있습니다. 공개 모델 파일을 한 번 내려받은 뒤에는 입력 문서와 추론이 로컬에서 처리됩니다.
+
+```powershell
+python -m venv out/document-transformer/venv
+$python = 'out/document-transformer/venv/Scripts/python.exe'
+& $python -m pip install 'numpy==2.2.6' 'onnxruntime==1.23.2' 'tokenizers==0.22.1'
+$model = 'out/document-transformer/e5-small'
+New-Item -ItemType Directory -Force $model | Out-Null
+$source = 'https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx'
+curl.exe --fail --location "$source/model.onnx" --output "$model/model.onnx"
+curl.exe --fail --location "$source/tokenizer.json" --output "$model/tokenizer.json"
+& $python tools/document_experiment/transformer.py tools/document_experiment/sample.json $model out/document-transformer/sample-result.csv --mask-filenames
+```
+
+[E5 모델 카드](https://huggingface.co/intfloat/multilingual-e5-small)의 FP32 모델을 사용합니다. 기본 CPU 스레드는 4개이며, 입력은 최대 512토큰입니다. 후보 폴더 벡터를 한 번 준비한 뒤 문서를 한 건씩 처리합니다. `--mask-filenames`는 입력에만 중립적인 파일명을 적용합니다.
+
+CSV는 문서별 추천 순위와 처리 시간을 저장합니다. 실행 요약에는 입력 읽기, 토크나이저·모델 로딩, 후보 준비, 전체 분류 시간과 프로세스 최대 작업 집합이 나옵니다. 처리 시간은 Python 모듈 초기 로딩을 마친 뒤부터 재며, 프로그램 시작까지 포함하려면 새 프로세스의 실행 시간을 함께 잽니다.
+
+기본은 추천 순위를 확인하기 위해 모든 문서에 후보를 반환합니다. `--min-score`로 보류 기준을 지정할 수 있으며, 이 점수는 확률이 아닙니다. 실제 품질을 비교할 때는 별도 검증 문서에서 기준을 정한 뒤 평가 문서에 적용합니다.
