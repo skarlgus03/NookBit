@@ -1,4 +1,4 @@
-"""Run the E5 document comparison with local model and tokenizer files."""
+"""Run a document embedding comparison with local ONNX and tokenizer files."""
 
 import argparse
 import csv
@@ -61,7 +61,7 @@ def read_documents(manifest, config, mask_filenames):
 
 
 def embed(texts, tokenizer, session):
-    """Create normalized E5 vectors using attention-mask mean pooling."""
+    """Create normalized vectors using attention-mask mean pooling."""
     encoded = tokenizer.encode_batch(texts)
     values = {
         "input_ids": [item.ids for item in encoded],
@@ -88,8 +88,9 @@ def run(args):
     loaded_input = perf_counter()
 
     tokenizer = Tokenizer.from_file(str(args.model_dir / "tokenizer.json"))
-    tokenizer.enable_truncation(max_length=512)
-    tokenizer.enable_padding(pad_id=1, pad_token="<pad>")
+    is_e5 = args.model == "e5"
+    tokenizer.enable_truncation(max_length=512 if is_e5 else 128)
+    tokenizer.enable_padding(pad_id=tokenizer.token_to_id("<pad>"), pad_token="<pad>")
     options = ort.SessionOptions()
     options.intra_op_num_threads = args.threads
     options.add_session_config_entry("session.intra_op.allow_spinning", "0")
@@ -97,15 +98,17 @@ def run(args):
         str(args.model_dir / "model.onnx"), sess_options=options, providers=["CPUExecutionProvider"]
     )
     loaded_model = perf_counter()
+    query_prefix = "query: " if is_e5 else ""
+    profile_prefix = "passage: " if is_e5 else ""
     vectors = embed(
-        [f"passage: {profile['folder']} {profile['description']}" for profile in profiles],
+        [f"{profile_prefix}{profile['folder']} {profile['description']}" for profile in profiles],
         tokenizer, session,
     )
     prepared_candidates = perf_counter()
     rows = []
     for filename, expected, document in documents:
         prediction_started = perf_counter()
-        scores = vectors @ embed([f"query: {document}"], tokenizer, session)[0]
+        scores = vectors @ embed([query_prefix + document], tokenizer, session)[0]
         order = np.argsort(-scores, kind="stable")[:3]
         ranked = [folders[index] for index in order if scores[index] >= args.min_score]
         elapsed = (perf_counter() - prediction_started) * 1000
@@ -125,7 +128,7 @@ def run(args):
         writer.writeheader()
         writer.writerows(rows)
     return {
-        "documents": len(rows), "threads": args.threads, "min_score": args.min_score,
+        "model": args.model, "documents": len(rows), "threads": args.threads, "min_score": args.min_score,
         "runtime_version": ort.__version__, "top1": sum(row["correct"] for row in rows),
         "top3": sum(row["top3_correct"] for row in rows),
         "suggested": sum(row["top1"] is not None for row in rows),
@@ -145,6 +148,7 @@ def main():
     parser.add_argument("manifest", type=Path)
     parser.add_argument("model_dir", type=Path)
     parser.add_argument("csv", type=Path)
+    parser.add_argument("--model", choices=("e5", "minilm"), default="e5")
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--min-score", type=float, default=-1.0)
     parser.add_argument("--mask-filenames", action="store_true")

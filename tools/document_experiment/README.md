@@ -42,6 +42,8 @@ curl.exe --fail --location "$source/tokenizer.json" --output "$model/tokenizer.j
 
 [E5 모델 카드](https://huggingface.co/intfloat/multilingual-e5-small)의 FP32 모델을 사용합니다. 기본 CPU 스레드는 4개이며, 입력은 최대 512토큰입니다. 후보 폴더 벡터를 한 번 준비한 뒤 문서를 한 건씩 처리합니다. `--mask-filenames`는 입력에만 중립적인 파일명을 적용합니다.
 
+[다국어 MiniLM](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2)을 비교하려면 해당 저장소의 `onnx/model.onnx`와 루트의 `tokenizer.json`을 별도 모델 폴더에 넣고 `--model minilm`을 지정합니다. MiniLM은 접두어 없이 최대 128토큰을 사용합니다. 동일 발췌 비교에서는 두 토크나이저와 모델별 접두어를 고려해 같은 텍스트가 두 모델의 입력 한도에 들어오도록 준비합니다.
+
 CSV는 문서별 추천 순위와 처리 시간을 저장합니다. 실행 요약에는 입력 읽기, 토크나이저·모델 로딩, 후보 준비, 전체 분류 시간과 프로세스 최대 작업 집합이 나옵니다. 처리 시간은 Python 모듈 초기 로딩을 마친 뒤부터 재며, 프로그램 시작까지 포함하려면 새 프로세스의 실행 시간을 함께 잽니다.
 
 기본은 추천 순위를 확인하기 위해 모든 문서에 후보를 반환합니다. `--min-score`로 보류 기준을 지정할 수 있으며, 이 점수는 확률이 아닙니다. 실제 품질을 비교할 때는 별도 검증 문서에서 기준을 정한 뒤 평가 문서에 적용합니다.
