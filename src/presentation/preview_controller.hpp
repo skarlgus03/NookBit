@@ -26,6 +26,8 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QVariantList outcomes READ outcomes NOTIFY previewChanged)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY previewChanged)
     Q_PROPERTY(QString message READ message NOTIFY previewChanged)
+    Q_PROPERTY(QString recommendationStatus READ recommendationStatus NOTIFY previewChanged)
+    Q_PROPERTY(bool recommendationBusy READ recommendationBusy NOTIFY previewChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool hasFrozenPlan READ hasFrozenPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
@@ -67,6 +69,13 @@ public:
 
     /// 최근 미리보기 결과 문구를 반환하는 함수.
     [[nodiscard]] QString message() const;
+
+    /// 문서 추천의 진행 상태와 결과 안내를 반환하는 함수.
+    [[nodiscard]] QString recommendationStatus() const { return recommendationStatus_; }
+    /// 문서 추천이 진행 중인지 반환하는 함수.
+    [[nodiscard]] bool recommendationBusy() const { return recommendationBusy_; }
+    /// 현재 미리보기의 문서에 읽기 전용 목적지 추천을 추가하는 함수.
+    Q_INVOKABLE void recommendDocumentFolders();
 
     /// 유효한 미리보기 초안의 존재 여부를 반환하는 함수.
     [[nodiscard]] bool hasPreview() const noexcept;
@@ -185,6 +194,8 @@ private:
     QVariantList outcomes_;
     QStringList warnings_;
     QString message_;
+    QString recommendationStatus_;
+    bool recommendationBusy_{false};
     bool hasPreview_{false};
     bool hasFrozenPlan_{false};
     bool awaitingConfirmation_{false};

@@ -722,6 +722,51 @@ void testEveryPreviewOutcomeIsVisible() {
            "preview outcome display must not move files");
 }
 
+// 기존 문서로 폴더를 추천하면서 이동 계획을 보존하는지 검사하는 함수.
+void testDocumentFolderRecommendations() {
+    QTemporaryDir directory;
+    if (!directory.isValid()) { expect(false, "document recommendation fixture"); return; }
+    const auto home = directory.filePath("organized");
+    const auto meeting = home + "/meeting";
+    const auto manuals = home + "/manuals";
+    const auto queued = directory.filePath("notes.md");
+    const auto unrelated = directory.filePath("other.txt");
+    expect(QDir().mkpath(meeting) && QDir().mkpath(manuals), "create candidate folders");
+    const auto writeText = [](const QString& path, const QByteArray& text) {
+        QFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    expect(writeText(meeting + "/minutes.md", "agenda attendees action items decisions") &&
+               writeText(manuals + "/setup.txt", "installation troubleshooting configuration") &&
+               writeText(queued, "agenda attendees action items decisions") &&
+               writeText(unrelated, "zebra"), "write example and queued documents");
+    const auto rules = projectPath("resources/rules/default.v3.json");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    PreviewWorkflow workflow(rules, schema, std::filesystem::path(directory.filePath("appdata").toStdWString()));
+    nookbit::PendingFilesModel pending;
+    nookbit::BackgroundTaskRunner runner;
+    nookbit::PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase,
+        workflow.verifyUseCase, workflow.approveUseCase, workflow.history, workflow.operations, rules, schema, home);
+    controller.setTaskRunner(&runner);
+    pending.addUrl(QUrl::fromLocalFile(queued));
+    pending.addUrl(QUrl::fromLocalFile(unrelated));
+    controller.createPreview(home);
+    expect(waitForBackground(runner) && controller.hasPreview(), "create document preview");
+    controller.recommendDocumentFolders();
+    expect(controller.recommendationBusy() && waitForBackground(runner), "run document recommendation off the UI thread");
+    QMap<QString, QVariantMap> rows;
+    for (const auto& value : controller.outcomes()) {
+        const auto row = value.toMap();
+        rows.insert(row.value("fileName").toString(), row);
+    }
+    expect(QDir::cleanPath(rows.value("notes.md").value("recommendedFolder").toString()) == meeting,
+        "document recommends the folder with similar examples");
+    expect(rows.value("other.txt").value("recommendedFolder").toString().isEmpty(),
+        "unrelated documents are not recommended a folder");
+    expect(!controller.hasMovableSteps() && rows.value("notes.md").value("destination").toString().isEmpty() &&
+               QFile::exists(queued), "recommendation cannot modify a plan or move the document");
+}
+
 // 공통 충돌 정책이 승인·실행까지 전달되고 규칙의 개별 설정이 우선하는지 검사하는 함수.
 void testCommonCollisionPolicyWorkflow() {
     QTemporaryDir directory;
@@ -1963,6 +2008,7 @@ int main(int argc, char* argv[]) {
     testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();
+    testDocumentFolderRecommendations();
     testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();
     testTreeRulesReachPreview();

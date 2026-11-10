@@ -32,6 +32,20 @@ Rectangle {
             wrapMode: Text.Wrap
             color: preview.foreground
         }
+        AppButton {
+            objectName: "documentRecommendationButton"
+            dark: preview.dark
+            text: qsTr("문서 폴더 추천")
+            enabled: preview.controller.hasPreview && !preview.controller.recommendationBusy
+            onClicked: preview.controller.recommendDocumentFolders()
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: preview.controller.recommendationStatus || ""
+            wrapMode: Text.Wrap
+            color: preview.muted
+        }
         ListView {
             id: results
             Layout.fillWidth: true
@@ -59,6 +73,13 @@ Rectangle {
                     Label { Layout.fillWidth: true; text: modelData.reason; wrapMode: Text.Wrap; color: preview.foreground }
                     Label { Layout.fillWidth: true; text: qsTr("원본: %1").arg(modelData.source); elide: Text.ElideMiddle; color: preview.muted }
                     Label { Layout.fillWidth: true; text: modelData.destination.length > 0 ? qsTr("예상 목적지: %1").arg(modelData.destination) : qsTr("이동하지 않음 · 원본 유지"); elide: Text.ElideMiddle; color: preview.muted }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: !!modelData.recommendedFolder
+                        text: visible ? qsTr("문서 추천: %1").arg(modelData.recommendedFolder) : ""
+                        wrapMode: Text.Wrap
+                        color: preview.foreground
+                    }
                 }
             }
             Label { anchors.centerIn: parent; visible: results.count === 0; text: qsTr("표시할 결과가 없어요. 안내 내용을 확인해 주세요."); color: preview.muted }
@@ -76,6 +97,7 @@ Rectangle {
             primary: true
             text: qsTr("정리하기")
             enabled: preview.controller.hasPreview && preview.controller.hasMovableSteps && !preview.controller.awaitingConfirmation
+                     && !preview.controller.recommendationBusy
             onClicked: preview.sortRequested()
         }
     }

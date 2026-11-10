@@ -1,4 +1,5 @@
 #include "presentation/preview_controller.hpp"
+#include "modules/document_recommendation/folder_suggestions.hpp"
 
 
 #include <QDir>
@@ -55,6 +56,51 @@ QVariantList PreviewController::steps() const { return steps_; }
 
 // 분류되지 않았거나 제외된 파일까지 포함한 미리보기 행을 반환하는 함수.
 QVariantList PreviewController::outcomes() const { return outcomes_; }
+
+// 현재 정리 계획은 그대로 두고 기존 문서에 근거한 후보를 미리보기에 표시하는 함수.
+void PreviewController::recommendDocumentFolders() {
+    if (!hasPreview_ || !draft_ || recommendationBusy_ || (runner_ && runner_->busy())) return;
+    QStringList sources;
+    QStringList documents;
+    for (const auto& outcome : draft_->previewOutcomes) {
+        const auto source = displayPath(outcome.source);
+        sources.append(source);
+        if (outcome.disposition != PreviewDisposition::Planned &&
+            outcome.disposition != PreviewDisposition::Unmatched) continue;
+        const auto extension = QFileInfo(source).suffix().toLower();
+        if (extension == "txt" || extension == "md") documents.append(source);
+    }
+    if (documents.isEmpty()) {
+        recommendationStatus_ = QStringLiteral("추천할 TXT·Markdown 문서가 없어요.");
+        emit previewChanged();
+        return;
+    }
+    const auto planId = draft_->id;
+    const auto selections = pendingFiles_.entries();
+    auto suggestions = std::make_shared<document_recommendation::FolderSuggestions>();
+    recommendationBusy_ = true;
+    recommendationStatus_ = QStringLiteral("기존 문서를 바탕으로 폴더를 찾고 있어요.");
+    emit previewChanged();
+    dispatchOperation(runner_, this, [home = previewHomeRoot_, documents, sources, suggestions] {
+        *suggestions = document_recommendation::suggestFolders(home, documents, sources);
+        return Result<void>::success();
+    }, [this, planId, selections, suggestions](const Result<void>& result) {
+        recommendationBusy_ = false;
+        if (pendingFiles_.entries() != selections) { clear(); return; }
+        if (!draft_ || draft_->id != planId) { emit previewChanged(); return; }
+        for (auto& value : outcomes_) {
+            auto row = value.toMap();
+            row.insert("recommendedFolder", suggestions->destinations.value(row.value("source").toString()));
+            value = row;
+        }
+        if (!result) recommendationStatus_ = QStringLiteral("문서 추천을 완료하지 못했어요.");
+        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("정리할 위치 바로 아래에 참고할 TXT·Markdown 문서가 든 폴더가 없어요.");
+        else if (suggestions->destinations.isEmpty()) recommendationStatus_ = QStringLiteral("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
+        else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요. 실제 이동 계획은 그대로예요.")
+            .arg(suggestions->destinations.size());
+        emit previewChanged();
+    });
+}
 
 // 화면에 표시할 검사 경고를 반환하는 함수.
 QStringList PreviewController::warnings() const { return warnings_; }
@@ -187,6 +233,7 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
         return;
     }
     draft_ = result.value();
+    recommendationStatus_.clear();
     previewHomeRoot_ = homePath;
     previewSelectedFiles_.clear();
     for (const auto& outcome : result.value().previewOutcomes) previewSelectedFiles_.push_back(outcome.source);
@@ -589,6 +636,7 @@ void PreviewController::clear() {
         !hasPreview_ && !hasFrozenPlan_ && !draft_ && !approval_) return;
     steps_.clear();
     outcomes_.clear();
+    recommendationStatus_.clear();
     warnings_.clear();
     message_.clear();
     hasPreview_ = false;
@@ -605,6 +653,7 @@ void PreviewController::clear() {
 void PreviewController::showError(const QString& message) {
     steps_.clear();
     outcomes_.clear();
+    recommendationStatus_.clear();
     warnings_.clear();
     hasPreview_ = false;
     hasFrozenPlan_ = false;
