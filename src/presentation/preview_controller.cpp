@@ -74,6 +74,7 @@ void PreviewController::restoreRecommendationFolders(const QString& root, const 
     for (auto& value : outcomes_) {
         auto row = value.toMap();
         row.remove("recommendedFolder");
+        row.remove("recommendationNote");
         value = row;
     }
     emit recommendationFoldersChanged();
@@ -118,10 +119,10 @@ void PreviewController::recommendDocumentFolders() {
         if (outcome.disposition != PreviewDisposition::Planned &&
             outcome.disposition != PreviewDisposition::Unmatched) continue;
         const auto extension = QFileInfo(source).suffix().toLower();
-        if (extension == "txt" || extension == "md") documents.append(source);
+        if (document_recommendation::isDocumentExtension(extension)) documents.append(source);
     }
     if (documents.isEmpty()) {
-        recommendationStatus_ = QStringLiteral("추천할 TXT·Markdown 문서가 없어요.");
+        recommendationStatus_ = QStringLiteral("추천할 TXT·Markdown·PDF 문서가 없어요.");
         emit previewChanged();
         return;
     }
@@ -143,11 +144,21 @@ void PreviewController::recommendDocumentFolders() {
         if (!draft_ || draft_->id != planId) { emit previewChanged(); return; }
         for (auto& value : outcomes_) {
             auto row = value.toMap();
-            row.insert("recommendedFolder", suggestions->destinations.value(row.value("source").toString()));
+            const auto source = row.value("source").toString();
+            row.insert("recommendedFolder", suggestions->destinations.value(source));
+            QString note;
+            if (suggestions->unreadablePdfs.contains(source)) {
+#ifdef NOOKBIT_DOCUMENT_PDF
+                note = QStringLiteral("앞쪽 5페이지에서 읽을 수 있는 PDF 텍스트가 없어요.");
+#else
+                note = QStringLiteral("이 빌드에서는 PDF 본문 추천을 지원하지 않아요.");
+#endif
+            }
+            row.insert("recommendationNote", note);
             value = row;
         }
         if (!result) recommendationStatus_ = QStringLiteral("문서 추천을 완료하지 못했어요.");
-        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("추천 후보에 참고할 TXT·Markdown 문서가 없어요.");
+        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("추천 후보에 읽을 수 있는 TXT·Markdown·PDF 예시가 없어요.");
         else if (suggestions->destinations.isEmpty()) recommendationStatus_ = QStringLiteral("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
         else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요. 실제 이동 계획은 그대로예요.")
             .arg(suggestions->destinations.size());

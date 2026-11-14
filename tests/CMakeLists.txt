@@ -137,7 +137,7 @@ if(TARGET nookbit_json_config)
   target_include_directories(nookbit_owned_runtime_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(nookbit_owned_runtime_tests PRIVATE NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   target_compile_features(nookbit_owned_runtime_tests PRIVATE cxx_std_20)
-  target_link_libraries(nookbit_owned_runtime_tests PRIVATE nookbit_filesystem nookbit_json_config nookbit_history Qt6::Core Qt6::Sql Qt6::Gui Qt6::Widgets)
+  target_link_libraries(nookbit_owned_runtime_tests PRIVATE nookbit_filesystem nookbit_json_config nookbit_history nookbit_document_recommendation Qt6::Core Qt6::Sql Qt6::Gui Qt6::Widgets)
   if(MSVC)
     target_compile_options(nookbit_owned_runtime_tests PRIVATE /W4 /permissive- /utf-8)
   endif()
@@ -462,7 +462,7 @@ if(TARGET nookbit_json_config)
   target_compile_definitions(nookbit_preview_controller_tests PRIVATE
     NOOKBIT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   target_link_libraries(nookbit_preview_controller_tests PRIVATE
-    nookbit_filesystem nookbit_json_config nookbit_history Qt6::Core Qt6::Sql)
+    nookbit_filesystem nookbit_json_config nookbit_history nookbit_document_recommendation Qt6::Core Qt6::Sql)
   add_test(NAME nookbit_preview_controller_tests COMMAND nookbit_preview_controller_tests)
   if(WIN32)
     set_tests_properties(nookbit_preview_controller_tests PROPERTIES

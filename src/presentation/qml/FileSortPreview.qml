@@ -75,8 +75,11 @@ Rectangle {
                     Label { Layout.fillWidth: true; text: modelData.destination.length > 0 ? qsTr("예상 목적지: %1").arg(modelData.destination) : qsTr("이동하지 않음 · 원본 유지"); elide: Text.ElideMiddle; color: preview.muted }
                     Label {
                         Layout.fillWidth: true
-                        visible: !!modelData.recommendedFolder
-                        text: visible ? qsTr("문서 추천: %1").arg(modelData.recommendedFolder) : ""
+                        visible: text.length > 0
+                        text: modelData.recommendedFolder
+                              ? qsTr("문서 추천: %1").arg(modelData.recommendedFolder)
+                              : modelData.recommendationNote || ""
+                        textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         color: preview.foreground
                     }

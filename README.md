@@ -37,6 +37,8 @@ NookBit은 승인된 경로로만 이동하고 기존 파일을 덮어쓰지 않
 
 C++20과 Qt/QML을 사용합니다. Windows에서 Visual Studio 2022의 **Desktop development with C++**(MSVC x64), CMake 3.24 이상, Ninja, MSVC x64용 Qt 6.5 이상이 필요합니다. Qt 구성 요소는 Core, Gui, Widgets, Qml, Quick, QuickControls2, QuickDialogs2, Sql입니다.
 
+PDF 본문으로 폴더를 추천하려면 같은 Qt 키트에 **Qt PDF** 구성 요소를 추가합니다. 추천은 텍스트가 들어 있는 PDF의 처음 5페이지를 읽습니다.
+
 x64 개발자 터미널에서 아래 Qt 경로를 자신의 설치 위치로 바꿔 실행합니다.
 
 ```powershell

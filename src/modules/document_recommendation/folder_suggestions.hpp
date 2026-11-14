@@ -8,17 +8,52 @@
 #include <QSet>
 #include <QStringConverter>
 
+#ifdef NOOKBIT_DOCUMENT_PDF
+#include <QPdfDocument>
+#include <QPdfSelection>
+#endif
+
 namespace nookbit::document_recommendation {
 
 struct FolderSuggestions {
     QMap<QString, QString> destinations;
+    QSet<QString> unreadablePdfs;
     int candidateCount{0};
 };
 
-// 연결 경로를 제외하고 읽을 수 있는 UTF-8 문서 앞부분을 가져오는 함수.
+// 문서 추천에서 검사하는 확장자인지 확인하는 함수.
+inline bool isDocumentExtension(const QString& extension) {
+    return extension == "txt" || extension == "md" || extension == "pdf";
+}
+
+#ifdef NOOKBIT_DOCUMENT_PDF
+// PDF 앞쪽 페이지의 텍스트를 지정한 길이까지 읽는 함수.
+inline QString pdfExcerpt(const QString& path, qsizetype characters) {
+    QPdfDocument document(nullptr);
+    if (document.load(path) != QPdfDocument::Error::None) return {};
+    QString text;
+    const int pages = std::min(document.pageCount(), 5);
+    for (int page = 0; page < pages && text.size() < characters; ++page) {
+        const auto pageText = document.getAllText(page).text().trimmed();
+        if (pageText.isEmpty()) continue;
+        if (!text.isEmpty()) text.append('\n');
+        text.append(pageText.left(characters - text.size()));
+    }
+    return text;
+}
+#endif
+
+// 연결 경로를 제외하고 로컬 문서의 본문 앞부분을 가져오는 함수.
 inline QString documentExcerpt(const QFileInfo& info, qsizetype characters) {
     const auto extension = info.suffix().toLower();
-    if (!info.isFile() || info.isSymLink() || (extension != "txt" && extension != "md")) return {};
+    if (!info.isFile() || info.isSymLink() || !isDocumentExtension(extension)) return {};
+    if (extension == "pdf") {
+#ifdef NOOKBIT_DOCUMENT_PDF
+        return pdfExcerpt(info.absoluteFilePath(), characters);
+#else
+        return {};
+#endif
+    }
     QFile file(info.absoluteFilePath());
     if (!file.open(QIODevice::ReadOnly)) return {};
     QStringDecoder decode(QStringDecoder::Utf8);
@@ -58,7 +93,7 @@ inline FolderSuggestions suggestFolders(const QString& homePath, const QStringLi
         if (selectedFolders && !selectedFolders->contains(folder.fileName())) continue;
         const QDir directory(folder.absoluteFilePath());
         QStringList examples;
-        const auto files = directory.entryInfoList({QStringLiteral("*.txt"), QStringLiteral("*.md")},
+        const auto files = directory.entryInfoList({QStringLiteral("*.txt"), QStringLiteral("*.md"), QStringLiteral("*.pdf")},
             QDir::Files | QDir::NoSymLinks, QDir::Name);
         for (const auto& file : files) {
             if (excluded.contains(documentKey(file))) continue;
@@ -73,12 +108,16 @@ inline FolderSuggestions suggestFolders(const QString& homePath, const QStringLi
 
     FolderSuggestions result;
     result.candidateCount = static_cast<int>(profiles.size());
-    if (profiles.empty()) return result;
     const auto idf = prepareProfiles(profiles);
     for (const auto& source : documents) {
         const QFileInfo file(source);
         const auto text = documentExcerpt(file, 4000);
-        if (text.isEmpty()) continue;
+        if (text.isEmpty()) {
+            if (file.suffix().compare(QStringLiteral("pdf"), Qt::CaseInsensitive) == 0)
+                result.unreadablePdfs.insert(source);
+            continue;
+        }
+        if (profiles.empty()) continue;
         const auto prediction = recommend(file.fileName() + '\n' + text, profiles, idf);
         if (prediction.bestScore && *prediction.bestScore >= minimumSimilarity)
             result.destinations.insert(source, prediction.ranked.front());

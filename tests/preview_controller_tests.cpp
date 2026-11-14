@@ -722,6 +722,30 @@ void testEveryPreviewOutcomeIsVisible() {
            "preview outcome display must not move files");
 }
 
+#ifdef NOOKBIT_DOCUMENT_PDF
+// 텍스트가 있는 페이지와 빈 페이지를 외부 도구 없이 만들 수 있는 테스트용 PDF 생성 함수.
+QByteArray recommendationPdf(const QByteArray& pageContent) {
+    const QList<QByteArray> objects{
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources "
+        "<< /Font << /F1 5 0 R >> >> >>",
+        "<< /Length " + QByteArray::number(pageContent.size()) + " >>\nstream\n" + pageContent + "\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    };
+    QByteArray pdf = "%PDF-1.4\n";
+    QByteArray offsets = "0000000000 65535 f \n";
+    for (qsizetype i = 0; i < objects.size(); ++i) {
+        offsets += QByteArray::number(pdf.size()).rightJustified(10, '0') + " 00000 n \n";
+        pdf += QByteArray::number(i + 1) + " 0 obj\n" + objects.at(i) + "\nendobj\n";
+    }
+    const auto xref = pdf.size();
+    pdf += "xref\n0 6\n" + offsets + "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + QByteArray::number(xref) + "\n%%EOF\n";
+    return pdf;
+}
+#endif
+
 // 기존 문서로 폴더를 추천하면서 이동 계획을 보존하는지 검사하는 함수.
 void testDocumentFolderRecommendations() {
     QTemporaryDir directory;
@@ -736,10 +760,18 @@ void testDocumentFolderRecommendations() {
         QFile file(path);
         return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
     };
-    expect(writeText(meeting + "/minutes.md", "agenda attendees action items decisions") &&
-               writeText(manuals + "/setup.txt", "installation troubleshooting configuration") &&
+    expect(writeText(manuals + "/setup.txt", "installation troubleshooting configuration") &&
                writeText(queued, "agenda attendees action items decisions") &&
                writeText(unrelated, "zebra"), "write example and queued documents");
+#ifdef NOOKBIT_DOCUMENT_PDF
+    const auto queuedPdf = directory.filePath("document.pdf");
+    const auto blankPdf = directory.filePath("blank.pdf");
+    const auto pdf = recommendationPdf("BT /F1 12 Tf 72 700 Td (agenda attendees action items decisions) Tj ET");
+    expect(writeText(meeting + "/minutes.pdf", pdf) && writeText(queuedPdf, pdf) &&
+               writeText(blankPdf, recommendationPdf("q Q")), "write PDF examples and test inputs");
+#else
+    expect(writeText(meeting + "/minutes.md", "agenda attendees action items decisions"), "write meeting example");
+#endif
     const auto rules = projectPath("resources/rules/default.v3.json");
     const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
     PreviewWorkflow workflow(rules, schema, std::filesystem::path(directory.filePath("appdata").toStdWString()));
@@ -750,8 +782,13 @@ void testDocumentFolderRecommendations() {
     controller.setTaskRunner(&runner);
     pending.addUrl(QUrl::fromLocalFile(queued));
     pending.addUrl(QUrl::fromLocalFile(unrelated));
+#ifdef NOOKBIT_DOCUMENT_PDF
+    pending.addUrl(QUrl::fromLocalFile(queuedPdf));
+    pending.addUrl(QUrl::fromLocalFile(blankPdf));
+#endif
     controller.createPreview(home);
     expect(waitForBackground(runner) && controller.hasPreview(), "create document preview");
+    const auto originalSteps = controller.steps();
     controller.recommendDocumentFolders();
     expect(controller.recommendationBusy() && waitForBackground(runner), "run document recommendation off the UI thread");
     QMap<QString, QVariantMap> rows;
@@ -763,8 +800,16 @@ void testDocumentFolderRecommendations() {
         "document recommends the folder with similar examples");
     expect(rows.value("other.txt").value("recommendedFolder").toString().isEmpty(),
         "unrelated documents are not recommended a folder");
-    expect(!controller.hasMovableSteps() && rows.value("notes.md").value("destination").toString().isEmpty() &&
+    expect(controller.steps() == originalSteps && rows.value("notes.md").value("destination").toString().isEmpty() &&
                QFile::exists(queued), "recommendation cannot modify a plan or move the document");
+#ifdef NOOKBIT_DOCUMENT_PDF
+    expect(QDir::cleanPath(rows.value("document.pdf").value("recommendedFolder").toString()) == meeting,
+        "a queued PDF is recommended to a folder with only a PDF example");
+    const auto blank = rows.value("blank.pdf");
+    expect(blank.value("recommendedFolder").toString().isEmpty() &&
+               !blank.value("recommendationNote").toString().isEmpty(),
+        "a PDF without text is left without a recommendation and gets an explanation");
+#endif
 
     controller.chooseRecommendationRoot(QUrl::fromLocalFile(home));
     expect(controller.recommendationCandidates().contains("meeting") &&

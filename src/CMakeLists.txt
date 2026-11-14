@@ -82,10 +82,17 @@ else()
 endif()
 
 if(NOOKBIT_BUILD_QT_APP)
-  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Widgets Qml Quick QuickControls2 QuickDialogs2 Sql)
+  find_package(Qt6 6.5 QUIET COMPONENTS Core Gui Widgets Qml Quick QuickControls2 QuickDialogs2 Sql
+    OPTIONAL_COMPONENTS Pdf)
 
   if(Qt6_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
+
+    add_library(nookbit_document_recommendation INTERFACE)
+    if(TARGET Qt6::Pdf)
+      target_link_libraries(nookbit_document_recommendation INTERFACE Qt6::Pdf)
+      target_compile_definitions(nookbit_document_recommendation INTERFACE NOOKBIT_DOCUMENT_PDF=1)
+    endif()
 
     add_library(nookbit_json_config STATIC
       infrastructure/configuration/json_document_loader.cpp
@@ -325,6 +332,7 @@ if(NOOKBIT_BUILD_QT_APP)
       nookbit_filesystem
       nookbit_json_config
       nookbit_history
+      nookbit_document_recommendation
       Qt6::Core
       Qt6::Gui
       Qt6::Widgets
