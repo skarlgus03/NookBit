@@ -55,10 +55,13 @@ Result<TransferAttempt> CommitTransferCopyUseCase::execute(
     if (!session) return stop(session.error(), TransferPhase::NeedsRecovery);
     saved = record({state.phase, TransferPhase::StagingCreated, session.value()->createdFingerprint()});
     if (!saved) return recordFailure(saved.error());
+    if (cancelled) OperationProgressScope::allowCopyCancellation(true);
     const auto verified = session.value()->copyAndVerify(cancelled);
+    if (!verified && cancelled) OperationProgressScope::allowCopyCancellation(false);
     if (!verified) return stop(verified.error(), verified.error().code == "transfer.cancelled"
         ? TransferPhase::Cancelled : TransferPhase::Failed);
     saved = record({state.phase, TransferPhase::CopyVerified, verified.value()});
+    if (cancelled) OperationProgressScope::allowCopyCancellation(false);
     if (!saved) return recordFailure(saved.error());
     if (wantsCancel()) return stop({"transfer.cancelled", "Cancelled before commit"}, TransferPhase::Cancelled);
     saved = record({state.phase, TransferPhase::CommitIntent});

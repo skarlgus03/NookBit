@@ -1,4 +1,5 @@
 #include <nookbit/application/execute_transfer_step_use_case.hpp>
+#include <nookbit/application/operation_progress.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include <algorithm>
 
@@ -32,7 +33,7 @@ Result<void> ExecuteTransferStepUseCase::execute(const PlanId& planId, const Ste
     attempt.staging = staging;
     attempt.sourceFingerprint = step->fingerprint;
     CommitTransferCopyUseCase copy(copy_, journal_);
-    const auto committed = copy.execute(attempt, {}, &*step->movement);
+    const auto committed = copy.execute(attempt, &OperationProgressScope::cancellationRequested, &*step->movement);
     if (!committed) return Result<void>::failure(committed.error());
     FinalizeTransferUseCase finalize(journal_, removal_, history_, hasher_);
     const auto completed = finalize.execute(attemptId);

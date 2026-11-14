@@ -199,6 +199,11 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
     int folderFailures = 0;
     std::size_t fileIndex = 0;
     for (const auto* step : steps) {
+        if (OperationProgressScope::cancellationRequested()) {
+            const auto marked = markNeedsRecovery(plan.id);
+            if (!marked) return marked;
+            return Result<void>::failure({"transfer.cancelled", "Stopped before starting the next file."});
+        }
         OperationProgressScope::file(++fileIndex, steps.size(), step->source);
         OperationProgressScope::phase(OperationPhase::SavingHistory);
         auto intent = history_.appendEvent(

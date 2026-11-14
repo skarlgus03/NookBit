@@ -14,7 +14,7 @@ Popup {
     focus: false
     closePolicy: Popup.NoAutoClose
     width: Math.min(UiMetrics.operationPopupWidth, parent.width - UiMetrics.pageInset * 2)
-    height: UiMetrics.operationPopupHeight
+    height: Math.max(UiMetrics.operationPopupHeight, contentItem.implicitHeight + topPadding + bottomPadding)
     padding: UiMetrics.spaceCompact
     background: Rectangle {
         radius: UiMetrics.radiusCard
@@ -63,6 +63,14 @@ Popup {
             color: popup.theme.muted
             font.pixelSize: UiMetrics.textBody
             Layout.fillWidth: true
+        }
+        AppButton {
+            objectName: "popupCancelCopy"
+            visible: !!popup.progress.canCancelCopy || !!popup.progress.copyCancellationRequested
+            enabled: !!popup.progress.canCancelCopy
+            dark: popup.dark
+            text: qsTr("복사 취소")
+            onClicked: popup.progress.requestCopyCancellation()
         }
     }
 }

@@ -9,6 +9,7 @@ Rectangle {
     required property var progress
     property bool completed: false
     property bool success: false
+    property bool cancelled: false
     property string resultMessage: ""
     property bool dark: false
     readonly property var theme: UiTheme.colors(dark)
@@ -31,7 +32,9 @@ Rectangle {
         NavigationIcon { visible: !status.completed; Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: UiMetrics.filePreviewSize; Layout.preferredHeight: UiMetrics.filePreviewSize; kind: "folder"; strokeColor: status.dark ? status.theme.text : status.theme.accent }
         Label {
             Layout.fillWidth: true
-            text: status.completed ? (status.success ? qsTr("정리를 마쳤어요") : qsTr("정리를 완료하지 못했어요")) : qsTr("파일을 정리하고 있어요")
+            text: !status.completed ? qsTr("파일을 정리하고 있어요")
+                : status.success ? qsTr("정리를 마쳤어요")
+                : status.cancelled ? qsTr("복사를 취소했어요") : qsTr("정리를 완료하지 못했어요")
             font.pixelSize: UiMetrics.textSectionTitle
             font.bold: true
             horizontalAlignment: Text.AlignHCenter
@@ -48,8 +51,17 @@ Rectangle {
             indeterminate: !status.progress.byteProgressKnown
         }
         Label { visible: !status.completed && status.progress.byteProgressKnown; text: status.progress.byteProgressText }
+        AppButton {
+            objectName: "fileSortCancelCopy"
+            Layout.alignment: Qt.AlignHCenter
+            visible: !status.completed && (!!status.progress.canCancelCopy || !!status.progress.copyCancellationRequested)
+            enabled: !!status.progress.canCancelCopy
+            dark: status.dark
+            text: qsTr("복사 취소")
+            onClicked: status.progress.requestCopyCancellation()
+        }
         Label { Layout.fillWidth: true; visible: status.completed; text: status.resultMessage; wrapMode: Text.Wrap }
-        Label { Layout.fillWidth: true; visible: status.completed && !status.success; text: qsTr("이동하지 못한 파일은 대기 목록과 작업 기록에서 확인해 주세요."); wrapMode: Text.Wrap }
+        Label { Layout.fillWidth: true; visible: status.completed && !status.success && !status.cancelled; text: qsTr("이동하지 못한 파일은 대기 목록과 작업 기록에서 확인해 주세요."); wrapMode: Text.Wrap }
         AppButton {
             visible: status.completed && status.success
             text: qsTr("되돌리기")

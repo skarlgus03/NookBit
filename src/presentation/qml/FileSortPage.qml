@@ -20,6 +20,7 @@ Rectangle {
     property int confirmationReturnStep: 0
     property bool manualSession: false
     property bool sortSuccess: false
+    property bool sortCancelled: false
     property string resultMessage: ""
     readonly property bool previewOpen: workflowStep === 1
     readonly property bool transitioning: slideAnimation.running
@@ -79,6 +80,7 @@ Rectangle {
             if (!home.manualSession) return
             home.manualSession = false
             home.sortSuccess = success
+            home.sortCancelled = !success && !!home.progress.copyCancelled
             home.resultMessage = message
             home.showStep(4)
         }
@@ -232,6 +234,7 @@ Rectangle {
             enabled: home.workflowStep === modelData && !home.transitioning
             completed: modelData === 4
             success: home.sortSuccess
+            cancelled: home.sortCancelled
             resultMessage: home.resultMessage
             controller: home.controller
             progress: home.progress

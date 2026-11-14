@@ -115,6 +115,46 @@ void testBackgroundRunner() {
     expect(drained, "runner destruction must wait for worker instead of terminating it");
 }
 
+// 복사 취소 요청이 작업 스레드에 전달되고 확정 이후에는 접수되지 않는지 검사하는 함수.
+void testBackgroundCopyCancellation() {
+    using namespace nookbit;
+    BackgroundTaskRunner runner;
+    QObject receiver;
+    for (const bool beforeCommit : {true, false}) {
+        QSemaphore allowWorkerToFinish;
+        bool requestSent = false;
+        bool observed = false;
+        const auto connection = QObject::connect(&runner, &BackgroundTaskRunner::progressChanged, &receiver, [&] {
+            const auto phase = runner.progress().phase;
+            if (requestSent || (beforeCommit ? phase != OperationPhase::Copying
+                                              : phase != OperationPhase::CommittingDestination)) return;
+            requestSent = true;
+            expect(runner.canCancelCopy() == beforeCommit, "cancel action is available only before commit");
+            runner.requestCopyCancellation();
+            expect(runner.copyCancellationRequested() == beforeCommit, "late cancellation cannot be accepted");
+            allowWorkerToFinish.release();
+        });
+        runner.submit(&receiver, [&] {
+            OperationProgressScope::allowCopyCancellation(true);
+            OperationProgressScope::copied(1, 2);
+            if (!beforeCommit) {
+                OperationProgressScope::allowCopyCancellation(false);
+                OperationProgressScope::phase(OperationPhase::CommittingDestination);
+            }
+            if (!allowWorkerToFinish.tryAcquire(1, 5000))
+                return Result<void>::failure({"test.timeout", "Cancellation fixture timed out"});
+            return OperationProgressScope::cancellationRequested()
+                ? Result<void>::failure({"transfer.cancelled", "Test copy cancelled"}) : Result<void>::success();
+        }, [&](const auto& result) {
+            observed = beforeCommit ? !result && result.error().code == "transfer.cancelled" : bool(result);
+        }, BackgroundTaskRunner::TaskKind::Sort);
+        expect(waitForBackground(runner) && requestSent && observed && runner.copyCancelled() == beforeCommit
+            && !runner.canCancelCopy() && !runner.copyCancellationRequested(),
+            "copy request reaches the worker and is cleared before the next operation");
+        QObject::disconnect(connection);
+    }
+}
+
 // 작업 스레드의 진행 값이 화면 스레드에서만 반영되고 실패 시 완료를 꾸미지 않는 함수.
 void testBackgroundProgress() {
     using namespace nookbit;
@@ -2066,6 +2106,7 @@ int main(int argc, char* argv[]) {
     if (application.arguments().size() > 1 && application.arguments()[1] == "--native-cross-run") return runNativeControllerTests(application.arguments());
     if (application.arguments().size() > 1) return 2;
     testBackgroundRunner();
+    testBackgroundCopyCancellation();
     testBackgroundProgress();
     testBackgroundApprovalSafety();
     QTemporaryDir backgroundSameVolume;

@@ -3,6 +3,7 @@
 #include <nookbit/application/finalize_transfer_use_case.hpp>
 #include <nookbit/application/rollback_transfer_use_case.hpp>
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
+#include <nookbit/application/operation_progress.hpp>
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_recovery.hpp"
 #include "application/use_cases/plan_signature.hpp"
@@ -295,6 +296,23 @@ void testSuccessAndCancel() {
         fixture.check(TransferPhase::Cancelled);
         expect(!std::filesystem::exists(fixture.attempt.destination), "cancel does not commit");
         if (cancelAt == TransferPhase::Prepared) expect(!std::filesystem::exists(fixture.attempt.staging), "early cancel creates no files");
+    }
+    {
+        Fixture fixture(false, false, std::string(8 * 1024 * 1024, 'c'));
+        if (!fixture.ready) return;
+        bool cancel = false;
+        bool cancelWindowOpen = false;
+        OperationProgressScope scope([&](const OperationProgress& progress) {
+            if (progress.canCancelCopy && progress.copiedBytes > 0) cancel = true;
+        }, [&] { return cancel; }, [&](bool allowed) { cancelWindowOpen = allowed; }, std::chrono::milliseconds::zero());
+        const auto result = fixture.useCase.execute(fixture.attempt, &OperationProgressScope::cancellationRequested);
+        expect(!result && result.error().code == "transfer.cancelled" && cancel && !cancelWindowOpen,
+            "a request after writing bytes cancels the native copy and closes the cancel window");
+        fixture.check(TransferPhase::Cancelled);
+        const auto partialSize = std::filesystem::file_size(fixture.attempt.staging);
+        expect(partialSize > 0 && partialSize < fixture.attempt.sourceFingerprint.size &&
+            !std::filesystem::exists(fixture.attempt.destination),
+            "cancel keeps the partial staging file and does not publish the destination");
     }
 }
 

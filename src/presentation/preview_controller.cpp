@@ -501,7 +501,7 @@ void PreviewController::confirmSortInBackground() {
                 message_ += QStringLiteral(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 emit previewChanged();
             }
-        }, BackgroundTaskRunner::TaskKind::FileWork);
+        }, BackgroundTaskRunner::TaskKind::Sort);
 }
 
 // 현재 미리보기를 재검사한 뒤 승인 전 계획으로 고정·저장하는 함수.
@@ -608,14 +608,16 @@ void PreviewController::moveApprovedFile() {
             return operations->executeApproved(plan, approval, selectedFiles, settings);
         }, [this, movedPlanId, movedSteps](const Result<void>& result) {
         finishMovement(movedPlanId, movedSteps, result);
-      }, BackgroundTaskRunner::TaskKind::FileWork);
+      }, BackgroundTaskRunner::TaskKind::Sort);
 }
 
 // 이동 완료/실패를 화면 스레드에서 동일한 규칙으로 처리하는 함수.
 void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps, const Result<void>& result) {
     if (!result) {
         const auto current = history_.loadPlan(movedPlanId);
-        if (current && current.value().status == PlanStatus::Failed) {
+        const bool cancelled = result.error().code == "transfer.cancelled";
+        if (current && (current.value().status == PlanStatus::Failed ||
+                        (cancelled && current.value().status == PlanStatus::NeedsRecovery))) {
             const auto& completed = current.value().steps;
             for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
                 const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
@@ -623,11 +625,14 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
                     return step.status == StepStatus::Applied && step.source == path;
                 })) pendingFiles_.removeAt(index);
             }
-            if (std::any_of(completed.begin(), completed.end(), [](const MoveStep& step) { return step.status == StepStatus::Applied; })) undoPlanId_ = movedPlanId;
+            if (current.value().status == PlanStatus::Failed &&
+                std::any_of(completed.begin(), completed.end(), [](const MoveStep& step) { return step.status == StepStatus::Applied; }))
+                undoPlanId_ = movedPlanId;
         }
         if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
         emit recoveryReconcileRequested();
-        message_ = QStringLiteral("이동을 완료하지 못했어요. %1").arg(reportFileOperationError(result.error()));
+        const auto reason = reportFileOperationError(result.error());
+        message_ = cancelled ? reason : QStringLiteral("이동을 완료하지 못했어요. %1").arg(reason);
         emit previewChanged();
         emit sortExecutionFinished(false, message_);
         return;

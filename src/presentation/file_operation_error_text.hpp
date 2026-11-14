@@ -57,6 +57,8 @@ inline QString fileOperationErrorText(const Error& error) {
         return QCoreApplication::translate("FileOperationError", "이동한 항목이 바뀌었거나 원래 위치를 사용할 수 없어요. 작업 기록에서 두 위치를 확인해 주세요.");
     if (code == "execute.partial_failure")
         return QCoreApplication::translate("FileOperationError", "일부 항목만 이동했어요. 작업 기록에서 이동하지 못한 항목을 확인해 주세요.");
+    if (code == "transfer.cancelled")
+        return QCoreApplication::translate("FileOperationError", "복사를 취소했어요. 먼저 옮긴 파일은 현재 위치에 있어요. 남은 작업은 ‘중단 작업 확인’에서 확인해 주세요.");
     if (code == "execute.batch_rolled_back")
         return QCoreApplication::translate("FileOperationError", "이동 중 문제가 생겨 이번 작업에서 먼저 옮긴 항목을 원래 위치로 돌려놓았어요.");
     if (is({"execute.needs_recovery", "execute.rollback_needs_recovery", "rollback.needs_recovery"}))

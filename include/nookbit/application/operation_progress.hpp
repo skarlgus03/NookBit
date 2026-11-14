@@ -12,7 +12,7 @@ enum class OperationPhase {
     Starting, Preparing, Approving, CheckingPlan, CheckingSource, ProtectingSource,
     Copying, FlushingCopy, VerifyingCopy, PreservingMetadata, CommittingDestination,
     VerifyingBeforeRemoval, RemovingSource, Moving, CheckingResult, SavingHistory,
-    Restoring, Recovering, Completed, Failed
+    Restoring, Recovering, Completed, Failed, Cancelled
 };
 
 /// 파일 내용이나 화면 타입이 없는 값 스냅샷이며 바이트 비율은 현재 파일의 복사에만 해당한다.
@@ -22,6 +22,7 @@ struct OperationProgress {
     std::string fileName;
     std::uintmax_t copiedBytes{}, totalBytes{};
     bool byteProgressKnown{false};
+    bool canCancelCopy{false};
 };
 
 /// 요청 조립부가 진행 수신자를 연결하며 다른 스레드·다른 요청과 문맥을 공유하지 않는다.
@@ -31,10 +32,28 @@ public:
     /// 요청 동안만 진행 이벤트를 전달하고 바이트 알림을 기본 100ms 간격으로 제한하는 함수.
     explicit OperationProgressScope(Sink sink, std::chrono::milliseconds byteInterval = std::chrono::milliseconds(100))
         : previous_(active_), sink_(std::move(sink)), interval_(byteInterval) { active_ = this; }
+    /// 현재 작업의 취소 신호를 진행 정보와 함께 연결하는 함수.
+    OperationProgressScope(Sink sink, std::function<bool()> cancellation, std::function<void(bool)> copyBoundary,
+                           std::chrono::milliseconds byteInterval = std::chrono::milliseconds(100))
+        : OperationProgressScope(std::move(sink), byteInterval) {
+        cancellation_ = std::move(cancellation);
+        copyBoundary_ = std::move(copyBoundary);
+    }
     /// 이전 문맥만 복구하며 성공·실패나 파일 완료를 임의로 만들어내지 않는 함수.
     ~OperationProgressScope() { active_ = previous_; }
     OperationProgressScope(const OperationProgressScope&) = delete;
     OperationProgressScope& operator=(const OperationProgressScope&) = delete;
+    /// 작업자가 안전한 경계에서 취소 요청을 읽는 함수.
+    static bool cancellationRequested() {
+        return active_ && active_->cancellation_ && active_->cancellation_();
+    }
+    /// 현재 복사가 사용자 취소를 받을 수 있는지 화면에 알리는 함수.
+    static void allowCopyCancellation(bool allowed) noexcept {
+        if (!active_ || !active_->copyBoundary_) return;
+        active_->copyBoundary_(allowed);
+        active_->value_.canCancelCopy = allowed;
+        active_->send();
+    }
     /// 새 처리 구간의 파일 수와 완료 수를 초기화하는 함수.
     static void begin(OperationPhase phase, std::size_t files = 0) noexcept {
         if (!active_) return;
@@ -87,6 +106,8 @@ private:
     inline static thread_local OperationProgressScope* active_{nullptr};
     OperationProgressScope* previous_;
     Sink sink_;
+    std::function<bool()> cancellation_;
+    std::function<void(bool)> copyBoundary_;
     std::chrono::milliseconds interval_;
     std::chrono::steady_clock::time_point lastByteUpdate_{};
     OperationProgress value_;
