@@ -377,13 +377,19 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             // 추가 메뉴가 조건·결과·처리·새 흐름을 중복 없이 나누고 제한된 크기로 열리는지 검사한다.
             const auto groups = rules->property("nodeAddGroups").value<QJSValue>().toVariant().toList();
             if (groups.size() != 4) return false;
-            const QStringList expectedTypes{"itemType", "extension", "size", "name", "age", "sourceFolder", "all", "any", "not", "otherwise", "destination", "exclude", "folderScan", "callFlow", "folderFlow", "classificationFlow"};
+            const QStringList expectedTypes{
+                "itemType", "extension", "size", "name", "age", "sourceFolder", "all", "any", "not", "otherwise",
+                "destination", "exclude", "documentAnalysis", "folderScan", "callFlow", "folderFlow", "classificationFlow"};
             QStringList actualTypes;
             for (const auto& group : groups) {
                 for (const auto& node : group.toMap().value("nodes").toList())
                     actualTypes.append(node.toMap().value("type").toString());
             }
-            if (actualTypes != expectedTypes || !QMetaObject::invokeMethod(rules, "openAddMenu",
+            if (actualTypes != expectedTypes) {
+                QTextStream(stderr) << "Rule node menu differs: " << actualTypes.join(", ") << Qt::endl;
+                return false;
+            }
+            if (!QMetaObject::invokeMethod(rules, "openAddMenu",
                     Q_ARG(QVariant, QVariant(100)), Q_ARG(QVariant, QVariant(100)))) return false;
             QCoreApplication::processEvents();
             auto* addMenu = rules->findChild<QObject*>(QStringLiteral("addNodeMenu"));
@@ -531,12 +537,27 @@ static bool verifyExtensionInteraction(QQuickWindow* mainWindow, QQuickWindow* e
             if (!sizeUnit || sizeUnit->property("count").toInt() != 4) return false;
         }
         if (page == 8) {
-            // 버전 정보가 추가된 네 설정 그룹이 같은 규격으로 배치되는지 검사한다.
-            auto* settings = findUiChild<QObject*>(mainWindow, QStringLiteral("settingsPage"));
+            // 동적으로 추가된 정리 설정을 포함해 실제 화면의 설정 그룹 규격을 검사한다.
+            auto* settings = findUiChild<QQuickItem*>(mainWindow, QStringLiteral("settingsPage"));
             if (!settings) return false;
-            const auto titles = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionTitle"));
-            const auto cards = settings->findChildren<QQuickItem*>(QStringLiteral("settingsSectionCard"));
-            if (titles.size() != 5 || cards.size() != 5) return false;
+            QList<QQuickItem*> titles, cards;
+            // Loader가 붙인 설정 섹션까지 화면 트리에서 수집하는 함수.
+            const auto collectSections = [&titles, &cards](auto&& self, QQuickItem* item) -> void {
+                if (item->objectName() == QStringLiteral("settingsSectionTitle")) titles.append(item);
+                if (item->objectName() == QStringLiteral("settingsSectionCard")) cards.append(item);
+                for (auto* child : item->childItems()) self(self, child);
+            };
+            collectSections(collectSections, settings);
+            const QStringList expectedTitles{QStringLiteral("화면"), QStringLiteral("파일 정리"),
+                QStringLiteral("문서 추천"), QStringLiteral("허용한 외부 목적지"),
+                QStringLiteral("기능"), QStringLiteral("정보")};
+            QStringList actualTitles;
+            for (auto* title : titles) actualTitles.append(title->property("text").toString());
+            if (actualTitles != expectedTitles || cards.size() != expectedTitles.size()) {
+                QTextStream(stderr) << "Settings sections differ: " << actualTitles.join(", ")
+                    << " (cards=" << cards.size() << ")" << Qt::endl;
+                return false;
+            }
             auto* version = findUiChild<QObject*>(settings, QStringLiteral("applicationVersionLabel"));
             if (!version || version->property("text").toString() != "NookBit " + QCoreApplication::applicationVersion()) return false;
             for (auto* title : titles) {
