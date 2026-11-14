@@ -265,7 +265,8 @@ int main(int argc, char** argv) {
     auto card = create(engine, "RuleNodeCard", {{"editor", QVariant::fromValue(state.get())},
         {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))}, {"modelData", list(state.get(), "blocks").first()}});
     if (!card) return 1;
-    auto* outputPort = card->findChild<QObject*>("ruleOutputPort_1");
+    auto* outputPort = findMenuItem(findMenuItem, qobject_cast<QQuickItem*>(card.get()), "ruleOutputPort_1");
+    expect(outputPort != nullptr, "the start node exposes its output socket");
     if (!outputPort) return 1;
     state->setProperty("connectingFrom", 1);
     state->setProperty("draggingConnection", true);
@@ -490,6 +491,44 @@ int main(int argc, char** argv) {
     expect(call(engine, state.get(), "connectBlocks", {notInput, notId, "predicate"}).toBool()
         && !call(engine, state.get(), "connectBlocks", {extraInput, notId, "predicate"}).toBool(),
         "NOT accepts one condition and rejects a second");
+
+    call(engine, other.get(), "addBlock", {"documentAnalysis", 420, 350});
+    const int analysisId = other->property("selectedId").toInt();
+    auto analysisCard = create(engine, "RuleNodeCard", {{"editor", QVariant::fromValue(other.get())},
+        {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))},
+        {"modelData", call(engine, other.get(), "blockForId", {analysisId}).toVariant()}});
+    auto* addCategory = analysisCard ? analysisCard->findChild<QObject*>(QString("ruleAddDocumentCategory_%1").arg(analysisId)) : nullptr;
+    expect(addCategory && QMetaObject::invokeMethod(addCategory, "clicked"), "document node exposes an add-category button");
+    call(engine, other.get(), "addDocumentCategory", {analysisId});
+    const auto categories = call(engine, other.get(), "blockForId", {analysisId}).toVariant().toMap().value("categories").toList();
+    expect(categories.size() == 2, "adding categories creates two independent outputs");
+    const auto minutes = categories.value(0).toMap().value("id").toString();
+    const auto manual = categories.value(1).toMap().value("id").toString();
+    call(engine, other.get(), "addBlock", {"destination", 850, 410});
+    const int minutesDestination = other->property("selectedId").toInt();
+    call(engine, other.get(), "addBlock", {"destination", 850, 510});
+    const int manualDestination = other->property("selectedId").toInt();
+    call(engine, other.get(), "addBlock", {"exclude", 850, 680});
+    const int abstainDestination = other->property("selectedId").toInt();
+    other->setProperty("connectingFrom", analysisId);
+    other->setProperty("connectingPort", minutes);
+    call(engine, other.get(), "finishConnectionAt", {850, 410 + other->property("blockHeight").toInt() / 2});
+    expect(call(engine, other.get(), "hasOutgoing", {analysisId, minutes}).toBool()
+        && list(other.get(), "edges").last().toMap().value("to").toInt() == minutesDestination,
+        "dragging an output retains its ID and connects to the dropped target");
+    expect(call(engine, other.get(), "connectBlocks", {analysisId, manualDestination, "", manual}).toBool(),
+        "the second category can connect independently");
+    expect(call(engine, other.get(), "connectBlocks", {analysisId, abstainDestination, "", "abstain"}).toBool(),
+        "the abstain output can connect independently");
+    const auto connected = list(other.get(), "edges");
+    call(engine, other.get(), "updateDocumentCategory", {analysisId, minutes, "Minutes", "agenda, action item"});
+    expect(list(other.get(), "edges") == connected, "renaming a category retains its connection");
+    call(engine, other.get(), "removeDocumentCategory", {analysisId, minutes});
+    expect(!call(engine, other.get(), "hasOutgoing", {analysisId, minutes}).toBool()
+        && call(engine, other.get(), "hasOutgoing", {analysisId, manual}).toBool()
+        && call(engine, other.get(), "hasOutgoing", {analysisId, "abstain"}).toBool(),
+        "removing a category disconnects only its output");
+
     auto inspectionPage = create(engine, "RuleEditorPage", {
         {"controller", QVariant::fromValue(controller.get())}, {"destinations", QVariant::fromValue(controller.get())},
         {"guideService", QVariant::fromValue(controller.get())}, {"width", 828}, {"height", 600}

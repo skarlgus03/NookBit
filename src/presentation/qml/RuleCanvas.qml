@@ -126,7 +126,7 @@ Rectangle {
                     if (source && target) {
                         const sourcePos = canvas.editor.positionFor(source);
                         const targetPos = canvas.editor.positionFor(target);
-                        const from = canvas.editor.outputPoint(source);
+                        const from = canvas.editor.outputPoint(source, edge.port);
                         const to = canvas.editor.inputPoint(target, edge.kind);
                         context.setLineDash(edge.kind === "predicate" ? [UiMetrics.spaceSmall * canvas.editor.zoom, UiMetrics.spaceExtraSmall * canvas.editor.zoom] : []);
                         canvas.drawEdge(context, from.x, from.y, to.x, to.y, false, canvas.editor.altHeld && index
@@ -139,7 +139,7 @@ Rectangle {
                     const source = canvas.editor.blockForId(canvas.editor.connectingFrom);
                     if (source) {
                         const sourcePos = canvas.editor.positionFor(source);
-                        const from = canvas.editor.outputPoint(source);
+                        const from = canvas.editor.outputPoint(source, canvas.editor.connectingPort);
                         const to = canvas.editor.screenPoint(canvas.editor.pointerX, canvas.editor.pointerY);
                         canvas.drawEdge(context, from.x, from.y, to.x, to.y, true, false, false);
                     }

@@ -474,6 +474,14 @@ Result<AtomicRuleCondition> flowCondition(const QVariantMap& value) {
 // 조건 계산 선을 먼저 검사한 뒤 이름 있는 흐름과 실행 트리를 분리하는 함수.
 Result<FolderFlowGraph> splitEditableGraph(const QVariantList& blocks, const QVariantList& edges,
                                          const FlowConditionParser& parser) {
+    for (const auto& block : blocks) {
+        if (block.toMap().value("type").toString() == QStringLiteral("documentAnalysis")) {
+            return Result<FolderFlowGraph>::failure({
+                "rules.document_analysis_draft",
+                "문서 분석 (TF-IDF)은 편집 초안이에요. 실제 규칙에 적용하려면 이 노드를 빼 주세요."
+            });
+        }
+    }
     const auto prepared = prepareLogicalGraph(blocks, edges);
     if (!prepared) return Result<FolderFlowGraph>::failure(prepared.error());
     return splitFolderFlowGraph(prepared.value().blocks, prepared.value().edges, parser);

@@ -27,6 +27,7 @@ QtObject {
             { type: "exclude", title: qsTr("정리하지 않음") }
         ] },
         { title: qsTr("처리 단계"), nodes: [
+            { type: "documentAnalysis", title: qsTr("문서 분석 (TF-IDF) · 초안") },
             { type: "folderScan", title: qsTr("폴더 내부 순회") },
             { type: "callFlow", title: qsTr("분류 흐름 호출") }
         ] },
@@ -102,6 +103,7 @@ QtObject {
     property real marqueeEndX: 0
     property real marqueeEndY: 0
     property int connectingFrom: -1
+    property string connectingPort: ""
     property bool draggingConnection: false
     property real pointerX: 0
     property real pointerY: 0
@@ -262,11 +264,30 @@ QtObject {
     // 카드의 실제 너비를 반환하는 함수.
     function widthFor(block) { return isLogical(block) ? UiMetrics.logicalNodeWidth : blockWidth; }
     // 카드의 실제 높이를 반환하는 함수.
-    function heightFor(block) { return isLogical(block) ? UiMetrics.logicalNodeHeight : blockHeight; }
+    function heightFor(block) {
+        if (block.type === "documentAnalysis")
+            return documentPortY(block, "abstain") + documentRowHeight * 1.5;
+        return isLogical(block) ? UiMetrics.logicalNodeHeight : blockHeight;
+    }
+    readonly property real documentRowHeight: UiMetrics.spaceGroup * 3
+
+    // 문서 분석 노드의 보류 출력과 분류별 출력을 반환하는 함수.
+    function documentPorts(block) {
+        return (block.categories || []).map(category => ({
+            id: category.id, label: category.label.trim() || qsTr("이름 없는 분류")
+        })).concat([{id: "abstain", label: qsTr("보류")}]);
+    }
+
+    // 핀과 연결선이 같은 높이에서 만나도록 출력의 카드 내 위치를 반환하는 함수.
+    function documentPortY(block, port) {
+        const index = documentPorts(block).findIndex(output => output.id === port);
+        return Math.round(blockHeight * 0.35) + (Math.max(0, index) + 0.5) * documentRowHeight;
+    }
     // 출력 연결점의 화면 좌표를 반환하는 함수.
-    function outputPoint(block) {
+    function outputPoint(block, port) {
         const p = positionFor(block);
-        return screenPoint(p.x + widthFor(block), p.y + heightFor(block) / 2);
+        const y = block.type === "documentAnalysis" ? documentPortY(block, port) : heightFor(block) / 2;
+        return screenPoint(p.x + widthFor(block), p.y + y);
     }
     // 실행 입력과 조건 계산 입력의 화면 좌표를 구별하는 함수.
     function inputPoint(block, kind) {
@@ -275,8 +296,8 @@ QtObject {
     }
 
     // 블록 출력점에서 다른 블록으로 선이 이어지는지 반환하는 함수.
-    function hasOutgoing(id) {
-        return edges.some(edge => edge.from === id);
+    function hasOutgoing(id, port = "") {
+        return edges.some(edge => edge.from === id && (edge.port || "") === port);
     }
 
     // 드래그 중인 블록은 아직 모델에 저장되지 않은 화면 위치를 반환하는 함수.
@@ -354,6 +375,7 @@ QtObject {
         case "callFlow": return qsTr("분류 흐름 호출");
         case "folderScan": return qsTr("내부 파일 순회");
         case "applyDefault": return qsTr("기본 정리 적용");
+        case "documentAnalysis": return qsTr("문서 분석 (TF-IDF)");
         case "start":
             return qsTr("파일 입력");
         case "extension":
@@ -391,6 +413,7 @@ QtObject {
             return;
         }
         const examples = {
+            documentAnalysis: "",
             folderScan: "", callFlow: "",
             itemType: "folder",
             sourceFolder: "", all: "", any: "", not: "",
@@ -416,6 +439,40 @@ QtObject {
         selectOnly(block.id);
         statusText = qsTr("블록을 추가했어요. 블록을 끌어 위치를 바꾸고, 오른쪽 점을 왼쪽 점에 연결해 보세요.");
         repaintRequested();
+    }
+
+    // 분류 항목을 만들고 다른 핀과 겹치지 않는 ID를 부여하는 함수.
+    function addDocumentCategory(blockId) {
+        const block = blockForId(blockId);
+        if (!block || block.type !== "documentAnalysis")
+            return;
+        const categories = block.categories || [];
+        const category = {id: "category-" + nextId++, label: qsTr("분류 %1").arg(categories.length + 1), keywords: ""};
+        blocks = blocks.map(item => item.id === blockId
+            ? Object.assign({}, item, {categories: categories.concat([category])}) : item);
+        selectOnly(blockId);
+    }
+
+    // 핀 ID를 보존하면서 분류 이름과 키워드를 편집하는 함수.
+    function updateDocumentCategory(blockId, categoryId, label, keywords) {
+        const block = blockForId(blockId);
+        if (!block || block.type !== "documentAnalysis")
+            return;
+        const categories = block.categories.map(category => category.id === categoryId
+            ? {id: categoryId, label: label, keywords: keywords} : category);
+        blocks = blocks.map(item => item.id === blockId ? Object.assign({}, item, {categories: categories}) : item);
+    }
+
+    // 분류 항목과 그 항목의 출력에 연결된 선만 제거하는 함수.
+    function removeDocumentCategory(blockId, categoryId) {
+        const block = blockForId(blockId);
+        if (!block || block.type !== "documentAnalysis")
+            return;
+        if (connectingFrom === blockId && connectingPort === categoryId)
+            cancelConnection();
+        edges = edges.filter(edge => edge.from !== blockId || edge.port !== categoryId);
+        const categories = block.categories.filter(category => category.id !== categoryId);
+        blocks = blocks.map(item => item.id === blockId ? Object.assign({}, item, {categories: categories}) : item);
     }
 
     // 선택한 시작 노드 이외의 블록과 그 사이 연결선만 내부 복사본으로 보관하는 함수.
@@ -655,7 +712,7 @@ QtObject {
     }
 
     // 한 부모와 한 자식 사이에 순환 없는 임시 연결을 만드는 함수.
-    function connectBlocks(fromId, toId, kind = "") {
+    function connectBlocks(fromId, toId, kind = "", port = "") {
         const source = blockForId(fromId);
         const target = blockForId(toId);
         if (source && target && (source.flowId || "") !== (target.flowId || "")) {
@@ -664,6 +721,15 @@ QtObject {
         }
         if (!source || !target || source.type === "destination" || source.type === "exclude" || ["callFlow", "applyDefault"].includes(source.type) || ["start", "flowStart"].includes(target.type))
             return false;
+        if (source.type === "documentAnalysis") {
+            if (kind || !documentPorts(source).some(output => output.id === port)
+                || !["destination", "exclude"].includes(target.type)) {
+                statusText = qsTr("문서 분석의 출력 핀은 목적지 또는 정리 제외에 연결할 수 있어요.");
+                return false;
+            }
+        } else if (port) {
+            return false;
+        }
         if (fromId === toId || hasPath(toId, fromId)) {
             statusText = qsTr("자기 자신이나 조상 블록으로 연결할 수 없어요.");
             return false;
@@ -693,7 +759,7 @@ QtObject {
                 return false;
             }
         }
-        const existing = edges.filter(edge => edge.from === fromId && !edge.kind);
+        const existing = edges.filter(edge => edge.from === fromId && !edge.kind && (edge.port || "") === port);
         const terminal = ["destination", "exclude", "callFlow", "applyDefault", "folderScan"].includes(target.type);
         if (source.type === "start" && terminal) {
             statusText = qsTr("파일 입력 뒤에는 조건 또는 '그 외' 노드를 먼저 연결해 주세요.");
@@ -711,28 +777,24 @@ QtObject {
             return false;
         }
         const next = edges.slice();
+        const connection = {from: fromId, to: toId};
+        if (port)
+            connection.port = port;
         const otherwiseIndex = next.findIndex(edge => edge.from === fromId && blockForId(edge.to).type === "otherwise");
         if (target.type !== "otherwise" && otherwiseIndex >= 0)
-            next.splice(otherwiseIndex, 0, {
-                            from: fromId,
-                            to: toId
-                        });
+            next.splice(otherwiseIndex, 0, connection);
         else
-            next.push({
-                          from: fromId,
-                          to: toId
-                      });
+            next.push(connection);
         edges = next;
-        connectingFrom = -1;
-        draggingConnection = false;
+        cancelConnection();
         statusText = qsTr("연결했어요. 이 그래프는 아직 분류 규칙으로 저장되지 않습니다.");
-        repaintRequested();
         return true;
     }
 
     // 입력을 잃거나 페이지를 떠날 때 임시 연결만 취소하고 저장된 선은 보존하는 함수.
     function cancelConnection() {
         connectingFrom = -1;
+        connectingPort = "";
         draggingConnection = false;
         repaintRequested();
     }
@@ -742,15 +804,16 @@ QtObject {
         if (connectingFrom < 0)
             return;
         const sourceId = connectingFrom;
+        const port = connectingPort;
         cancelConnection();
         for (const block of blocks) {
             const p = positionFor(block);
             if (isLogical(block) && Math.abs(x - p.x) < 20 && Math.abs(y - (p.y + heightFor(block) * 0.75)) < 14) {
-                connectBlocks(sourceId, block.id, "predicate"); return;
+                connectBlocks(sourceId, block.id, "predicate", port); return;
             }
             if (!["start", "flowStart"].includes(block.type) && Math.abs(x - p.x) < 28 && Math.abs(y - (p.y + heightFor(block) * (isLogical(block) ? 0.25 : 0.5)))
                     < 28) {
-                connectBlocks(sourceId, block.id);
+                connectBlocks(sourceId, block.id, "", port);
                 return;
             }
         }
@@ -855,9 +918,7 @@ QtObject {
             const target = blockForId(edge.to);
             if (!source || !target)
                 continue;
-            const a = positionFor(source);
-            const b = positionFor(target);
-            const from = outputPoint(source);
+            const from = outputPoint(source, edge.port);
             const to = inputPoint(target, edge.kind);
             const current = connectionStyle === 1
                 ? ConnectionGeometry.distanceToSegment(screenX, screenY, from.x, from.y, to.x, to.y)

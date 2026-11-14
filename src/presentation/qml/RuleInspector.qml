@@ -21,7 +21,10 @@ Frame {
     property int folderTargetId: -1
     property string externalFolder: ""
     readonly property string selectedType: editor.selectedBlock ? editor.selectedBlock.type : ""
-    readonly property string selectionKind: editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("처리 흐름") : selectedType === "start" ? qsTr("시작점")
+    readonly property string documentCategoryIds: JSON.stringify(selectedType === "documentAnalysis"
+        ? (editor.selectedBlock.categories || []).map(category => category.id) : [])
+    readonly property string selectionKind: selectedType === "documentAnalysis" ? qsTr("편집 초안")
+        : editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("처리 흐름") : selectedType === "start" ? qsTr("시작점")
         : ["destination", "exclude"].includes(selectedType) ? qsTr("종착점")
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
     readonly property string valueLabel: selectedType === "flowStart" ? qsTr("흐름 이름") : selectedType === "destination" ? qsTr("목적지 경로")
@@ -115,7 +118,7 @@ Frame {
                          && inspector.editor.selectedBlock.type !== "otherwise" && inspector.editor.selectedBlock.type
                          !== "exclude"
                          && !inspector.editor.isLogical(inspector.editor.selectedBlock)
-                         && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
+                         && !["folderScan", "applyDefault", "callFlow", "documentAnalysis"].includes(inspector.selectedType)
             }
             AppTextField {
                 id: inspectorValue
@@ -126,7 +129,7 @@ Frame {
                          !== "exclude"
                          && inspector.selectedType !== "itemType"
                          && !inspector.editor.isLogical(inspector.editor.selectedBlock)
-                         && !["folderScan", "applyDefault", "callFlow"].includes(inspector.selectedType)
+                         && !["folderScan", "applyDefault", "callFlow", "documentAnalysis"].includes(inspector.selectedType)
                 enabled: visible
                 placeholderText: inspector.editor.selectedBlock && inspector.editor.selectedBlock.type
                                  === "destination" ? (inspector.editor.selectedBlock.homeRelative !== false ? qsTr(
@@ -141,6 +144,55 @@ Frame {
                 onEditingFinished: {
                     if (inspector.editor.selectedBlock)
                         inspector.editor.updateValue(inspector.editor.selectedBlock.id, text);
+                }
+            }
+            AppButton {
+                id: documentDetails
+                Layout.fillWidth: true
+                visible: inspector.selectedType === "documentAnalysis"
+                checkable: true
+                checked: true
+                text: checked ? qsTr("▾ 분류 설정") : qsTr("▸ 분류 설정")
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: documentDetails.visible && documentDetails.checked
+                text: qsTr("노드의 + 버튼으로 분류를 추가하세요. 초안은 저장하거나 실행할 수 없어요.")
+                color: inspector.mutedText
+                wrapMode: Text.Wrap
+            }
+            Repeater {
+                model: JSON.parse(inspector.documentCategoryIds)
+                delegate: ColumnLayout {
+                    id: categoryFields
+                    required property string modelData
+                    readonly property var category: inspector.selectedType === "documentAnalysis"
+                        ? (inspector.editor.selectedBlock.categories || []).find(item => item.id === modelData) : null
+                    visible: documentDetails.visible && documentDetails.checked
+                    Layout.fillWidth: true
+                    RowLayout {
+                        Layout.fillWidth: true
+                        AppTextField {
+                            objectName: "ruleDocumentCategoryLabel_" + categoryFields.modelData
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("분류 이름")
+                            text: categoryFields.category?.label ?? ""
+                            onTextEdited: inspector.editor.updateDocumentCategory(inspector.editor.selectedId,
+                                categoryFields.modelData, text, categoryFields.category.keywords)
+                        }
+                        AppButton {
+                            text: qsTr("삭제")
+                            onClicked: inspector.editor.removeDocumentCategory(inspector.editor.selectedId, categoryFields.modelData)
+                        }
+                    }
+                    AppTextField {
+                        objectName: "ruleDocumentCategoryKeywords_" + categoryFields.modelData
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("키워드 (쉼표로 구분)")
+                        text: categoryFields.category?.keywords ?? ""
+                        onTextEdited: inspector.editor.updateDocumentCategory(inspector.editor.selectedId,
+                            categoryFields.modelData, categoryFields.category.label, text)
+                    }
                 }
             }
             Label {

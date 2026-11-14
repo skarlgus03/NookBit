@@ -16,6 +16,7 @@ Rectangle {
     readonly property color primaryText: theme.text
     readonly property color mutedText: theme.muted
     readonly property color nodeColor: theme.nodeSurface
+    readonly property bool documentAnalysis: modelData.type === "documentAnalysis"
 
     x: blockCard.editor.screenPoint(blockCard.editor.positionFor(modelData).x, blockCard.editor.positionFor(
                                         modelData).y).x
@@ -100,7 +101,7 @@ Rectangle {
             ToolTip.visible: containsMouse
             ToolTip.text: qsTr("조건 입력 · 조건 출력점을 여기에 연결하세요")
             onClicked: if (blockCard.editor.connectingFrom >= 0)
-                blockCard.editor.connectBlocks(blockCard.editor.connectingFrom, modelData.id, "predicate")
+                blockCard.editor.connectBlocks(blockCard.editor.connectingFrom, modelData.id, "predicate", blockCard.editor.connectingPort)
         }
     }
     Rectangle {
@@ -144,7 +145,7 @@ Rectangle {
         // 파일 입력에 직접 연결된 조건을 테두리 대신 작은 배지로 표시한다.
         Rectangle {
             id: rootBadge
-            visible: blockCard.editor.isRootBlock(modelData.id)
+            visible: !blockCard.documentAnalysis && blockCard.editor.isRootBlock(modelData.id)
             anchors.right: parent.right
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
@@ -162,7 +163,7 @@ Rectangle {
         }
     }
     Label {
-        visible: modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
+        visible: !blockCard.documentAnalysis && modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: cardHeader.bottom
@@ -177,7 +178,7 @@ Rectangle {
         color: blockCard.primaryText
     }
     Label {
-        visible: modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
+        visible: !blockCard.documentAnalysis && modelData.type !== "start" && !blockCard.editor.isLogical(modelData)
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 12
@@ -271,52 +272,82 @@ Rectangle {
             anchors.margins: -12
             onClicked: {
                 if (blockCard.editor.connectingFrom >= 0)
-                    blockCard.editor.connectBlocks(blockCard.editor.connectingFrom, modelData.id);
+                    blockCard.editor.connectBlocks(blockCard.editor.connectingFrom, modelData.id, "", blockCard.editor.connectingPort);
                 else
                     blockCard.editor.selectOnly(modelData.id);
             }
         }
     }
-    Rectangle {
-        id: outputPort
-        visible: modelData.type !== "destination" && modelData.type !== "exclude" && modelData.type !== "applyDefault" && modelData.type !== "callFlow"
-        x: parent.width - width / 2
-        y: parent.height / 2 - height / 2
-        width: modelData.type === "start" ? 22 : 16
-        height: width
-        radius: width / 2
-        color: blockCard.editor.hasOutgoing(modelData.id) ? blockCard.colorFor(modelData.type) : blockCard.nodeColor
-        border.width: modelData.type === "start" ? 3 : 2
-        border.color: blockCard.colorFor(modelData.type)
-        MouseArea {
-            objectName: "ruleOutputPort_" + modelData.id
-            anchors.fill: parent
-            anchors.margins: -12
-            preventStealing: true
-            onPressed: mouse => {
-                blockCard.editor.connectingFrom = modelData.id;
-                blockCard.editor.draggingConnection = true;
-                const screen = mapToItem(blockCard.viewport, mouse.x, mouse.y);
-                const point = blockCard.editor.worldPoint(screen.x, screen.y);
-                blockCard.editor.pointerX = point.x;
-                blockCard.editor.pointerY = point.y;
-                blockCard.repaintRequested();
+    Button {
+        visible: blockCard.documentAnalysis
+        objectName: "ruleAddDocumentCategory_" + blockCard.modelData.id
+        anchors.left: parent.left
+        anchors.leftMargin: UiMetrics.spaceGroup
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: UiMetrics.spaceExtraSmall
+        height: blockCard.editor.documentRowHeight
+        text: qsTr("+ 분류 추가")
+        onClicked: blockCard.editor.addDocumentCategory(blockCard.modelData.id)
+    }
+    Repeater {
+        model: blockCard.documentAnalysis ? blockCard.editor.documentPorts(blockCard.modelData)
+            : ["destination", "exclude", "applyDefault", "callFlow"].includes(blockCard.modelData.type)
+              ? [] : [{id: "", label: ""}]
+        delegate: Rectangle {
+            id: outputPort
+            required property var modelData
+            readonly property string portId: modelData.id
+            x: blockCard.width - width / 2
+            y: (blockCard.documentAnalysis ? blockCard.editor.documentPortY(blockCard.modelData, portId) : blockCard.height / 2) - height / 2
+            width: blockCard.modelData.type === "start" ? 22 : 16
+            height: width
+            radius: width / 2
+            color: blockCard.editor.hasOutgoing(blockCard.modelData.id, portId) ? blockCard.colorFor(blockCard.modelData.type) : blockCard.nodeColor
+            border.width: blockCard.modelData.type === "start" ? 3 : 2
+            border.color: blockCard.colorFor(blockCard.modelData.type)
+            Label {
+                visible: blockCard.documentAnalysis
+                anchors.right: parent.left
+                anchors.rightMargin: UiMetrics.spaceGroup
+                anchors.verticalCenter: parent.verticalCenter
+                width: blockCard.width - UiMetrics.spaceGroup * 4
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                text: outputPort.modelData.label
+                font.pixelSize: blockCard.editor.nodeFontSize
+                color: blockCard.primaryText
             }
-            onPositionChanged: mouse => {
-                if (blockCard.editor.connectingFrom === modelData.id && blockCard.editor.draggingConnection) {
+            MouseArea {
+                objectName: "ruleOutputPort_" + blockCard.modelData.id + (outputPort.portId ? "_" + outputPort.portId : "")
+                anchors.fill: parent
+                anchors.margins: blockCard.documentAnalysis ? -UiMetrics.spaceExtraSmall : -12
+                preventStealing: true
+                onPressed: mouse => {
+                    blockCard.editor.connectingFrom = blockCard.modelData.id;
+                    blockCard.editor.connectingPort = outputPort.portId;
+                    blockCard.editor.draggingConnection = true;
                     const screen = mapToItem(blockCard.viewport, mouse.x, mouse.y);
                     const point = blockCard.editor.worldPoint(screen.x, screen.y);
                     blockCard.editor.pointerX = point.x;
                     blockCard.editor.pointerY = point.y;
                     blockCard.repaintRequested();
                 }
+                onPositionChanged: mouse => {
+                    if (blockCard.editor.connectingFrom === blockCard.modelData.id && blockCard.editor.draggingConnection) {
+                        const screen = mapToItem(blockCard.viewport, mouse.x, mouse.y);
+                        const point = blockCard.editor.worldPoint(screen.x, screen.y);
+                        blockCard.editor.pointerX = point.x;
+                        blockCard.editor.pointerY = point.y;
+                        blockCard.repaintRequested();
+                    }
+                }
+                onReleased: mouse => {
+                    const screen = mapToItem(blockCard.viewport, mouse.x, mouse.y);
+                    const point = blockCard.editor.worldPoint(screen.x, screen.y);
+                    blockCard.editor.finishConnectionAt(point.x, point.y);
+                }
+                onCanceled: blockCard.editor.cancelConnection()
             }
-            onReleased: mouse => {
-                const screen = mapToItem(blockCard.viewport, mouse.x, mouse.y);
-                const point = blockCard.editor.worldPoint(screen.x, screen.y);
-                blockCard.editor.finishConnectionAt(point.x, point.y);
-            }
-            onCanceled: blockCard.editor.cancelConnection()
         }
     }
     // 노드 종류에 맞는 기능 색상을 공통 테마에서 읽는 함수.
