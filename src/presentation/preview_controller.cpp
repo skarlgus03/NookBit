@@ -1,4 +1,5 @@
 #include "presentation/preview_controller.hpp"
+#include "presentation/file_operation_error_text.hpp"
 #include "modules/document_recommendation/folder_suggestions.hpp"
 
 
@@ -226,7 +227,7 @@ void PreviewController::refreshActiveRules() {
     const auto label = loaded
         ? QStringLiteral("%1 · %2").arg(QString::fromStdString(loaded.value().id),
                                           QString::fromStdString(loaded.value().version))
-        : QStringLiteral("읽기 실패: %1").arg(QString::fromStdString(loaded.error().message));
+        : QStringLiteral("읽기 실패. %1").arg(reportFileOperationError(loaded.error()));
     if (activeRuleLabel_ != label) {
         activeRuleLabel_ = label;
         emit activeRuleChanged();
@@ -292,8 +293,7 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
             showError(QStringLiteral("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
             return;
         }
-        showError(QStringLiteral("미리보기를 만들지 못했어요: %1")
-                      .arg(QString::fromStdString(result.error().message)));
+        showError(QStringLiteral("미리보기를 만들지 못했어요. %1").arg(reportFileOperationError(result.error())));
         return;
     }
     draft_ = result.value();
@@ -464,7 +464,7 @@ void PreviewController::prepareSortInBackground() {
             return *prepared ? Result<void>::success() : Result<void>::failure(prepared->error());
         }, [this, paths, selections, prepared, elapsedMs](const Result<void>& result) {
             if (!result) {
-                auto error = QStringLiteral("정리 준비 검사에 실패했어요: %1").arg(QString::fromStdString(result.error().message));
+                auto error = QStringLiteral("정리 준비 검사에 실패했어요. %1").arg(reportFileOperationError(result.error()));
                 if (*elapsedMs >= 0) error += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 showError(error); return;
             }
@@ -519,8 +519,7 @@ void PreviewController::freezePreview() {
 
     const auto result = freezePreview_.execute(*draft_, selectedFiles, settings);
     if (!result) {
-        showError(QStringLiteral("계획을 저장하지 못했어요. 새 미리보기를 확인해 주세요: %1")
-                      .arg(QString::fromStdString(result.error().message)));
+        showError(QStringLiteral("계획을 저장하지 못했어요. %1").arg(reportFileOperationError(result.error())));
         return;
     }
     draft_ = result.value();
@@ -545,8 +544,7 @@ bool PreviewController::verifySavedPlan() {
 
     const auto result = verifySavedPlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
-        message_ = QStringLiteral("저장 계획 검사 실패. 새 미리보기가 필요할 수 있어요: %1")
-                       .arg(QString::fromStdString(result.error().message));
+        message_ = QStringLiteral("저장한 계획을 확인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
         emit previewChanged();
         return false;
     }
@@ -571,8 +569,7 @@ void PreviewController::approvePlan() {
     const auto selectedFiles = previewSelectedFiles_;
     const auto result = approvePlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
-        message_ = QStringLiteral("승인하지 못했어요. 새 미리보기가 필요할 수 있어요: %1")
-                       .arg(QString::fromStdString(result.error().message));
+        message_ = QStringLiteral("승인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
         emit previewChanged();
         return;
     }
@@ -630,8 +627,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
         }
         if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
         emit recoveryReconcileRequested();
-        message_ = QStringLiteral("이동을 완료하지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
-                       .arg(QString::fromStdString(result.error().message));
+        message_ = QStringLiteral("이동을 완료하지 못했어요. %1").arg(reportFileOperationError(result.error()));
         emit previewChanged();
         emit sortExecutionFinished(false, message_);
         return;
@@ -671,8 +667,7 @@ void PreviewController::undoLastMove() {
                 current.value().status != PlanStatus::Failed) {
                 undoPlanId_.reset();
             }
-            message_ = QStringLiteral("되돌리지 못했어요. 파일 위치와 작업 기록을 확인해 주세요: %1")
-                           .arg(QString::fromStdString(result.error().message));
+            message_ = QStringLiteral("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
             emit previewChanged();
             return;
         }

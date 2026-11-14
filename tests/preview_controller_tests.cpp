@@ -474,10 +474,22 @@ void testBackgroundApprovalSafety() {
     preview.confirmSort(); expect(runner.busy(), "approval revalidation must not block screen");
     expect(waitForBackground(runner) && QFile::exists(source) && !QFile::exists(successfulSource) && pending.count() == 1 && preview.canUndo(),
         "partial metadata failure must retain failed pending file and remove only successful file");
+    expect(preview.message().contains(QStringLiteral("일부 항목만 이동했어요")),
+        "partial move displays actionable Korean feedback");
     const auto plans = workflow.history.incompletePlans();
     expect(plans && plans.value().size() == 1 && plans.value()[0].status == nookbit::PlanStatus::Failed &&
         std::any_of(plans.value()[0].steps.begin(), plans.value()[0].steps.end(), [](const auto& step) { return step.failure && step.failure->code == "move.source_changed"; }),
         "metadata execution must record changed source as per-file failure");
+    if (plans && plans.value().size() == 1) {
+        nookbit::HistoryController history(workflow.history, workflow.history, operations);
+        history.refreshHistory();
+        history.selectHistoryPlan(QString::fromStdString(plans.value().front().id));
+        const auto steps = history.historySteps();
+        expect(std::any_of(steps.begin(), steps.end(), [](const QVariant& step) {
+            const auto status = step.toMap().value("status").toString();
+            return status.contains(QStringLiteral("원본 파일이나 폴더가 바뀌었어요")) && !status.contains("move.source_changed");
+        }), "history displays the localized per-file error without exposing the internal code");
+    }
     preview.undoLastMove(); expect(waitForBackground(runner) && QFile::exists(successfulSource) && QFile::exists(source), "partial metadata UI undo must restore only successful subset");
 #endif
 }
@@ -1620,7 +1632,7 @@ void testHistoryUndoAfterRestart() {
     occupied.close();
     restartedHistory.undoSelectedHistory();
     expect(QFile::exists(firstDestination) && QFile::exists(first) &&
-               restartedHistory.historyMessage().contains(QStringLiteral("되돌리지 못했어요")),
+               restartedHistory.historyMessage().contains(QStringLiteral("원래 위치를 사용할 수 없어요")),
            "history undo must refuse an occupied original path");
     expect(QFile::remove(first), "collision fixture should be removed");
     restartedHistory.selectHistoryPlan(firstPlanId);

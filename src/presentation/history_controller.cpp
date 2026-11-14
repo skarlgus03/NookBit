@@ -1,4 +1,5 @@
 #include "presentation/history_controller.hpp"
+#include "presentation/file_operation_error_text.hpp"
 #include "presentation/history_date_group.hpp"
 
 
@@ -165,7 +166,7 @@ void HistoryController::loadMoreHistory() {
 bool HistoryController::readSearchPage(const HistorySearch& search, bool append) {
     const auto result = query_.searchHistory(search);
     if (!result) {
-        searchMessage_ = QStringLiteral("작업 기록을 읽지 못했어요: %1").arg(QString::fromStdString(result.error().message));
+        searchMessage_ = reportFileOperationError(result.error());
         return false;
     }
     if (!append) { selectedHistoryPlan_.reset(); historySteps_.clear(); historyEntries_.clear(); }
@@ -221,8 +222,7 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
     }
     const auto loaded = history_.loadPlan(planId.toStdString());
     if (!loaded) {
-        historyMessage_ = QStringLiteral("선택한 작업을 읽지 못했어요: %1")
-                              .arg(QString::fromStdString(loaded.error().message));
+        historyMessage_ = QStringLiteral("선택한 작업을 읽지 못했어요. %1").arg(reportFileOperationError(loaded.error()));
         emit historyChanged();
         return;
     }
@@ -240,8 +240,8 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         row.insert(QStringLiteral("statusTone"), historyStatusTone(step.status));
         row.insert(QStringLiteral("applied"), step.status == StepStatus::Applied);
         row.insert(QStringLiteral("rolledBack"), step.status == StepStatus::RolledBack);
-        if (step.failure) row["status"] = historyStepStatusText(step.status) + QStringLiteral(": %1 (%2)")
-            .arg(QString::fromStdString(step.failure->message), QString::fromStdString(step.failure->code));
+        if (step.failure) row["status"] = historyStepStatusText(step.status) + QStringLiteral(" · ")
+            + fileOperationErrorText(*step.failure);
         historySteps_.append(row);
     }
     historyMessage_ = canUndoSelectedHistory()
@@ -268,8 +268,7 @@ void HistoryController::undoSelectedHistory() {
             if (current && current.value().status == PlanStatus::NeedsRecovery) {
                 emit recoveryRefreshRequested();
             }
-            historyMessage_ = QStringLiteral("되돌리지 못했어요. 파일은 덮어쓰지 않았어요: %1")
-                                  .arg(QString::fromStdString(result.error().message));
+            historyMessage_ = QStringLiteral("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
         } else {
             historyMessage_ = QStringLiteral("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
         }
