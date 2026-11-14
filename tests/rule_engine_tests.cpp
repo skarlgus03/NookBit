@@ -2,9 +2,18 @@
 #include "application/use_cases/plan_signature.hpp"
 
 #include <chrono>
+#include <ctime>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -130,6 +139,67 @@ void testPriorityAndDestination() {
            "equal priorities should preserve JSON rule order");
 }
 
+// 현지 자정 직전과 직후에 수정된 파일의 날짜 토큰을 확인하는 함수.
+void testLocalDatesInDestinations() {
+    const auto localMidnightUtc = [](int month) -> std::optional<std::int64_t> {
+#ifdef _WIN32
+        const SYSTEMTIME local{2027, static_cast<WORD>(month), 0, 1, 0, 0, 0, 0};
+        SYSTEMTIME utc{};
+        if (!TzSpecificLocalTimeToSystemTimeEx(nullptr, &local, &utc)) return std::nullopt;
+        return utcMillis(utc.wYear, utc.wMonth, utc.wDay)
+            + ((utc.wHour * 60 + utc.wMinute) * 60 + utc.wSecond) * 1000LL + utc.wMilliseconds;
+#else
+        std::tm date{};
+        date.tm_year = 2027 - 1900;
+        date.tm_mon = month - 1;
+        date.tm_mday = 1;
+        date.tm_isdst = -1;
+        const auto midnight = std::mktime(&date);
+        if (midnight == static_cast<std::time_t>(-1)) return std::nullopt;
+        return static_cast<std::int64_t>(midnight) * 1000;
+#endif
+    };
+    const auto january = localMidnightUtc(1);
+    const auto february = localMidnightUtc(2);
+    expect(january && february, "test time zone supports January and February midnight");
+    if (!january || !february) return;
+
+    nookbit::RuleSet rules;
+    rules.id = "local-dates";
+    rules.version = "v3";
+    rules.schemaVersion = 3;
+    nookbit::RuleNode node;
+    node.id = "text";
+    node.atomicCondition = nookbit::ExtensionPredicate{{"txt"}};
+    node.destination = nookbit::RuleDestination{L"Sorted/{yyyy}/{MM}", std::nullopt};
+    rules.nodes = {node};
+    auto file = sampleFile();
+    file.extension = ".txt";
+    nookbit::RuleEngine engine;
+    // 규칙 시험과 실제 분류가 같은 날짜 경로를 선택하는지 확인하는 함수.
+    const auto expectDestination = [&](std::int64_t modified, const wchar_t* path) {
+        file.fingerprint.modifiedUtcMs = modified;
+        const auto result = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch, 0);
+        const auto trace = engine.trace(file, rules, 0);
+        expect(result && result.value() && result.value()->destinationRelativePath == path,
+               "classification expands tokens using the local calendar");
+        expect(trace && trace.value().decision && trace.value().decision->destinationRelativePath == path,
+               "rule test expands tokens to the same destination as classification");
+    };
+    expectDestination(*january - 1, L"Sorted/2026/12");
+    expectDestination(*january, L"Sorted/2027/01");
+    expectDestination(*february - 1, L"Sorted/2027/01");
+    expectDestination(*february, L"Sorted/2027/02");
+
+    constexpr auto invalidTime = std::numeric_limits<std::int64_t>::max();
+    file.fingerprint.modifiedUtcMs = invalidTime;
+    const auto invalid = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch, 0);
+    expect(!invalid && invalid.error().code == "rules.invalid_modified_time",
+           "unrepresentable modification time is rejected when a date token needs it");
+    rules.nodes[0].destination->relativePath = L"Sorted";
+    expectDestination(invalidTime, L"Sorted");
+}
+
 // 조건 그룹과 일치하지 않는 파일이 분류되지 않는지 검사하는 함수.
 void testConditionsAndNoMatch() {
     nookbit::ClassificationRule rule;
@@ -151,9 +221,9 @@ void testConditionsAndNoMatch() {
     expect(matched.hasValue() && matched.value().has_value(),
            "all matching conditions should produce a decision");
 
-    auto small = sampleFile();
-    small.fingerprint.size = 100;
-    const auto sizeMiss = engine.decide(small, rules,
+    auto smallFile = sampleFile();
+    smallFile.fingerprint.size = 100;
+    const auto sizeMiss = engine.decide(smallFile, rules,
         nookbit::MultiMatchPolicy::FirstMatch, utcMillis(2026, 9, 25));
     expect(sizeMiss.hasValue() && !sizeMiss.value().has_value(),
            "a failed size condition should leave the file unclassified");
@@ -426,6 +496,7 @@ void testLogicalPredicates() {
 // RuleEngine 테스트를 실행하고 결과 코드를 반환하는 함수.
 int main() {
     testPriorityAndDestination();
+    testLocalDatesInDestinations();
     testConditionsAndNoMatch();
     testUnicodeFileNames();
     testUnsafeDestination();

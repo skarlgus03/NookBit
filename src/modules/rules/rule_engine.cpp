@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -271,24 +272,58 @@ void replaceToken(std::wstring& destination, const std::wstring& token,
     }
 }
 
+// 파일 수정 시각을 시스템 시간대의 달력 날짜로 변환하는 함수.
+std::optional<std::chrono::year_month_day> localModifiedDate(std::int64_t modifiedUtcMs) {
+    using namespace std::chrono;
+    const sys_time<milliseconds> modified{milliseconds{modifiedUtcMs}};
+#ifdef _WIN32
+    const auto utcDay = floor<days>(modified);
+    if (utcDay < sys_days{year{1601}/January/1} || utcDay > sys_days{year{9999}/December/31})
+        return std::nullopt;
+    const year_month_day utcDate{utcDay};
+    const hh_mm_ss time{modified - utcDay};
+    const SYSTEMTIME utc{
+        static_cast<WORD>(static_cast<int>(utcDate.year())),
+        static_cast<WORD>(static_cast<unsigned>(utcDate.month())),
+        0,
+        static_cast<WORD>(static_cast<unsigned>(utcDate.day())),
+        static_cast<WORD>(time.hours().count()),
+        static_cast<WORD>(time.minutes().count()),
+        static_cast<WORD>(time.seconds().count()),
+        static_cast<WORD>(time.subseconds().count())};
+    SYSTEMTIME local{};
+    if (!SystemTimeToTzSpecificLocalTimeEx(nullptr, &utc, &local))
+        return std::nullopt;
+    return year{local.wYear}/month{local.wMonth}/day{local.wDay};
+#else
+    const auto epochSeconds = floor<seconds>(modified).time_since_epoch().count();
+    if (!std::in_range<std::time_t>(epochSeconds)) return std::nullopt;
+    const auto timestamp = static_cast<std::time_t>(epochSeconds);
+    std::tm local{};
+    if (!localtime_r(&timestamp, &local) || local.tm_year < 1 - 1900 || local.tm_year > 9999 - 1900)
+        return std::nullopt;
+    return year{local.tm_year + 1900}/month{static_cast<unsigned>(local.tm_mon + 1)}/day{static_cast<unsigned>(local.tm_mday)};
+#endif
+}
+
 // 규칙 목적지를 펼치고 상위 경로 탈출 여부를 검사하는 함수.
 Result<std::filesystem::path> destinationFor(const std::filesystem::path& relativePath,
                                               const FileFact& file, bool absolute = false) {
-    using namespace std::chrono;
-    const sys_time<milliseconds> modified{milliseconds{file.fingerprint.modifiedUtcMs}};
-    const year_month_day date{floor<days>(modified)};
-    if (!date.ok()) {
-        return Result<std::filesystem::path>::failure({
-            "rules.invalid_modified_time", "File modified time cannot be used for a destination.",
-        });
-    }
     auto destination = relativePath.wstring();
-    auto year = std::to_wstring(static_cast<int>(date.year()));
-    if (year.size() < 4) year.insert(0, 4 - year.size(), L'0');
-    auto month = std::to_wstring(static_cast<unsigned>(date.month()));
-    if (month.size() < 2) month.insert(0, 2 - month.size(), L'0');
-    replaceToken(destination, L"{yyyy}", year);
-    replaceToken(destination, L"{MM}", month);
+    if (destination.find(L"{yyyy}") != std::wstring::npos || destination.find(L"{MM}") != std::wstring::npos) {
+        const auto date = localModifiedDate(file.fingerprint.modifiedUtcMs);
+        if (!date || !date->ok() || date->year() < std::chrono::year{1} || date->year() > std::chrono::year{9999}) {
+            return Result<std::filesystem::path>::failure({
+                "rules.invalid_modified_time", "File modified time cannot be used for a destination.",
+            });
+        }
+        auto year = std::to_wstring(static_cast<int>(date->year()));
+        year.insert(0, 4 - year.size(), L'0');
+        auto month = std::to_wstring(static_cast<unsigned>(date->month()));
+        month.insert(0, 2 - month.size(), L'0');
+        replaceToken(destination, L"{yyyy}", year);
+        replaceToken(destination, L"{MM}", month);
+    }
     if (destination.find_first_of(L"{}") != std::wstring::npos) {
         return Result<std::filesystem::path>::failure({
             "rules.unknown_destination_token", "Destination contains an unsupported token.",
