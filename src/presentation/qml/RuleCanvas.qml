@@ -321,24 +321,18 @@ Rectangle {
         dark: canvas.dark
     }
     // 노드 메뉴의 제목과 항목을 같은 행 규격으로 표시하는 부품.
-    component NodeMenuButton: Button {
+    component NodeMenuButton: AppButton {
         id: menuButton
         property string glyph: "rules"
         property bool heading: false
         property bool expanded: false
+        dark: canvas.dark
+        appearance: AppButton.Menu
         implicitHeight: UiMetrics.menuRowHeight
         padding: UiMetrics.spaceControl
-        hoverEnabled: true
         font.family: UiMetrics.applicationFont.family
         font.pixelSize: UiMetrics.textBody
         font.bold: heading
-        background: Rectangle {
-            radius: UiMetrics.radiusControl
-            color: menuButton.down ? canvas.theme.buttonPressed
-                : menuButton.hovered || menuButton.visualFocus ? canvas.theme.buttonHover : "transparent"
-            border.width: menuButton.visualFocus ? UiMetrics.borderActive : 0
-            border.color: canvas.theme.buttonFocus
-        }
         contentItem: RowLayout {
             spacing: UiMetrics.spaceControl
             NavigationIcon {

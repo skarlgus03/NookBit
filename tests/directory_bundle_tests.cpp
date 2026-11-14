@@ -111,6 +111,15 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     Rules rules; nookbit::FilesystemScanner scanner; nookbit::QtPlanHasher hasher;
     nookbit::RuleEngine engine; nookbit::Planner planner(engine, appData, nookbit::CrossVolumeDrafts::Allow);
     nookbit::WindowsStagedCopy volumes;
+    if (!sameVolume) {
+        const auto sourceVolume = volumes.inspectVolume(base);
+        const auto targetVolume = volumes.inspectVolume(settings.value.homeRoot);
+        if (!sourceVolume || !targetVolume) { expect(false, "inspect workflow fixture volumes"); return; }
+        if (sourceVolume.value().name == targetVolume.value().name) {
+            std::cout << "SKIP: cross-volume folder workflow needs the temporary directory and checkout on different volumes.\n";
+            return;
+        }
+    }
     nookbit::SqliteHistoryRepository history(from.filePath("history.sqlite"),
         QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
     std::vector<std::filesystem::path> selected{base / "bundle-one", base / "bundle-two"};
@@ -119,7 +128,7 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     auto draft = preview.execute({{}, selected, settings.value.homeRoot});
     if (!draft) { expect(false, "workflow preview: " + draft.error().message); return; }
     if (!sameVolume) expect(draft.value().steps[0].movement->strategy == nookbit::MoveStrategy::VerifiedCopy,
-        "the C-to-D fixture really uses different local volumes");
+        "a folder workflow between different volumes must use verified copy");
     if (sameVolume) for (auto& step : draft.value().steps) step.movement->strategy = nookbit::MoveStrategy::MetadataRename;
     nookbit::FreezePreviewUseCase freeze(rules, scanner, planner, hasher, history, &volumes);
     const auto frozen = freeze.execute(draft.value(), selected, settings.value);
