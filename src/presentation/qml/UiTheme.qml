@@ -43,7 +43,7 @@ QtObject {
     readonly property var nodePalette: ({
         start: "#24624d", extension: "#286c9c", size: "#986126", name: "#7750a2",
         age: "#237c83", otherwise: "#596575", destination: "#39734c", exclude: "#944b68",
-        fallback: "#53677e"
+        documentAnalysis: "#5146a8", fallback: "#53677e"
     })
     readonly property color lightAccentColor: lightPalette.accent
     readonly property color darkAccentColor: darkPalette.accent

@@ -47,6 +47,12 @@ Canvas {
             ctx.moveTo(14, 6); ctx.lineTo(20, 12); ctx.lineTo(14, 18)
         } else if (kind === "folder") {
             ctx.moveTo(3, 7); ctx.lineTo(3, 20); ctx.lineTo(21, 20); ctx.lineTo(21, 8); ctx.lineTo(11, 8); ctx.lineTo(9, 5); ctx.lineTo(3, 5); ctx.lineTo(3, 7)
+        } else if (kind === "documentSearch") {
+            ctx.moveTo(7, 20); ctx.lineTo(4, 20); ctx.lineTo(4, 3)
+            ctx.lineTo(14, 3); ctx.lineTo(18, 7); ctx.lineTo(18, 10)
+            ctx.moveTo(14, 3); ctx.lineTo(14, 7); ctx.lineTo(18, 7)
+            ctx.moveTo(18, 15); ctx.arc(14, 15, 4, 0, Math.PI * 2)
+            ctx.moveTo(17, 18); ctx.lineTo(21, 22)
         } else if (kind === "rules") {
             ctx.rect(2, 9, 6, 6); ctx.rect(16, 2, 6, 6); ctx.rect(16, 16, 6, 6)
             ctx.moveTo(8, 12); ctx.lineTo(12, 12); ctx.lineTo(12, 5); ctx.lineTo(16, 5)

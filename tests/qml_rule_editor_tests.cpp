@@ -498,7 +498,8 @@ int main(int argc, char** argv) {
         {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))},
         {"modelData", call(engine, other.get(), "blockForId", {analysisId}).toVariant()}});
     auto* addCategory = analysisCard ? analysisCard->findChild<QObject*>(QString("ruleAddDocumentCategory_%1").arg(analysisId)) : nullptr;
-    expect(addCategory && QMetaObject::invokeMethod(addCategory, "clicked"), "document node exposes an add-category button");
+    expect(addCategory && addCategory->property("text").toString() == QStringLiteral("+ 첫 분류 추가")
+        && QMetaObject::invokeMethod(addCategory, "clicked"), "empty document node exposes the first-category action");
     call(engine, other.get(), "addDocumentCategory", {analysisId});
     const auto categories = call(engine, other.get(), "blockForId", {analysisId}).toVariant().toMap().value("categories").toList();
     expect(categories.size() == 2, "adding categories creates two independent outputs");
@@ -521,8 +522,23 @@ int main(int argc, char** argv) {
     expect(call(engine, other.get(), "connectBlocks", {analysisId, abstainDestination, "", "abstain"}).toBool(),
         "the abstain output can connect independently");
     const auto connected = list(other.get(), "edges");
-    call(engine, other.get(), "updateDocumentCategory", {analysisId, minutes, "Minutes", "agenda, action item"});
+    call(engine, other.get(), "updateDocumentCategory", {analysisId, minutes, "Minutes", "agenda, action item, notes, decisions"});
     expect(list(other.get(), "edges") == connected, "renaming a category retains its connection");
+    call(engine, other.get(), "setDocumentSimilarity", {analysisId, 42});
+    const auto populatedModel = call(engine, other.get(), "blockForId", {analysisId}).toVariant();
+    auto populatedCard = create(engine, "RuleNodeCard", {{"editor", QVariant::fromValue(other.get())},
+        {"viewport", QVariant::fromValue(qobject_cast<QQuickItem*>(canvas.get()))}, {"modelData", populatedModel}});
+    auto* populatedItem = qobject_cast<QQuickItem*>(populatedCard.get());
+    auto* thresholdLabel = findMenuItem(findMenuItem, populatedItem, "ruleDocumentSimilarity");
+    auto* abstainHint = findMenuItem(findMenuItem, populatedItem, "ruleDocumentAbstainHint");
+    auto* categoryPin = findMenuItem(findMenuItem, populatedItem, QString("ruleOutputPort_%1_%2").arg(analysisId).arg(minutes));
+    expect(thresholdLabel && thresholdLabel->property("text").toString() == "0.42"
+        && abstainHint && abstainHint->property("text").toString() == QStringLiteral("기준 미달")
+        && populatedCard->property("height").toDouble() > analysisCard->property("height").toDouble(),
+        "populated document node displays the configured threshold and expands for category rows");
+    expect(categoryPin && qFuzzyCompare(categoryPin->mapToItem(populatedItem, categoryPin->boundingRect().center()).y(),
+        call(engine, other.get(), "documentPortY", {populatedModel, minutes}).toNumber()),
+        "category output stays centered on its wire origin");
     call(engine, other.get(), "removeDocumentCategory", {analysisId, minutes});
     expect(!call(engine, other.get(), "hasOutgoing", {analysisId, minutes}).toBool()
         && call(engine, other.get(), "hasOutgoing", {analysisId, manual}).toBool()

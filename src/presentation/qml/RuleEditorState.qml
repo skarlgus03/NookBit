@@ -266,22 +266,36 @@ QtObject {
     // 카드의 실제 높이를 반환하는 함수.
     function heightFor(block) {
         if (block.type === "documentAnalysis")
-            return documentPortY(block, "abstain") + documentRowHeight * 1.5;
+            return documentFooterTop(block) + documentRowHeight;
         return isLogical(block) ? UiMetrics.logicalNodeHeight : blockHeight;
     }
-    readonly property real documentRowHeight: UiMetrics.spaceGroup * 3
+    readonly property int nodeHeaderHeight: Math.round(blockHeight * 0.35)
+    readonly property int documentRowHeight: nodeFontSize + UiMetrics.spaceCompact * 2
+    readonly property int documentCategoryHeight: documentRowHeight + UiMetrics.nodeCaptionSizes[fontPresetIndex] + UiMetrics.spaceExtraSmall
+    readonly property int defaultDocumentSimilarity: 35
+
+    // 분류가 없을 때는 설명과 추가 버튼에 두 줄 높이를 배정하는 함수.
+    function documentAddTop(block) {
+        const count = (block.categories || []).length;
+        return nodeHeaderHeight + (count ? documentRowHeight + count * documentCategoryHeight : documentRowHeight * 2);
+    }
+
+    // 추가 버튼 아래 보류 영역이 시작하는 위치를 반환하는 함수.
+    function documentFooterTop(block) {
+        return documentAddTop(block) + documentRowHeight + UiMetrics.spaceSmall * 2;
+    }
 
     // 문서 분석 노드의 보류 출력과 분류별 출력을 반환하는 함수.
     function documentPorts(block) {
-        return (block.categories || []).map(category => ({
-            id: category.id, label: category.label.trim() || qsTr("이름 없는 분류")
-        })).concat([{id: "abstain", label: qsTr("보류")}]);
+        return (block.categories || []).map(category => category.id).concat(["abstain"]);
     }
 
     // 핀과 연결선이 같은 높이에서 만나도록 출력의 카드 내 위치를 반환하는 함수.
     function documentPortY(block, port) {
-        const index = documentPorts(block).findIndex(output => output.id === port);
-        return Math.round(blockHeight * 0.35) + (Math.max(0, index) + 0.5) * documentRowHeight;
+        if (port === "abstain")
+            return documentFooterTop(block) + documentRowHeight / 2;
+        const index = (block.categories || []).findIndex(category => category.id === port);
+        return nodeHeaderHeight + documentRowHeight + (Math.max(0, index) + 0.5) * documentCategoryHeight;
     }
     // 출력 연결점의 화면 좌표를 반환하는 함수.
     function outputPoint(block, port) {
@@ -292,7 +306,14 @@ QtObject {
     // 실행 입력과 조건 계산 입력의 화면 좌표를 구별하는 함수.
     function inputPoint(block, kind) {
         const p = positionFor(block);
-        return screenPoint(p.x, p.y + heightFor(block) * (isLogical(block) ? (kind === "predicate" ? 0.75 : 0.25) : 0.5));
+        return screenPoint(p.x, p.y + inputPortY(block, kind));
+    }
+
+    // 문서 분석은 입력점을 상단에 두고 카드가 자라도 같은 위치에 유지하는 함수.
+    function inputPortY(block, kind) {
+        if (block.type === "documentAnalysis")
+            return nodeHeaderHeight + documentRowHeight / 2;
+        return heightFor(block) * (isLogical(block) ? (kind === "predicate" ? 0.75 : 0.25) : 0.5);
     }
 
     // 블록 출력점에서 다른 블록으로 선이 이어지는지 반환하는 함수.
@@ -434,6 +455,8 @@ QtObject {
             comparison: type === "size" ? "greaterThan" : "atLeast",
             unit: "MB"
         };
+        if (type === "documentAnalysis")
+            block.minimumSimilarity = defaultDocumentSimilarity;
         if (editingFlowId) { block.flowId = editingFlowId; block.flowNodeId = "node-" + block.id; }
         blocks = blocks.concat([block]);
         selectOnly(block.id);
@@ -451,6 +474,12 @@ QtObject {
         blocks = blocks.map(item => item.id === blockId
             ? Object.assign({}, item, {categories: categories.concat([category])}) : item);
         selectOnly(blockId);
+    }
+
+    // 초안의 유사도 기준을 정수 퍼센트로 보관하는 함수.
+    function setDocumentSimilarity(blockId, value) {
+        blocks = blocks.map(block => block.id === blockId && block.type === "documentAnalysis"
+            ? Object.assign({}, block, {minimumSimilarity: value}) : block);
     }
 
     // 핀 ID를 보존하면서 분류 이름과 키워드를 편집하는 함수.
@@ -722,7 +751,7 @@ QtObject {
         if (!source || !target || source.type === "destination" || source.type === "exclude" || ["callFlow", "applyDefault"].includes(source.type) || ["start", "flowStart"].includes(target.type))
             return false;
         if (source.type === "documentAnalysis") {
-            if (kind || !documentPorts(source).some(output => output.id === port)
+            if (kind || !documentPorts(source).includes(port)
                 || !["destination", "exclude"].includes(target.type)) {
                 statusText = qsTr("문서 분석의 출력 핀은 목적지 또는 정리 제외에 연결할 수 있어요.");
                 return false;
@@ -808,10 +837,10 @@ QtObject {
         cancelConnection();
         for (const block of blocks) {
             const p = positionFor(block);
-            if (isLogical(block) && Math.abs(x - p.x) < 20 && Math.abs(y - (p.y + heightFor(block) * 0.75)) < 14) {
+            if (isLogical(block) && Math.abs(x - p.x) < 20 && Math.abs(y - (p.y + inputPortY(block, "predicate"))) < 14) {
                 connectBlocks(sourceId, block.id, "predicate", port); return;
             }
-            if (!["start", "flowStart"].includes(block.type) && Math.abs(x - p.x) < 28 && Math.abs(y - (p.y + heightFor(block) * (isLogical(block) ? 0.25 : 0.5)))
+            if (!["start", "flowStart"].includes(block.type) && Math.abs(x - p.x) < 28 && Math.abs(y - (p.y + inputPortY(block)))
                     < 28) {
                 connectBlocks(sourceId, block.id, "", port);
                 return;

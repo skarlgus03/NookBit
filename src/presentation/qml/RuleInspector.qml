@@ -161,6 +161,34 @@ Frame {
                 color: inspector.mutedText
                 wrapMode: Text.Wrap
             }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: documentDetails.visible && documentDetails.checked && documentSimilarity.hasCategories
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("최소 유사도")
+                    color: inspector.primaryText
+                }
+                AppSpinBox {
+                    id: documentSimilarity
+                    readonly property bool hasCategories: inspector.selectedType === "documentAnalysis"
+                        && (inspector.editor.selectedBlock.categories || []).length > 0
+                    from: 0
+                    to: 100
+                    editable: true
+                    value: hasCategories ? inspector.editor.selectedBlock.minimumSimilarity ?? inspector.editor.defaultDocumentSimilarity
+                        : inspector.editor.defaultDocumentSimilarity
+                    textFromValue: (value, locale) => Number(value / 100).toLocaleString(locale, "f", 2)
+                    valueFromText: (text, locale) => Math.round(Number.fromLocaleString(locale, text) * 100)
+                    validator: DoubleValidator {
+                        bottom: 0
+                        top: 1
+                        decimals: 2
+                        notation: DoubleValidator.StandardNotation
+                    }
+                    onValueModified: inspector.editor.setDocumentSimilarity(inspector.editor.selectedId, value)
+                }
+            }
             Repeater {
                 model: JSON.parse(inspector.documentCategoryIds)
                 delegate: ColumnLayout {
