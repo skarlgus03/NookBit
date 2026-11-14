@@ -170,6 +170,18 @@ struct FileOrganizerRuntime::State {
         QObject::connect(&previewController, &PreviewController::destinationRootAccepted,
                          &destinationSettings, &DestinationSettingsController::setHomeRoot);
         previewController.setTaskRunner(&backgroundTasks);
+        if (!verifyUi) {
+            const auto rootKey = QStringLiteral("documentRecommendation/root");
+            const auto foldersKey = QStringLiteral("documentRecommendation/folders");
+            previewController.restoreRecommendationFolders(uiPreferences.value(rootKey).toString(),
+                uiPreferences.value(foldersKey).toStringList());
+            QObject::connect(&previewController, &PreviewController::recommendationFoldersChanged,
+                &connections, [this, rootKey, foldersKey] {
+                    uiPreferences.setValue(rootKey, previewController.recommendationRoot());
+                    uiPreferences.setValue(foldersKey, previewController.selectedRecommendationFolders());
+                    uiPreferences.sync();
+                });
+        }
         previewController.setSortWorkflow(&fileOperations);
         historyController.setTaskRunner(&backgroundTasks);
         recoveryController.setTaskRunner(&backgroundTasks);

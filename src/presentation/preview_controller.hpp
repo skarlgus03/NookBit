@@ -12,6 +12,7 @@
 #include "presentation/background_task_runner.hpp"
 #include <nookbit/application/sort_workflow.hpp>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 
 #include <filesystem>
@@ -28,6 +29,9 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString message READ message NOTIFY previewChanged)
     Q_PROPERTY(QString recommendationStatus READ recommendationStatus NOTIFY previewChanged)
     Q_PROPERTY(bool recommendationBusy READ recommendationBusy NOTIFY previewChanged)
+    Q_PROPERTY(QString recommendationRoot READ recommendationRoot NOTIFY recommendationFoldersChanged)
+    Q_PROPERTY(QStringList recommendationCandidates READ recommendationCandidates NOTIFY recommendationFoldersChanged)
+    Q_PROPERTY(QStringList selectedRecommendationFolders READ selectedRecommendationFolders NOTIFY recommendationFoldersChanged)
     Q_PROPERTY(bool hasPreview READ hasPreview NOTIFY previewChanged)
     Q_PROPERTY(bool hasFrozenPlan READ hasFrozenPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
@@ -76,6 +80,17 @@ public:
     [[nodiscard]] bool recommendationBusy() const { return recommendationBusy_; }
     /// 현재 미리보기의 문서에 읽기 전용 목적지 추천을 추가하는 함수.
     Q_INVOKABLE void recommendDocumentFolders();
+    /// 현재 추천 기준 폴더와 선택 목록을 반환하는 함수.
+    QString recommendationRoot() const { return recommendationRoot_; }
+    QStringList selectedRecommendationFolders() const { return selectedRecommendationFolders_; }
+    /// 기준 폴더에서 선택 가능한 하위 폴더를 가져오는 함수.
+    QStringList recommendationCandidates() const;
+    /// 저장된 추천 기준과 선택을 적용하는 함수.
+    void restoreRecommendationFolders(const QString& root, const QStringList& folders);
+    /// 폴더 선택 창에서 새 기준을 선택하거나 기본 기준으로 돌아가는 함수.
+    Q_INVOKABLE void chooseRecommendationRoot(const QUrl& folder);
+    /// 후보 폴더 하나의 사용 여부를 변경하는 함수.
+    Q_INVOKABLE void selectRecommendationFolder(const QString& name, bool selected);
 
     /// 유효한 미리보기 초안의 존재 여부를 반환하는 함수.
     [[nodiscard]] bool hasPreview() const noexcept;
@@ -150,6 +165,7 @@ public:
     Q_INVOKABLE void clear();
 
 signals:
+    void recommendationFoldersChanged();
     /// 실제 정리 실행의 시작과 결과만 알리고 어떤 화면을 열지는 결정하지 않는다.
     void sortExecutionStarted();
     void sortExecutionFinished(bool success, const QString& message);
@@ -195,6 +211,8 @@ private:
     QStringList warnings_;
     QString message_;
     QString recommendationStatus_;
+    QString recommendationRoot_;
+    QStringList selectedRecommendationFolders_;
     bool recommendationBusy_{false};
     bool hasPreview_{false};
     bool hasFrozenPlan_{false};

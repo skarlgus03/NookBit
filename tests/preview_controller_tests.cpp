@@ -765,6 +765,20 @@ void testDocumentFolderRecommendations() {
         "unrelated documents are not recommended a folder");
     expect(!controller.hasMovableSteps() && rows.value("notes.md").value("destination").toString().isEmpty() &&
                QFile::exists(queued), "recommendation cannot modify a plan or move the document");
+
+    controller.chooseRecommendationRoot(QUrl::fromLocalFile(home));
+    expect(controller.recommendationCandidates().contains("meeting") &&
+               controller.selectedRecommendationFolders().isEmpty(), "choosing a root exposes folders for selection");
+    controller.recommendDocumentFolders();
+    expect(!runner.busy() && !controller.recommendationStatus().isEmpty(), "an empty selection does not scan every folder");
+    controller.selectRecommendationFolder("manuals", true);
+    controller.recommendDocumentFolders();
+    expect(waitForBackground(runner), "recommend with selected candidates");
+    for (const auto& value : controller.outcomes()) {
+        const auto suggested = value.toMap().value("recommendedFolder").toString();
+        expect(suggested.isEmpty() || QDir::cleanPath(suggested) == manuals,
+            "only checked folders can be recommended");
+    }
 }
 
 // 공통 충돌 정책이 승인·실행까지 전달되고 규칙의 개별 설정이 우선하는지 검사하는 함수.

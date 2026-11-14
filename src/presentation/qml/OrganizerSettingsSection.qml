@@ -1,8 +1,9 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs as NativeDialogs
 
-// 충돌 처리와 외부 목적지 설정만 소유하고 다른 기능의 앞부분은 표시 슬롯으로 받는다.
+// 정리 기능의 설정을 표시하고 다른 기능의 앞부분은 표시 슬롯으로 받는다.
 ColumnLayout {
     id: section
     objectName: "organizerSettingsSection"
@@ -34,6 +35,58 @@ ColumnLayout {
             onPolicyRequested: policy => section.sorting.collisionPolicy = policy
         }
         Label { Layout.fillWidth: true; text: qsTr("규칙에 별도 처리가 지정되어 있으면 그 설정이 우선해요."); wrapMode: Text.Wrap; font.pixelSize: UiMetrics.textBody; color: section.theme.muted }
+    }
+    SettingsSection {
+        Layout.fillWidth: true
+        title: qsTr("문서 추천")
+        dark: section.dark
+        Label {
+            Layout.fillWidth: true
+            text: section.sorting.recommendationRoot || qsTr("정리할 위치의 하위 폴더를 후보로 사용해요.")
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: section.theme.muted
+        }
+        RowLayout {
+            AppButton {
+                text: qsTr("기준 폴더 선택")
+                dark: section.dark
+                enabled: !section.sorting.recommendationBusy
+                onClicked: recommendationFolderDialog.open()
+            }
+            AppButton {
+                visible: !!section.sorting.recommendationRoot
+                text: qsTr("기본 위치 사용")
+                dark: section.dark
+                enabled: !section.sorting.recommendationBusy
+                onClicked: section.sorting.chooseRecommendationRoot("")
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: !!section.sorting.recommendationRoot
+            text: (section.sorting.recommendationCandidates || []).length
+                  ? qsTr("추천에 사용할 하위 폴더를 선택해 주세요.")
+                  : qsTr("선택할 하위 폴더가 없어요.")
+            wrapMode: Text.Wrap
+            color: section.theme.muted
+        }
+        Repeater {
+            model: section.sorting.recommendationCandidates || []
+            CheckBox {
+                required property string modelData
+                Layout.fillWidth: true
+                text: modelData
+                enabled: !section.sorting.recommendationBusy
+                checked: (section.sorting.selectedRecommendationFolders || []).indexOf(modelData) !== -1
+                onToggled: section.sorting.selectRecommendationFolder(modelData, checked)
+            }
+        }
+    }
+    NativeDialogs.FolderDialog {
+        id: recommendationFolderDialog
+        title: qsTr("문서 추천 기준 폴더 선택")
+        onAccepted: section.sorting.chooseRecommendationRoot(selectedFolder)
     }
     SettingsSection {
         Layout.fillWidth: true

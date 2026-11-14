@@ -36,18 +36,26 @@ inline QString documentKey(const QFileInfo& info) {
 #endif
 }
 
-// 정리 위치 바로 아래의 폴더에서 대표 문서를 읽고 이동 계획과 별개로 추천하는 함수.
+// 사용자가 체크할 수 있는 바로 아래 폴더 이름을 가져오는 함수.
+inline QFileInfoList candidateFolders(const QString& root) {
+    if (root.isEmpty()) return {};
+    auto folders = QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
+    folders.removeIf([](const QFileInfo& folder) { return folder.isJunction(); });
+    return folders;
+}
+
+// 후보 폴더의 대표 문서를 읽고 이동 계획과 별개로 추천하는 함수.
 inline FolderSuggestions suggestFolders(const QString& homePath, const QStringList& documents,
-                                        const QStringList& previewSources) {
+                                        const QStringList& previewSources,
+                                        const std::optional<QStringList>& selectedFolders = std::nullopt) {
     constexpr int candidateLimit = 32;
     constexpr double minimumSimilarity = 0.286;
-    const QDir home(homePath);
     QSet<QString> excluded;
     for (const auto& path : previewSources) excluded.insert(documentKey(QFileInfo(path)));
     std::vector<Profile> profiles;
-    const auto folders = home.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
+    const auto folders = candidateFolders(homePath);
     for (const auto& folder : folders) {
-        if (folder.isJunction()) continue;
+        if (selectedFolders && !selectedFolders->contains(folder.fileName())) continue;
         const QDir directory(folder.absoluteFilePath());
         QStringList examples;
         const auto files = directory.entryInfoList({QStringLiteral("*.txt"), QStringLiteral("*.md")},

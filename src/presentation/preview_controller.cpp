@@ -57,9 +57,59 @@ QVariantList PreviewController::steps() const { return steps_; }
 // 분류되지 않았거나 제외된 파일까지 포함한 미리보기 행을 반환하는 함수.
 QVariantList PreviewController::outcomes() const { return outcomes_; }
 
+// 기준 폴더의 바로 아래 디렉터리를 설정 화면의 선택 목록으로 반환하는 함수.
+QStringList PreviewController::recommendationCandidates() const {
+    QStringList names;
+    for (const auto& folder : document_recommendation::candidateFolders(recommendationRoot_))
+        names.append(folder.fileName());
+    return names;
+}
+
+// 새 설정을 반영하고 이전 후보로 만든 추천을 지우는 함수.
+void PreviewController::restoreRecommendationFolders(const QString& root, const QStringList& folders) {
+    if (recommendationRoot_ == root && selectedRecommendationFolders_ == folders) return;
+    recommendationRoot_ = root;
+    selectedRecommendationFolders_ = folders;
+    recommendationStatus_.clear();
+    for (auto& value : outcomes_) {
+        auto row = value.toMap();
+        row.remove("recommendedFolder");
+        value = row;
+    }
+    emit recommendationFoldersChanged();
+    emit previewChanged();
+}
+
+// 로컬 폴더를 기준으로 선택하고 후보 체크 목록을 초기화하는 함수.
+void PreviewController::chooseRecommendationRoot(const QUrl& folder) {
+    if (recommendationBusy_) return;
+    if (folder.isEmpty()) {
+        restoreRecommendationFolders({}, {});
+        return;
+    }
+    const QFileInfo directory(folder.toLocalFile());
+    if (folder.isLocalFile() && directory.isDir() && directory.absoluteFilePath() != recommendationRoot_)
+        restoreRecommendationFolders(directory.absoluteFilePath(), {});
+}
+
+// 현재 기준 폴더에 있는 후보 하나의 체크 상태를 저장하는 함수.
+void PreviewController::selectRecommendationFolder(const QString& name, bool selected) {
+    if (recommendationBusy_ || !recommendationCandidates().contains(name)) return;
+    auto folders = selectedRecommendationFolders_;
+    if (selected && !folders.contains(name)) folders.append(name);
+    if (!selected) folders.removeAll(name);
+    restoreRecommendationFolders(recommendationRoot_, folders);
+}
+
 // 현재 정리 계획은 그대로 두고 기존 문서에 근거한 후보를 미리보기에 표시하는 함수.
 void PreviewController::recommendDocumentFolders() {
     if (!hasPreview_ || !draft_ || recommendationBusy_ || (runner_ && runner_->busy())) return;
+    const bool usesSelectedFolders = !recommendationRoot_.isEmpty();
+    if (usesSelectedFolders && selectedRecommendationFolders_.isEmpty()) {
+        recommendationStatus_ = QStringLiteral("설정의 문서 추천에서 후보 폴더를 하나 이상 선택해 주세요.");
+        emit previewChanged();
+        return;
+    }
     QStringList sources;
     QStringList documents;
     for (const auto& outcome : draft_->previewOutcomes) {
@@ -77,12 +127,15 @@ void PreviewController::recommendDocumentFolders() {
     }
     const auto planId = draft_->id;
     const auto selections = pendingFiles_.entries();
+    const auto root = usesSelectedFolders ? recommendationRoot_ : previewHomeRoot_;
+    const auto folders = usesSelectedFolders
+        ? std::optional<QStringList>(selectedRecommendationFolders_) : std::nullopt;
     auto suggestions = std::make_shared<document_recommendation::FolderSuggestions>();
     recommendationBusy_ = true;
     recommendationStatus_ = QStringLiteral("기존 문서를 바탕으로 폴더를 찾고 있어요.");
     emit previewChanged();
-    dispatchOperation(runner_, this, [home = previewHomeRoot_, documents, sources, suggestions] {
-        *suggestions = document_recommendation::suggestFolders(home, documents, sources);
+    dispatchOperation(runner_, this, [root, documents, sources, folders, suggestions] {
+        *suggestions = document_recommendation::suggestFolders(root, documents, sources, folders);
         return Result<void>::success();
     }, [this, planId, selections, suggestions](const Result<void>& result) {
         recommendationBusy_ = false;
@@ -94,7 +147,7 @@ void PreviewController::recommendDocumentFolders() {
             value = row;
         }
         if (!result) recommendationStatus_ = QStringLiteral("문서 추천을 완료하지 못했어요.");
-        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("정리할 위치 바로 아래에 참고할 TXT·Markdown 문서가 든 폴더가 없어요.");
+        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("추천 후보에 참고할 TXT·Markdown 문서가 없어요.");
         else if (suggestions->destinations.isEmpty()) recommendationStatus_ = QStringLiteral("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
         else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요. 실제 이동 계획은 그대로예요.")
             .arg(suggestions->destinations.size());
