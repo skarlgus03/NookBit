@@ -220,7 +220,25 @@ void testContractMigrationFailure() {
     QFile broken(upgrade);
     expect(broken.open(QIODevice::WriteOnly), "broken contract migration should open");
     if (!broken.isOpen()) return;
-    broken.write("ALTER TABLE plans ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1; INVALID SQL;");
+    QFile migration(sourceDir + "003_plan_contract.sql");
+    expect(migration.open(QIODevice::ReadOnly), "contract migration should open");
+    if (!migration.isOpen()) return;
+    const auto script = migration.readAll() + R"sql(
+-- The comment contains a semicolon; it is not a statement.
+CREATE TABLE migration_probe (message TEXT);
+CREATE TRIGGER migration_probe_insert AFTER INSERT ON migration_probe
+WHEN NEW.message = 'seed; value'
+BEGIN
+    INSERT INTO migration_probe VALUES ('first; result');
+    INSERT INTO migration_probe VALUES ('second; result');
+END;
+/* Adjacent SQL; statements are also supported. */
+INSERT INTO migration_probe VALUES ('seed; value'); CREATE TABLE migration_check (ok INTEGER CHECK(ok = 1));
+INSERT INTO migration_check
+SELECT count(*) = 2 FROM migration_probe WHERE message IN ('first; result', 'second; result');
+-- A trailing comment; must not produce an empty query.
+)sql";
+    broken.write(script + "\nINVALID SQL;");
     broken.close();
     nookbit::SqliteHistoryRepository repository(path, initial);
     auto loaded = repository.loadPlan(plan.id);
@@ -228,7 +246,10 @@ void testContractMigrationFailure() {
     expect(!repository.loadPlan(plan.id), "failed migration must not bypass validation on retry");
     expect(mutate(path, "ALTER TABLE plans ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1") &&
         mutate(path, "ALTER TABLE plans DROP COLUMN format_version"), "failed migration must leave no partial format column");
-    expect(QFile::remove(upgrade) && QFile::copy(sourceDir + "003_plan_contract.sql", upgrade), "valid contract migration should replace failed fixture");
+    expect(broken.open(QIODevice::WriteOnly | QIODevice::Truncate), "valid migration should replace the failed script");
+    if (!broken.isOpen()) return;
+    expect(broken.write(script) == script.size(), "fixture with semicolons and a trigger should be written");
+    broken.close();
     expect(QFile::copy(sourceDir + "004_transfer_recovery.sql", directory.filePath("004_transfer_recovery.sql")), "recovery migration fixture should copy");
     expect(QFile::copy(sourceDir + "005_staging_cleanup.sql", directory.filePath("005_staging_cleanup.sql")), "cleanup migration fixture should copy");
     expect(QFile::copy(sourceDir + "006_recovery_removal.sql", directory.filePath("006_recovery_removal.sql")), "removal recovery migration fixture should copy");
@@ -238,7 +259,7 @@ void testContractMigrationFailure() {
     loaded = repository.loadPlan(plan.id);
     expect(loaded && loaded.value().formatVersion == 1 && loaded.value().planHash == plan.planHash &&
         nookbit::PlanSignature::approvalPayload(loaded.value()) == nookbit::PlanSignature::approvalPayload(plan),
-        "retry must preserve legacy version, signature bytes and saved hash");
+        "retry must execute the trigger script and preserve legacy version, signature bytes and saved hash");
 }
 }
 
