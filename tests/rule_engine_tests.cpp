@@ -36,6 +36,58 @@ nookbit::FileFact sampleFile() {
     return file;
 }
 
+// UTF-8 글롭의 문자 경계와 Windows 이름 비교를 확인하는 함수.
+void testUnicodeFileNames() {
+    nookbit::ClassificationRule rule;
+    rule.id = "unicode";
+    rule.enabled = true;
+    rule.destinationRelativePath = L"Sorted";
+    nookbit::RuleSet rules{"default", "version-1", {rule}};
+    nookbit::RuleEngine engine;
+    auto file = sampleFile();
+    // 현재 파일과 규칙이 일치해 목적지를 얻는지 확인하는 함수.
+    const auto matches = [&] {
+        const auto result = engine.decide(file, rules, nookbit::MultiMatchPolicy::FirstMatch, 0);
+        return result && result.value().has_value();
+    };
+
+    file.relativePath = std::filesystem::path(u8"한글.txt");
+    rules.rules[0].fileNameGlobs = {"??.TXT"};
+    expect(matches(), "each question mark consumes one Korean code point");
+    rules.rules[0].fileNameGlobs = {"?.txt"};
+    expect(!matches(), "one question mark does not consume two Korean code points");
+    rules.rules[0].fileNameGlobs = {"*?.txt"};
+    expect(matches(), "star retries on a code point boundary");
+    file.relativePath = std::filesystem::path(u8"\U0001F4C1.txt");
+    rules.rules[0].fileNameGlobs = {"?.txt"};
+    expect(matches(), "a supplementary-plane character consumes one question mark");
+
+#ifdef _WIN32
+    file.relativePath = std::filesystem::path(u8"Résumé.TXT");
+    rules.rules[0].fileNameGlobs = {"RÉSUMÉ.*"};
+    expect(matches(), "legacy glob compares accents case-insensitively");
+    rules.rules[0].fileNameGlobs = {"RESUME.*"};
+    expect(!matches(), "legacy glob still distinguishes accents");
+
+    nookbit::RuleNode node;
+    node.id = "unicode-atomic";
+    node.atomicCondition = nookbit::NameContainsPredicate{"ÉSUM"};
+    node.destination = nookbit::RuleDestination{L"Sorted", std::nullopt};
+    rules.schemaVersion = 3;
+    rules.nodes = {node};
+    expect(matches(), "name contains compares accented text case-insensitively");
+    rules.nodes[0].atomicCondition = nookbit::NameContainsPredicate{"ESUM"};
+    expect(!matches(), "name contains still distinguishes accents");
+
+    rules.nodes[0].atomicCondition = nookbit::SourceFolderPredicate{
+        std::filesystem::path(u8"C:/Input/École"), true};
+    file.absolutePath = std::filesystem::path(u8"C:/input/école/Notes/file.txt");
+    expect(matches(), "source folder compares accented components case-insensitively");
+    file.absolutePath = std::filesystem::path(u8"C:/input/école-backup/file.txt");
+    expect(!matches(), "source folder still requires a full component match");
+#endif
+}
+
 // 우선순위, 날짜 목적지, 충돌 정책을 포함한 분류 결과를 검사하는 함수.
 void testPriorityAndDestination() {
     nookbit::ClassificationRule low;
@@ -375,6 +427,7 @@ void testLogicalPredicates() {
 int main() {
     testPriorityAndDestination();
     testConditionsAndNoMatch();
+    testUnicodeFileNames();
     testUnsafeDestination();
     testOrderedTreeAndOtherwise();
     testAtomicConditionTree();

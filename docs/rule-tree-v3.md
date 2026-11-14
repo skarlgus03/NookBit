@@ -87,7 +87,7 @@ It does not change ordinary condition-node semantics or the whole-folder default
 original absolute parent folder of a file or folder bundle. `recursive: false`
 requires a direct child; `true` includes descendants. The chosen folder itself
 is not a child. Relative display paths and destination paths are ignored.
-Paths are compared lexically by components, with ASCII case folding; junctions
+Paths are compared lexically by components using Windows ordinal case-insensitive matching; junctions
 and symlinks are not resolved. Absolute paths and Boolean `recursive` are required;
 parent traversal (`..`) is rejected. This predicate does not scan folder contents.
 It works in ordinary trees and named processing flows. Old apps may reject it.

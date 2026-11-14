@@ -4,19 +4,70 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <map>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace nookbit {
 namespace {
 
 // ASCII 글자를 대소문자 구분 없이 비교할 수 있게 변환하는 함수.
 char lowerAscii(char character) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    return character >= 'A' && character <= 'Z'
+        ? static_cast<char>(character + ('a' - 'A')) : character;
+}
+
+#ifdef _WIN32
+// ASCII 비교만으로 판단할 수 없는 문자열인지 확인하는 함수.
+bool hasNonAscii(std::string_view text) {
+    return std::ranges::any_of(text, [](unsigned char value) { return value >= 0x80; });
+}
+
+// Windows 이름 비교 API에 전달할 수 있도록 UTF-8 문자열을 변환하는 함수.
+std::wstring toWide(std::string_view text) {
+    if (text.empty() || text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        return {};
+    const auto bytes = static_cast<int>(text.size());
+    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), bytes, nullptr, 0);
+    if (size == 0) return {};
+    std::wstring result(static_cast<std::size_t>(size), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), bytes, result.data(), size) == 0)
+        return {};
+    return result;
+}
+#endif
+
+// Windows에서는 시스템의 유니코드 대소문자 규칙으로 이름을 비교하는 함수.
+bool equalIgnoringCase(std::string_view left, std::string_view right) {
+    if (std::ranges::equal(left, right, {}, lowerAscii, lowerAscii)) return true;
+#ifdef _WIN32
+    if (!hasNonAscii(left) && !hasNonAscii(right)) return false;
+    const auto wideLeft = toWide(left);
+    const auto wideRight = toWide(right);
+    return !wideLeft.empty() && !wideRight.empty() &&
+        CompareStringOrdinal(wideLeft.data(), static_cast<int>(wideLeft.size()),
+                             wideRight.data(), static_cast<int>(wideRight.size()), TRUE) == CSTR_EQUAL;
+#else
+    return false;
+#endif
+}
+
+// UTF-8 문자열에서 다음 코드포인트가 시작하는 바이트 위치를 구하는 함수.
+std::size_t nextCodePoint(std::string_view text, std::size_t index) {
+    ++index;
+    while (index < text.size() && (static_cast<unsigned char>(text[index]) & 0xc0) == 0x80)
+        ++index;
+    return index;
 }
 
 // 확장자 앞의 점을 제거하고 대소문자를 통일하는 함수.
@@ -42,23 +93,47 @@ bool matchesGlob(std::string_view pattern, std::string_view fileName) {
     std::size_t lastStar = std::string_view::npos;
     std::size_t nameAfterStar = 0;
     while (nameIndex < fileName.size()) {
-        if (patternIndex < pattern.size() &&
-            (pattern[patternIndex] == '?' ||
-             lowerAscii(pattern[patternIndex]) == lowerAscii(fileName[nameIndex]))) {
-            ++patternIndex;
-            ++nameIndex;
-        } else if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
-            lastStar = patternIndex++;
-            nameAfterStar = nameIndex;
-        } else if (lastStar != std::string_view::npos) {
+        if (patternIndex < pattern.size()) {
+            if (pattern[patternIndex] == '*') {
+                lastStar = patternIndex++;
+                nameAfterStar = nameIndex;
+                continue;
+            }
+            const auto patternEnd = nextCodePoint(pattern, patternIndex);
+            const auto nameEnd = nextCodePoint(fileName, nameIndex);
+            if (pattern[patternIndex] == '?' ||
+                equalIgnoringCase(pattern.substr(patternIndex, patternEnd - patternIndex),
+                                  fileName.substr(nameIndex, nameEnd - nameIndex))) {
+                patternIndex = patternEnd;
+                nameIndex = nameEnd;
+                continue;
+            }
+        }
+        if (lastStar != std::string_view::npos) {
             patternIndex = lastStar + 1;
-            nameIndex = ++nameAfterStar;
+            nameAfterStar = nextCodePoint(fileName, nameAfterStar);
+            nameIndex = nameAfterStar;
         } else {
             return false;
         }
     }
     while (patternIndex < pattern.size() && pattern[patternIndex] == '*') ++patternIndex;
     return patternIndex == pattern.size();
+}
+
+// 파일명의 문자 경계에서 부분 문자열을 대소문자 구분 없이 찾는 함수.
+bool containsIgnoringCase(std::string_view text, std::string_view expected) {
+    if (expected.empty()) return true;
+#ifdef _WIN32
+    if (hasNonAscii(text) || hasNonAscii(expected)) {
+        const auto wideText = toWide(text);
+        const auto wideExpected = toWide(expected);
+        return !wideText.empty() && !wideExpected.empty() &&
+            FindStringOrdinal(FIND_FROMSTART, wideText.data(), static_cast<int>(wideText.size()),
+                              wideExpected.data(), static_cast<int>(wideExpected.size()), TRUE) >= 0;
+    }
+#endif
+    return std::ranges::search(text, expected, {}, lowerAscii, lowerAscii).begin() != text.end();
 }
 
 // 파일 정보가 규칙의 모든 조건 그룹을 만족하는지 확인하는 함수.
@@ -118,13 +193,12 @@ bool matchesLeaf(const AtomicRuleCondition& condition, const FileFact& file,
     }
     if (const auto* source = std::get_if<SourceFolderPredicate>(&condition)) {
         if (!source->folder.is_absolute() || !file.absolutePath.is_absolute()) return false;
-        // 경로를 정규화한 구성요소 목록으로 바꾸고 ASCII 대소문자를 통일하는 함수.
+        // 원본 경로를 정규화한 뒤 비교할 구성요소 목록을 만드는 함수.
         const auto parts = [](const std::filesystem::path& path) {
-            std::vector<std::wstring> result;
+            std::vector<std::string> result;
             for (const auto& part : path.lexically_normal()) {
-                auto text = part.wstring();
-                if (text.empty() || text == L".") continue;
-                for (auto& ch : text) if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
+                auto text = utf8Path(part);
+                if (text.empty() || text == ".") continue;
                 result.push_back(std::move(text));
             }
             return result;
@@ -132,15 +206,11 @@ bool matchesLeaf(const AtomicRuleCondition& condition, const FileFact& file,
         const auto base = parts(source->folder);
         const auto parent = parts(file.absolutePath.parent_path());
         return parent.size() >= base.size() && (source->recursive || parent.size() == base.size())
-            && std::equal(base.begin(), base.end(), parent.begin());
+            && std::equal(base.begin(), base.end(), parent.begin(), equalIgnoringCase);
     }
     if (const auto* name = std::get_if<NameContainsPredicate>(&condition)) {
         const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
-        auto actual = utf8Path(path.filename());
-        auto expected = name->text;
-        std::transform(actual.begin(), actual.end(), actual.begin(), lowerAscii);
-        std::transform(expected.begin(), expected.end(), expected.begin(), lowerAscii);
-        return actual.find(expected) != std::string::npos;
+        return containsIgnoringCase(utf8Path(path.filename()), name->text);
     }
     if (const auto* size = std::get_if<SizePredicate>(&condition)) {
         if (file.fingerprint.directory) return false;
