@@ -194,6 +194,35 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
     return failures ? Result<void>::failure({"execute.partial_failure", std::to_string(failures) + " file(s) could not move; successful files remain moved. See per-file history."}) : Result<void>::success();
 }
 
+// 다른 볼륨으로 파일을 옮기고 승인된 계획에 완료가 기록됐는지 확인하는 함수.
+Result<void> SafeExecutor::executeVerifiedCopy(const OperationPlan& plan, const MoveStep& step) {
+    static std::atomic<std::uint64_t> attemptCounter{0};
+    const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+    const auto attemptId = "transfer-" + std::to_string(stamp) + "-" + std::to_string(++attemptCounter);
+    const auto staging = step.destination.parent_path() / (".nookbit-" + attemptId + ".tmp");
+    const auto transferred = transfers_->execute(plan.id, step.id, attemptId, staging);
+    if (!transferred) {
+        const auto marked = markNeedsRecovery(plan.id);
+        return marked ? transferred : marked;
+    }
+
+    const auto recorded = history_.loadPlan(plan.id);
+    if (!recorded) return Result<void>::failure(recorded.error());
+    const auto& recordedPlan = recorded.value();
+    const auto completed = std::find_if(recordedPlan.steps.begin(), recordedPlan.steps.end(),
+        [&](const MoveStep& item) { return item.id == step.id; });
+    if (completed == recordedPlan.steps.end() || completed->status != StepStatus::Applied ||
+        recordedPlan.planHash != plan.planHash ||
+        recordedPlan.planHash != hasher_.sha256(PlanSignature::approvalPayload(recordedPlan))) {
+        const auto marked = markNeedsRecovery(plan.id);
+        if (!marked) return marked;
+        return Result<void>::failure({
+            "execute.transfer_record_invalid", "Transfer result is not backed by an intact applied-step record.",
+        });
+    }
+    return Result<void>::success();
+}
+
 // 정방향 최초 실행과 복구가 동일한 이동 및 보상 경계를 사용하는 함수.
 Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
     const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps, bool sourceContentAtCopyOpen) {
@@ -283,26 +312,8 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& saved,
             continue;
         }
         if (saved.formatVersion == 2 && step->movement->strategy == MoveStrategy::VerifiedCopy) {
-            static std::atomic<std::uint64_t> attemptCounter{0};
-            const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-            const auto attemptId = "transfer-" + std::to_string(stamp) + "-" + std::to_string(++attemptCounter);
-            const auto staging = step->destination.parent_path() / (".nookbit-" + attemptId + ".tmp");
-            const auto transferred = transfers_->execute(plan.id, step->id, attemptId, staging);
-            if (!transferred) {
-                const auto marked = markNeedsRecovery(plan.id);
-                if (!marked) return marked;
-                return transferred;
-            }
-            const auto recorded = history_.loadPlan(plan.id);
-            if (!recorded) return Result<void>::failure(recorded.error());
-            const auto completedStep = std::find_if(recorded.value().steps.begin(), recorded.value().steps.end(), [&](const MoveStep& item) { return item.id == step->id; });
-            if (completedStep == recorded.value().steps.end() || completedStep->status != StepStatus::Applied ||
-                recorded.value().planHash != saved.planHash ||
-                recorded.value().planHash != hasher_.sha256(PlanSignature::approvalPayload(recorded.value()))) {
-                const auto marked = markNeedsRecovery(plan.id);
-                if (!marked) return marked;
-                return Result<void>::failure({"execute.transfer_record_invalid", "Transfer result is not backed by an intact applied-step record."});
-            }
+            const auto transferred = executeVerifiedCopy(plan, *step);
+            if (!transferred) return transferred;
             appliedSteps.push_back(step);
             OperationProgressScope::fileCompleted();
             continue;
