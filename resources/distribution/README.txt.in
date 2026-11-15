@@ -28,6 +28,11 @@ data is stored under %APPDATA%\NookBitProject\NookBit, and UI/module preferences
 use Windows user settings. A fresh installation starts with the bundled defaults.
 Close NookBit fully before replacing its application folder with an update.
 
+Licenses
+NookBit's original code, documentation, Nmoo artwork and application icon are
+available under the MIT License in LICENSE. Third-party components retain their
+own licenses. The bundled font's notice is in licenses/NotoSansKR-OFL.txt.
+
 Feedback
 Report the version, the steps you followed, what you expected, and what happened.
 A screenshot can help with visual issues. Do not send private files or personal

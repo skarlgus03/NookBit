@@ -52,3 +52,12 @@ ctest --preset dev
 
 - [설계와 안전 원칙](docs/architecture.md) · [기능 모듈 구조](docs/feature-modules.md)
 - [협업 및 테스트 안내](docs/contributing.md)
+
+## 라이선스
+
+NookBit 프로젝트가 제작한 소스 코드, 문서, Nmoo 이미지와 앱 아이콘은
+[MIT 라이선스](LICENSE)로 배포합니다. 저작권과 라이선스 고지를 유지하면
+수정·재배포·상업적 이용이 가능합니다.
+
+Qt, Qt PDF, Noto Sans KR 등 외부 구성 요소에는 각 구성 요소의 라이선스가 적용됩니다.
+번들 글꼴의 출처와 조건은 [폰트 안내](resources/fonts/README.md)에 정리되어 있습니다.
