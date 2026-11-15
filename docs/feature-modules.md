@@ -496,15 +496,15 @@ feature endpoints; connection adapters die before Companion/Notifications/Watch,
 and Watch dies before Organizer. Existing runner destructors join work before
 their dependencies disappear. No new thread or saved format is introduced.
 
-CTest exercises all 32 requested combinations through the real app using
-`--verify-feature-startup`. Each case uses temporary data and INI preferences,
+CTest exercises all 32 requested combinations through the shared app startup
+code using `nookbit_ui_checks --verify-feature-startup`. Each case uses temporary data and INI preferences,
 disables automatic scanning, and checks runtime/page/window/tray presence, absent
 notification sources, dependency messages, stale routes and QML binding warnings.
 The normal all-enabled UI smoke test remains separate and ignores personal module
 choices. Selection tests also cover invalid/repeated options and dependency state.
 Preference/controller tests cover all 32 save/reopen combinations, invalid documents,
 failed saves, draft discard, CLI overlays, preserved unrelated preferences and
-immutable current state. Four `--verify-feature-preferences` app cases seed only a
+immutable current state. Four `nookbit_ui_checks --verify-feature-preferences` cases seed a
 temporary INI and exercise the real preference-loading path, module switches/save,
 dependency resolution, disabled UI absence and the unchanged current desktop
 window after saving. No verification mode reads or writes personal module settings.

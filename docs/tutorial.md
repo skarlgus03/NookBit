@@ -50,7 +50,8 @@ preserve the separation from real feature commands and user files.
 Registry tests cover multi-page contribution, stable ordering, atomic rejection,
 thread ownership, value snapshots and lifetime cleanup. Controller tests verify
 completion, skip, read-only review, legacy compatibility and save errors.
-`--verify-tutorial` and `--verify-tutorial-skip` exercise the actual QML navigation,
+`nookbit_ui_checks --verify-tutorial` and `nookbit_ui_checks --verify-tutorial-skip`
+exercise the actual QML navigation,
 contents selector, completion and Settings replay in isolated app data. Module
 startup tests verify that inactive modules add no tutorial pages, including the
 all-disabled case with only host guidance. Normal UI verification never writes

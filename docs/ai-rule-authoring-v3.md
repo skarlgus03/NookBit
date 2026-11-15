@@ -9,6 +9,10 @@ Standalone authoring contract for an LLM generating `nookbit_rules.json`. No oth
 
 ## Output shape
 
+The editor's `documentAnalysis` prototype and the preview's document-folder
+recommendations are outside the v3 JSON contract. Use only the supported
+conditions and processing nodes below to author runnable rules.
+
 The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise` and `folderFlows`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
 
 Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain exactly one `when` condition. An else node has `"otherwise": true` instead of `when`; at most one else node is allowed in each sibling array. Put it last for readability. A node either has a nonempty `children` array, is a leaf with `destination`, or is a leaf with `"exclude": true`. An internal node must not have `destination` or `exclude`. A leaf must not omit its terminal action, even if `globalOtherwise` exists. Do not add unlisted fields.

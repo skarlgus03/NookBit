@@ -241,7 +241,7 @@ Invalid stored packs are omitted from the list and rechecked when selected.
 QSettings stores `character/selectedPack` and `character/scales/<library-key>`.
 These are personal settings, not edits to the pack. Startup restores the chosen
 key and scale; a missing/unusable selection falls back to the bundled character
-(or an existing legacy presentation). `--verify-ui` uses only bundled data and
+(or an existing legacy presentation). `nookbit_ui_checks --verify-ui` uses bundled data and
 does not write these settings. Character settings now opens an independent static
 preview with draggable pivot and bubble-attachment points and horizontal guides.
 Apply commits both offsets; Cancel discards the draft; Reset zeros the draft.

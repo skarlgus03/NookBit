@@ -27,7 +27,12 @@ Primary labels on their normal accents measure about 10.32:1 light / 8.39:1 dark
 The only color arithmetic outside the theme is the file-drop overlay: it changes
 the alpha of `UiTheme.white` using the shared overlay opacity, without adding a hue.
 
-`fontFamily` prefers installed Noto Sans KR; `fontFallback` is Malgun Gothic, followed by the platform's original default. No font files are bundled or downloaded. The application font is inherited by ordinary QML text and native menus/dialogs. `--verify-ui` reports the resolved family so a missing font is not mistaken for a successful substitution.
+The app embeds three static Noto Sans KR faces under the private family
+`NookBit UI Sans`. Startup registers the font resources before creating QML
+controls, builds the default font from `UiMetrics`, and applies it to both the
+application and the shared QML font. `Malgun Gothic` is the configured fallback.
+`nookbit_ui_checks --verify-ui` reports the resolved font. See the
+[bundled font source and license](../resources/fonts/README.md).
 
 ## Roles
 
@@ -272,4 +277,7 @@ Home menu buttons are borderless. Busy state disables navigation/business conten
 
 `UiSettingsController` stores each page's last size under a stable `windows/<page-name>/size` QSettings key, separate from rule JSON. Resizing is debounced by 300 ms; page changes, closing the extension, hiding the main window, and tray exit immediately commit pending changes. Reopening a page restores its own size, independent of the main window's height. Defaults and restored sizes are bounded by the current screen's available dimensions where compatible with the page's minimum size; docking positions are not clamped to a single monitor.
 
-Invalid or extreme stored sizes fall back to the page default. `--verify-ui` remembers test sizes only in memory and never reads or overwrites personal window settings. Persistence tests use a temporary INI file; smoke tests check page-specific restoration, close/reopen, and independent main-window resizing.
+Invalid or extreme stored sizes fall back to the page default.
+`nookbit_ui_checks --verify-ui` uses in-memory test sizes. Persistence tests use
+a temporary INI file, and smoke tests check page-specific restoration,
+close/reopen, and independent main-window resizing.

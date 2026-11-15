@@ -1,6 +1,9 @@
 # Operation progress
 
-The background operation panel shows the current processing phase, current filename, file position/count, durably completed file count, and current-file copy bytes/percentage. Navigation and conflicting operations remain input-disabled while work is active, but the window title area stays movable. No cancel button or estimated time remaining was added.
+The background operation panel shows the current phase, filename, file position
+and count, durably completed file count, and copy progress for the current file.
+Navigation and conflicting actions are disabled during work. The window title
+area stays movable.
 
 Preparation and undo use a non-modal panel centered over the extension window's
 content area, with a translucent white veil confined to that content area.
@@ -12,6 +15,18 @@ Read-only recovery-list inspection is an exception: open the recovery page first
 then refresh its list and show a small inline spinner/message. Neither the shared
 panel nor white veil is shown for that inspection. Explicit resume/rollback still
 uses the shared file-work progress display; approval and inspection are unchanged.
+
+## Copy cancellation
+
+During sorting, **복사 취소** appears while a cross-volume staged copy accepts
+cancellation. The button disables after a request. The worker checks the request
+during copying and again before it records commit intent. The current source
+stays in place if the copy stops before commit. Previously completed moves stay
+in work history, and the batch stops before starting the next file.
+
+Same-volume moves, undo and recovery do not offer this cancellation action.
+Uncertain outcomes or failures to record an outcome still follow the recovery
+path.
 
 ## Backend contract and lifetime
 
@@ -32,10 +47,10 @@ Progress reports are observational: they are not authorization, validation evide
 - Preparation/approval/plan checks, flush, verification, commit, deletion and history writes use an indeterminate indicator. Empty files do not divide by zero or receive invented percentages. Same-volume rename has no copy-byte percentage.
 - Detailed phase/byte events are available for the normal staged-copy path and underlying undo/recovery copies. Some recovery inspection or other background requests only supply a broad phase and omit a file count. The panel does not claim a complete recovery-wide denominator.
 
-The small panel uses explicit light/dark text colors and a native progress bar. This is a functional status display, not the final application/character design. Visual testing is left to the user; automated tests do not control the desktop.
-
 ## Verification
 
 Core tests cover throttling without sleeps, final-byte delivery, large counters, bounded values, empty-file handling, no false completion at copy 100%, thread/nested-scope isolation, observer exceptions and unregistration. Background runner tests hold the worker until the GUI actually receives an intermediate 45% update, verify UI-thread property updates, and ensure failure starts with fresh counts and no stale copy bar. Native background workflows assert recorded completed counts, restored counts, and required copy/verification/commit/removal phase events; same-volume workflows assert the absence of copy percentages.
 
-The full automatic suite passed 22/22. Actual C:/D: mixed and copy-only background move, last undo, history undo and explicit recovery passed with progress assertions. Owned fixtures were retained at `C:/Users/begon/AppData/Local/Temp/NookBit-bg-source-UnhXec` and `D:/NookBit/out/build/dev/tests/NookBit-bg-target-BsZDXL` (copy-only cases under `copy-only`). No user original or application DB was used. The application executable was rebuilt; its visual appearance and real 4 GB transfer display are user checks.
+The commit-transfer and preview-controller tests cover cancellation before
+commit and the background runner's cancellation boundary. For a native
+two-volume run, use the [cross-volume test procedure](cross-volume-test-run.md).
