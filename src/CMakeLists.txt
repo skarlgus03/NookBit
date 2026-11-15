@@ -131,10 +131,7 @@ if(NOOKBIT_BUILD_QT_APP)
       target_link_libraries(nookbit_history PRIVATE SQLite::SQLite3)
     endif()
 
-    qt_add_executable(nookbit
-      presentation/main.cpp
-      presentation/ui_smoke_checks.cpp
-      presentation/ui_smoke_checks.hpp
+    qt_add_library(nookbit_desktop STATIC
       app/pending_queue_adapter.hpp
       app/feature_connections.hpp
       app/feature_connections.cpp
@@ -198,7 +195,27 @@ if(NOOKBIT_BUILD_QT_APP)
       ${PROJECT_SOURCE_DIR}/resources/config.qrc
       ${PROJECT_SOURCE_DIR}/resources/fonts.qrc
     )
-    set_target_properties(nookbit PROPERTIES AUTORCC ON)
+    set_target_properties(nookbit_desktop PROPERTIES AUTORCC ON)
+
+    file(TO_CMAKE_PATH "${NOOKBIT_DEV_DESTINATION_ROOT}" NOOKBIT_DEV_DESTINATION_PATH)
+    function(nookbit_add_desktop_executable target)
+      qt_add_executable(${target} presentation/main.cpp)
+      target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+      target_compile_definitions(${target} PRIVATE
+        NOOKBIT_VERSION_STRING="${NOOKBIT_VERSION}"
+        NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
+      # QML 등록과 리소스 초기화 객체까지 두 실행 파일에 포함한다.
+      target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,nookbit_desktop>")
+    endfunction()
+
+    nookbit_add_desktop_executable(nookbit)
+    if(NOOKBIT_BUILD_TESTS)
+      nookbit_add_desktop_executable(nookbit_ui_checks)
+      target_sources(nookbit_ui_checks PRIVATE presentation/ui_smoke_checks.cpp presentation/ui_smoke_checks.hpp)
+      target_compile_definitions(nookbit_ui_checks PRIVATE NOOKBIT_UI_CHECKS)
+      # 같은 빌드 디렉터리에 배포되는 Qt 런타임과 캐릭터 팩을 사용한다.
+      add_dependencies(nookbit_ui_checks nookbit)
+    endif()
     if(WIN32)
       enable_language(RC)
       configure_file(
@@ -225,17 +242,15 @@ if(NOOKBIT_BUILD_QT_APP)
         "$<TARGET_FILE_DIR:nookbit>/imagepacks/nmoo"
       COMMENT "Deploying the test ImagePack"
       VERBATIM)
-    target_include_directories(nookbit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    file(TO_CMAKE_PATH "${NOOKBIT_DEV_DESTINATION_ROOT}" NOOKBIT_DEV_DESTINATION_PATH)
-    target_compile_definitions(nookbit PRIVATE
-      NOOKBIT_VERSION_STRING="${NOOKBIT_VERSION}"
-      NOOKBIT_DEV_DESTINATION_ROOT="${NOOKBIT_DEV_DESTINATION_PATH}")
+    target_include_directories(nookbit_desktop PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_source_files_properties(presentation/qml/UiMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
     set_source_files_properties(presentation/qml/UiTheme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-    qt_add_qml_module(nookbit
+    qt_add_qml_module(nookbit_desktop
       URI NookBit
       VERSION 1.0
+      NO_PLUGIN
+      OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/NookBit"
       QML_FILES
         presentation/qml/Main.qml
         presentation/qml/TutorialPage.qml
@@ -332,7 +347,7 @@ if(NOOKBIT_BUILD_QT_APP)
         presentation/qml/RuleDocumentActions.qml
     )
 
-    target_link_libraries(nookbit PRIVATE
+    target_link_libraries(nookbit_desktop PUBLIC
       nookbit_core
       nookbit_filesystem
       nookbit_json_config
@@ -348,7 +363,7 @@ if(NOOKBIT_BUILD_QT_APP)
       Qt6::Sql
     )
     if(WIN32)
-      target_link_libraries(nookbit PRIVATE shell32 ole32 user32)
+      target_link_libraries(nookbit_desktop PRIVATE shell32 ole32 user32)
       find_program(NOOKBIT_WINDEPLOYQT NAMES windeployqt windeployqt6
         HINTS "${Qt6_DIR}/../../../bin")
     endif()

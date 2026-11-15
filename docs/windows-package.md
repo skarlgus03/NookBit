@@ -60,10 +60,12 @@ To restore the full deployment, configure with
 back ON to restore the compact policy. Revisit the exclusions when changing the
 application's control style or database backend.
 
-Validate the packaged executable without the Qt SDK on PATH (`--verify-ui`,
-`QT_QPA_PLATFORM=offscreen`, `QT_QUICK_BACKEND=software`, and unset Qt/QML plugin
-path overrides). This verifies packaged UI/character resources but does not
-replace Windows graphics-driver and native dialog testing on end-user machines.
+Validate the packaged executable without the Qt SDK on PATH or Qt/QML plugin
+path overrides. Check `nookbit.exe --version`, then launch the app and open the
+pages and companion preview. Run the automated UI checks from the repository root
+with `ctest --preset release -R nookbit_qml_smoke`. CTest runs
+`nookbit_ui_checks --verify-ui`, which shares the app's startup code and QML
+resources. The package includes only the regular executable.
 
 ## Measured first pass (2026-10-14, Qt 6.11.2)
 

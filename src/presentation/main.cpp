@@ -16,7 +16,9 @@
 #include "presentation/recovery_controller.hpp"
 #include "presentation/watch_controller.hpp"
 #include "presentation/rule_editor_controller.hpp"
+#ifdef NOOKBIT_UI_CHECKS
 #include "presentation/ui_smoke_checks.hpp"
+#endif
 
 #include <QDir>
 #include <QFileInfo>
@@ -75,15 +77,33 @@ int main(int argc, char* argv[]) {
         QTextStream(stdout) << "NookBit " << QCoreApplication::applicationVersion() << Qt::endl;
         return EXIT_SUCCESS;
     }
+#ifdef NOOKBIT_UI_CHECKS
     const bool verifyFeaturePreferences = arguments.contains(QStringLiteral("--verify-feature-preferences"));
     const bool verifyTutorialSkip = arguments.contains(QStringLiteral("--verify-tutorial-skip"));
     const bool verifyTutorial = verifyTutorialSkip || arguments.contains(QStringLiteral("--verify-tutorial"));
     const bool verifyFeatures = verifyTutorial || verifyFeaturePreferences || arguments.contains(QStringLiteral("--verify-feature-startup"));
     const bool verifyUi = verifyFeatures || arguments.contains(QStringLiteral("--verify-ui"));
+    if (!verifyUi) {
+        QTextStream(stderr) << "Select a UI verification mode." << Qt::endl;
+        return EXIT_FAILURE;
+    }
+#else
+    if (std::any_of(arguments.cbegin() + 1, arguments.cend(),
+        [](const QString& argument) { return argument.startsWith("--verify-"); })) {
+        QTextStream(stderr) << "UI verification requires nookbit_ui_checks." << Qt::endl;
+        return EXIT_FAILURE;
+    }
+    constexpr bool verifyFeaturePreferences = false;
+    constexpr bool verifyTutorial = false;
+    constexpr bool verifyFeatures = false;
+    constexpr bool verifyUi = false;
+#endif
     const auto selection = nookbit::parseFeatureSelection(arguments);
     if (!selection) { QTextStream(stderr) << QString::fromStdString(selection.error().message) << Qt::endl; return EXIT_FAILURE; }
     application.setWindowIcon(applicationIcon());
+#ifdef NOOKBIT_UI_CHECKS
     if (verifyUi && !nookbit::ui_smoke::verifyApplicationIcon(application.windowIcon())) return EXIT_FAILURE;
+#endif
     // 숨긴 메인 창과 도구 창의 개수로 프로세스 수명을 결정하지 않는다.
     application.setQuitOnLastWindowClosed(false);
     nookbit::AppLifecycleController appLifecycle;
@@ -171,7 +191,9 @@ int main(int argc, char* argv[]) {
         QTextStream(stderr) << QString::fromStdString(hostTutorial.error().message) << Qt::endl;
         return EXIT_FAILURE;
     }
+#ifdef NOOKBIT_UI_CHECKS
     bool featureBindingsClean = true;
+#endif
     QQmlApplicationEngine engine;
     // 테마와 컨트롤을 만들기 전에 공통 글꼴을 확정하고 창에서도 명시적으로 공유한다.
     auto* uiMetrics = engine.singletonInstance<QObject*>("NookBit", "UiMetrics");
@@ -238,11 +260,13 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty("watchSettingsEntry", folderWatch ? folderWatch->settingsEntryUi() : QVariantMap{});
     engine.rootContext()->setContextProperty("watchProposalUi", folderWatch ? folderWatch->proposalUi() : QVariantMap{});
     engine.rootContext()->setContextProperty("companionDesktop", companion ? companion->desktopUi() : QVariantMap{});
+#ifdef NOOKBIT_UI_CHECKS
     if (verifyFeatures) QObject::connect(&engine, &QQmlEngine::warnings, &engine, [&featureBindingsClean](const QList<QQmlError>& errors) {
         // 일부 기능이 없는 상태에서 숨은 필수 참조나 잘못된 바인딩을 놓치지 않는 함수.
         featureBindingsClean = false;
         for (const auto& error : errors) QTextStream(stderr) << error.toString() << Qt::endl;
     });
+#endif
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,
@@ -304,6 +328,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&trayAvailability, &QTimer::timeout, &appLifecycle, refreshTray);
     if (!verifyUi) trayAvailability.start();
 
+#ifdef NOOKBIT_UI_CHECKS
     if (verifyTutorial)
         return nookbit::ui_smoke::verifyTutorial(engine, features, uiPages, uiPreferences, tutorial,
             verifyTutorialSkip, featureBindingsClean);
@@ -312,6 +337,7 @@ int main(int argc, char* argv[]) {
             featureSettings, featurePreferences, savedFeatures, verifyFeaturePreferences, featureBindingsClean);
     if (verifyUi)
         return nookbit::ui_smoke::verifyUi(application, engine, features, uiMetrics, appLifecycle, userGuides);
+#endif
 
     return application.exec();
 }
