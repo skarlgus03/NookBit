@@ -27,6 +27,7 @@ add_library(nookbit_core STATIC
     application/use_cases/cleanup_preserved_staging_use_case.cpp
   application/use_cases/finalize_transfer_use_case.cpp
   application/use_cases/rollback_transfer_use_case.cpp
+  modules/document_recommendation/tfidf.cpp
   modules/rules/rule_engine.cpp
   modules/rules/rule_diagnostics.cpp
   modules/rules/processing_flow.cpp
@@ -91,10 +92,16 @@ if(NOOKBIT_BUILD_QT_APP)
   if(Qt6_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
 
-    add_library(nookbit_document_recommendation INTERFACE)
+    add_library(nookbit_document_recommendation STATIC
+      infrastructure/filesystem/folder_suggestions.cpp)
+    target_include_directories(nookbit_document_recommendation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(nookbit_document_recommendation PUBLIC Qt6::Core PRIVATE nookbit_core)
+    if(MSVC)
+      target_compile_options(nookbit_document_recommendation PRIVATE /W4 /permissive- /utf-8)
+    endif()
     if(TARGET Qt6::Pdf)
-      target_link_libraries(nookbit_document_recommendation INTERFACE Qt6::Pdf)
-      target_compile_definitions(nookbit_document_recommendation INTERFACE NOOKBIT_DOCUMENT_PDF=1)
+      target_link_libraries(nookbit_document_recommendation PRIVATE Qt6::Pdf)
+      target_compile_definitions(nookbit_document_recommendation PUBLIC NOOKBIT_DOCUMENT_PDF=1)
     endif()
 
     add_library(nookbit_json_config STATIC

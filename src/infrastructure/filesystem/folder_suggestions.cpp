@@ -1,14 +1,15 @@
-#pragma once
+#include "infrastructure/filesystem/folder_suggestions.hpp"
 
-#include "modules/document_recommendation/tfidf.hpp"
+#include "infrastructure/filesystem/document_text_terms.hpp"
 
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QSet>
 #include <QStringConverter>
 
+#include <algorithm>
 #include <string>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #include <QtCore/qt_windows.h>
@@ -20,34 +21,16 @@
 #endif
 
 namespace nookbit::document_recommendation {
-
-enum class ExcerptIssue { None, Unreadable, Encoding, Empty, PdfNoText, PdfUnavailable };
+namespace {
 
 struct Excerpt {
     QString text;
     ExcerptIssue issue{ExcerptIssue::None};
 };
 
-struct FolderSuggestions {
-    QMap<QString, QString> destinations;
-    QMap<QString, ExcerptIssue> unreadableDocuments;
-    qsizetype candidateCount{0};
-    qsizetype inspectedFolderCount{0};
-    qsizetype usedFolderCount{0};
-    qsizetype cappedFolderCount{0};
-};
-
-inline constexpr qsizetype recommendationFolderLimit = 32;
-inline constexpr int exampleReadLimit = 8;
-
-// 문서 추천에서 검사하는 확장자인지 확인하는 함수.
-inline bool isDocumentExtension(const QString& extension) {
-    return extension == "txt" || extension == "md" || extension == "pdf";
-}
-
 #ifdef NOOKBIT_DOCUMENT_PDF
 // PDF 앞쪽 페이지의 텍스트를 지정한 길이까지 읽는 함수.
-inline Excerpt pdfExcerpt(const QString& path, qsizetype characters) {
+Excerpt pdfExcerpt(const QString& path, qsizetype characters) {
     QPdfDocument document(nullptr);
     if (document.load(path) != QPdfDocument::Error::None) return {{}, ExcerptIssue::Unreadable};
     QString text;
@@ -64,10 +47,10 @@ inline Excerpt pdfExcerpt(const QString& path, qsizetype characters) {
 #endif
 
 #ifdef Q_OS_WIN
-inline constexpr UINT koreanCodePage = 949;
+constexpr UINT koreanCodePage = 949;
 
 // 시스템 로캘과 무관하게 Windows 한국어 코드 페이지로 바이트를 검사하는 함수.
-inline QString decodeCp949(QByteArrayView bytes) {
+QString decodeCp949(QByteArrayView bytes) {
     const int length = static_cast<int>(bytes.size());
     const int size = MultiByteToWideChar(koreanCodePage, MB_ERR_INVALID_CHARS, bytes.data(), length, nullptr, 0);
     if (size == 0) return {};
@@ -78,7 +61,7 @@ inline QString decodeCp949(QByteArrayView bytes) {
 #endif
 
 // 연결 경로를 제외하고 로컬 문서의 본문 앞부분을 가져오는 함수.
-inline Excerpt documentExcerpt(const QFileInfo& info, qsizetype characters) {
+Excerpt documentExcerpt(const QFileInfo& info, qsizetype characters) {
     const auto extension = info.suffix().toLower();
     if (!info.isFile() || info.isSymLink() || !isDocumentExtension(extension)) return {{}, ExcerptIssue::Unreadable};
     if (extension == "pdf") {
@@ -118,7 +101,7 @@ inline Excerpt documentExcerpt(const QFileInfo& info, qsizetype characters) {
 }
 
 // 대기 문서가 자기 자신의 예시가 되지 않도록 정규 경로를 비교하는 함수.
-inline QString documentKey(const QFileInfo& info) {
+QString documentKey(const QFileInfo& info) {
     const auto path = info.canonicalFilePath();
 #ifdef Q_OS_WIN
     return path.toCaseFolded();
@@ -127,8 +110,15 @@ inline QString documentKey(const QFileInfo& info) {
 #endif
 }
 
+} // namespace
+
+// 문서 추천에서 검사하는 확장자인지 확인하는 함수.
+bool isDocumentExtension(const QString& extension) {
+    return extension == "txt" || extension == "md" || extension == "pdf";
+}
+
 // 사용자가 체크할 수 있는 바로 아래 폴더 이름을 가져오는 함수.
-inline QFileInfoList candidateFolders(const QString& root) {
+QFileInfoList candidateFolders(const QString& root) {
     if (root.isEmpty()) return {};
     auto folders = QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
     folders.removeIf([](const QFileInfo& folder) { return folder.isJunction(); });
@@ -136,9 +126,9 @@ inline QFileInfoList candidateFolders(const QString& root) {
 }
 
 // 후보 폴더의 대표 문서를 읽고 이동 계획과 별개로 추천하는 함수.
-inline FolderSuggestions suggestFolders(const QString& homePath, const QStringList& documents,
-                                        const QStringList& previewSources,
-                                        const std::optional<QStringList>& selectedFolders = std::nullopt) {
+FolderSuggestions suggestFolders(const QString& homePath, const QStringList& documents,
+                                 const QStringList& previewSources,
+                                 const std::optional<QStringList>& selectedFolders) {
     constexpr double minimumSimilarity = 0.286;
     QSet<QString> excluded;
     for (const auto& path : previewSources) excluded.insert(documentKey(QFileInfo(path)));
@@ -173,7 +163,8 @@ inline FolderSuggestions suggestFolders(const QString& homePath, const QStringLi
             if (examples.size() == 2) break;
         }
         if (examples.isEmpty()) continue;
-        profiles.push_back({folder.absoluteFilePath(), folder.fileName() + '\n' + examples.join('\n'), {}});
+        profiles.push_back({folder.absoluteFilePath().toStdU16String(),
+                            countTextTerms(folder.fileName() + '\n' + examples.join('\n')), {}});
     }
 
     result.usedFolderCount = static_cast<qsizetype>(profiles.size());
@@ -186,9 +177,9 @@ inline FolderSuggestions suggestFolders(const QString& homePath, const QStringLi
             continue;
         }
         if (profiles.empty()) continue;
-        const auto prediction = recommend(file.fileName() + '\n' + excerpt.text, profiles, idf);
+        const auto prediction = recommend(countTextTerms(file.fileName() + '\n' + excerpt.text), profiles, idf);
         if (prediction.bestScore && *prediction.bestScore >= minimumSimilarity)
-            result.destinations.insert(source, prediction.ranked.front());
+            result.destinations.insert(source, QString::fromStdU16String(prediction.ranked.front()));
     }
     return result;
 }

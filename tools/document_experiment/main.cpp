@@ -1,6 +1,6 @@
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
+#include "infrastructure/filesystem/document_text_terms.hpp"
 #include "modules/rules/rule_engine.hpp"
-#include "modules/document_recommendation/tfidf.hpp"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -29,10 +29,16 @@ struct Document {
     nookbit::FileFact fact;
 };
 
-using nookbit::document_recommendation::Prediction;
 using nookbit::document_recommendation::Profile;
+using nookbit::document_recommendation::countTextTerms;
 using nookbit::document_recommendation::prepareProfiles;
 using nookbit::document_recommendation::recommend;
+
+struct Prediction {
+    QStringList ranked;
+    std::optional<double> bestScore;
+};
+
 using Predict = std::function<Prediction(const Document&)>;
 
 // 파일 내용을 수정하지 않고 바이트를 읽는 함수.
@@ -136,7 +142,7 @@ int main(int argc, char* argv[]) {
             if (folder.isEmpty() || folders.contains(folder))
                 throw std::runtime_error("Candidate folders must be nonempty and unique.");
             folders.append(folder);
-            profiles.push_back({folder, folder + ' ' + description, {}});
+            profiles.push_back({folder.toStdU16String(), countTextTerms(folder + ' ' + description), {}});
         }
         std::vector<Document> documents;
         for (const auto& row : config.value("documents").toArray()) {
@@ -172,11 +178,17 @@ int main(int argc, char* argv[]) {
             const auto folder = QString::fromStdWString(decision.value()->destinationRelativePath.generic_wstring());
             return {{folder}, std::nullopt};
         }, csv, summary);
+        const auto predictText = [&](const QString& text) {
+            const auto prediction = recommend(countTextTerms(text), profiles, idf);
+            Prediction result{{}, prediction.bestScore};
+            for (const auto& label : prediction.ranked) result.ranked.append(QString::fromStdU16String(label));
+            return result;
+        };
         evaluate("tfidf_filename", documents, [&](const Document& document) {
-            return recommend(document.fileName, profiles, idf);
+            return predictText(document.fileName);
         }, csv, summary);
         evaluate("tfidf_body", documents, [&](const Document& document) {
-            return recommend(document.fileName + '\n' + document.body, profiles, idf);
+            return predictText(document.fileName + '\n' + document.body);
         }, csv, summary);
         csv.flush();
         if (csv.status() != QTextStream::Ok || !output.flush()) throw std::runtime_error("CSV write failed.");

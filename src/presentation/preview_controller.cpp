@@ -1,6 +1,6 @@
 #include "presentation/preview_controller.hpp"
 #include "presentation/file_operation_error_text.hpp"
-#include "modules/document_recommendation/folder_suggestions.hpp"
+#include "infrastructure/filesystem/folder_suggestions.hpp"
 
 
 #include <QDir>
