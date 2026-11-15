@@ -1,63 +1,31 @@
 # NookBit
 
-NookBit은 **파일과 폴더를 내가 정한 규칙으로 정리하는 Windows 데스크톱 앱**입니다. 파일을 대기 목록에 넣고 목적지를 미리 본 뒤, 확인한 항목을 이동할 수 있습니다.
+내가 정한 규칙으로 파일과 폴더를 정리하는 Windows 데스크톱 앱입니다. 이동할 위치를 미리 보고, 확인한 항목만 정리할 수 있습니다.
 
 ## 다운로드 및 실행
 
 1. [GitHub Releases](https://github.com/skarlgus03/NookBit/releases)의 **Assets**에서 `NookBit-<버전>-Windows-x64.zip`을 받습니다.
-2. ZIP 전체를 새 폴더에 풉니다.
-3. 압축을 푼 `NookBit-Release` 폴더에서 `nookbit.exe`를 실행합니다.
+2. ZIP 전체를 새 폴더에 풉니다. DLL과 런타임은 실행 파일과 함께 둡니다.
+3. `NookBit-Release` 폴더에서 `nookbit.exe`를 실행합니다.
 
-`Source code (zip)`과 `Source code (tar.gz)`만 보이면 해당 릴리스에 실행용 패키지가 아직 첨부되지 않은 상태입니다. `.zip.sha256`은 다운로드 검증용이며, 실행에는 DLL과 런타임을 포함한 배포 폴더 전체가 필요합니다.
+`Source code (zip)`과 `Source code (tar.gz)`만 보이면 해당 릴리스에 실행용 ZIP이 아직 첨부되지 않은 상태입니다. 업데이트할 때는 실행 중인 NookBit을 트레이에서 완전히 종료한 뒤 새 폴더의 실행 파일을 엽니다. 설정과 작업 기록은 앱 폴더 밖에 저장됩니다.
 
-업데이트할 때는 새 ZIP을 별도 폴더에 풀고, 기존 앱을 트레이 메뉴에서 완전히 종료한 뒤 새 버전을 실행합니다. 사용자 설정과 작업 기록은 앱 폴더 밖에 저장됩니다.
+## 처음 정리하기
 
-## 주요 기능
+**파일 정리**에 파일이나 폴더를 끌어놓고 정리 위치를 고릅니다. **결과 미리보기**에서 이동 예정 경로를 확인한 뒤 **정리하기**를 실행합니다. 완료한 작업은 **작업 기록**에서 검색하고 되돌릴 수 있습니다.
 
-| 기능 | 할 수 있는 일 |
-| --- | --- |
-| 파일 정리 | 파일과 폴더를 끌어놓고, 이동 예정 경로를 확인한 뒤 정리 |
-| 분류 규칙 | 노드 편집기에서 조건과 목적지를 연결하고, 샘플 파일로 테스트하거나 JSON을 가져오기·내보내기 |
-| 작업 기록 | 이전 이동 내역 검색 및 되돌리기 |
-| 폴더 감시 | 지정한 조건을 충족하면 정리를 제안. 이동은 사용자 확인 후 시작 |
-| 컴패니언 | 바탕화면에서 정리 제안과 진행 상태를 표시하고, 캐릭터 팩을 교체 |
+- **분류 규칙** — 노드로 조건과 목적지를 연결합니다. 샘플로 규칙을 시험하거나 JSON을 가져오고 내보낼 수 있습니다. 외부 AI로 규칙을 작성하려면 [작성 규격](docs/ai-rule-authoring-v3.md)과 [예제 JSON](resources/rules/ai-example.v3.json)을 사용하세요. [분류 규칙 사용법](docs/user/rules-guide.ko.md)
+- **폴더 감시** — 지정한 폴더가 설정한 조건을 충족하면 정리를 제안합니다. 이동은 사용자 확인 후 시작합니다.
+- **컴패니언** — 바탕화면에 정리 제안과 작업 상태를 표시합니다. 캐릭터 팩을 교체하거나 직접 만들 수 있습니다. [캐릭터 팩 제작 가이드](docs/user/character-pack-guide.md)
 
-폴더는 기본적으로 통째로 다룹니다. 내용물을 따로 정리하려면 [폴더 처리 흐름](docs/folder-processing-flows.md)을 사용할 수 있습니다. 기능은 **설정 → 모듈 관리**에서 선택하고 앱을 완전히 종료한 뒤 다시 실행해 적용합니다.
+폴더는 기본적으로 통째로 다룹니다. 내용물을 개별로 정리하거나 중단된 작업을 확인할 때는 아래 안내를 참고하세요. [폴더 처리 흐름](docs/folder-processing-flows.md) · [폴더 이동·되돌리기](docs/directory-bundles.md) · [중단 작업 복구](docs/interrupted-operation-recovery.md)
 
-## 사용 가이드
+## 개발
 
-- [분류 규칙 사용법](docs/user/rules-guide.ko.md)
-- [외부 AI에 전달할 규칙 작성 규격](docs/ai-rule-authoring-v3.md) · [예제 JSON](resources/rules/ai-example.v3.json)
-- [컴패니언 팩 제작 가이드](docs/user/character-pack-guide.md)
-- [폴더 이동·되돌리기 지원 범위](docs/directory-bundles.md) · [중단 작업 복구](docs/interrupted-operation-recovery.md)
-
-NookBit은 승인된 경로로만 이동하고 기존 파일을 덮어쓰지 않습니다. 되돌릴 때는 원래 위치를 확인하며, 중단 후 상태가 불확실한 작업은 검토 대상으로 남깁니다.
-
-## 개발 및 빌드
-
-C++20과 Qt/QML을 사용합니다. Windows에서 Visual Studio 2022의 **Desktop development with C++**(MSVC x64), CMake 3.24 이상, Ninja, MSVC x64용 Qt 6.5 이상이 필요합니다. Qt 구성 요소는 Core, Gui, Widgets, Qml, Quick, QuickControls2, QuickDialogs2, Sql입니다.
-
-PDF 본문으로 폴더를 추천하려면 같은 Qt 키트에 **Qt PDF** 구성 요소를 추가합니다. 추천은 텍스트가 들어 있는 PDF의 처음 5페이지를 읽습니다.
-
-x64 개발자 터미널에서 아래 Qt 경로를 자신의 설치 위치로 바꿔 실행합니다.
-
-```powershell
-cmake --preset dev -DCMAKE_PREFIX_PATH="C:/Qt/6.11.2/msvc2022_64"
-cmake --build --preset dev
-ctest --preset dev
-.\out\build\dev\src\nookbit.exe
-```
-
-배포 ZIP을 만들려면 `cmake --preset release`에 같은 Qt 경로를 지정한 뒤 `cmake --build --preset archive-release`를 실행합니다. 배포·검증 절차는 [Windows 패키징 문서](docs/windows-package.md)를 참고하세요.
-
-- [설계와 안전 원칙](docs/architecture.md) · [기능 모듈 구조](docs/feature-modules.md)
-- [협업 및 테스트 안내](docs/contributing.md)
+- [Windows 개발 환경, 빌드와 테스트](docs/contributing.md)
+- [아키텍처와 안전 원칙](docs/architecture.md) · [기능 모듈](docs/feature-modules.md)
+- [Windows ZIP 생성과 배포 전 검증](docs/windows-package.md)
 
 ## 라이선스
 
-NookBit 프로젝트가 제작한 소스 코드, 문서, Nmoo 이미지와 앱 아이콘은
-[MIT 라이선스](LICENSE)로 배포합니다. 저작권과 라이선스 고지를 유지하면
-수정·재배포·상업적 이용이 가능합니다.
-
-Qt, Qt PDF, Noto Sans KR 등 외부 구성 요소에는 각 구성 요소의 라이선스가 적용됩니다.
-번들 글꼴의 출처와 조건은 [폰트 안내](resources/fonts/README.md)에 정리되어 있습니다.
+NookBit이 제작한 코드, 문서, Nmoo 이미지와 앱 아이콘은 [MIT 라이선스](LICENSE)로 배포합니다. Qt, Qt PDF, Noto Sans KR 등 외부 구성 요소에는 각각의 라이선스가 적용됩니다. [번들 폰트 안내](resources/fonts/README.md)

@@ -1,94 +1,31 @@
-# Windows runtime packaging
+# Windows 배포
 
-Build with `cmake --build --preset package-release`. The package is generated at
-`out/package/NookBit-Release`.
+[개발 환경 안내](contributing.md#빌드와-테스트)에 따라 Windows x64 개발자 터미널을 준비한다. 저장소 루트에서 실제 Qt 키트 경로를 지정한다.
 
-## Versioned test archive
+```powershell
+cmake --preset release -DCMAKE_PREFIX_PATH="C:/Qt/6.11.2/msvc2022_64"
+cmake --build --preset archive-release
+```
 
-Run `cmake --build --preset archive-release` to update the package and create:
+`out/package/NookBit-Release`에 실행 파일과 런타임이 모이고, `out/package`에 `NookBit-<버전>-Windows-x64.zip`과 `.zip.sha256`이 생성된다. 폴더만 갱신할 때는 `cmake --build --preset package-release`를 쓴다. ZIP은 임시 파일로 작성한 뒤 같은 이름의 로컬 ZIP을 교체한다.
 
-- `out/package/NookBit-<version>-Windows-x64.zip`
-- The matching `.zip.sha256` checksum file.
+앱 버전은 루트 `CMakeLists.txt`의 `project(VERSION …)`과 `NOOKBIT_PRERELEASE`로 정해진다. 안정 버전에는 `-DNOOKBIT_PRERELEASE=`를 지정한다. 한 버전으로 배포한 뒤 내용이 바뀌면 새 버전을 지정한다. 빌드 명령은 로컬 파일을 생성한다. GitHub Releases에는 확인한 ZIP과 체크섬을 직접 첨부한다.
 
-The ZIP contains the entire `NookBit-Release` directory, including `nookbit.exe`,
-the deployed runtime, bundled packs, `README.txt` quick-start instructions and
-`version.json`. Extract everything before launching the executable. Personal
-preferences, imported packs, pending files and history are stored outside the
-application directory and are not added by the packaging target.
+## 배포 파일 검증
 
-The core version is `project(VERSION ...)` in the root CMakeLists.txt;
-`NOOKBIT_PRERELEASE` supplies the current pre-release identifier. They form one display version used by
-Qt application metadata, Settings > Information, Windows executable properties,
-package metadata, instructions and the archive filename. `nookbit.exe --version`
-prints the same value without loading personal settings or starting features.
-For a stable build, configure `-DNOOKBIT_PRERELEASE=`; for a later test build,
-set the next identifier before building. Do not reuse a published version for
-different contents. This target creates local artifacts; it does not create a
-Git tag, publish a GitHub release or upload any files.
+1. `Get-FileHash <archive.zip> -Algorithm SHA256` 결과가 `.zip.sha256`의 해시와 일치하는지 확인한다.
+2. ZIP을 새 폴더에 풀어 `README.txt`, `version.json`, `LICENSE`, `licenses/NotoSansKR-OFL.txt`, `imagepacks`가 들어 있는지 확인한다. 패키지는 앱과 런타임을 포함한다. 작업 기록과 개인 설정은 앱 폴더 외부에 저장된다.
+3. Qt SDK 설치 경로가 `PATH`와 Qt/QML 플러그인 경로에 없는 환경에서 `nookbit.exe --version`을 실행한다. 출력, `version.json`, Windows 파일 속성의 버전을 비교한다.
+4. 압축을 푼 앱에서 메인 화면, 컴패니언 미리보기, 샘플 파일 이동과 작업 기록을 확인한다. 자동 UI 검사는 저장소 루트에서 `ctest --preset release -R nookbit_qml_smoke`로 실행한다. CTest는 배포 앱과 시작 코드 및 QML을 공유하는 `nookbit_ui_checks`를 사용한다.
 
-The archive is written to a temporary file before replacing a previous local ZIP.
-Its SHA-256 file is generated after success. To inspect it on Windows, use
-`Get-FileHash <archive.zip> -Algorithm SHA256` and compare with the `.sha256` text.
-Creating the ZIP does not perform a fresh test run; run the relevant CTest checks
-before sharing it. A clean-machine/native-desktop test still needs a tester.
+## 라이선스 고지
 
-`NOOKBIT_COMPACT_PACKAGE` defaults to ON and affects only that package, not the
-installed Qt SDK or the development build's runtime. `windeployqt` still discovers
-the application's dependencies before the package-specific exclusions run.
+패키징 스크립트는 NookBit의 MIT 원문과 Noto Sans KR의 OFL을 복사한다. 현재 로컬 배포 폴더에는 Qt와 Qt PDF DLL이 들어 있다. 해당 구성 요소의 라이선스 원문과 제3자 고지는 배포 폴더에서 확인되지 않았다.
 
-Excluded components:
+공개 ZIP에는 실제로 포함된 Qt 모듈과 Qt PDF 내 제3자 구성 요소에 맞는 고지를 포함한다. LGPL로 배포하는 라이브러리는 해당 빌드의 대응 소스 제공 방법과 라이브러리 교체에 필요한 조건도 확인한다. [Qt LGPL 배포 안내](https://www.qt.io/development/open-source-lgpl-obligations) · [Qt PDF 라이선스](https://doc.qt.io/qt-6.11/qtpdf-licensing.html)
 
-- QML debugging/profiling plugins (`qmltooling`).
-- Non-SQLite database drivers: InterBase, Mimer, Oracle, ODBC and PostgreSQL.
-- Fusion, Imagine, Material, Universal, FluentWinUI3 and Windows Quick Controls
-  styles, their implementation DLLs and their style-specific fallback dialogs.
-  The application explicitly selects Basic in `main.cpp`.
+## 런타임 구성
 
-Retained components include Basic and its default dialogs, Qt Quick rendering,
-image format plugins, SQLite, Windows integration, the offscreen test platform,
-graphics compiler/software-rendering fallback DLLs, the VC runtime installer and
-the test character ImagePack. PNG/atlas character rendering uses this retained
-runtime; adding a character pack does not require the excluded control styles.
+`NOOKBIT_COMPACT_PACKAGE`의 기본값은 `ON`이다. `windeployqt`가 의존성을 모은 뒤, 패키징 스크립트가 생성된 배포 폴더에서 사용하지 않는 QML 디버깅 플러그인, SQLite 이외의 SQL 드라이버, Basic 이외의 지정된 Quick Controls 스타일을 제거한다. Basic과 기본 대화상자, Qt Quick 렌더링, 이미지 플러그인, SQLite와 Windows 플랫폼 플러그인, VC 런타임 설치 파일은 유지한다.
 
-The exclusion script only removes named generated runtime components under the
-Release package. It checks resolved paths before removal. User settings, source
-files and the Qt installation are not cleanup targets. Repackaging removes stale
-excluded components left by older full packages.
-
-To restore the full deployment, configure with
-`cmake --preset release -DNOOKBIT_COMPACT_PACKAGE=OFF` and package again. Turn it
-back ON to restore the compact policy. Revisit the exclusions when changing the
-application's control style or database backend.
-
-Validate the packaged executable without the Qt SDK on PATH or Qt/QML plugin
-path overrides. Check `nookbit.exe --version`, then launch the app and open the
-pages and companion preview. Run the automated UI checks from the repository root
-with `ctest --preset release -R nookbit_qml_smoke`. CTest runs
-`nookbit_ui_checks --verify-ui`, which shares the app's startup code and QML
-resources. The package includes only the regular executable.
-
-## Measured first pass (2026-10-14, Qt 6.11.2)
-
-- Before: about 142.2 MiB / 1,458 files.
-- Compact package: about 125.1 MiB / 193 files (about 17.1 MiB saved).
-- ZIP of that directory: about 66.0 MiB / 193 files.
-- Packaged `--verify-ui` passed with the Qt SDK removed from PATH and no external
-  Qt/QML plugin path overrides.
-
-These are measurements of this build, not fixed size guarantees. Graphics
-compatibility libraries and the VC redistributable account for much of the
-remaining size and are deliberately retained. The local archive
-`out/package/NookBit-Release-compact.zip` is a snapshot; recreate it after rebuilding
-the package before distributing a later version.
-
-## Local test archive (2026-10-29)
-
-`0.1.0-alpha.1` contains 250 ZIP entries and is about 69.1 MiB compressed.
-The application-version, UI smoke, QML page-boundary, UI metric and saved-all-off
-startup checks passed. The ZIP was extracted into a fresh verification directory;
-its checksum, manifest, native file version and command-line version matched.
-The extracted app passed isolated feature startup with the Qt SDK removed from
-PATH and no external Qt/QML plugin-path overrides. No pending-list, watch settings,
-database, timing log or PDB files were found in the archive. The temporary extracted
-directory was removed after verification. This is local test packaging; no GitHub
-release has been published by these build targets.
+전체 런타임이 필요하면 `cmake --preset release -DNOOKBIT_COMPACT_PACKAGE=OFF`로 구성하고 패키지를 다시 만든다. 컨트롤 스타일이나 DB 드라이버를 바꿀 때는 배포 제외 목록도 확인한다.

@@ -4,10 +4,28 @@
 
 ## 시작 전
 
-1. [README](../README.md)의 Windows 준비 사항으로 앱을 빌드·실행하고 테스트를 돌린다.
+1. 아래 Windows 환경에서 앱을 빌드·실행하고 테스트를 돌린다.
 2. [설계와 확장 원칙](architecture.md), 변경할 기능과 관련된 규칙 문서를 읽는다.
 3. 코드는 `src/presentation/main.cpp`에서 객체 연결을, `src/presentation/qml/`에서 화면을, `include/nookbit/application/ports.hpp`에서 작업 계약을 따라가면 전체 흐름을 파악하기 쉽다.
 4. 실제 개인 파일 대신 복사한 시험 파일과 임시 목적지를 사용한다. 앱이 이미 사용하는 사용자 데이터와 작업 기록은 실험용으로 지우거나 덮어쓰지 않는다.
+
+## 빌드와 테스트
+
+- Visual Studio 2022의 **Desktop development with C++** 워크로드와 MSVC x64 도구
+- CMake 3.24 이상과 Ninja
+- MSVC x64용 Qt 6.5 이상과 Core, Gui, Widgets, Qml, Quick, QuickControls2, QuickDialogs2, Sql 구성 요소
+- PDF 본문 기반 폴더 추천을 쓰려면 같은 Qt 키트의 Qt PDF 구성 요소도 설치한다.
+
+Visual Studio x64 개발자 터미널에서 저장소 루트로 이동하고, Qt 경로를 실제 설치 위치로 바꿔 실행한다.
+
+```powershell
+cmake --preset dev -DCMAKE_PREFIX_PATH="C:/Qt/6.11.2/msvc2022_64"
+cmake --build --preset dev
+ctest --preset dev
+.\out\build\dev\src\nookbit.exe
+```
+
+Release ZIP을 만들고 확인하는 절차는 [Windows 배포](windows-package.md)를 참고한다.
 
 ## 브랜치와 변경 제안
 
@@ -29,13 +47,6 @@ git switch -c feature/your-task
 - 새 동작에는 자동화 테스트를 추가한다. 특히 파일 이동은 실제 사용자 파일이 아닌 테스트용 임시 디렉터리에서 검증한다.
 - 생성된 `out/`, 로컬 Qt 경로와 `CMakeUserPresets.json`, 개인 앱 데이터의 JSON/SQLite, 비밀 정보는 커밋하지 않는다.
 - UI의 최종 디자인은 아직 확정되지 않았다. 화면을 크게 바꾸는 작업은 범위와 사용 흐름을 먼저 합의한다.
-
-검증 명령은 저장소 루트에서 다음과 같다.
-
-```powershell
-cmake --build --preset dev
-ctest --preset dev
-```
 
 UI 변경 시에는 직접 실행해서 사용자 흐름도 확인한다. `ctest`의 QML 스모크 테스트는 화면이 시작되는지 보는 검사이지, 모든 UI 동작을 대신하지 않는다. 문제가 생기면 사용한 Qt Kit, CMake 구성 명령, 실패한 테스트 이름과 재현 절차를 PR에 남긴다.
 
