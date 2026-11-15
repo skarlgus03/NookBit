@@ -148,21 +148,31 @@ void PreviewController::recommendDocumentFolders() {
             const auto source = row.value("source").toString();
             row.insert("recommendedFolder", suggestions->destinations.value(source));
             QString note;
-            if (suggestions->unreadablePdfs.contains(source)) {
-#ifdef NOOKBIT_DOCUMENT_PDF
-                note = QStringLiteral("앞쪽 5페이지에서 읽을 수 있는 PDF 텍스트가 없어요.");
-#else
-                note = QStringLiteral("이 빌드에서는 PDF 본문 추천을 지원하지 않아요.");
-#endif
+            using document_recommendation::ExcerptIssue;
+            switch (suggestions->unreadableDocuments.value(source)) {
+            case ExcerptIssue::None: break;
+            case ExcerptIssue::Unreadable: note = QStringLiteral("이 문서를 열거나 읽을 수 없어요."); break;
+            case ExcerptIssue::Encoding: note = QStringLiteral("지원하는 텍스트 인코딩으로 본문을 읽을 수 없어요."); break;
+            case ExcerptIssue::Empty: note = QStringLiteral("문서 앞부분에 읽을 텍스트가 없어요."); break;
+            case ExcerptIssue::PdfNoText: note = QStringLiteral("앞쪽 5페이지에서 읽을 수 있는 PDF 텍스트가 없어요."); break;
+            case ExcerptIssue::PdfUnavailable: note = QStringLiteral("이 빌드에서는 PDF 본문 추천을 지원하지 않아요."); break;
             }
             row.insert("recommendationNote", note);
             value = row;
         }
         if (!result) recommendationStatus_ = QStringLiteral("문서 추천을 완료하지 못했어요.");
-        else if (!suggestions->candidateCount) recommendationStatus_ = QStringLiteral("추천 후보에 읽을 수 있는 TXT·Markdown·PDF 예시가 없어요.");
+        else if (!suggestions->usedFolderCount) recommendationStatus_ = QStringLiteral("검사한 폴더에서 읽을 수 있는 문서 예시를 찾지 못했어요.");
         else if (suggestions->destinations.isEmpty()) recommendationStatus_ = QStringLiteral("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
-        else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요. 실제 이동 계획은 그대로예요.")
+        else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요.")
             .arg(suggestions->destinations.size());
+        if (result && suggestions->candidateCount) {
+            recommendationStatus_ += QStringLiteral("\n후보 폴더 %1개 중 %2개 검사 · %3개 사용")
+                .arg(suggestions->candidateCount).arg(suggestions->inspectedFolderCount).arg(suggestions->usedFolderCount);
+            if (suggestions->cappedFolderCount) {
+                recommendationStatus_ += QStringLiteral("\n문서 %1개 읽기 한도에 도달한 폴더 %2개")
+                    .arg(document_recommendation::exampleReadLimit).arg(suggestions->cappedFolderCount);
+            }
+        }
         emit previewChanged();
     });
 }

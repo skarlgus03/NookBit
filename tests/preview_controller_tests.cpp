@@ -805,16 +805,27 @@ void testDocumentFolderRecommendations() {
     const auto home = directory.filePath("organized");
     const auto meeting = home + "/meeting";
     const auto manuals = home + "/manuals";
+    const auto korean = home + "/korean";
     const auto queued = directory.filePath("notes.md");
     const auto unrelated = directory.filePath("other.txt");
-    expect(QDir().mkpath(meeting) && QDir().mkpath(manuals), "create candidate folders");
+    const auto unreadable = directory.filePath("unreadable.txt");
+    const auto empty = directory.filePath("empty.md");
+    expect(QDir().mkpath(meeting) && QDir().mkpath(manuals) && QDir().mkpath(korean), "create candidate folders");
     const auto writeText = [](const QString& path, const QByteArray& text) {
         QFile file(path);
         return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
     };
     expect(writeText(manuals + "/setup.txt", "installation troubleshooting configuration") &&
+               writeText(korean + "/meeting.md", QStringLiteral("회의록 참석자 일정 검토 안건 결정 담당자").toUtf8()) &&
                writeText(queued, "agenda attendees action items decisions") &&
-               writeText(unrelated, "zebra"), "write example and queued documents");
+               writeText(unrelated, "zebra") && writeText(unreadable, QByteArray::fromHex("610062")) &&
+               writeText(empty, " \r\n"), "write example and queued documents");
+#ifdef _WIN32
+    const auto legacy = directory.filePath("legacy.txt");
+    const auto truncated = directory.filePath("truncated.txt");
+    expect(writeText(legacy, QByteArray::fromHex("c8b8c0c7b7cf20c2fcbcaec0da20c0cfc1a420b0cbc5e420bec8b0c720b0e1c1a420b4e3b4e7c0da")) &&
+               writeText(truncated, QByteArray::fromHex("81")), "write a CP949 document and a broken trailing byte");
+#endif
 #ifdef NOOKBIT_DOCUMENT_PDF
     const auto queuedPdf = directory.filePath("document.pdf");
     const auto blankPdf = directory.filePath("blank.pdf");
@@ -834,6 +845,12 @@ void testDocumentFolderRecommendations() {
     controller.setTaskRunner(&runner);
     pending.addUrl(QUrl::fromLocalFile(queued));
     pending.addUrl(QUrl::fromLocalFile(unrelated));
+    pending.addUrl(QUrl::fromLocalFile(unreadable));
+    pending.addUrl(QUrl::fromLocalFile(empty));
+#ifdef _WIN32
+    pending.addUrl(QUrl::fromLocalFile(legacy));
+    pending.addUrl(QUrl::fromLocalFile(truncated));
+#endif
 #ifdef NOOKBIT_DOCUMENT_PDF
     pending.addUrl(QUrl::fromLocalFile(queuedPdf));
     pending.addUrl(QUrl::fromLocalFile(blankPdf));
@@ -852,6 +869,16 @@ void testDocumentFolderRecommendations() {
         "document recommends the folder with similar examples");
     expect(rows.value("other.txt").value("recommendedFolder").toString().isEmpty(),
         "unrelated documents are not recommended a folder");
+    expect(rows.value("unreadable.txt").value("recommendationNote").toString().contains(QStringLiteral("인코딩")) &&
+               rows.value("empty.md").value("recommendationNote").toString().contains(QStringLiteral("텍스트가 없어요")),
+        "unreadable and empty text documents explain why no recommendation is shown");
+#ifdef _WIN32
+    expect(QDir::cleanPath(rows.value("legacy.txt").value("recommendedFolder").toString()) == korean &&
+               rows.value("legacy.txt").value("recommendationNote").toString().isEmpty(),
+        "a CP949 document matches a UTF-8 Korean example");
+    expect(rows.value("truncated.txt").value("recommendationNote").toString().contains(QStringLiteral("인코딩")),
+        "an incomplete character at EOF is not treated as a bounded excerpt");
+#endif
     expect(controller.steps() == originalSteps && rows.value("notes.md").value("destination").toString().isEmpty() &&
                QFile::exists(queued), "recommendation cannot modify a plan or move the document");
 #ifdef NOOKBIT_DOCUMENT_PDF
@@ -876,6 +903,29 @@ void testDocumentFolderRecommendations() {
         expect(suggested.isEmpty() || QDir::cleanPath(suggested) == manuals,
             "only checked folders can be recommended");
     }
+
+    const auto scans = home + "/00-scans";
+    expect(QDir().mkpath(scans), "create scan-only candidates");
+    for (int index = 0; index < 8; ++index) {
+#ifdef NOOKBIT_DOCUMENT_PDF
+        const auto contents = recommendationPdf("q Q");
+        const auto name = QStringLiteral("/page-%1.pdf").arg(index);
+#else
+        const auto contents = QByteArray{};
+        const auto name = QStringLiteral("/page-%1.txt").arg(index);
+#endif
+        expect(writeText(scans + name, contents), "write textless example fixture");
+    }
+    expect(writeText(scans + "/z-late.md", "agenda attendees action items decisions"), "write example beyond the read limit");
+    for (int index = 0; index < 32; ++index)
+        expect(QDir().mkpath(home + QStringLiteral("/candidate-%1").arg(index, 2, 10, QLatin1Char('0'))), "create sorted candidate");
+    controller.chooseRecommendationRoot(QUrl::fromLocalFile(home));
+    for (const auto& folder : controller.recommendationCandidates()) controller.selectRecommendationFolder(folder, true);
+    controller.recommendDocumentFolders();
+    expect(waitForBackground(runner) &&
+               controller.recommendationStatus().contains(QStringLiteral("후보 폴더 36개 중 32개 검사 · 0개 사용")) &&
+               controller.recommendationStatus().contains(QStringLiteral("문서 8개 읽기 한도에 도달한 폴더 1개")),
+        "candidate and file-open limits are reported with scanned and usable counts");
 }
 
 // 공통 충돌 정책이 승인·실행까지 전달되고 규칙의 개별 설정이 우선하는지 검사하는 함수.
