@@ -133,6 +133,8 @@ if(NOOKBIT_BUILD_QT_APP)
 
     qt_add_executable(nookbit
       presentation/main.cpp
+      presentation/ui_smoke_checks.cpp
+      presentation/ui_smoke_checks.hpp
       app/pending_queue_adapter.hpp
       app/feature_connections.hpp
       app/feature_connections.cpp
