@@ -1,213 +1,58 @@
 # NookBit 설계와 확장 원칙
 
-The tutorial is read-only host UI backed by module-owned value contributions in
-`UiPageRegistry`. Active modules may contribute multiple ordered pages; lifetime
-cleanup removes their instructions. `TutorialController` stores only completion,
-has no feature apply callback and cannot change settings or execute file work.
-Legacy first-run completion remains valid. See [tutorial](tutorial.md).
+NookBit은 파일과 폴더의 분류 결과를 미리 보여주고, 사용자가 확인한 이동만 실행하는 Windows 데스크톱 앱이다. 분류 규칙은 노드 편집기나 JSON으로 작성하고, 폴더 감시는 정리 후보를 제안한다.
 
-File-work state uses `ICharacterChannel`; bounded result presentation uses the
-separate `ICharacterReactionChannel`. BackgroundTaskRunner emits a completion fact
-only for FileWork tasks, and FeatureConnections maps it to optional pack cues.
-CharacterController owns the short presentation deadline and re-evaluates current
-behavior when it expires. Active file work wins over result and interaction cues;
-a new work request discards an old result instead of replaying it later. Result
-delivery does not register notifications or execute interactions/file operations.
-
-Typography is defined by UiMetrics. Startup builds a fresh UI font from those
-roles, clears inherited named styles/variable axes, and assigns it to both the
-application default and `UiMetrics.applicationFont`. Main pins that full font;
-the extension window inherits it explicitly. Page controls override only role
-sizes/weights. This avoids relying on ambient system/theme font inheritance.
-Font tests inject a Thin named style/weight axis and verify stable regular/bold
-selection across separate windows and loader-created content, without displaying
-the test windows.
-
-The NativeTextRendering experiment worsened text on the affected machine and was
-reverted. Qt's default scalable text renderer is retained. The application now
-embeds static Noto Sans KR faces under the private family `NookBit UI Sans` and
-registers them before creating controls. It no longer selects the installed
-variable font by name. Roles and sizes are unchanged. Font tests verify actual
-Korean glyph runs use this private family, static font tables and the expected
-weights. See [font provenance and reproduction](../resources/fonts/README.md).
-The exact cause of the original intermittent rendering issue was not reproduced;
-visual verification on the affected machine remains necessary.
-
-Companion preview edit drafts live in `CompanionEditState.qml`, independently of
-the view, playback clock and persistence service. The view supplies frame metadata
-and personal offsets, owns playback/camera requests, and emits apply requests.
-Standalone state tests cover draft isolation, coordinate offsets, frame alignment,
-duration overrides and reset/cancel. Preview playback additionally requires a
-visible, non-minimized containing window, while preserving the user's playback
-request during temporary window hiding. Rule connection cancellation clears only
-temporary wire state on pointer cancellation and page exit.
-
-The optional [feeding feature](companion-feeding.md) borrows only the interaction
-registration capability. Its scoped owner registers a handler and menu metadata;
-Companion owns generic input/rendering and the host enforces the dependency.
-
-History search uses a separate read-only `IHistoryQuery` capability. The host
-injects it alongside history persistence and file operations; SQL queries do not
-scan live files. Filtered pagination and full-plan undo scope are documented in
-[History search](history-search.md).
-
-Feature-module ownership, communication contracts, disabled-state behavior and
-the incremental refactor plan are recorded in [Feature modules](feature-modules.md).
-The plan distinguishes existing interfaces from module lifecycle work not yet implemented.
-
-The first feature-module seam is implemented: WatchController queries pending
-paths through `IPendingPathsQuery` and registers accepted proposals through
-`IEnqueuePendingPaths`. An Organizer-owned `PendingQueueAdapter` reuses the current
-model's admission rules; host connections forward queue changes. WatchController
-does not include or hold PendingFilesModel. Queue state is still owned by that
-model, so this is an incremental boundary rather than a completed backend rewrite.
-
-Watch evaluation now delegates active-rule loading and matching to
-`IClassificationQuery`. The Organizer-side `ClassifyFilesUseCase` returns ordered
-decisions from one rule snapshot and a content-based revision, with no file-content
-reads or writes. Watch retains scanning, file readiness and proposal thresholds;
-the revision invalidates old offers and is rechecked before enqueueing. Actual
-movement still requires the existing fresh preview and approval workflow.
-
-Host-side `FeatureConnections` now owns Watch-to-notification,
-notification-to-companion and file-activity-to-companion signal routes. Main
-constructs services and selects those bindings; the bridge owns no feature state
-or worker and preserves the existing input contracts and IDs. Notification
-preferences remain independent from file-work activity. Lifetime guards and
-scoped QObject connections prevent delivery to destroyed endpoints.
-FeatureRuntimeHost now selects only available routes from resolved startup choices.
-
-NotificationRuntime, FolderWatchRuntime, FileOrganizerRuntime and CompanionRuntime
-now own feature-level object groups. File Organizer owns its queue, rule/query and
-sort/history/recovery assembly; Companion owns its packs, personal edits, placement,
-interaction and motion assembly. Main supplies preferences/paths, injects Organizer
-capabilities into Watch, and exposes borrowed endpoints to QML and integration
-bridges. Internal timers and preference callbacks end with their feature owner.
-File work joins before its dependent repositories/controllers are destroyed; pack
-imports join before their library is destroyed. Saved settings/data remain intact.
-CompanionRuntime now registers its management page and menu in UiPageRegistry.
-The generic page host receives explicit feature inputs, keeps drafts while hidden,
-and uses shared theme/navigation services. DesktopCompanion now owns the independent
-character-window bindings; Main loads its explicit descriptor instead of publishing
-individual Companion controller globals. A scoped CompanionTrayAction owns the
-visibility menu entry. Main retains the system-tray icon, app lifecycle, attention
-action selection, general settings and module management.
-FileOrganizerRuntime also registers sort/rules/history and auxiliary recovery/
-collision pages as one atomic batch. Public entry points (`inMenu`) appear in the
-host's All Features catalog, grouped by their section. Internal recovery/collision
-routes remain hidden there. Modules may request a home shortcut with
-`homeShortcut`; it defaults to false, and the home shows at most the shared
-`UiMetrics.homeShortcutLimit` entries in deterministic menu order. Organizer's
-three main pages and Companion opt in. Adding modules therefore does not grow the
-home indefinitely. The summary and shortcuts scroll together above a fixed footer
-containing All Features and Settings, which remain reachable at minimum height.
-The catalog (host route 14) sends the same page requests as other navigation, so
-history preparation and Watch's settings-detail flow remain owned by their pages.
-Module Management is available both in the catalog and in Settings.
-Their small QML adapters own feature-internal screen wiring and recovery inspection
-preparation;
-the host supplies theme/guide/overlay services and routes navigation. Existing page
-numbers and window-size preference keys are retained. Organizer supplies optional
-settings and recovery-notice fragments; AppSettingsPage retains theme controls and
-Watch navigation while RegisteredSettingsSection receives borrowed feature inputs.
-The Watch entry is a visual slot, so Organizer does not depend on WatchController.
-FolderWatchRuntime now supplies its settings-detail page, summary entry and proposal
-renderer. SettingsWorkflow only hosts the registered slide; AppSettingsPage no
-longer receives a WatchController. NotificationRuntime registers its settings page
-and menu, with policy changes wired inside NotificationsPage. UiPageRegistry
-distinguishes normal extension pages from settings-detail placement so Watch has
-only one editor instance. Main retains source facts and attention selection,
-general settings/developer UI, and progress/approval integration. Organizer-owned
-host widgets and the home portrait are loaded only with their feature.
-FeatureRuntimeHost conditionally creates the selected runtimes; disabling Organizer
-also leaves Watch inactive with an explicit dependency reason. Notifications and
-Companion are independent optional consumers. Temporary `--disable-feature=<id>`
-options overlay the saved choices for one run without saving those overrides.
-The host-owned module page edits a separate draft and persists requested selection
-through FeaturePreferences at `modules/selection`. The current runtimes remain
-unchanged until a full exit and fresh launch. Saved-disabled features retain their
-own settings/data. Invalid module preferences start no features and leave module
-management accessible for explicit repair. All 32 requested startup combinations,
-saved-state startup cases and QML binding warnings are checked with isolated data.
-See [runtime ownership](feature-modules.md#current-runtime-ownership)
-for lifetime order and verification-mode behavior.
-
-이 문서는 팀원이 기능을 붙일 때 **현재 코드가 어떻게 동작하는지**와 **어떤 방향으로 확장할지**를 구분하기 위한 안내다. 저장소의 코드가 최종 형태라는 뜻은 아니다. 특히 일부 컨트롤러는 아직 구체 구현을 직접 보유하고 있다.
-
-## 제품의 기본 흐름
-
-NookBit의 기본 입력은 사용자가 끌어온 파일의 **대기 목록**이다. 폴더 감시는 별도 입력 경로로서, 조건 충족 시 파일을 대기 목록에 넣을지 물어본다. 감시와 분류는 모두 파일 이동을 직접 시작하지 않는다.
+## 파일 정리 흐름
 
 ```text
-끌어놓기 ─┐
-          ├→ 대기 목록 → 스캔 → 규칙 판단 → 이동 계획 미리보기
-감시 제안 ─┘                                  ↓
-                  계획 고정·재검사 → 승인 기록 → 안전 실행 → 작업 기록/되돌리기
+끌어놓기 또는 수락한 감시 제안
+  → 대기 목록 → 스캔·규칙 평가 → 결과 미리보기
+  → 이동 계획 고정·재검사 → 사용자 확인 → 승인 기록·이동
+  → 작업 기록 → 되돌리기 또는 중단 복구
 ```
 
-규칙 편집기의 시험 기능은 편집 중인 초안에 대해 판단 경로를 보여주는 **읽기 전용** 작업이다. JSON 가져오기·내보내기와 활성 규칙에 적용하는 **전체 저장**은 서로 다르다. 실제 실행은 미리보기와도 분리되어 있다.
+미리보기의 `previewOutcomes`에는 미분류와 제외를 포함한 판단 결과가 들어간다. 승인할 이동 대상은 `steps`에 기록한다. 정리 확인창을 열기 전에 `ISortWorkflow::prepare`가 계획을 고정하고, 사용자가 확인하면 `approveAndExecute`가 현재 파일·설정·규칙을 다시 검증한 뒤 실행한다. 규칙 편집기의 시험 기능은 편집 중인 초안을 평가하고, **전체 저장**은 앱이 사용할 활성 규칙을 갱신한다.
 
-## 책임과 의존 방향
+## 코드에서 따라갈 곳
 
-2026-10-06 파일 이동·마지막/기록 되돌리기·전체 중단 복구 실행은 main이 공유하는 BackgroundTaskRunner에서 한 작업씩 비동기로 실행한다. 컨트롤러는 승인 계획·선택 경로·설정을 값으로 고정하며 작업 스레드에서 화면 모델/QObject를 만지지 않는다. ThreadLocalOperations 조립부가 요청 스레드 안에서 SQLite 연결·일꾼·유스케이스를 생성하고 같은 스레드에서 해제한다. 파일 변경은 기존 시스템 잠금과 승인 재검사를 그대로 따른다. 결과는 화면 스레드로 돌아온 뒤 목록/기록에 반영한다. 화면 입력과 닫기는 실행 중 차단하고 앱 수명 종료 시 작업을 강제 종료하지 않고 기다린다. 정리 전 고정·재검사와 확인 후 승인 해시 계산도 백그라운드로 실행한다. 미리보기와 시작 복구 조회는 아직 동기이며 정확한 진행률·안전 취소는 후속이다.
+| 역할 | 주요 위치 |
+| --- | --- |
+| 앱 시작, 공통 설정, QML과 트레이 연결 | [main.cpp](../src/presentation/main.cpp) |
+| 모듈 생성·종료와 모듈 간 연결 | [FeatureRuntimeHost](../src/app/feature_runtime_host.cpp), [FeatureConnections](../src/app/feature_connections.cpp) |
+| 파일 정보, 규칙, 이동 계획 자료형 | [도메인 모델](../include/nookbit/domain/model.hpp) |
+| 작업 순서와 의존성 계약 | [유스케이스](../src/application/use_cases/), [포트](../include/nookbit/application/ports.hpp) |
+| 규칙 평가, 경로 계획, 감시 조건, 캐릭터 행동 | [모듈 구현](../src/modules/) |
+| 파일 시스템, JSON, SQLite, 해시 | [인프라 구현](../src/infrastructure/) |
+| 화면 상태와 작업 요청 | [컨트롤러](../src/presentation/), [QML](../src/presentation/qml/) |
 
-| 층 | 이 프로젝트에서 하는 일 | 주요 위치 |
-| --- | --- | --- |
-| 도메인 | 파일 사실, 분류 결정, 계획·상태와 정책 표현 | `include/nookbit/domain/` |
-| 애플리케이션 | 유스케이스가 작업 순서를 조율하고 필요한 일꾼을 포트로 요청 | `include/nookbit/application/`, `src/application/use_cases/` |
-| 모듈 | 규칙 판단·계획 작성·감시 조건 평가 같은 개별 계산 | `src/modules/` |
-| 인프라 | 디스크 스캔·이동, JSON, SQLite, 해시 등 외부 세계와 접촉 | `src/infrastructure/` |
-| 표현 | QML 이벤트/화면 상태를 애플리케이션 작업에 연결 | `src/presentation/` |
+유스케이스는 입력과 결과를 값으로 다루며 포트를 통해 스캔, 규칙 평가, 저장, 실행을 요청한다. 앱 조립부가 포트에 구체 구현을 연결한다. QML은 화면과 입력을 담당하고 컨트롤러가 유스케이스 호출과 결과 반영을 맡는다. 공통 글꼴과 화면 토큰, 페이지별 상태 소유 범위는 [QML 구조](qml-structure.md)와 [UI 규격](ui-metrics.md)에 정리한다.
 
-대표적인 포트는 [`ports.hpp`](../include/nookbit/application/ports.hpp)에 있다. Scanner, RuleEngine, Planner, Executor, 저장소 등은 호출자에게 **무엇을 할 수 있는지**만 보여준다. 구체 구현은 바깥쪽에서 연결한다. 유스케이스는 예를 들어 Scanner → RuleEngine → Planner 같은 순서를 조율하지만, 서로 무관한 일꾼이 다른 일꾼을 직접 소유·호출하는 식의 결합은 늘리지 않는다. 데이터를 주고받을 때는 명시적 요청·결과 자료형을 사용한다.
+`FileOrganizerRuntime`이 소유한 [BackgroundTaskRunner](../src/presentation/background_task_runner.hpp)는 계획 고정·승인·이동·되돌리기·전체 중단 복구를 작업 스레드에서 한 번에 하나씩 실행한다. [ThreadLocalOperations](../src/app/thread_local_operations.hpp)에서 작업 스레드용 SQLite 연결과 서비스를 조립하고 같은 스레드에서 해제한다. 컨트롤러는 결과를 받아 화면 스레드에서 모델을 갱신한다.
 
-같은 일꾼을 여러 유스케이스가 이용해도 된다. 객체를 유스케이스마다 새로 만들지 공유할지는 상태, 수명, 동시성에 따라 결정한다. **모든 일꾼이 싱글턴이어야 한다는 원칙은 없다.** 반면 SQLite 기록처럼 공유되는 영속 상태는 트랜잭션과 동시 접근을 신중하게 다뤄야 한다. 파일 작업에는 별도 직렬화와 기록 일관성이 필요하다.
+## 기능 모듈과 통신
 
-Qt/QML은 화면 계층이다. QML이 파일 이동·DB·규칙 해석을 직접 구현하지 않도록 한다. 컨트롤러는 화면 입력을 변환하고 유스케이스를 호출하며 결과를 화면에 돌려준다. Feature-internal creation and wiring live in the runtime owners under `src/app/`; [`main.cpp`](../src/presentation/main.cpp) selects cross-feature routes and exposes UI endpoints. [`CompositionRoot`](../src/app/composition_root.cpp)는 서비스 묶음 검증에 쓰이지만, 현재 데스크톱 연결의 전부를 대신하지는 않는다.
+앱은 시작 시 저장된 모듈 선택과 의존 관계를 해석하고, `FeatureRuntimeHost`가 그 결과에 따라 활성 모듈을 생성한다. 모듈 관리에서 저장한 선택은 다음 앱 시작에 적용된다. 폴더 감시는 파일 정리의 분류 조회와 대기 목록 등록 포트를 이용한다. 컴패니언 먹이 주기는 컴패니언의 상호작용 등록 기능을 이용한다.
 
-2026-10-06 [`PreviewController`](../src/presentation/preview_controller.hpp)와 HistoryController의 Scanner/RuleEngine/Planner/Hasher 보유 및 SafeExecutor 직접 생성을 제거했다. main에서 조립한 IFileOperations 계약을 공유하고 FileOperationService가 요청별 SafeExecutor를 조립한다. 보호 경로와 전송 포트도 화면 밖에서 소유한다. PreviewController의 규칙 저장소 등 일부 구체 저장소 의존은 남아 있다. 이는 우리가 지향하는 “화면은 포트와 유스케이스에 의존” 방향에 남아 있는 결합이다. 새 기능에서 이 패턴을 무작정 복제하지 말고, 기능 경계가 분명할 때 유스케이스/포트로 옮기자. 다만 작은 수정을 위해 대규모 구조 개편을 끼워 넣지는 않는다.
+`FeatureConnections`가 감시 제안을 알림으로, 표시가 허용된 알림과 파일 작업 상태를 컴패니언에 전달한다. 파일 작업 결과의 일시 표현은 별도 반응 채널로 전달한다. 각 모듈은 자기 UI와 튜토리얼 기여를 `UiPageRegistry`에 등록하고 앱은 이 등록 정보로 메뉴와 안내를 구성한다. 수명과 설정 소유 범위는 [기능 모듈](feature-modules.md), [컴패니언 행동](companion-behavior-design.md), [튜토리얼](tutorial.md)을 참고한다.
 
 ## 규칙 모델
 
-정리 버튼의 `ISortWorkflow` 계약은 확인 전 prepare와 확인 후 approveAndExecute를 분리한다. prepare는 작업 스레드에서 고정·내용 해시·저장 계획 재검사를 끝내지만 승인/이동하지 않는다. 결과를 화면에 반영한 뒤 awaitingConfirmation 상태로 확인창을 연다. 확인 이후에도 작업 스레드 전용 저장소로 표시 계획 해시·현재 파일/설정/규칙을 재검사하고 승인한 다음 기존 안전 실행기를 호출한다. 실패·취소에는 대기 목록을 제거하지 않으며 이동 결과 반영은 공통 finishMovement로 처리한다. 컨트롤러나 작업 스레드가 QML을 직접 호출하지 않는다.
+- **기본 분류.** v3 규칙은 파일·폴더 종류, 확장자, 이름, 원본 폴더, 크기, 수정 경과일 등의 조건을 평가한다. 트리의 부모·자식 조건과 AND·OR·NOT 논리식을 조합할 수 있다. 같은 레벨에서는 첫 일치 분기로 진행한다. 해당 분기에 결과가 없더라도 다음 형제로 돌아가지 않는다. 해당 레벨의 `otherwise`와 전체 기본 목적지는 각각의 범위에서 적용된다.
+- **폴더 처리.** 기본값은 폴더를 하나의 대상으로 옮기는 방식이다. 사용자가 이름 있는 흐름을 선택하면 순회, 별도 흐름 호출, 조건, 목적지 등을 조합할 수 있다. 미리보기에서 확정한 입력 경로와 순회 지점은 승인 검증에 포함한다.
+- **목적지.** 상대 경로는 사용자가 지정한 정리 루트에서 계산한다. 정리 루트 밖의 절대 경로는 사용자가 별도로 허용한 위치 안에서만 사용할 수 있다.
+- **문서 분석.** 미리보기의 TF-IDF 문서 추천은 기존 문서의 내용으로 후보를 표시한다. 이동 계획은 사용자가 확인하는 규칙 평가 결과로 유지된다. 규칙 편집기의 문서 분석 노드는 편집 초안으로만 제공하며, 적용 시 검증에서 차단한다.
 
-전체 중단 복구도 main이 조립한 `IInterruptedOperations`를 RecoveryController에 주입한다. 컨트롤러는 표시 스냅샷과 확인 상태만 관리하고, 전체 검사/재개/되돌리기 일꾼을 생성하지 않는다. 구형 v1의 기록 확인을 위한 기존 Scanner/Hasher 의존은 호환 경로에 남아 있다. 공유 복구 서비스는 OperationMutex로 직렬화하고 실제 현재 설정·규칙을 다시 검사한다. 시작 시 자동 파일 작업·기록 정합화는 하지 않는다.
+자세한 규칙은 [v3 분류 트리](rule-tree-v3.md), [폴더 처리 흐름](folder-processing-flows.md), [JSON 스키마](../schemas/rules-tree-v3.schema.json), [AI 작성 규격](ai-rule-authoring-v3.md)을 따른다.
 
-The primary rules format is the v3 tree. Each ordinary node checks one condition:
-item type (file/folder), extension, name substring, file size or modified age.
-Nested conditions compose as AND; the first matching sibling wins without
-backtracking. Local `otherwise` branches and a global fallback remain separate;
-explicit exclusion takes precedence. Every leaf has a destination or exclusion.
+## 파일 작업의 안전과 저장 데이터
 
-Destinations can be relative to the configured organizing root or absolute inside
-separately user-approved external roots. Rules do not grant external-path access;
-parent traversal remains invalid. See the [v3 notes](rule-tree-v3.md),
-[current authoring contract](ai-rule-authoring-v3.md) and
-[schema](../schemas/rules-tree-v3.schema.json). Update documentation, schema,
-conversion and tests together when changing these semantics.
-
-## 안전과 데이터 소유
-
-다른 볼륨 복사는 [다운로드 표식 계약](download-marker-copy.md)의 서명된 보존 정책 1을 사용한다. 새 초안의 빠른 지원 검사 뒤에만 선택하고 기존 서명을 바꾸지 않는다. 표식 원문은 메타데이터로 보존하고 내용 해시는 기본 데이터 스트림을 검사한다. 제거 세션은 Qt 없는 `TransferRemovalProof`를 제공하며 유스케이스가 기록 포트로 삭제 전에 영수증·감사를 저장한다. Schema v9 기록 일꾼은 승인·확정 이벤트 연결과 증거 불변성을 검증한다. 원본 없는 정방향 복구는 새 읽기 전용 보호 세션에서 저장 증거와 파일을 대조해 기록만 완료한다. 옛 무증거 기록·중단 역전송은 차단하며 완료된 작업의 정상 되돌리기는 지원한다.
-
-새 같은 볼륨 전용 작업은 [MetadataRename 계약](same-volume-fast-move.md)으로 전체 내용 해시를 요구하지 않는다. 이 정책은 서명에 포함되며 기존 승인이나 다른 볼륨/혼합 작업에 소급 적용하지 않는다. 확실한 실패는 파일별 감사로 남기고 계속하며, 불확실한 결과/DB 실패는 보존·중단한다. 새 정책의 중단 복구는 아직 차단한다. 아래 내용 해시·역순 보상 설명은 기존 Rename/VerifiedCopy 계약의 설명이다.
-
-미리보기는 읽기 전용 `Draft`다. `previewOutcomes`는 미분류·제외까지 화면에 설명하기 위한 일시적 판단이며, 실제 실행 대상인 `steps`와 다르다. 계획 고정 때 파일·규칙·설정을 재검사하고 파일 내용 SHA-256을 기록한다. 저장 계획 검사와 승인도 현재 상태를 다시 확인한다. 승인 기록과 실제 실행은 별도 단계다. 실행기는 덮어쓰기 없는 이동과 이벤트 기록을 사용한다. 중간 실패 때 확실한 것만 역순으로 되돌리고, 모호하면 `NeedsRecovery`로 멈춘다. 복구 화면도 확신할 수 없는 파일을 자동으로 옮기지 않는다.
-
-앱 데이터의 위치는 운영체제의 `QStandardPaths::AppDataLocation` 결과로 정한다. `rules.json`은 활성 규칙, `rule-graph-layout.json`은 그래프 표시 위치, `watch.json`은 감시 설정, `history.sqlite`는 계획·승인·실행 기록이다. 저장소 안의 `resources/rules/default.v3.json`은 첫 실행 기본값이지 사용자 규칙의 실시간 원본이 아니다. 작업 중인 초안과 활성 규칙, SQLite 기록을 혼동하지 않는다.
-
-Pending-list persistence uses the `IPendingFilesRepository` contract and `JsonPendingFilesRepository` implementation. `FileOrganizerRuntime` owns restoration, change-signal persistence and the repository; PendingFilesModel only manages paths and availability. The `pending-files.json` format is `{ "schemaVersion": 1, "paths": ["absolute path"] }`, without plans or approvals. Whole-document validation limits it to 16 MiB, and QSaveFile replaces it atomically. A failed restore preserves the original document and disables automatic writes for that run. Restoration deduplicates paths while retaining unavailable entries. Availability polling invalidates stale previews; actual movement still requires a new preview and final confirmation after restart.
+- [SafeExecutor](../src/infrastructure/filesystem/safe_executor.cpp)는 승인한 계획을 기준으로 덮어쓰기 없는 이동을 실행하고 단계별 결과를 기록한다. 이미 목적지에 있는 항목은 이동 계획에서 제외한다. 되돌리기는 작업 기록의 원본 경로를 사용하며, 상태나 기록을 확정할 수 없으면 복구가 필요한 상태로 남긴다.
+- 모든 단계가 같은 볼륨 내 이동인 일부 새 계획에는 내용 해시 대신 파일 ID로 검증하는 [MetadataRename](same-volume-fast-move.md)을 쓴다. 다른 볼륨의 복사는 내용 검증과 [다운로드 표식 보존](download-marker-copy.md)을 적용한다. 취소는 확정 전 지원되는 복사 구간에 한해 가능하다. 복구 범위는 [중단 작업 복구](interrupted-operation-recovery.md)에서 확인한다.
+- `QStandardPaths::AppDataLocation` 아래에 활성 규칙 `rules.json`, 그래프 배치 `rule-graph-layout.json`, 대기 경로 `pending-files.json`, 감시 설정 `watch.json`, 승인·실행 기록 `history.sqlite`를 저장한다. 모듈 선택과 화면 설정은 `QSettings`에 저장한다. 대기 목록은 절대 경로만 원자적으로 저장하고, 복원이 실패하면 기존 파일을 보존한다. 앱을 다시 실행한 뒤에는 새로 미리보기와 확인을 거친다.
 
 ## 기능을 추가할 때
 
-알림·Interact·행동의 책임과 데이터 수명은 [컴패니언 행동 설계](companion-behavior-design.md)를 따른다. 알림 종류는 `INotificationChannel`로 발생 상태를 전달하고, 등록 정보로 설정 목록을 만든다. 표시 허용 여부와 실제 기능 실행은 분리한다. `InteractionManager`는 등록된 처리기로 요청을 전달하고 세션을 관리하며, `BehaviorManager`는 등록된 조건으로 기본 행동을 고른다. `IdleWalkState`는 시간과 수평 범위만으로 모션을 계산하고 Qt 어댑터가 필요한 갱신 시점을 예약한다. 실제 창 위치와 행동 창구의 연결은 조립부가 담당한다. 기본 행동과 일시 반응을 분리하되 반응 큐·일반 행동 스케줄러·동적 모듈 로딩은 후속 단계다.
-
-정리 실패·재시작·되돌리기·감시 등록 흐름의 재현 테스트와 현재 보장 범위는 [백엔드 안전 점검](backend-safety-checks.md)에 정리한다.
-
-1. 사용자 동작과 안전 경계를 먼저 정의한다. 파일을 바꾸는지, 단순 조회인지, 승인이 필요한지 구분한다.
-2. 입력·결과 자료형과 필요한 포트를 코어에 두고, 유스케이스가 순서를 조율하도록 한다. 기존 포트가 맞으면 재사용한다.
-3. 구체 일꾼은 해당 모듈·인프라에 구현하고 앱 시작 지점에서 연결한다. QML에는 표시·입력 로직만 둔다.
-4. 정상 경로뿐 아니라 미분류·충돌·파일 변경·중단·되돌리기 실패를 테스트한다. 규칙 형식을 바꾸면 Schema와 AI 작성 규격도 갱신한다.
-5. 사용법이나 지원 범위가 달라지면 README와 관련 문서를 같은 변경에 포함한다.
-
-목표는 계층을 늘리는 것 자체가 아니라, 기능 하나를 바꾸거나 시험할 때 다른 화면·저장소·파일 작업을 불필요하게 건드리지 않는 것이다.
+1. 사용자 입력과 데이터 소유자를 먼저 정한다. 파일을 변경하는 동작은 미리보기·승인·실행 경로를 따른다.
+2. 코어가 필요한 경우 기존 요청 자료형과 포트를 재사용한다. 구체 구현과 모듈 간 연결은 앱 조립부에 둔다.
+3. 규칙 의미가 바뀌면 스키마, JSON 입출력, AI 작성 규격과 테스트를 함께 갱신한다. 파일 작업은 정상 이동 외에도 충돌, 파일 변경, 취소, 중단, 되돌리기를 확인한다.
+4. [협업 및 테스트 안내](contributing.md)에 따라 CTest를 실행한다. UI 자가 검사는 배포용 앱과 같은 시작 코드 및 QML을 쓰는 `nookbit_ui_checks`에서 실행한다. 파일 작업의 검사 방법과 범위는 [백엔드 안전 점검](backend-safety-checks.md)을 참고한다.

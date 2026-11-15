@@ -1,6 +1,6 @@
 # 팀원 작업 안내
 
-이 문서는 NookBit에 처음 참여하는 사람을 위한 권장 작업 순서다. 저장소는 비공개이므로 먼저 GitHub 초대 수락과 접근 권한을 확인한다.
+이 문서는 NookBit에 처음 참여하는 사람을 위한 권장 작업 순서다.
 
 ## 시작 전
 
@@ -40,8 +40,13 @@ ctest --preset dev
 UI 변경 시에는 직접 실행해서 사용자 흐름도 확인한다. `ctest`의 QML 스모크 테스트는 화면이 시작되는지 보는 검사이지, 모든 UI 동작을 대신하지 않는다. 문제가 생기면 사용한 Qt Kit, CMake 구성 명령, 실패한 테스트 이름과 재현 절차를 PR에 남긴다.
 
 `main` 푸시와 `main` 대상 PR에서는 GitHub Actions의 **Windows CI**가 Qt PDF를 포함해 Release를 빌드하고 등록된 CTest 검사를 실행한다. 결과와 실패 로그는 저장소의 **Actions → Windows CI**에서 확인한다.
-폴더 이동 테스트에서 드라이브 간 승인·이동·되돌리기 시나리오는 임시 폴더와 저장소가 서로 다른 볼륨에 있을 때 실행된다.
 
-MSVC + Ninja 구성은 `cmake/msvc_showincludes.ps1`로 컴파일러의 `/showIncludes` 출력 인코딩과 접두사를 통일한다. 한국어 출력 접두사 인코딩이 구성 시점과 빌드 시점에 다르면 Ninja의 헤더 의존성이 0개로 남아, 헤더 수정 후에도 이전 앱 코드가 그대로 실행될 수 있다. `VSLANG=1033`만 지정해도 영어 언어팩이 없으면 한국어로 돌아가므로, 래퍼가 UTF-8과 영어 ASCII 접두사를 함께 적용한다. 명령 인자·따옴표·컴파일 오류 종료 코드는 보존한다. 직접 빌드와 IDE 빌드에도 적용되고 앱 실행에는 영향을 주지 않는다. 이 변경을 처음 적용하면 기존 객체 파일을 다시 빌드한다. `ninja -C out/build/dev -t deps src/CMakeFiles/nookbit.dir/presentation/main.cpp.obj`에 `src/app/thread_local_operations.hpp`가 있는지 확인하면 된다. 기존 객체의 시간이나 실행 파일에 문자열이 존재한다는 사실만으로 헤더 변경이 반영됐다고 판단하지 않는다.
+실제 두 볼륨에서 파일을 옮기는 시나리오는 `nookbit_cross_volume_tests`로 별도 실행한다. 준비 방법은 [두 볼륨 테스트](cross-volume-test-run.md)를 참고한다.
+
+MSVC + Ninja 구성은 `cmake/msvc_showincludes.ps1`로 컴파일러의 헤더 의존성 출력을 UTF-8과 고정 접두사로 통일한다. 헤더 변경 후 관련 객체 파일이 재빌드되지 않으면 아래 검사로 앱의 의존성이 등록됐는지 확인한다.
+
+```powershell
+ctest --preset dev -R nookbit_header_dependency_regression
+```
 
 개발 중 정리 목적지를 고정하려면 `cmake --preset dev -DNOOKBIT_DEV_DESTINATION_ROOT="D:/NookBitTest"`처럼 로컬 빌드에 지정하고 재빌드한다. 이 값은 사용자 기억값보다 우선하며 Git에 공유되지 않는다. 다시 사용자 설정을 사용하려면 같은 옵션에 빈 문자열을 지정한다. 실행 파일에 `--print-default-destination`을 붙이면 창을 열지 않고 실제 시작 기본 경로를 확인할 수 있다.
