@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   NookBit
-  VERSION 0.1.0
+  VERSION 1.0.0
   DESCRIPTION "Safety-first desktop file organizer"
   LANGUAGES CXX
 )
@@ -11,7 +11,7 @@ option(NOOKBIT_BUILD_TESTS "Build core tests" ON)
 option(NOOKBIT_BUILD_QT_APP "Build the Qt/QML desktop shell when Qt is available" ON)
 option(NOOKBIT_COMPACT_PACKAGE "Exclude unused styles and development plugins from Windows packages" ON)
 set(NOOKBIT_DEV_DESTINATION_ROOT "" CACHE PATH "Optional fixed destination for this local development build")
-set(NOOKBIT_PRERELEASE "alpha.15" CACHE STRING "Pre-release identifier; empty for a stable release")
+set(NOOKBIT_PRERELEASE "" CACHE STRING "Pre-release identifier; empty for a stable release")
 set(NOOKBIT_VERSION "${PROJECT_VERSION}")
 set(NOOKBIT_VERSION_FLAGS "0")
 if(NOT NOOKBIT_PRERELEASE STREQUAL "")
