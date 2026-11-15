@@ -1,6 +1,7 @@
 #include "modules/rules/processing_flow.hpp"
 #include "modules/rules/logical_predicate.hpp"
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <map>
 #include <set>
@@ -8,6 +9,19 @@
 
 namespace nookbit {
 namespace {
+struct NodeTypeName {
+    ProcessingNodeType type;
+    const char* name;
+};
+constexpr std::array nodeTypeNames{
+    NodeTypeName{ProcessingNodeType::Input, "input"},
+    NodeTypeName{ProcessingNodeType::Traverse, "traverse"},
+    NodeTypeName{ProcessingNodeType::Call, "call"},
+    NodeTypeName{ProcessingNodeType::Condition, "condition"},
+    NodeTypeName{ProcessingNodeType::Otherwise, "otherwise"},
+    NodeTypeName{ProcessingNodeType::Destination, "destination"},
+    NodeTypeName{ProcessingNodeType::Exclude, "exclude"},
+};
 // 논리 입력까지 포함한 조건 수를 제한해 편집 그래프가 과도하게 커지는 것을 막는 함수.
 std::size_t predicateSize(const AtomicRuleCondition& condition, int depth = 0) {
     if (depth > 32) return 1001;
@@ -43,12 +57,26 @@ int acceptedTypes(const AtomicRuleCondition& condition, bool negated = false) {
 }
 }
 
+// 저장 형식의 이름을 내부 처리 노드 종류로 변환하는 함수.
+std::optional<ProcessingNodeType> parseProcessingNodeType(std::string_view name) {
+    const auto entry = std::ranges::find_if(nodeTypeNames, [name](const auto& value) { return name == value.name; });
+    if (entry == nodeTypeNames.end()) return std::nullopt;
+    return entry->type;
+}
+
+// 규칙 JSON과 기존 승인 서명에 쓸 처리 노드 이름을 반환하는 함수.
+const char* processingNodeTypeName(ProcessingNodeType type) {
+    const auto entry = std::ranges::find(nodeTypeNames, type, &NodeTypeName::type);
+    return entry == nodeTypeNames.end() ? "" : entry->name;
+}
+
 // 이전 프리셋을 기본 입력·순회·호출 그래프로 변환하는 함수.
 RuleSet::FolderFlow expandedFlow(const RuleSet::FolderFlow& value) {
     if (!value.nodes.empty()) return value;
     auto flow = value;
     flow.entry = "input";
-    flow.nodes = {{"input", "input", {"scan"}}, {"scan", "traverse", {"apply"}}, {"apply", "call"}};
+    flow.nodes = {{"input", ProcessingNodeType::Input, {"scan"}},
+        {"scan", ProcessingNodeType::Traverse, {"apply"}}, {"apply", ProcessingNodeType::Call}};
     return flow;
 }
 
@@ -75,7 +103,7 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
         std::map<std::string, const ProcessingNode*> nodes;
         for (const auto& node : flow.nodes)
             if (!std::regex_match(node.id, id) || !nodes.emplace(node.id, &node).second) return fail("duplicate or invalid node ID.");
-        if (!nodes.contains(flow.entry) || nodes.at(flow.entry)->type != "input") return fail("entry must name an input node.");
+        if (!nodes.contains(flow.entry) || nodes.at(flow.entry)->type != ProcessingNodeType::Input) return fail("entry must name an input node.");
         std::set<std::string> visiting, visited;
         std::map<std::string, int> parents;
         std::function<Result<void>(const std::string&, int, int)> check;
@@ -85,33 +113,32 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
             if (visited.contains(key)) return fail("nodes may have only one parent: " + key);
             if (!nodes.contains(key)) return fail("unknown node: " + key);
             const auto& node = *nodes.at(key);
-            if (node.maxDepth && (node.type != "traverse" || !node.recursive || *node.maxDepth < 1))
+            if (node.maxDepth && (node.type != ProcessingNodeType::Traverse || !node.recursive || *node.maxDepth < 1))
                 return fail("maxDepth requires a recursive traversal and a positive integer at " + key);
-            const bool conditional = node.type == "condition";
-            const bool terminal = node.type == "destination" || node.type == "exclude" || node.type == "call";
-            if (node.type != "input" && node.type != "traverse" && !conditional && node.type != "otherwise" && !terminal)
-                return fail("unsupported node type: " + node.type);
-            if ((node.type == "input" && key != flow.entry) || conditional != node.condition.has_value() ||
-                (node.type == "destination") != node.destination.has_value() ||
+            const bool conditional = node.type == ProcessingNodeType::Condition;
+            const bool terminal = node.type == ProcessingNodeType::Destination || node.type == ProcessingNodeType::Exclude || node.type == ProcessingNodeType::Call;
+            if (!*processingNodeTypeName(node.type)) return fail("unsupported node type at " + key);
+            if ((node.type == ProcessingNodeType::Input && key != flow.entry) || conditional != node.condition.has_value() ||
+                (node.type == ProcessingNodeType::Destination) != node.destination.has_value() ||
                 (terminal ? !node.next.empty() : node.next.empty())) return fail("invalid fields or missing successor at " + key);
-            if (node.type != "call" && !node.targetFlow.empty()) return fail("only call nodes can choose another flow.");
-            if (node.type == "traverse" && (inputTypes & 1)) return fail("traversal requires a folder input or folder-type guard at " + key);
-            if (node.type == "call" && !node.targetFlow.empty()) {
+            if (node.type != ProcessingNodeType::Call && !node.targetFlow.empty()) return fail("only call nodes can choose another flow.");
+            if (node.type == ProcessingNodeType::Traverse && (inputTypes & 1)) return fail("traversal requires a folder input or folder-type guard at " + key);
+            if (node.type == ProcessingNodeType::Call && !node.targetFlow.empty()) {
                 if (!flows.contains(node.targetFlow)) return fail("unknown called flow: " + node.targetFlow);
                 if ((inputTypes & 1) && flows.at(node.targetFlow).folderInput) return fail("file output cannot call a folder-only flow.");
                 calls[flowId].insert(node.targetFlow);
             }
             visiting.insert(key);
-            int outputTypes = node.type == "traverse" ? 1 : inputTypes;
+            int outputTypes = node.type == ProcessingNodeType::Traverse ? 1 : inputTypes;
             if (node.condition) outputTypes &= acceptedTypes(*node.condition);
             bool otherwiseSeen = false;
             for (std::size_t index = 0; index < node.next.size(); ++index) {
                 const auto& child = node.next[index];
                 if (!nodes.contains(child)) return fail("unknown successor: " + child);
                 const auto& childType = nodes.at(child)->type;
-                if (node.next.size() > 1 && childType != "condition" && childType != "otherwise")
+                if (node.next.size() > 1 && childType != ProcessingNodeType::Condition && childType != ProcessingNodeType::Otherwise)
                     return fail("branch siblings must be conditions or otherwise.");
-                if (childType == "otherwise") {
+                if (childType == ProcessingNodeType::Otherwise) {
                     if (otherwiseSeen || index + 1 != node.next.size()) return fail("otherwise must be unique and last.");
                     otherwiseSeen = true;
                 }

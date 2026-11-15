@@ -202,10 +202,12 @@ struct RuleNode {
     bool exclude{false};
 };
 
+enum class ProcessingNodeType { Unspecified, Input, Traverse, Call, Condition, Otherwise, Destination, Exclude };
+
 /// 조건·순회·다른 흐름 호출을 연결하는 Qt 독립 처리 노드.
 struct ProcessingNode {
     std::string id;
-    std::string type;
+    ProcessingNodeType type{ProcessingNodeType::Unspecified};
     std::vector<std::string> next;
     std::optional<AtomicRuleCondition> condition;
     std::optional<RuleDestination> destination;

@@ -20,6 +20,8 @@
 #include <iostream>
 
 namespace {
+using nookbit::ProcessingNodeType;
+
 int failures = 0;
 // 실패한 기능 계약을 기록하는 함수.
 void expect(bool value, const char* message) {
@@ -55,11 +57,13 @@ void workflow(bool custom = false) {
     rules.folderFlows.push_back({"contents", "내용물 정리"});
     if (custom) {
         rules.folderFlows[0].entry = "input";
-        rules.folderFlows[0].nodes = {{"input", "input", {"scan"}}, {"scan", "traverse", {"call-images"}}, {"call-images", "call"}};
+        rules.folderFlows[0].nodes = {{"input", ProcessingNodeType::Input, {"scan"}},
+            {"scan", ProcessingNodeType::Traverse, {"call-images"}}, {"call-images", ProcessingNodeType::Call}};
         rules.folderFlows[0].nodes.back().targetFlow = "images";
         nookbit::RuleSet::FolderFlow images{"images", "이미지 별도 분류"};
         images.folderInput = false; images.entry = "input";
-        images.nodes = {{"input", "input", {"png"}}, {"png", "condition", {"destination"}}, {"destination", "destination"}};
+        images.nodes = {{"input", ProcessingNodeType::Input, {"png"}},
+            {"png", ProcessingNodeType::Condition, {"destination"}}, {"destination", ProcessingNodeType::Destination}};
         images.nodes[1].condition = nookbit::ExtensionPredicate{{"png"}};
         images.nodes[2].destination = nookbit::RuleDestination{L"CustomImages", {}, false};
         rules.folderFlows.push_back(images);
@@ -68,6 +72,8 @@ void workflow(bool custom = false) {
     expect(bool(repository.save(rules)), "save named flows");
     const auto loaded = repository.load();
     expect(loaded && loaded.value().folderFlows.size() == (custom ? 2 : 1) && loaded.value().folderFlows[0].name == "내용물 정리", "JSON preserves flow identity and name");
+    expect(loaded && nookbit::PlanSignature::rules(loaded.value()) == nookbit::PlanSignature::rules(rules),
+        "JSON round-trip preserves the processing flow signature");
     auto changed = rules; changed.folderFlows[0].name = "이름 변경";
     expect(nookbit::PlanSignature::rules(rules) != nookbit::PlanSignature::rules(changed), "flow changes invalidate rule revision");
     auto invalid = rules; invalid.folderFlows.push_back({"other", "내용물 정리"});
@@ -188,8 +194,9 @@ void graphContract() {
     auto condition=std::make_shared<nookbit::LogicalPredicate>();
     condition->operands={nookbit::ItemTypePredicate{nookbit::ItemType::Folder},nookbit::NameContainsPredicate{"Project"}};
     nookbit::RuleSet::FolderFlow guarded;guarded.id="guarded";guarded.name="Guarded";guarded.entry="input";guarded.folderInput=false;
-    guarded.nodes={{"input","input",{"guard"}},{"guard","condition",{"scan"},nookbit::LogicalPredicatePtr(condition)},
-        {"scan","traverse",{"apply"}},{"apply","call"}};
+    guarded.nodes = {{"input", ProcessingNodeType::Input, {"guard"}},
+        {"guard", ProcessingNodeType::Condition, {"scan"}, nookbit::LogicalPredicatePtr(condition)},
+        {"scan", ProcessingNodeType::Traverse, {"apply"}}, {"apply", ProcessingNodeType::Call}};
     rules.folderFlows={guarded};
     expect(nookbit::validateProcessingFlows(rules).hasValue(),"AND folder guard safely narrows traversal input");
     auto alternative=std::make_shared<nookbit::LogicalPredicate>(*condition);alternative->operation=nookbit::LogicalOperator::Any;
@@ -206,11 +213,26 @@ void graphContract() {
     expect(!nookbit::validateProcessingFlows(rules), "NOT PNG can still admit files to traversal");
 
 }
+// 열거형 도입 전에 처리 그래프에 사용한 승인 서명 형식을 검사하는 함수.
+void processingSignatureContract() {
+    nookbit::RuleSet rules;
+    rules.id = "types";
+    rules.version = "v3";
+    rules.schemaVersion = 3;
+    rules.folderFlows = {nookbit::expandedFlow({"folder", "Folder"})};
+    expect(nookbit::PlanSignature::rules(rules) ==
+        "nookbit-rules-v35:types2:v31:01:015:folder-flows-v11:16:folder6:Folder"
+        "23:recursiveFilesToDefault19:processing-graph-v15:input1:11:3"
+        "5:input5:input1:14:scan1:01:00:"
+        "4:scan8:traverse1:15:apply1:01:00:1:1"
+        "5:apply4:call1:01:01:00:", "preserve the pre-enum signature for a processing graph");
+}
 }
 
 // 실제 파일과 저장소를 쓰는 폴더 흐름 검증을 실행하는 함수.
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     workflow(); workflow(true); graphContract();
+    processingSignatureContract();
     return failures ? 1 : 0;
 }

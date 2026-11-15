@@ -727,16 +727,18 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
                     const auto object = value.toObject();
                     ProcessingNode node;
                     node.id = object.value("id").toString().toStdString();
-                    node.type = object.value("type").toString().toStdString();
+                    const auto type = parseProcessingNodeType(object.value("type").toString().toStdString());
+                    if (!type) return Result<RuleSet>::failure({"rules.folder_flow_invalid", "Unsupported processing node type."});
+                    node.type = *type;
                     for (const auto& next : object.value("next").toArray()) node.next.push_back(next.toString().toStdString());
-                    if (node.type == "condition") {
+                    if (node.type == ProcessingNodeType::Condition) {
                         const auto condition = convertAtomicCondition(object.value("when").toObject());
                         if (!condition) return Result<RuleSet>::failure(condition.error());
                         node.condition = condition.value();
                     }
-                    if (node.type == "destination") node.destination = convertDestination(object.value("destination").toObject());
-                    if (node.type == "call") node.targetFlow = object.value("target").toString().toStdString();
-                    if (node.type == "traverse") {
+                    if (node.type == ProcessingNodeType::Destination) node.destination = convertDestination(object.value("destination").toObject());
+                    if (node.type == ProcessingNodeType::Call) node.targetFlow = object.value("target").toString().toStdString();
+                    if (node.type == ProcessingNodeType::Traverse) {
                         node.recursive = object.value("recursive").toBool();
                         if (object.contains("maxDepth")) node.maxDepth = object.value("maxDepth").toInt();
                     }
@@ -845,7 +847,7 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
                 for (const auto& node : flow.nodes) {
                     QJsonArray next;
                     for (const auto& id : node.next) next.append(QString::fromStdString(id));
-                    QJsonObject value{{"id", QString::fromStdString(node.id)}, {"type", QString::fromStdString(node.type)}, {"next", next}};
+                    QJsonObject value{{"id", QString::fromStdString(node.id)}, {"type", QString::fromUtf8(processingNodeTypeName(node.type))}, {"next", next}};
                     if (node.condition) {
                         const auto condition = atomicConditionObject(*node.condition);
                         if (!condition) return Result<void>::failure(condition.error());
@@ -856,8 +858,8 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
                         if (!destination) return Result<void>::failure(destination.error());
                         value.insert("destination", destination.value());
                     }
-                    if (node.type == "call") value.insert("target", QString::fromStdString(node.targetFlow));
-                    if (node.type == "traverse") {
+                    if (node.type == ProcessingNodeType::Call) value.insert("target", QString::fromStdString(node.targetFlow));
+                    if (node.type == ProcessingNodeType::Traverse) {
                         value.insert("recursive", node.recursive);
                         if (node.maxDepth) value.insert("maxDepth", *node.maxDepth);
                     }

@@ -83,9 +83,9 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
             const auto type = block.value("type").toString();
             ProcessingNode node; node.id = nodeIds.value(id).toStdString();
             for (const auto child : outgoing.value(id)) node.next.push_back(nodeIds.value(child).toStdString());
-            if (type == "flowStart") node.type = "input";
+            if (type == "flowStart") node.type = ProcessingNodeType::Input;
             else if (type == "folderScan") {
-                node.type = "traverse";
+                node.type = ProcessingNodeType::Traverse;
                 node.recursive = block.value("recursive", true).toBool();
                 if (block.contains("maxDepth")) {
                     const auto value = block.value("maxDepth");
@@ -101,10 +101,11 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
                     node.maxDepth = static_cast<int>(depth);
                 }
             }
-            else if (type == "callFlow" || type == "applyDefault") { node.type = "call"; node.targetFlow = block.value("targetFlow").toString().toStdString(); }
-            else if (type == "otherwise" || type == "exclude") node.type = type.toStdString();
+            else if (type == "callFlow" || type == "applyDefault") { node.type = ProcessingNodeType::Call; node.targetFlow = block.value("targetFlow").toString().toStdString(); }
+            else if (type == "otherwise") node.type = ProcessingNodeType::Otherwise;
+            else if (type == "exclude") node.type = ProcessingNodeType::Exclude;
             else if (type == "destination") {
-                node.type = "destination";
+                node.type = ProcessingNodeType::Destination;
                 const auto text = block.value("value").toString().trimmed();
                 const std::filesystem::path path(text.toStdWString());
                 const bool absolute = !block.value("homeRelative", true).toBool();
@@ -123,7 +124,7 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
                 if (!conditionParser) return invalid(QStringLiteral("알 수 없는 처리 노드예요."));
                 const auto condition = conditionParser(block);
                 if (!condition) return Result<FolderFlowGraph>::failure(condition.error());
-                node.type = "condition"; node.condition = condition.value();
+                node.type = ProcessingNodeType::Condition; node.condition = condition.value();
             }
             flow.nodes.push_back(std::move(node));
         }
@@ -153,7 +154,7 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
         arrange = [&](const std::string& key, int depth) {
             const auto node = std::find_if(flow.nodes.begin(), flow.nodes.end(), [&](const auto& item) { return item.id == key; });
             if (node == flow.nodes.end()) return top;
-            const int rows = node->type == "condition" && formatCondition
+            const int rows = node->type == ProcessingNodeType::Condition && formatCondition
                 ? logicalGraphRows(formatCondition(*node, ids.value(QString::fromStdString(key)))) : 1;
             const int groupsBeforeChildren = logicalGroups;
             double y = top;
@@ -175,10 +176,13 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
             const auto key = QString::fromStdString(node.id);
             const auto id = ids.value(key);
             QVariantMap block;
-            if (node.type == "condition" && formatCondition) block = formatCondition(node, id);
+            if (node.type == ProcessingNodeType::Condition && formatCondition) block = formatCondition(node, id);
             else {
-                const auto type = node.type == "input" ? "flowStart" : node.type == "traverse" ? "folderScan" : node.type == "call" ? "callFlow" : node.type.c_str();
-                block = {{"id", id}, {"type", QString::fromUtf8(type)}, {"value", node.type == "input" ? QString::fromStdString(flow.name) : QString()}};
+                auto type = processingNodeTypeName(node.type);
+                if (node.type == ProcessingNodeType::Input) type = "flowStart";
+                if (node.type == ProcessingNodeType::Traverse) type = "folderScan";
+                if (node.type == ProcessingNodeType::Call) type = "callFlow";
+                block = {{"id", id}, {"type", QString::fromUtf8(type)}, {"value", node.type == ProcessingNodeType::Input ? QString::fromStdString(flow.name) : QString()}};
             }
             const auto type = block.value("type").toString();
             const auto fallback = positions.value("flow:" + flowId + ":" + (type == "callFlow" ? "applyDefault" : type), defaults.value(key));
@@ -186,8 +190,8 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
             block.insert("flowId", flowId); block.insert("flowNodeId", key);
             block.insert("flowInput", flow.folderInput ? "folder" : "item");
             block.insert("x", point.x()); block.insert("y", point.y());
-            if (node.type == "call") block.insert("targetFlow", QString::fromStdString(node.targetFlow));
-            if (node.type == "traverse") {
+            if (node.type == ProcessingNodeType::Call) block.insert("targetFlow", QString::fromStdString(node.targetFlow));
+            if (node.type == ProcessingNodeType::Traverse) {
                 block.insert("recursive", node.recursive);
                 if (node.maxDepth) block.insert("maxDepth", *node.maxDepth);
             }

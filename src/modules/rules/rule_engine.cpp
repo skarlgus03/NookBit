@@ -415,7 +415,7 @@ Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& r
     };
     const auto* node = find(*flow, file.processingAfterNode.empty() ? flow->entry : file.processingAfterNode);
     if (!node) return invalid("Unknown flow resume point.");
-    if (!file.processingAfterNode.empty() && (node->type != "traverse" || file.fingerprint.directory))
+    if (!file.processingAfterNode.empty() && (node->type != ProcessingNodeType::Traverse || file.fingerprint.directory))
         return invalid("Only enumerated files can resume after a traversal node.");
     auto next = node->next;
     for (int budget = 0; budget < 1000; ++budget) {
@@ -424,18 +424,18 @@ Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& r
         for (const auto& id : next) {
             const auto* candidate = find(*flow, id);
             if (!candidate) return invalid("Unknown successor.");
-            if (candidate->type == "otherwise") fallback = candidate;
-            else if (candidate->type != "condition" || (candidate->condition && matchesAtomic(*candidate->condition, file, nowUtcMs))) {
+            if (candidate->type == ProcessingNodeType::Otherwise) fallback = candidate;
+            else if (candidate->type != ProcessingNodeType::Condition || (candidate->condition && matchesAtomic(*candidate->condition, file, nowUtcMs))) {
                 selected = candidate; break;
             }
         }
         node = selected ? selected : fallback;
         if (!node) return Result<ProcessingRoute>::success({});
-        if (node->type == "traverse") {
+        if (node->type == ProcessingNodeType::Traverse) {
             if (!file.fingerprint.directory) return invalid("Traversal requires a folder.");
             return Result<ProcessingRoute>::success({{}, true, flow->id, node->id, node->recursive, node->maxDepth});
         }
-        if (node->type == "call") {
+        if (node->type == ProcessingNodeType::Call) {
             if (node->targetFlow.empty()) {
                 const auto decision = treeDecision(file, rules, nowUtcMs);
                 if (!decision) return Result<ProcessingRoute>::failure(decision.error());
@@ -446,9 +446,9 @@ Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& r
             flow = target;
             node = find(*flow, flow->entry);
             if (!node) return invalid("Called flow entry is missing.");
-        } else if (node->type == "destination" || node->type == "exclude") {
+        } else if (node->type == ProcessingNodeType::Destination || node->type == ProcessingNodeType::Exclude) {
             const auto id = "flow-" + flow->id + "-" + node->id;
-            if (node->type == "exclude") return Result<ProcessingRoute>::success({RuleDecision{id, {}, "Excluded by processing flow.", {}, true}});
+            if (node->type == ProcessingNodeType::Exclude) return Result<ProcessingRoute>::success({RuleDecision{id, {}, "Excluded by processing flow.", {}, true}});
             if (!node->destination) return invalid("Destination is missing.");
             const auto& destination = *node->destination;
             const auto path = destinationFor(destination.relativePath, file, destination.absolute);

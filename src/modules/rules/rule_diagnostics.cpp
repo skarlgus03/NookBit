@@ -229,9 +229,9 @@ void inspectFlow(const RuleSet::FolderFlow& flow, const std::map<std::string, co
     std::vector<EarlierBranch> earlier;
     for (const auto& id : parent.next) {
         const auto& node = *nodes.at(id);
-        auto possible = inspectBranch(flow.id, id, node.condition, node.type == "otherwise", incoming, earlier, warnings);
+        auto possible = inspectBranch(flow.id, id, node.condition, node.type == ProcessingNodeType::Otherwise, incoming, earlier, warnings);
         if (possible.empty()) continue;
-        if (node.type == "traverse") {
+        if (node.type == ProcessingNodeType::Traverse) {
             Facts files;
             files.types = fileType;
             possible = {files};
