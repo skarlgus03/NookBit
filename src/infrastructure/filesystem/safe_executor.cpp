@@ -164,12 +164,15 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
         }
         if (!result) {
             // 이름 변경 API 실패가 실제 이동 결과를 증명하지 못하면 다음 파일로 진행하지 않는다.
-            if (result.error().code == "move.rename_failed" &&
-                (probeFile(scanner_, step.source, step.fingerprint) != FileProbe::Matches ||
-                 probeFile(scanner_, step.destination, step.fingerprint) == FileProbe::Matches ||
-                 probeFile(scanner_, step.destination, step.fingerprint) == FileProbe::Unavailable)) {
-                const auto marked = markNeedsRecovery(plan.id);
-                return marked ? Result<void>::failure({"execute.needs_recovery", "Rename outcome is uncertain; preserve files and review."}) : marked;
+            if (result.error().code == "move.rename_failed") {
+                const auto source = probeFile(scanner_, step.source, step.fingerprint);
+                const auto destination = source == FileProbe::Matches
+                    ? probeFile(scanner_, step.destination, step.fingerprint)
+                    : FileProbe::Unavailable;
+                if (destination != FileProbe::Missing && destination != FileProbe::Different) {
+                    const auto marked = markNeedsRecovery(plan.id);
+                    return marked ? Result<void>::failure({"execute.needs_recovery", "Rename outcome is uncertain; preserve files and review."}) : marked;
+                }
             }
             const auto failed = history_.appendEvent(StepStatusChanged{plan.id, step.id, StepStatus::Failed, result.error()});
             if (!failed) { const auto marked = markNeedsRecovery(plan.id); return marked ? failed : marked; }
