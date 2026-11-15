@@ -216,7 +216,17 @@ Result<void> SafeExecutor::executeMetadataSteps(const OperationPlan& plan,
 Result<void> SafeExecutor::executeVerifiedCopy(const OperationPlan& plan, const MoveStep& step) {
     const auto [attemptId, staging] = newTransferAttempt("transfer", step.destination);
     const auto transferred = transfers_->execute(plan.id, step.id, attemptId, staging);
-    if (!transferred) return Result<void>::failure(recoveryError(plan.id, transferred.error()));
+    if (!transferred) {
+        if (transferred.error().code == "transfer.cancelled") {
+            // Skipped는 승인 당시의 제외 상태이므로 실행 중에는 취소 사유를 기록한다.
+            const auto stopped = history_.appendEvent(StepStatusChanged{
+                plan.id, step.id, StepStatus::Failed, transferred.error()
+            });
+            if (!stopped) return Result<void>::failure(recoveryError(plan.id, stopped.error()));
+            return cancelPreparedBatch(plan, transferred.error());
+        }
+        return Result<void>::failure(recoveryError(plan.id, transferred.error()));
+    }
 
     const auto recorded = history_.loadPlan(plan.id);
     if (!recorded) return Result<void>::failure(recorded.error());
@@ -308,6 +318,13 @@ Result<void> SafeExecutor::executeCheckedRename(const OperationPlan& plan, const
     return Result<void>::success();
 }
 
+// 취소가 확정되면 완료된 이동 기록을 보존하는 함수.
+Result<void> SafeExecutor::cancelPreparedBatch(const OperationPlan& plan, const Error& error) {
+    const auto stopped = history_.appendEvent(PlanStatusChanged{plan.id, PlanStatus::Cancelled});
+    if (!stopped) return Result<void>::failure(recoveryError(plan.id, stopped.error()));
+    return Result<void>::failure(error);
+}
+
 // 정방향 최초 실행과 복구가 동일한 이동 및 보상 경계를 사용하는 함수.
 Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& plan,
     const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps,
@@ -317,9 +334,9 @@ Result<void> SafeExecutor::executePreparedSteps(const OperationPlan& plan,
     std::size_t fileIndex = 0;
     for (const auto* step : steps) {
         if (OperationProgressScope::cancellationRequested()) {
-            return Result<void>::failure(recoveryError(plan.id, {
+            return cancelPreparedBatch(plan, {
                 "transfer.cancelled", "Stopped before starting the next file.",
-            }));
+            });
         }
         OperationProgressScope::file(++fileIndex, steps.size(), step->source);
         OperationProgressScope::phase(OperationPhase::SavingHistory);
@@ -570,11 +587,11 @@ Result<void> SafeExecutor::rollback(const PlanId& planId) {
     const auto& plan = loaded.value();
     const auto format = PlanSignature::validateFormat(plan);
     if (!format) return format;
-    if ((plan.status != PlanStatus::Completed && plan.status != PlanStatus::Failed) ||
+    if ((plan.status != PlanStatus::Completed && plan.status != PlanStatus::Failed && plan.status != PlanStatus::Cancelled) ||
         !PlanSignature::isSha256Hex(plan.planHash) ||
         plan.planHash != hasher_.sha256(PlanSignature::approvalPayload(plan))) {
         return Result<void>::failure({
-            "rollback.plan_invalid", "Only an intact completed or failed plan can be rolled back.",
+            "rollback.plan_invalid", "Only an intact finished plan can be rolled back.",
         });
     }
     const auto applied = stepsWithStatus(plan, StepStatus::Applied);

@@ -16,6 +16,7 @@
 #include "modules/rules/rule_engine.hpp"
 #include "application/use_cases/plan_signature.hpp"
 #include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
+#include <nookbit/application/operation_progress.hpp>
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -660,10 +661,41 @@ void testMixedBatch(int scenario) {
             if (scenario == 7) removal.fail = true;
         }
     };
-    const auto result = executor.execute(plan, approval.value(), selected);
+    bool cancel = false;
+    const auto result = [&] {
+        nookbit::OperationProgressScope progress([&](const nookbit::OperationProgress& value) {
+            if (scenario == 8 && value.completedFiles == 1) cancel = true;
+            if (scenario == 9 && value.fileIndex == 3 && value.phase == nookbit::OperationPhase::CheckingSource)
+                cancel = true;
+        }, [&] { return cancel; }, [](bool) {});
+        return executor.execute(plan, approval.value(), selected);
+    }();
     const auto saved = history.loadPlan(plan.id);
     expect(saved && saved.value().planHash == plan.planHash, "mixed execution must preserve approval hash");
     if (!saved) return;
+    if (scenario == 8 || scenario == 9) {
+        using nookbit::PlanStatus;
+        using nookbit::StepStatus;
+        expect(!result && result.error().code == "transfer.cancelled" && saved.value().status == PlanStatus::Cancelled,
+            "confirmed cancellation must close the plan without recovery");
+        expect(saved.value().steps[0].status == StepStatus::Applied &&
+            saved.value().steps[1].status == (scenario == 8 ? StepStatus::Planned : StepStatus::Applied) &&
+            saved.value().steps[2].status == (scenario == 8 ? StepStatus::Planned : StepStatus::Failed) &&
+            saved.value().planHash == hasher.sha256(nookbit::PlanSignature::approvalPayload(saved.value())) &&
+            readFile(target1) == "first bytes" && readFile(last) == "last bytes" && !QFile::exists(target3),
+            "cancellation preserves completed steps and leaves unstarted originals untouched");
+        const auto recent = history.recentPlans(5);
+        expect(recent && recent.value().size() == 1 && recent.value().front().status == PlanStatus::Cancelled,
+            "cancelled plan is visible in history");
+        const auto undone = executor.rollback(plan.id);
+        if (!undone) std::cerr << "Cancelled batch " << scenario << " undo: " << undone.error().code
+            << ": " << undone.error().message << '\n';
+        expect(undone.hasValue() && readFile(first) == "first bytes" &&
+            readFile(second) == "second bytes" && readFile(last) == "last bytes" &&
+            !QFile::exists(target1) && !QFile::exists(target2),
+            "undo of a cancelled plan restores only applied files");
+        return;
+    }
     if (scenario == 1 || scenario == 2) {
         expect(!result && result.error().code == "execute.batch_rolled_back" && saved.value().status == nookbit::PlanStatus::Failed &&
             saved.value().steps[0].status == nookbit::StepStatus::RolledBack && saved.value().steps[1].status == nookbit::StepStatus::RolledBack &&
@@ -1043,7 +1075,7 @@ int main(int argc, char* argv[]) {
     testStreamingContentHash();
     testApprovedSingleFileMoveAndUndo();
     for (int scenario = 0; scenario < 16; ++scenario) testV2Execution(scenario);
-    for (int scenario = 0; scenario < 8; ++scenario) testMixedBatch(scenario);
+    for (int scenario = 0; scenario < 10; ++scenario) testMixedBatch(scenario);
     testBatchFailureRollsBackEarlierMove(false);
     testBatchFailureRollsBackEarlierMove(true);
     testBatchFailureRollsBackEarlierMove(false, true);

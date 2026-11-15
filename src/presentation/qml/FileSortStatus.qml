@@ -63,11 +63,16 @@ Rectangle {
         Label { Layout.fillWidth: true; visible: status.completed; text: status.resultMessage; wrapMode: Text.Wrap }
         Label { Layout.fillWidth: true; visible: status.completed && !status.success && !status.cancelled; text: qsTr("이동하지 못한 파일은 대기 목록과 작업 기록에서 확인해 주세요."); wrapMode: Text.Wrap }
         AppButton {
-            visible: status.completed && status.success
-            text: qsTr("되돌리기")
+            visible: status.completed && (status.success || (status.cancelled && !!status.controller.canUndoCancelledSort))
+            text: status.cancelled ? qsTr("옮긴 파일 되돌리기") : qsTr("되돌리기")
             enabled: status.controller.canUndo && !status.progress.busy
             // 되돌리기를 요청한 뒤 대기 목록에서 기존 되돌리기 결과 안내를 확인하는 함수.
             onClicked: { status.controller.undoLastMove(); status.backRequested() }
+        }
+        AppButton {
+            visible: status.completed && status.cancelled
+            text: status.controller.canUndoCancelledSort ? qsTr("그대로 두기") : qsTr("대기 목록으로")
+            onClicked: status.backRequested()
         }
         Item { Layout.fillHeight: true }
     }

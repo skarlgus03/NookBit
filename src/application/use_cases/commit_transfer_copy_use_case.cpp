@@ -9,7 +9,8 @@ CommitTransferCopyUseCase::CommitTransferCopyUseCase(IStagedCopy& copy, ITransfe
 
 // 기록 경계가 성공한 경우에만 다음 파일 작업을 진행하는 함수.
 Result<TransferAttempt> CommitTransferCopyUseCase::execute(
-    const TransferAttempt& attempt, const std::function<bool()>& cancelled, const MoveContract* movement) {
+    const TransferAttempt& attempt, const std::function<bool()>& cancelled, const MoveContract* movement,
+    bool discardCancelledStaging) {
     const auto valid = TransferValidation::validateNew(attempt);
     if (!valid) return Result<TransferAttempt>::failure(valid.error());
     const auto begun = journal_.begin(attempt);
@@ -55,15 +56,24 @@ Result<TransferAttempt> CommitTransferCopyUseCase::execute(
     if (!session) return stop(session.error(), TransferPhase::NeedsRecovery);
     saved = record({state.phase, TransferPhase::StagingCreated, session.value()->createdFingerprint()});
     if (!saved) return recordFailure(saved.error());
+    // 취소가 기록된 뒤에만 현재 세션이 만든 미확정 복사본을 제거한다.
+    const auto stopCopy = [&](const Error& error) {
+        if (error.code != "transfer.cancelled") return stop(error, TransferPhase::Failed);
+        auto stopped = stop(error, TransferPhase::Cancelled);
+        if (discardCancelledStaging && stopped.error().code == "transfer.cancelled") {
+            const auto cleaned = session.value()->discardCancelledStaging();
+            if (!cleaned) return Result<TransferAttempt>::failure(cleaned.error());
+        }
+        return stopped;
+    };
     if (cancelled) OperationProgressScope::allowCopyCancellation(true);
     const auto verified = session.value()->copyAndVerify(cancelled);
     if (!verified && cancelled) OperationProgressScope::allowCopyCancellation(false);
-    if (!verified) return stop(verified.error(), verified.error().code == "transfer.cancelled"
-        ? TransferPhase::Cancelled : TransferPhase::Failed);
+    if (!verified) return stopCopy(verified.error());
     saved = record({state.phase, TransferPhase::CopyVerified, verified.value()});
     if (cancelled) OperationProgressScope::allowCopyCancellation(false);
     if (!saved) return recordFailure(saved.error());
-    if (wantsCancel()) return stop({"transfer.cancelled", "Cancelled before commit"}, TransferPhase::Cancelled);
+    if (wantsCancel()) return stopCopy({"transfer.cancelled", "Cancelled before commit"});
     saved = record({state.phase, TransferPhase::CommitIntent});
     if (!saved) return recordFailure(saved.error());
     // 이 지점부터 취소나 파일 오류로 실제 확정 여부를 숨기지 않는다.

@@ -375,6 +375,9 @@ Result<std::pair<ZoneSnapshot, ZoneSnapshot>> protectMatchingZones(
     return Return::success({std::move(input.value()), std::move(output.value())});
 }
 
+// 접근 실패와 실제 부재를 구분하는 함수.
+Result<void> requireMissing(const std::filesystem::path& path);
+
 class Session final : public IStagedCopySession {
 public:
     std::vector<Handle> parents;
@@ -386,6 +389,7 @@ public:
     std::optional<FileFingerprint> verifiedCopy;
     bool attempted{false};
     bool commitAttempted{false};
+    bool ownsNewStaging{false};
     uintmax_t resumeOffset{};
     bool allowZone{false};
     ZoneSnapshot sourceZone, stagingZone;
@@ -409,6 +413,19 @@ public:
 
     // 세션을 연 시점의 임시 파일 객체 지문을 반환하는 함수.
     const FileFingerprint& createdFingerprint() const override { return created; }
+
+    // 확정 시도 전까지 보호 중인 새 임시 파일 핸들만 제거한다.
+    Result<void> discardCancelledStaging() override {
+        if (!ownsNewStaging || commitAttempted || staging.value == INVALID_HANDLE_VALUE)
+            return Result<void>::failure({"transfer.cancel_cleanup_needed", "Cannot discard pre-existing or committed staging."});
+        stagingZone = {};
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        if (!SetFileInformationByHandle(staging.value, FileDispositionInfo, &disposition, sizeof(disposition)))
+            return Result<void>::failure(failure("transfer.cleanup_remove"));
+        if (!CloseHandle(staging.value)) return Result<void>::failure(failure("transfer.cleanup_close"));
+        staging.value = INVALID_HANDLE_VALUE;
+        return requireMissing(stagingPath);
+    }
 
     // 원본을 유지하며 복사·flush·재읽기·메타데이터 검증을 수행하는 함수.
     Result<FileFingerprint> copyAndVerify(const std::function<bool()>& cancelled) override {
@@ -612,9 +629,6 @@ public:
         return final;
     }
 };
-// 제거 확인에서도 접근 실패와 실제 부재를 구분하는 함수.
-Result<void> requireMissing(const std::filesystem::path& path);
-
 // 최종 파일을 보호한 상태에서 승인 원본 핸들만 제거하는 세션.
 class RemovalSession final : public ITransferRemovalSession {
     std::vector<Handle> parents_;
@@ -1317,13 +1331,14 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
         return Return::failure({"transfer.volume_unsupported", "Only local fixed NTFS supported"});
     if (movement && !approvedVolume(targetVolume.value(), movement->destinationVolume))
         return Return::failure({"transfer.volume_changed", "Protected copy destination differs from approval"});
-    // DELETE 권한은 앱이 만든 임시 파일의 이름 변경에만 사용하며 제거 API는 제공하지 않는다.
+    // DELETE 권한은 앱이 만든 임시 파일의 이름 변경과 취소 정리에만 사용한다.
     Handle output(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (output.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.staging_create"));
     const auto initial = fingerprint(output.value);
     if (!initial) return Return::failure(initial.error());
     auto session = std::make_unique<Session>(std::move(locks), std::move(input), std::move(output), expected, initial.value(), basic, source, staging);
+    session->ownsNewStaging = true;
     session->allowZone = allowZone; session->sourceZone = std::move(marker);
     return Return::success(std::move(session));
 }

@@ -26,6 +26,10 @@ public:
     /// 한 번만 복사하고 내용을 재검증하며 취소·실패 시에도 원본을 유지하는 함수.
     [[nodiscard]] virtual Result<FileFingerprint> copyAndVerify(
         const std::function<bool()>& cancelled = {}) = 0;
+    /// 새 세션이 만든 미확정 임시 파일만 취소 시 제거하는 함수.
+    [[nodiscard]] virtual Result<void> discardCancelledStaging() {
+        return Result<void>::failure({"transfer.cancel_cleanup_needed", "Cancelled staging requires review."});
+    }
     /// 검증된 임시 파일만 같은 부모의 최종 이름으로 덮어쓰기 없이 확정하는 함수.
     [[nodiscard]] virtual Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) = 0;
 };

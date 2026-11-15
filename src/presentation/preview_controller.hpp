@@ -37,6 +37,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool hasApprovedPlan READ hasApprovedPlan NOTIFY previewChanged)
     Q_PROPERTY(bool hasMovableSteps READ hasMovableSteps NOTIFY previewChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
+    Q_PROPERTY(bool canUndoCancelledSort READ canUndoCancelledSort NOTIFY previewChanged)
     Q_PROPERTY(bool awaitingConfirmation READ awaitingConfirmation NOTIFY previewChanged)
     Q_PROPERTY(QVariantList confirmationSteps READ confirmationSteps NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
@@ -104,6 +105,7 @@ public:
     [[nodiscard]] bool hasMovableSteps() const noexcept;
 
     [[nodiscard]] bool canUndo() const noexcept;
+    [[nodiscard]] bool canUndoCancelledSort() const noexcept { return undoCancelledSort_ && canUndo(); }
 
     /// 처음 제안할 정리 목적지 루트를 반환하는 함수.
     [[nodiscard]] QString defaultDestinationRoot() const;
@@ -206,6 +208,7 @@ private:
     std::vector<std::filesystem::path> previewSelectedFiles_;
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;
+    bool undoCancelledSort_{false};
     QVariantList steps_;
     QVariantList outcomes_;
     QStringList warnings_;

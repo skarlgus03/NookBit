@@ -297,7 +297,7 @@ void testSuccessAndCancel() {
         expect(!std::filesystem::exists(fixture.attempt.destination), "cancel does not commit");
         if (cancelAt == TransferPhase::Prepared) expect(!std::filesystem::exists(fixture.attempt.staging), "early cancel creates no files");
     }
-    {
+    for (const bool discardStaging : {false, true}) {
         Fixture fixture(false, false, std::string(8 * 1024 * 1024, 'c'));
         if (!fixture.ready) return;
         bool cancel = false;
@@ -305,14 +305,21 @@ void testSuccessAndCancel() {
         OperationProgressScope scope([&](const OperationProgress& progress) {
             if (progress.canCancelCopy && progress.copiedBytes > 0) cancel = true;
         }, [&] { return cancel; }, [&](bool allowed) { cancelWindowOpen = allowed; }, std::chrono::milliseconds::zero());
-        const auto result = fixture.useCase.execute(fixture.attempt, &OperationProgressScope::cancellationRequested);
+        const auto result = fixture.useCase.execute(fixture.attempt, &OperationProgressScope::cancellationRequested,
+            nullptr, discardStaging);
         expect(!result && result.error().code == "transfer.cancelled" && cancel && !cancelWindowOpen,
             "a request after writing bytes cancels the native copy and closes the cancel window");
         fixture.check(TransferPhase::Cancelled);
-        const auto partialSize = std::filesystem::file_size(fixture.attempt.staging);
-        expect(partialSize > 0 && partialSize < fixture.attempt.sourceFingerprint.size &&
-            !std::filesystem::exists(fixture.attempt.destination),
-            "cancel keeps the partial staging file and does not publish the destination");
+        expect(std::filesystem::exists(fixture.attempt.source) && !std::filesystem::exists(fixture.attempt.destination),
+            "cancel keeps the original and does not publish the destination");
+        if (discardStaging) {
+            expect(!std::filesystem::exists(fixture.attempt.staging), "sorting cancellation discards only its staging file");
+        } else {
+            std::error_code error;
+            const auto partialSize = std::filesystem::file_size(fixture.attempt.staging, error);
+            expect(!error && partialSize > 0 && partialSize < fixture.attempt.sourceFingerprint.size,
+                "other callers can preserve their partial staging for recovery");
+        }
     }
 }
 

@@ -58,6 +58,8 @@ private:
         bool sourceContentAtCopyOpen = false);
     /// 다른 볼륨으로 파일을 옮기고 승인된 계획에 완료가 기록됐는지 확인하는 함수.
     [[nodiscard]] Result<void> executeVerifiedCopy(const OperationPlan& plan, const MoveStep& step);
+    /// 확정되지 않은 단계 없이 취소를 기록하고 완료된 이동은 보존하는 함수.
+    [[nodiscard]] Result<void> cancelPreparedBatch(const OperationPlan& plan, const Error& error);
     /// 폴더 이동을 실행하고 이동 완료 또는 기록된 개별 실패를 반환하는 함수.
     [[nodiscard]] Result<bool> executeDirectoryMove(const OperationPlan& plan, const MoveStep& step);
     /// 내용 검증이 필요한 파일 이름 변경과 완료 기록을 처리하는 함수.

@@ -21,8 +21,11 @@ uses the shared file-work progress display; approval and inspection are unchange
 During sorting, **복사 취소** appears while a cross-volume staged copy accepts
 cancellation. The button disables after a request. The worker checks the request
 during copying and again before it records commit intent. The current source
-stays in place if the copy stops before commit. Previously completed moves stay
-in work history, and the batch stops before starting the next file.
+stays in place. The worker records the cancelled attempt and removes the
+uncommitted staging file through its existing protected handle. Previously
+completed moves stay in work history, and the batch stops before starting the
+next file. The result page offers to undo the files already moved or leave them
+where they are. Remaining items stay in the pending queue.
 
 Same-volume moves, undo and recovery do not offer this cancellation action.
 Uncertain outcomes or failures to record an outcome still follow the recovery

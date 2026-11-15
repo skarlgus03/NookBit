@@ -35,7 +35,8 @@ Result<TransferAttempt> RollbackTransferUseCase::executeImpl(const std::string& 
         plan.value().planHash != hasher_.sha256(PlanSignature::approvalPayload(plan.value())) ||
         step == plan.value().steps.end() ||
         (plan.value().status != PlanStatus::Completed && plan.value().status != PlanStatus::RollingBack &&
-            !(inspectOnly && (plan.value().status == PlanStatus::Executing || plan.value().status == PlanStatus::Failed))) ||
+            !(inspectOnly && (plan.value().status == PlanStatus::Executing ||
+                plan.value().status == PlanStatus::Failed || plan.value().status == PlanStatus::Cancelled))) ||
         (step->status != StepStatus::Applied && step->status != StepStatus::RollbackIntentRecorded) ||
         !TransferValidation::sameObject(step->fingerprint, forward.value().sourceFingerprint) ||
         !TransferValidation::sameContent(step->fingerprint, *forward.value().destinationFingerprint))

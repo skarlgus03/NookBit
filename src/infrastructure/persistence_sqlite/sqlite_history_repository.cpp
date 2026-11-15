@@ -408,7 +408,7 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
                 break;
             case PlanStatus::RollingBack:
                 updateSql = QStringLiteral(
-                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed','executing')");
+                    "UPDATE plans SET status = ? WHERE id = ? AND status IN ('completed','failed','cancelled','executing')");
                 fixedPreviousStates = true;
                 break;
             case PlanStatus::RolledBack:
@@ -426,6 +426,13 @@ Result<void> SqliteHistoryRepository::appendEvent(const DomainEvent& event) {
             case PlanStatus::NeedsRecovery:
                 updateSql = QStringLiteral(
                     "UPDATE plans SET status = ? WHERE id = ? AND status IN ('executing','rolling_back')");
+                fixedPreviousStates = true;
+                break;
+            case PlanStatus::Cancelled:
+                updateSql = QStringLiteral(
+                    "UPDATE plans SET status = ? WHERE id = ? AND status = 'executing' "
+                    "AND NOT EXISTS (SELECT 1 FROM steps WHERE plan_id = plans.id "
+                    "AND status NOT IN ('planned','skipped','applied','failed'))");
                 fixedPreviousStates = true;
                 break;
             default: break;
@@ -866,7 +873,7 @@ Result<HistorySearchPage> SqliteHistoryRepository::searchHistory(const HistorySe
         "CASE WHEN :term='' THEN 0 ELSE (SELECT COUNT(*) FROM steps s WHERE s.plan_id=p.id AND "
         "(instr(lower(replace(s.source_path,char(92),'/')),:term)>0 OR "
         "instr(lower(replace(s.destination_path,char(92),'/')),:term)>0)) END AS matches "
-        "FROM plans p WHERE p.status IN ('executing','completed','rolling_back','rolled_back','needs_recovery','failed')) "
+        "FROM plans p WHERE p.status IN ('executing','completed','rolling_back','rolled_back','needs_recovery','failed','cancelled')) "
         "SELECT id,activity,status,files,applied,matches FROM summary WHERE (%1) AND (:term='' OR matches>0) "
         "AND (:from='' OR julianday(activity)>=julianday(:from)) AND (:until='' OR julianday(activity)<julianday(:until)) "
         "AND (:cursor='' OR activity %2 :cursor OR (activity=:cursor AND id %2 :cursorId)) "

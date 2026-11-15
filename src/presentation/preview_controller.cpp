@@ -613,26 +613,35 @@ void PreviewController::moveApprovedFile() {
 
 // 이동 완료/실패를 화면 스레드에서 동일한 규칙으로 처리하는 함수.
 void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps, const Result<void>& result) {
+    undoCancelledSort_ = false;
     if (!result) {
         const auto current = history_.loadPlan(movedPlanId);
-        const bool cancelled = result.error().code == "transfer.cancelled";
-        if (current && (current.value().status == PlanStatus::Failed ||
-                        (cancelled && current.value().status == PlanStatus::NeedsRecovery))) {
+        const bool cancelled = current && current.value().status == PlanStatus::Cancelled;
+        int applied = 0;
+        if (current && (current.value().status == PlanStatus::Failed || cancelled)) {
             const auto& completed = current.value().steps;
+            applied = static_cast<int>(std::count_if(completed.begin(), completed.end(),
+                [](const MoveStep& step) { return step.status == StepStatus::Applied; }));
             for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
                 const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
                 if (std::any_of(completed.begin(), completed.end(), [&](const MoveStep& step) {
                     return step.status == StepStatus::Applied && step.source == path;
                 })) pendingFiles_.removeAt(index);
             }
-            if (current.value().status == PlanStatus::Failed &&
-                std::any_of(completed.begin(), completed.end(), [](const MoveStep& step) { return step.status == StepStatus::Applied; }))
+            if (applied) {
                 undoPlanId_ = movedPlanId;
+                undoCancelledSort_ = cancelled;
+            }
         }
         if (!current || current.value().status != PlanStatus::Approved) approval_.reset();
         emit recoveryReconcileRequested();
         const auto reason = reportFileOperationError(result.error());
-        message_ = cancelled ? reason : QStringLiteral("이동을 완료하지 못했어요. %1").arg(reason);
+        if (cancelled) {
+            message_ = applied ? QStringLiteral("먼저 옮긴 파일 %1개는 현재 위치에 있어요. 나머지는 대기 목록에 남아 있어요.").arg(applied)
+                               : QStringLiteral("파일을 옮기기 전에 정리를 취소했어요. 대기 목록에서 다시 시작할 수 있어요.");
+        } else {
+            message_ = QStringLiteral("이동을 완료하지 못했어요. %1").arg(reason);
+        }
         emit previewChanged();
         emit sortExecutionFinished(false, message_);
         return;
@@ -669,7 +678,7 @@ void PreviewController::undoLastMove() {
         if (!result) {
             const auto current = history_.loadPlan(id);
             if (current && current.value().status != PlanStatus::Completed &&
-                current.value().status != PlanStatus::Failed) {
+                current.value().status != PlanStatus::Failed && current.value().status != PlanStatus::Cancelled) {
                 undoPlanId_.reset();
             }
             message_ = QStringLiteral("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
@@ -687,7 +696,8 @@ void PreviewController::refreshLastUndoAfterHistoryRollback(const QString& planI
     if (!undoPlanId_ || *undoPlanId_ != planId.toStdString()) return;
     const auto current = history_.loadPlan(*undoPlanId_);
     if (!current || (current.value().status != PlanStatus::Completed &&
-                     current.value().status != PlanStatus::Failed)) {
+                     current.value().status != PlanStatus::Failed &&
+                     current.value().status != PlanStatus::Cancelled)) {
         undoPlanId_.reset();
         emit previewChanged();
     }

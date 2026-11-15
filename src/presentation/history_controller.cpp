@@ -25,6 +25,7 @@ QString historyStatusText(PlanStatus status) {
     case PlanStatus::Completed: return QStringLiteral("이동 완료");
     case PlanStatus::RolledBack: return QStringLiteral("되돌림 완료");
     case PlanStatus::Failed: return QStringLiteral("이동 실패");
+    case PlanStatus::Cancelled: return QStringLiteral("정리 취소");
     case PlanStatus::NeedsRecovery: return QStringLiteral("확인 필요");
     case PlanStatus::Executing: return QStringLiteral("실행 중단");
     case PlanStatus::RollingBack: return QStringLiteral("되돌리기 중단");
@@ -92,7 +93,8 @@ QString HistoryController::selectedHistoryPlanId() const {
 bool HistoryController::canUndoSelectedHistory() const noexcept {
     if (!selectedHistoryPlan_ ||
         (selectedHistoryPlan_->status != PlanStatus::Completed &&
-         selectedHistoryPlan_->status != PlanStatus::Failed)) return false;
+         selectedHistoryPlan_->status != PlanStatus::Failed &&
+         selectedHistoryPlan_->status != PlanStatus::Cancelled)) return false;
     return std::any_of(selectedHistoryPlan_->steps.begin(), selectedHistoryPlan_->steps.end(),
         [](const MoveStep& step) { return step.status == StepStatus::Applied; });
 }
@@ -240,8 +242,13 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         row.insert(QStringLiteral("statusTone"), historyStatusTone(step.status));
         row.insert(QStringLiteral("applied"), step.status == StepStatus::Applied);
         row.insert(QStringLiteral("rolledBack"), step.status == StepStatus::RolledBack);
-        if (step.failure) row["status"] = historyStepStatusText(step.status) + QStringLiteral(" · ")
-            + fileOperationErrorText(*step.failure);
+        if (step.failure && step.failure->code == "transfer.cancelled") {
+            row["status"] = QStringLiteral("취소됨");
+            row["statusTone"] = QStringLiteral("neutral");
+        } else if (step.failure) {
+            row["status"] = historyStepStatusText(step.status) + QStringLiteral(" · ")
+                + fileOperationErrorText(*step.failure);
+        }
         historySteps_.append(row);
     }
     historyMessage_ = canUndoSelectedHistory()
