@@ -46,6 +46,24 @@ std::wstring toWide(std::string_view text) {
         return {};
     return result;
 }
+
+// 파일명 비교용 복사본을 NFC로 합성하고 실패하면 원래 문자열을 사용하는 함수.
+std::wstring normalizeName(std::wstring text) {
+    if (text.empty()) return text;
+    const int length = static_cast<int>(text.size());
+    const int estimate = NormalizeString(NormalizationC, text.data(), length, nullptr, 0);
+    if (estimate <= 0) return text;
+    std::wstring normalized(static_cast<std::size_t>(estimate), L'\0');
+    int written = NormalizeString(NormalizationC, text.data(), length, normalized.data(), estimate);
+    if (written < -estimate && written != std::numeric_limits<int>::min() &&
+        GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+        normalized.resize(static_cast<std::size_t>(-written));
+        written = NormalizeString(NormalizationC, text.data(), length, normalized.data(), -written);
+    }
+    if (written <= 0) return text;
+    normalized.resize(static_cast<std::size_t>(written));
+    return normalized;
+}
 #endif
 
 // Windows에서는 시스템의 유니코드 대소문자 규칙으로 이름을 비교하는 함수.
@@ -85,6 +103,23 @@ std::string utf8Path(const std::filesystem::path& path) {
     result.reserve(value.size());
     for (const char8_t character : value) result.push_back(static_cast<char>(character));
     return result;
+}
+
+// 글롭의 유니코드 코드포인트 비교를 위해 NFC 결과를 UTF-8로 반환하는 함수.
+std::string normalizedGlobText(std::string_view text) {
+#ifdef _WIN32
+    if (hasNonAscii(text)) {
+        const auto wide = normalizeName(toWide(text));
+        const auto length = static_cast<int>(wide.size());
+        const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), length, nullptr, 0, nullptr, nullptr);
+        if (size > 0) {
+            std::string normalized(static_cast<std::size_t>(size), '\0');
+            if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), length,
+                                    normalized.data(), size, nullptr, nullptr) > 0) return normalized;
+        }
+    }
+#endif
+    return std::string(text);
 }
 
 // 별표와 물음표를 지원하는 파일명 패턴을 비교하는 함수.
@@ -127,8 +162,8 @@ bool containsIgnoringCase(std::string_view text, std::string_view expected) {
     if (expected.empty()) return true;
 #ifdef _WIN32
     if (hasNonAscii(text) || hasNonAscii(expected)) {
-        const auto wideText = toWide(text);
-        const auto wideExpected = toWide(expected);
+        const auto wideText = normalizeName(toWide(text));
+        const auto wideExpected = normalizeName(toWide(expected));
         return !wideText.empty() && !wideExpected.empty() &&
             FindStringOrdinal(FIND_FROMSTART, wideText.data(), static_cast<int>(wideText.size()),
                               wideExpected.data(), static_cast<int>(wideExpected.size()), TRUE) >= 0;
@@ -153,9 +188,9 @@ bool matchesRule(const Condition& rule, const FileFact& file, std::int64_t nowUt
         if (!found) return false;
     }
     if (!rule.fileNameGlobs.empty()) {
-        const auto fileName = utf8Path(path.filename());
+        const auto fileName = normalizedGlobText(utf8Path(path.filename()));
         const bool found = std::any_of(rule.fileNameGlobs.begin(), rule.fileNameGlobs.end(),
-            [&fileName](const std::string& glob) { return matchesGlob(glob, fileName); });
+            [&fileName](const std::string& glob) { return matchesGlob(normalizedGlobText(glob), fileName); });
         if (!found) return false;
     }
     if (file.fingerprint.directory && (rule.minimumBytes || rule.maximumBytes)) return false;

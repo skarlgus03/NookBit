@@ -51,6 +51,9 @@ target_include_directories(nookbit_core
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_compile_features(nookbit_core PUBLIC cxx_std_20)
+if(WIN32)
+  target_link_libraries(nookbit_core PRIVATE normaliz)
+endif()
 
 add_library(nookbit_filesystem STATIC
   infrastructure/diagnostics/operation_timing.cpp

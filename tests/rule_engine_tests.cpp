@@ -78,15 +78,36 @@ void testUnicodeFileNames() {
     rules.rules[0].fileNameGlobs = {"RESUME.*"};
     expect(!matches(), "legacy glob still distinguishes accents");
 
+    const auto decomposedName = std::filesystem::path(u8"\u1107\u1169\u1100\u1169\u1109\u1165.TXT");
+    file.relativePath = decomposedName;
+    rules.rules[0].fileNameGlobs = {"보고서*"};
+    expect(matches(), "a composed glob matches a decomposed Korean filename");
+    rules.rules[0].fileNameGlobs = {"???.txt"};
+    expect(matches(), "wildcards count Korean code points after NFC composition");
+    rules.rules[0].fileNameGlobs = {"??????.txt"};
+    expect(!matches(), "decomposed jamo are not counted separately after composition");
+    file.relativePath = std::filesystem::path(u8"보고서.txt");
+    rules.rules[0].fileNameGlobs = {"\u1107\u1169\u1100\u1169\u1109\u1165.*"};
+    expect(matches(), "a decomposed glob matches a composed Korean filename");
+
     nookbit::RuleNode node;
     node.id = "unicode-atomic";
     node.atomicCondition = nookbit::NameContainsPredicate{"ÉSUM"};
     node.destination = nookbit::RuleDestination{L"Sorted", std::nullopt};
     rules.schemaVersion = 3;
     rules.nodes = {node};
+    file.relativePath = std::filesystem::path(u8"Résumé.TXT");
     expect(matches(), "name contains compares accented text case-insensitively");
     rules.nodes[0].atomicCondition = nookbit::NameContainsPredicate{"ESUM"};
     expect(!matches(), "name contains still distinguishes accents");
+    rules.nodes[0].atomicCondition = nookbit::NameContainsPredicate{"보고서"};
+    file.relativePath = decomposedName;
+    expect(matches(), "composed Korean substring matches a decomposed filename");
+    rules.nodes[0].atomicCondition = nookbit::NameContainsPredicate{"\u1107\u1169\u1100\u1169\u1109\u1165"};
+    file.relativePath = std::filesystem::path(u8"보고서.txt");
+    expect(matches(), "decomposed Korean substring matches a composed filename");
+    rules.nodes[0].atomicCondition = nookbit::NameContainsPredicate{"보고소"};
+    expect(!matches(), "normalization still distinguishes different Korean syllables");
 
     rules.nodes[0].atomicCondition = nookbit::SourceFolderPredicate{
         std::filesystem::path(u8"C:/Input/École"), true};
@@ -94,6 +115,10 @@ void testUnicodeFileNames() {
     expect(matches(), "source folder compares accented components case-insensitively");
     file.absolutePath = std::filesystem::path(u8"C:/input/école-backup/file.txt");
     expect(!matches(), "source folder still requires a full component match");
+    rules.nodes[0].atomicCondition = nookbit::SourceFolderPredicate{
+        std::filesystem::path(u8"C:/Input/보고서"), true};
+    file.absolutePath = std::filesystem::path(u8"C:/Input/\u1107\u1169\u1100\u1169\u1109\u1165/notes.txt");
+    expect(!matches(), "canonically equivalent directory names remain distinct for source path checks");
 #endif
 }
 
