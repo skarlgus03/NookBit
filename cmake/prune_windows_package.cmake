@@ -22,6 +22,15 @@ function(nookbit_exclude_runtime relative_path)
   endif()
 endfunction()
 
+# 배포 대상에 없는 DLL은 이전 패키지에서도 제거한다.
+foreach(runtime IN ITEMS Qt6Quick3DUtils.dll dxcompiler.dll dxil.dll)
+  nookbit_exclude_runtime("${runtime}")
+endforeach()
+
+if(NOT NOOKBIT_COMPACT_PACKAGE)
+  return()
+endif()
+
 # main.cpp에서 Basic을 고정한다. 스타일을 바꾸면 이 목록도 함께 수정해야 한다.
 foreach(style IN ITEMS Fusion Imagine Material Universal FluentWinUI3 Windows)
   nookbit_exclude_runtime("qml/QtQuick/Controls/${style}")

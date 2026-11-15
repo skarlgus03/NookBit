@@ -1,0 +1,36 @@
+Windows distribution notices
+============================
+
+This package uses Qt 6.11.2 (MSVC 2022 x64) under the GNU Lesser General
+Public License, version 3. Copyright (C) The Qt Company Ltd. and other
+contributors. The license texts are in LGPL-3.0.txt and GPL-3.0.txt.
+
+Corresponding Qt source for this build:
+  https://download.qt.io/archive/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz
+  https://download.qt.io/archive/qt/6.11/6.11.2/submodules/qtdeclarative-everywhere-src-6.11.2.tar.xz
+  https://download.qt.io/archive/qt/6.11/6.11.2/submodules/qtsvg-everywhere-src-6.11.2.tar.xz
+  Qt PDF, when present, is built from Qt WebEngine's Qt PDF sources, which
+  include Chromium and PDFium:
+  https://download.qt.io/archive/qt/6.11/6.11.2/submodules/qtwebengine-everywhere-src-6.11.2.tar.xz
+
+Qt is dynamically linked. To replace the library, close the app and work
+from a writable copy of the extracted distribution. Replace the applicable
+DLLs and related plugins or QML modules with interface-compatible Windows
+x64 builds, then launch nookbit.exe from that copy. You may modify or replace
+the LGPL libraries and reverse engineer the application to debug your changes
+to those libraries under the terms of the LGPL.
+
+Qt-third-party.txt includes notices from the Qt and Qt PDF 6.11.2
+documentation. The Qt SDK SPDX files identify the sources and configurations
+of the shipped Qt modules.
+
+The optional OpenGL software renderer opengl32sw.dll from the Qt SDK
+contains Mesa 11.2.2 and LLVM 3.6.2. See Mesa-11.2.2.txt and LLVM-3.6.2.txt.
+  https://archive.mesa3d.org/older-versions/11.x/11.2.2/
+  https://releases.llvm.org/3.6.2/
+  https://download.qt.io/development_releases/prebuilt/llvmpipe/windows/
+
+The Microsoft Direct3D shader compiler and Visual C++ Redistributable
+are Microsoft components distributed under their applicable terms:
+  https://learn.microsoft.com/windows/win32/directx-sdk--august-2009-
+  https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files

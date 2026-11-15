@@ -31,7 +31,9 @@ Close NookBit fully before replacing its application folder with an update.
 Licenses
 NookBit's original code, documentation, Nmoo artwork and application icon are
 available under the MIT License in LICENSE. Third-party components retain their
-own licenses. The bundled font's notice is in licenses/NotoSansKR-OFL.txt.
+own licenses. Qt is used under LGPL v3. See licenses/qt/Qt-source-and-runtime.txt
+for the corresponding source, library replacement and third-party notices.
+The bundled font's notice is in licenses/NotoSansKR-OFL.txt.
 
 Feedback
 Report the version, the steps you followed, what you expected, and what happened.

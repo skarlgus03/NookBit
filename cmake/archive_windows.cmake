@@ -7,7 +7,10 @@ endif()
 if(NOT NOOKBIT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")
   message(FATAL_ERROR "Invalid NookBit archive version.")
 endif()
-foreach(required README.txt version.json LICENSE licenses/NotoSansKR-OFL.txt imagepacks/nmoo/imagepack.json Qt6Core.dll platforms/qwindows.dll)
+foreach(required IN ITEMS README.txt version.json LICENSE licenses/NotoSansKR-OFL.txt
+    licenses/qt/LGPL-3.0.txt licenses/qt/GPL-3.0.txt licenses/qt/Qt-third-party.txt
+    licenses/qt/Qt-source-and-runtime.txt licenses/qt/Mesa-11.2.2.txt licenses/qt/LLVM-3.6.2.txt
+    imagepacks/nmoo/imagepack.json Qt6Core.dll platforms/qwindows.dll)
   if(NOT EXISTS "${package_root}/${required}")
     message(FATAL_ERROR "Required package file is missing: ${required}")
   endif()
