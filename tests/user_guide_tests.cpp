@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         ruleCursor = ruleEnd + 3;
     }
     if (ruleExampleCount < 2 || !checkedFolderExample) return 1;
-    const auto character = guides.text("character");
+    const auto character = guides.text("character").replace("\r\n", "\n");
     const auto begin = character.indexOf("```json\n") + 8;
     const auto end = character.indexOf("```", begin);
     if (begin < 8 || end < begin) return 1;
