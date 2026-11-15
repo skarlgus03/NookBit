@@ -58,6 +58,16 @@ private:
         bool sourceContentAtCopyOpen = false);
     /// 다른 볼륨으로 파일을 옮기고 승인된 계획에 완료가 기록됐는지 확인하는 함수.
     [[nodiscard]] Result<void> executeVerifiedCopy(const OperationPlan& plan, const MoveStep& step);
+    /// 폴더 이동을 실행하고 이동 완료 또는 기록된 개별 실패를 반환하는 함수.
+    [[nodiscard]] Result<bool> executeDirectoryMove(const OperationPlan& plan, const MoveStep& step);
+    /// 내용 검증이 필요한 파일 이름 변경과 완료 기록을 처리하는 함수.
+    [[nodiscard]] Result<void> executeCheckedRename(const OperationPlan& plan, const MoveStep& step,
+        const std::vector<const MoveStep*>& applied);
+    /// 아직 옮긴 파일이 없으면 실패를 기록하고, 있으면 원래 위치로 되돌리는 함수.
+    [[nodiscard]] Result<void> stopPreparedBatch(const OperationPlan& plan,
+        const std::vector<const MoveStep*>& applied, const Error& error, const char* rolledBackMessage);
+    /// 새 임시 경로를 지정해 승인된 복사 이동을 반대로 실행하는 함수.
+    [[nodiscard]] Result<void> reverseVerifiedCopy(const OperationPlan& plan, const MoveStep& step);
     /// v2의 승인된 볼륨과 이동 전략을 실제 실행 직전에 재검사하는 함수.
     [[nodiscard]] Result<void> verifyMovement(const OperationPlan& plan, const MoveStep* step = nullptr);
     /// 이미 적용된 단계들을 검증하고 역순으로 되돌려 최종 상태를 기록하는 함수.
@@ -69,6 +79,8 @@ private:
 
     /// 확인 불가 상태를 기록하고 작업을 중단하는 함수.
     [[nodiscard]] Result<void> markNeedsRecovery(const PlanId& planId);
+    /// 복구 필요를 기록하고, 기록이 성공하면 원래 실패 사유를 반환하는 함수.
+    [[nodiscard]] Error recoveryError(const PlanId& planId, Error error);
 
     ISettingsRepository& settings_;
     IVerifySavedPlanUseCase* verifier_;

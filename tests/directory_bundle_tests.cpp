@@ -114,7 +114,7 @@ struct CountingDirectoryHasher final : nookbit::IPlanHasher {
     }
 };
 /// 기존 승인·SQLite 기록·실행·되돌리기 흐름이 폴더에도 그대로 적용되는지 검사하는 함수.
-void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
+void testApprovedWorkflow(bool sameVolume, bool lateCollision, bool singleFolder = false) {
     QTemporaryDir from;
     QTemporaryDir to(QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/out/folder-workflow-XXXXXX");
     if (!from.isValid() || !to.isValid()) { expect(false, "workflow fixtures"); return; }
@@ -135,7 +135,8 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     }
     nookbit::SqliteHistoryRepository history(from.filePath("history.sqlite"),
         QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql");
-    std::vector<std::filesystem::path> selected{base / "bundle-one", base / "bundle-two"};
+    std::vector<std::filesystem::path> selected{base / "bundle-one"};
+    if (!singleFolder) selected.push_back(base / "bundle-two");
     for (const auto& path : selected) { std::filesystem::create_directories(path / "empty"); write(path / "data.txt", "workflow"); }
     nookbit::CreatePreviewUseCase preview(rules, scanner, planner, &hasher, &volumes);
     auto draft = preview.execute({{}, selected, settings.value.homeRoot});
@@ -160,18 +161,20 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     const auto result = executor.execute(approved.value(), approval.value(), selected);
     expect(bool(result) != lateCollision, result ? "workflow succeeds" : "workflow result: " + result.error().code + ": " + result.error().message);
     const auto after = history.loadPlan(frozen.value().id);
-    expect(after && after.value().steps[1].status == nookbit::StepStatus::Applied, "second folder still moves");
+    expect(after && after.value().steps.size() == selected.size() &&
+        after.value().steps.back().status == nookbit::StepStatus::Applied, "last planned folder moves");
     if (!after) return;
     expect(after.value().status == (lateCollision ? nookbit::PlanStatus::Failed : nookbit::PlanStatus::Completed), "folder plan final state");
     hasher.reads = 0;
     const auto undone = executor.rollback(after.value().id);
     if (!sameVolume && undone) {
-        const auto restored = lateCollision ? 1 : 2;
+        const auto restored = lateCollision ? 1 : static_cast<int>(selected.size());
         std::cout << "cross_volume_folder_undo_digest_reads_per_folder=" << hasher.reads / restored << '\n';
         expect(hasher.reads == restored * 6, "cross-volume undo reuses the verified folder fingerprint");
     }
     expect(undone.hasValue(), undone ? "undo success" : "workflow undo: " + undone.error().code + ": " + undone.error().message);
-    expect(std::filesystem::exists(selected[0] / "data.txt") && std::filesystem::exists(selected[1] / "data.txt"), "undo preserves original folder trees");
+    for (const auto& folder : selected)
+        expect(std::filesystem::exists(folder / "data.txt"), "undo preserves the original folder tree");
 }
 
 /// 승인 뒤 내용 변경과 제거 직전 새 파일 추가에도 사용자 데이터가 사라지지 않는지 검사하는 함수.
@@ -212,6 +215,7 @@ int main(int argc, char** argv) {
     testApprovedWorkflow(true, true);
     testApprovedWorkflow(false, false);
     testApprovedWorkflow(false, true);
+    testApprovedWorkflow(false, false, true);
     testConcurrentChanges(false);
     testConcurrentChanges(true);
     return failures == 0 ? 0 : 1;
