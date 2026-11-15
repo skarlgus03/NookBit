@@ -22,11 +22,12 @@ enum class FileProbe {
     const std::filesystem::path& path,
     const IPlanHasher* hasher = nullptr);
 
-/// 파일이 없거나, 같은 파일이거나, 다른 파일인지 구분하는 함수.
+/// 파일의 상태를 구분하고 일치할 때만 요청받은 현재 지문을 돌려주는 함수.
 [[nodiscard]] FileProbe probeFile(
     IScanner& scanner,
     const std::filesystem::path& path,
     const FileFingerprint& expected,
-    const IPlanHasher* hasher = nullptr);
+    const IPlanHasher* hasher = nullptr,
+    FileFingerprint* matchedFingerprint = nullptr);
 
 } // namespace nookbit

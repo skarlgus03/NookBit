@@ -100,6 +100,19 @@ struct Settings final : nookbit::ISettingsRepository {
     /// 시험용 설정을 갱신하는 함수.
     nookbit::Result<void> save(const nookbit::UserSettings& settings) override { value = settings; return nookbit::Result<void>::success(); }
 };
+
+// 실제 폴더 내용을 검증하면서 되돌리기가 요청한 전체 지문 횟수를 세는 일꾼.
+struct CountingDirectoryHasher final : nookbit::IPlanHasher {
+    nookbit::QtPlanHasher native;
+    mutable int reads{};
+    // 승인 기록의 해시를 계산하는 함수.
+    std::string sha256(std::string_view text) const override { return native.sha256(text); }
+    // 승인된 폴더의 지문을 실제로 읽고 횟수를 더하는 함수.
+    nookbit::Result<std::string> sha256File(const std::filesystem::path& path) const override {
+        ++reads;
+        return native.sha256File(path);
+    }
+};
 /// 기존 승인·SQLite 기록·실행·되돌리기 흐름이 폴더에도 그대로 적용되는지 검사하는 함수.
 void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     QTemporaryDir from;
@@ -108,7 +121,7 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     const auto base = std::filesystem::path(from.path().toStdWString());
     const auto appData = base / "app-data";
     Settings settings; settings.value.homeRoot = sameVolume ? base / "organized" : std::filesystem::path(to.path().toStdWString());
-    Rules rules; nookbit::FilesystemScanner scanner; nookbit::QtPlanHasher hasher;
+    Rules rules; nookbit::FilesystemScanner scanner; CountingDirectoryHasher hasher;
     nookbit::RuleEngine engine; nookbit::Planner planner(engine, appData, nookbit::CrossVolumeDrafts::Allow);
     nookbit::WindowsStagedCopy volumes;
     if (!sameVolume) {
@@ -150,7 +163,13 @@ void testApprovedWorkflow(bool sameVolume, bool lateCollision) {
     expect(after && after.value().steps[1].status == nookbit::StepStatus::Applied, "second folder still moves");
     if (!after) return;
     expect(after.value().status == (lateCollision ? nookbit::PlanStatus::Failed : nookbit::PlanStatus::Completed), "folder plan final state");
+    hasher.reads = 0;
     const auto undone = executor.rollback(after.value().id);
+    if (!sameVolume && undone) {
+        const auto restored = lateCollision ? 1 : 2;
+        std::cout << "cross_volume_folder_undo_digest_reads_per_folder=" << hasher.reads / restored << '\n';
+        expect(hasher.reads == restored * 6, "cross-volume undo reuses the verified folder fingerprint");
+    }
     expect(undone.hasValue(), undone ? "undo success" : "workflow undo: " + undone.error().code + ": " + undone.error().message);
     expect(std::filesystem::exists(selected[0] / "data.txt") && std::filesystem::exists(selected[1] / "data.txt"), "undo preserves original folder trees");
 }

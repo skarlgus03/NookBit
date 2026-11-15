@@ -530,7 +530,10 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
             if (!marked) return marked;
             return currentMovement;
         }
-        if (probeFile(scanner_, step->destination, step->fingerprint, &hasher_) != FileProbe::Matches ||
+        const bool copyFolder = step->fingerprint.directory && step->movement &&
+            step->movement->strategy == MoveStrategy::VerifiedCopy;
+        FileFingerprint verifiedFolder;
+        if (probeFile(scanner_, step->destination, step->fingerprint, &hasher_, copyFolder ? &verifiedFolder : nullptr) != FileProbe::Matches ||
             probeFile(scanner_, step->source, step->fingerprint, &hasher_) != FileProbe::Missing) {
             auto marked = markNeedsRecovery(plan.id);
             if (!marked) return marked;
@@ -538,12 +541,9 @@ Result<void> SafeExecutor::rollbackAppliedSteps(
                 "rollback.needs_recovery", "A file changed during undo; review is required.",
             });
         }
-        auto moved = step->fingerprint.directory && step->movement && step->movement->strategy == MoveStrategy::VerifiedCopy
-            ? [&]() {
-                auto current = scanFingerprint(scanner_, step->destination, &hasher_);
-                if (!current) return Result<void>::failure(current.error());
-                return WindowsDirectoryMover::move(step->destination, step->source, current.value(), scanner_, hasher_);
-            }()
+        // 복사 실행기는 방금 검증한 폴더 지문을 받고 보호 핸들 아래에서 내용을 다시 확인한다.
+        auto moved = copyFolder
+            ? WindowsDirectoryMover::move(step->destination, step->source, verifiedFolder, scanner_, hasher_)
             : PlanSignature::isMetadataRenamePlan(plan)
             ? WindowsFileMover::moveMatchingNoReplace(step->destination, step->source, step->fingerprint)
             : WindowsFileMover::moveNoReplace(step->destination, step->source);
