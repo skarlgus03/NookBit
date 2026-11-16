@@ -55,7 +55,7 @@ private:
     /// 최초 실행과 복구 실행이 같은 단계 이동·보상·완료 기록을 공유하는 함수.
     [[nodiscard]] Result<void> executePreparedSteps(const OperationPlan& plan,
         const std::vector<const MoveStep*>& steps, std::vector<const MoveStep*> appliedSteps,
-        bool sourceContentAtCopyOpen = false);
+        bool sourceContentBeforeCommit = false);
     /// 다른 볼륨으로 파일을 옮기고 승인된 계획에 완료가 기록됐는지 확인하는 함수.
     [[nodiscard]] Result<void> executeVerifiedCopy(const OperationPlan& plan, const MoveStep& step);
     /// 확정되지 않은 단계 없이 취소를 기록하고 완료된 이동은 보존하는 함수.

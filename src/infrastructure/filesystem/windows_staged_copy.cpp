@@ -46,6 +46,7 @@ Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::o
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace nookbit {
@@ -1287,11 +1288,12 @@ TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::fil
 // 지원 범위와 원본을 검사한 뒤 독점적인 새 임시 파일 세션을 만드는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract* movement) {
-    TimingStage opening("protected_copy_open", expected.size);
+    TimingStage opening("protected_copy_open");
     OperationProgressScope::phase(OperationPhase::ProtectingSource);
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
     if (!validPath(source) || !validPath(staging) || staging.filename().empty() ||
-        !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId)
+        !expected.sha256 || expected.sha256->size() != 64 || !expected.volumeId || !expected.fileId ||
+        expected.size > static_cast<std::uintmax_t>((std::numeric_limits<LONGLONG>::max)()))
         return Return::failure({"transfer.path", "Absolute ordinary paths and full source evidence required"});
     std::vector<Handle> locks;
     const auto sourceParents = lockParents(source, locks);
@@ -1320,14 +1322,13 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
         (movement->preservation != PreservationPolicy::LocalNtfsBasic && movement->preservation != PreservationPolicy::LocalNtfsBasicWithZone) ||
         !approvedVolume(sourceVolume.value(), movement->sourceVolume)))
         return Return::failure({"transfer.volume_changed", "Protected copy volume differs from approval."});
-    auto fp = fingerprint(input.value);
+    const auto fp = fingerprint(input.value);
     if (!fp) return Return::failure(fp.error());
-    const auto hash = digest(input.value, {});
-    if (!hash) return Return::failure(hash.error());
-    fp.value().sha256 = hash.value();
-    if (!sameFingerprint(expected, fp.value()))
-        return Return::failure({"transfer.source_changed", "Source no longer matches approved evidence"});
-    // 원본 객체·내용·계약을 확인하기 전에는 목적지 폴더를 생성하지 않는다.
+    auto expectedMetadata = expected;
+    expectedMetadata.sha256.reset();
+    if (!sameFingerprint(expectedMetadata, fp.value()))
+        return Return::failure({"transfer.source_changed", "Source metadata no longer matches approved evidence"});
+    // 객체와 볼륨을 확인한 뒤 임시 파일을 준비한다. 내용은 보호된 원본에서 복사하며 검증한다.
     const auto targetParents = movement ? prepareApprovedParents(staging, movement->destinationVolume, locks) : lockParents(staging, locks);
     if (!targetParents) return Return::failure(targetParents.error());
     const auto targetVolume = volume(locks.back().value);
@@ -1340,6 +1341,20 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     Handle output(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (output.value == INVALID_HANDLE_VALUE) return Return::failure(failure("transfer.staging_create"));
+    if (expected.size > 0) {
+        TimingStage reserve("staging_allocate", expected.size);
+        // 공간만 확보한다. 논리 크기는 복사된 바이트 수를 나타내며 이어쓰기에서 사용한다.
+        FILE_ALLOCATION_INFO allocation{};
+        allocation.AllocationSize.QuadPart = static_cast<LONGLONG>(expected.size);
+        if (!SetFileInformationByHandle(output.value, FileAllocationInfo, &allocation, sizeof(allocation))) {
+            auto error = failure("transfer.staging_create");
+            // 아직 기록되지 않은 이 세션의 새 임시 객체만 제거한다.
+            FILE_DISPOSITION_INFO discard{TRUE};
+            if (!SetFileInformationByHandle(output.value, FileDispositionInfo, &discard, sizeof(discard)))
+                error.message += "; newly created staging could not be discarded";
+            return Return::failure(std::move(error));
+        }
+    }
     const auto initial = fingerprint(output.value);
     if (!initial) return Return::failure(initial.error());
     auto session = std::make_unique<Session>(std::move(locks), std::move(input), std::move(output), expected, initial.value(), basic, source, staging);

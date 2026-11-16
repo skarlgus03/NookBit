@@ -8,8 +8,8 @@ class ITransferStepExecutor {
 public:
     /// 외부에서 소유한 전송 실행 기능을 해제하는 함수.
     virtual ~ITransferStepExecutor() = default;
-    /// 승인 원본의 내용 검증을 임시 파일 생성 전 보호 세션에서 수행하는지 반환하는 함수.
-    [[nodiscard]] virtual bool verifiesSourceBeforeStaging() const { return false; }
+    /// 승인 원본의 내용 검증을 최종 이름 확정 전 보호 세션에서 수행하는지 반환하는 함수.
+    [[nodiscard]] virtual bool verifiesSourceBeforeCommit() const { return false; }
     /// 의도가 기록된 승인 단계 하나를 새 전송 시도로 실행하는 함수.
     [[nodiscard]] virtual Result<void> execute(const PlanId& planId, const StepId& stepId,
         const std::string& attemptId, const std::filesystem::path& staging) = 0;
@@ -22,7 +22,7 @@ public:
     ExecuteTransferStepUseCase(IStagedCopy& copy, ITransferSourceRemoval& removal,
         ITransferJournal& journal, const IHistoryRepository& history, const IPlanHasher& hasher);
     /// 주입된 복사 일꾼의 보호 검증 보장을 구체 구현을 모르고 전달하는 함수.
-    [[nodiscard]] bool verifiesSourceBeforeStaging() const override { return copy_.verifiesSourceBeforeStaging(); }
+    [[nodiscard]] bool verifiesSourceBeforeCommit() const override { return copy_.verifiesSourceBeforeCommit(); }
     /// 호출자가 작업 잠금을 가진 상태에서 저장된 실행 의도 하나를 완료하는 함수.
     [[nodiscard]] Result<void> execute(const PlanId& planId, const StepId& stepId,
         const std::string& attemptId, const std::filesystem::path& staging) override;

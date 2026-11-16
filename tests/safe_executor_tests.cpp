@@ -365,7 +365,7 @@ public:
     bool fail{false};
     bool protectedChecks{false};
     // 원본을 실제 native 보호 세션으로 검사하는 테스트에서만 보장을 선언하는 함수.
-    bool verifiesSourceBeforeStaging() const override { return protectedChecks; }
+    bool verifiesSourceBeforeCommit() const override { return protectedChecks; }
     // 실제 볼륨 조회를 전달하는 함수.
     nookbit::Result<nookbit::TransferVolume> inspectVolume(const std::filesystem::path& path) override { return volumes ? volumes->inspectVolume(path) : native.inspectVolume(path); }
     // 승인 없는 API가 호출되면 테스트를 실패시키는 함수.
@@ -902,7 +902,7 @@ void testDeferredCopyChecks(int scenario) {
     LogicalCopy copy; copy.volumes = &volumes; copy.protectedChecks = scenario != 3 && scenario != 7;
     LogicalRemoval removal;
     ExecuteTransferStepUseCase transfer(copy, removal, journal, history, hasher);
-    expect(transfer.verifiesSourceBeforeStaging() == copy.protectedChecks, "copy capability propagated through use-case port");
+    expect(transfer.verifiesSourceBeforeCommit() == copy.protectedChecks, "copy capability propagated through use-case port");
     if (scenario == 1) mutate();
     if (scenario == 2) changing.onIntent = mutate;
     if (scenario == 5) settings.settings.defaultCollisionPolicy = CollisionPolicy::Skip;
@@ -917,12 +917,13 @@ void testDeferredCopyChecks(int scenario) {
         expect(attempts && attempts.value().size() == 1 && attempts.value()[0].phase == TransferPhase::Completed,
             "successful deferred copy records completion");
     } else if (scenario == 1 || scenario == 2) {
-        expect(!result && result.error().code == "transfer.source_changed", "protected open detects metadata-invisible source change");
+        expect(!result && result.error().code == "transfer.source_changed", "protected streaming verification detects metadata-invisible source change");
         expect(QFile::exists(source) && readFile(source) == QByteArray(original.size(), 'x') && !QFile::exists(destination),
             "changed source retained and no final destination created");
-        expect(attempts && attempts.value().size() == 1 && !std::filesystem::exists(attempts.value()[0].staging) &&
+        expect(attempts && attempts.value().size() == 1 && attempts.value()[0].phase == TransferPhase::Failed &&
+            attempts.value()[0].stagingFingerprint && std::filesystem::exists(attempts.value()[0].staging) &&
             history.loadPlan(frozen.value().id).value().status == PlanStatus::NeedsRecovery,
-            "mismatch creates no staging and records uncertainty for explicit review");
+            "mismatch preserves the recorded staging file for explicit review");
     } else {
         expect(!result && copy.approvedCalls == 0 && QFile::exists(source) && !QFile::exists(destination),
             "unsupported policy, changed settings or volume reject before protected copy");

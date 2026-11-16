@@ -318,9 +318,27 @@ void testApprovedParentCreation(const std::filesystem::path& root) {
     wrong = movement; wrong.sourceVolume.serial = "0";
     expect(!worker.openApproved(source, expected, root / "wrong-source-volume" / "nested" / "stage", wrong), "wrong approved source volume rejected");
     expect(!std::filesystem::exists(root / "wrong-source-volume"), "source volume mismatch creates no folders");
-    auto stale = expected; stale.sha256 = std::string(64, '0');
-    expect(!worker.openApproved(source, stale, root / "stale-source" / "nested" / "stage", movement), "changed source rejected before parent creation");
-    expect(!std::filesystem::exists(root / "stale-source"), "source hash mismatch creates no folders");
+    auto stale = expected;
+    ++stale.size;
+    expect(!worker.openApproved(source, stale, root / "stale-source" / "nested" / "stage", movement),
+        "changed source metadata rejected before parent creation");
+    expect(!std::filesystem::exists(root / "stale-source"), "source metadata mismatch creates no folders");
+    {
+        auto wrongHash = expected;
+        wrongHash.sha256 = std::string(64, '0');
+        const auto parent = root / "changed-content" / "nested";
+        auto session = worker.openApproved(source, wrongHash, parent / "stage", movement);
+        expect(session.hasValue(), "protected opening accepts matching metadata and prepares parents");
+        if (session) {
+            const auto copied = session.value()->copyAndVerify();
+            expect(!copied && copied.error().code == "transfer.source_changed",
+                "streaming verification detects the mismatch in a newly created parent");
+            expect(!session.value()->commitNoReplace(parent / "final"), "mismatched copy cannot commit in a new parent");
+        }
+        expect(std::filesystem::is_directory(parent) && !std::filesystem::exists(parent / "final"),
+            "content mismatch retains the new parent without publishing a final file");
+        unchanged(source, expected);
+    }
     expect(!worker.open(source, expected, root / "legacy-missing" / "stage") && !std::filesystem::exists(root / "legacy-missing"),
         "unsigned legacy parent creation stays disabled");
     write(root / "file-parent", "existing file must remain");
@@ -424,7 +442,15 @@ int main(int argc, char** argv) {
         const auto staging = root / ("stage-" + std::to_string(size));
         write(source, std::string(size, 'x'));
         const auto expected = fingerprint(source);
+        IO_COUNTERS beforeOpen{}, afterOpen{};
+        const bool countedBefore = GetProcessIoCounters(GetCurrentProcess(), &beforeOpen);
         auto session = worker.open(source, expected, staging);
+        const bool countedAfter = GetProcessIoCounters(GetCurrentProcess(), &afterOpen);
+        if (size >= 2 * 1024 * 1024) {
+            expect(countedBefore && countedAfter &&
+                afterOpen.ReadTransferCount - beforeOpen.ReadTransferCount < size,
+                "normal protected opening does not read a full copy of the source");
+        }
         if (!session) std::cerr << session.error().code << ": " << session.error().message << '\n';
         expect(bool(session), "create staging session");
         if (!session) continue;
@@ -460,8 +486,27 @@ int main(int argc, char** argv) {
     const auto expected = fingerprint(source);
     auto incorrect = expected;
     incorrect.sha256 = std::string(64, '0');
-    expect(!worker.open(source, incorrect, staging), "wrong source hash rejected");
-    expect(!std::filesystem::exists(staging), "rejection before staging creation");
+    const auto mismatchStage = root / "digest-mismatch-stage";
+    const auto final = root / "digest-mismatch-final";
+    auto mismatch = worker.open(source, incorrect, mismatchStage);
+    expect(bool(mismatch), "opening the protected source does not compare its full hash");
+    if (mismatch) {
+        expect(mismatch.value()->createdFingerprint().size == 0, "allocation keeps the staging EOF at zero");
+        const HANDLE reader = CreateFileW(mismatchStage.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        FILE_STANDARD_INFO info{};
+        expect(reader != INVALID_HANDLE_VALUE &&
+            GetFileInformationByHandleEx(reader, FileStandardInfo, &info, sizeof(info)) &&
+            info.EndOfFile.QuadPart == 0 && static_cast<std::uintmax_t>(info.AllocationSize.QuadPart) >= expected.size,
+            "staging reserves the file's space without marking any bytes copied");
+        if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+        const auto verified = mismatch.value()->copyAndVerify();
+        expect(!verified && verified.error().code == "transfer.source_changed", "streaming verification rejects a mismatched hash");
+        expect(!mismatch.value()->commitNoReplace(final), "an unverified staging file cannot be committed");
+        mismatch.value().reset();
+    }
+    expect(!std::filesystem::exists(final), "mismatched copy creates no final file");
+    unchanged(source, expected);
     write(staging, "do not overwrite");
     const auto existing = fingerprint(staging);
     expect(!worker.open(source, expected, staging), "existing staging rejected");
@@ -469,6 +514,7 @@ int main(int argc, char** argv) {
     auto session = worker.open(source, expected, root / "cancel-stage");
     expect(bool(session), "cancel fixture session");
     if (session) {
+        expect(session.value()->createdFingerprint().size == 0, "cancel fixture begins at logical offset zero");
         int checks{};
         const auto cancelled = session.value()->copyAndVerify([&] { return ++checks == 2; });
         expect(!cancelled && cancelled.error().code == "transfer.cancelled", "copy cancellation reported");
