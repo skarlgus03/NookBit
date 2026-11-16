@@ -661,9 +661,14 @@ public:
         for (const auto& pair : {std::pair{source_.value, attempt_.source}, std::pair{destination_.value, attempt_.destination}}) {
             const auto supported = ordinarySource(pair.first, pair.second, allowZone_);
             if (!supported) return supported;
-            const auto& expected = pair.first == source_.value ? attempt_.sourceFingerprint : *attempt_.destinationFingerprint;
+            const bool isSource = pair.first == source_.value;
+            const auto& expected = isSource ? attempt_.sourceFingerprint : *attempt_.destinationFingerprint;
             // 재개·재열기에서는 반드시 전체 검증하며, 같은 독점 세션에서만 재사용한다.
-            const auto hash = contentsVerified_ ? Result<std::string>::success(*expected.sha256) : digest(pair.first, {});
+            const auto hash = [&] {
+                if (contentsVerified_) return Result<std::string>::success(*expected.sha256);
+                TimingStage reading(isSource ? "removal_source_digest" : "removal_destination_digest", expected.size);
+                return digest(pair.first, {});
+            }();
             const auto actual = fingerprint(pair.first);
             if (!hash || !actual) return Result<void>::failure(!hash ? hash.error() : actual.error());
             auto hashed = actual.value();

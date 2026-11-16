@@ -437,8 +437,9 @@ void testBackgroundWorkflow(const QString& sourceRoot, const QString& targetRoot
     expect(timingReport.contains("operation=move outcome=success") && timingReport.contains("approval_check") &&
         timingReport.contains("executor_plan_check"), "timing includes approval and executor checks");
     if (taggedCrossVolume) for (const auto* stage : {"protected_copy_open", "copy_stream", "copy_flush", "copy_readback",
-        "destination_commit", "removal_full_check", "source_delete_and_confirm"})
-        expect(timingReport.contains(stage), "timing includes every actual cross-volume transfer phase");
+        "destination_commit", "removal_full_check", "removal_source_digest", "removal_destination_digest",
+        "source_delete_and_confirm"})
+        expect(timingReport.contains(stage), std::string("timing includes cross-volume stage: ") + stage);
     for (const auto& source : sources) expect(!timingReport.contains(source.toUtf8()), "diagnostic report omits source paths");
     for (const auto& source : sources) expect(!QFile::exists(source), "background source moved");
     preview.undoLastMove(); expect(runner.busy(), "last undo must dispatch to background");
