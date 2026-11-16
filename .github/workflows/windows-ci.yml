@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-and-test:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -21,15 +21,17 @@ jobs:
           persist-credentials: false
 
       - name: Install Qt and Qt PDF
+        id: qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: '6.11.2'
           arch: win64_msvc2022_64
           modules: qtpdf
+          cache: true
           # This revision understands the Qt 6.11 repository layout.
           aqtsource: git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7
 
-      - name: Configure and build
+      - name: Configure and build Release
         shell: cmd
         run: |
           call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 || exit /b 1
@@ -37,5 +39,19 @@ jobs:
           cmake --preset release "-DCMAKE_PREFIX_PATH=%QT_ROOT_DIR%" || exit /b 1
           cmake --build --preset release --parallel 4 || exit /b 1
 
-      - name: Run tests
+      - name: Test Release
         run: ctest --preset release --no-tests=error --timeout 120 --output-on-failure
+
+      - name: Configure and build Debug
+        id: debug_build
+        if: ${{ !cancelled() && steps.qt.outcome == 'success' }}
+        shell: cmd
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 || exit /b 1
+          if not exist "%QT_ROOT_DIR%\lib\cmake\Qt6Pdf\Qt6PdfConfig.cmake" exit /b 1
+          cmake --preset dev "-DCMAKE_PREFIX_PATH=%QT_ROOT_DIR%" || exit /b 1
+          cmake --build --preset dev --parallel 4 || exit /b 1
+
+      - name: Test Debug
+        if: ${{ !cancelled() && steps.debug_build.outcome == 'success' }}
+        run: ctest --preset dev --no-tests=error --timeout 120 --output-on-failure

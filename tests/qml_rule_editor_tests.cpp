@@ -533,7 +533,7 @@ int main(int argc, char** argv) {
     auto* abstainHint = findMenuItem(findMenuItem, populatedItem, "ruleDocumentAbstainHint");
     auto* categoryPin = findMenuItem(findMenuItem, populatedItem, QString("ruleOutputPort_%1_%2").arg(analysisId).arg(minutes));
     expect(thresholdLabel && thresholdLabel->property("text").toString() == "0.42"
-        && abstainHint && abstainHint->property("text").toString() == QStringLiteral("기준 미달")
+        && abstainHint && abstainHint->property("text").toString() == QStringLiteral("기준 미달 · 읽기 실패")
         && populatedCard->property("height").toDouble() > analysisCard->property("height").toDouble(),
         "populated document node displays the configured threshold and expands for category rows");
     expect(categoryPin && qFuzzyCompare(categoryPin->mapToItem(populatedItem, categoryPin->boundingRect().center()).y(),

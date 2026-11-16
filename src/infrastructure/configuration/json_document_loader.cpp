@@ -36,32 +36,16 @@ bool hasType(const QJsonValue& value, const QString& type) {
     return false;
 }
 
-// Schema의 검증 규칙을 값 하나에 재귀적으로 적용하는 함수.
 Result<void> validateValue(
     const QJsonValue& value,
     const QJsonObject& schema,
     const QJsonObject& schemaRoot,
     const QString& location,
-    int depth = 0) {
-    if (depth > 128) return invalid(location, QStringLiteral("JSON nesting is too deep"));
-    if (schema.contains(QStringLiteral("$ref"))) {
-        const auto reference = schema.value(QStringLiteral("$ref")).toString();
-        if (!reference.startsWith(QStringLiteral("#/$defs/"))) {
-            return invalid(location, QStringLiteral("unsupported Schema reference"));
-        }
-        const auto name = reference.mid(8);
-        const auto definition = schemaRoot.value(QStringLiteral("$defs"))
-                                    .toObject().value(name);
-        if (!definition.isObject()) {
-            return invalid(location, QStringLiteral("missing Schema definition"));
-        }
-        return validateValue(value, definition.toObject(), schemaRoot, location, depth + 1);
-    }
+    int depth = 0);
 
-    if (schema.contains(QStringLiteral("type")) &&
-        !hasType(value, schema.value(QStringLiteral("type")).toString())) {
-        return invalid(location, QStringLiteral("incorrect JSON type"));
-    }
+// 선택지와 금지 조건을 적용하고 선택지 오류에는 해당 필드 경로를 보존한다.
+Result<void> validateChoices(const QJsonValue& value, const QJsonObject& schema,
+                             const QJsonObject& schemaRoot, const QString& location, int depth) {
     if (schema.contains(QStringLiteral("oneOf"))) {
         int matches = 0;
         std::string detail;
@@ -98,63 +82,71 @@ Result<void> validateValue(
                       schemaRoot, location, depth + 1)) {
         return invalid(location, QStringLiteral("value matches a forbidden pattern"));
     }
+    return Result<void>::success();
+}
 
-    if (value.isObject()) {
-        const auto object = value.toObject();
-        const auto required = schema.value(QStringLiteral("required")).toArray();
-        for (const auto& key : required) {
-            if (!object.contains(key.toString())) {
-                return invalid(location + QStringLiteral(".") + key.toString(),
-                               QStringLiteral("required field is missing"));
+// 객체의 필수 필드와 하위 값을 확인한다.
+Result<void> validateObject(const QJsonObject& object, const QJsonObject& schema,
+                            const QJsonObject& schemaRoot, const QString& location, int depth) {
+    const auto required = schema.value(QStringLiteral("required")).toArray();
+    for (const auto& key : required) {
+        if (!object.contains(key.toString())) {
+            return invalid(location + QStringLiteral(".") + key.toString(),
+                           QStringLiteral("required field is missing"));
+        }
+    }
+    if (schema.contains(QStringLiteral("minProperties")) &&
+        object.size() < schema.value(QStringLiteral("minProperties")).toInt()) {
+        return invalid(location, QStringLiteral("too few properties"));
+    }
+    const auto properties = schema.value(QStringLiteral("properties")).toObject();
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        if (!properties.contains(it.key())) {
+            if (schema.value(QStringLiteral("additionalProperties")).toBool(true)) {
+                continue;
             }
+            return invalid(location + QStringLiteral(".") + it.key(),
+                           QStringLiteral("unknown field"));
         }
-        if (schema.contains(QStringLiteral("minProperties")) &&
-            object.size() < schema.value(QStringLiteral("minProperties")).toInt()) {
-            return invalid(location, QStringLiteral("too few properties"));
-        }
-        const auto properties = schema.value(QStringLiteral("properties")).toObject();
-        for (auto it = object.begin(); it != object.end(); ++it) {
-            if (!properties.contains(it.key())) {
-                if (schema.value(QStringLiteral("additionalProperties")).toBool(true)) {
-                    continue;
+        auto checked = validateValue(it.value(), properties.value(it.key()).toObject(),
+                                     schemaRoot, location + QStringLiteral(".") + it.key(),
+                                     depth + 1);
+        if (!checked) return checked;
+    }
+    return Result<void>::success();
+}
+
+// 배열의 항목 수, 중복, 하위 값을 확인한다.
+Result<void> validateArray(const QJsonArray& array, const QJsonObject& schema,
+                           const QJsonObject& schemaRoot, const QString& location, int depth) {
+    if (schema.contains(QStringLiteral("minItems")) &&
+        array.size() < schema.value(QStringLiteral("minItems")).toInt()) {
+        return invalid(location, QStringLiteral("too few items"));
+    }
+    if (schema.value(QStringLiteral("uniqueItems")).toBool()) {
+        for (int i = 0; i < array.size(); ++i) {
+            for (int j = i + 1; j < array.size(); ++j) {
+                if (array.at(i) == array.at(j)) {
+                    return invalid(location, QStringLiteral("duplicate array item"));
                 }
-                return invalid(location + QStringLiteral(".") + it.key(),
-                               QStringLiteral("unknown field"));
             }
-            auto checked = validateValue(it.value(), properties.value(it.key()).toObject(),
-                                         schemaRoot, location + QStringLiteral(".") + it.key(),
-                                         depth + 1);
+        }
+    }
+    if (schema.contains(QStringLiteral("items"))) {
+        const auto itemSchema = schema.value(QStringLiteral("items")).toObject();
+        for (int i = 0; i < array.size(); ++i) {
+            auto checked = validateValue(
+                array.at(i), itemSchema, schemaRoot,
+                location + QStringLiteral("[") + QString::number(i) + QStringLiteral("]"),
+                depth + 1);
             if (!checked) return checked;
         }
     }
+    return Result<void>::success();
+}
 
-    if (value.isArray()) {
-        const auto array = value.toArray();
-        if (schema.contains(QStringLiteral("minItems")) &&
-            array.size() < schema.value(QStringLiteral("minItems")).toInt()) {
-            return invalid(location, QStringLiteral("too few items"));
-        }
-        if (schema.value(QStringLiteral("uniqueItems")).toBool()) {
-            for (int i = 0; i < array.size(); ++i) {
-                for (int j = i + 1; j < array.size(); ++j) {
-                    if (array.at(i) == array.at(j)) {
-                        return invalid(location, QStringLiteral("duplicate array item"));
-                    }
-                }
-            }
-        }
-        if (schema.contains(QStringLiteral("items"))) {
-            const auto itemSchema = schema.value(QStringLiteral("items")).toObject();
-            for (int i = 0; i < array.size(); ++i) {
-                auto checked = validateValue(
-                    array.at(i), itemSchema, schemaRoot,
-                    location + QStringLiteral("[") + QString::number(i) + QStringLiteral("]"),
-                    depth + 1);
-                if (!checked) return checked;
-            }
-        }
-    }
-
+// 문자열과 숫자에 적용되는 제약을 확인한다.
+Result<void> validateScalar(const QJsonValue& value, const QJsonObject& schema, const QString& location) {
     if (value.isString()) {
         const auto string = value.toString();
         if (schema.contains(QStringLiteral("minLength")) &&
@@ -192,6 +184,39 @@ Result<void> validateValue(
         }
     }
     return Result<void>::success();
+}
+
+// 중첩 검증 중에는 다른 값 종류의 검사에 쓰이는 지역 변수를 스택에 남기지 않는다.
+Result<void> validateValue(
+    const QJsonValue& value,
+    const QJsonObject& schema,
+    const QJsonObject& schemaRoot,
+    const QString& location,
+    int depth) {
+    if (depth > 128) return invalid(location, QStringLiteral("JSON nesting is too deep"));
+    if (schema.contains(QStringLiteral("$ref"))) {
+        const auto reference = schema.value(QStringLiteral("$ref")).toString();
+        if (!reference.startsWith(QStringLiteral("#/$defs/"))) {
+            return invalid(location, QStringLiteral("unsupported Schema reference"));
+        }
+        const auto name = reference.mid(8);
+        const auto definition = schemaRoot.value(QStringLiteral("$defs"))
+                                    .toObject().value(name);
+        if (!definition.isObject()) {
+            return invalid(location, QStringLiteral("missing Schema definition"));
+        }
+        return validateValue(value, definition.toObject(), schemaRoot, location, depth + 1);
+    }
+
+    if (schema.contains(QStringLiteral("type")) &&
+        !hasType(value, schema.value(QStringLiteral("type")).toString())) {
+        return invalid(location, QStringLiteral("incorrect JSON type"));
+    }
+    const auto choices = validateChoices(value, schema, schemaRoot, location, depth);
+    if (!choices) return choices;
+    if (value.isObject()) return validateObject(value.toObject(), schema, schemaRoot, location, depth);
+    if (value.isArray()) return validateArray(value.toArray(), schema, schemaRoot, location, depth);
+    return validateScalar(value, schema, location);
 }
 
 // 파일 하나를 열어 JSON 객체로 변환하는 함수.

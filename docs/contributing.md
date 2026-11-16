@@ -50,7 +50,7 @@ git switch -c feature/your-task
 
 UI 변경 시에는 직접 실행해서 사용자 흐름도 확인한다. `ctest`의 QML 스모크 테스트는 화면이 시작되는지 보는 검사이지, 모든 UI 동작을 대신하지 않는다. 문제가 생기면 사용한 Qt Kit, CMake 구성 명령, 실패한 테스트 이름과 재현 절차를 PR에 남긴다.
 
-`main` 푸시와 `main` 대상 PR에서는 GitHub Actions의 **Windows CI**가 Qt PDF를 포함해 Release를 빌드하고 등록된 CTest 검사를 실행한다. 결과와 실패 로그는 저장소의 **Actions → Windows CI**에서 확인한다.
+`main` 푸시와 `main` 대상 PR에서는 GitHub Actions의 **Windows CI**가 Release와 Debug를 빌드하고 각각 CTest를 실행한다. 두 빌드는 Qt와 Qt PDF 설치를 공유한다. 이후 실행에서는 같은 설치 구성의 캐시를 복원할 수 있다. 저장소의 **Actions → Windows CI**에서 빌드별 테스트 결과와 Qt 설치 단계의 캐시 로그를 확인할 수 있다.
 
 실제 두 볼륨에서 파일을 옮기는 시나리오는 `nookbit_cross_volume_tests`로 별도 실행한다. 준비 방법은 [두 볼륨 테스트](cross-volume-test-run.md)를 참고한다.
 
