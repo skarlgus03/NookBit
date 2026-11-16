@@ -77,6 +77,10 @@ public:
                                       const QString& sizeBytes, const QString& ageDays, bool directory = false) const;
     /// 현재 규칙 초안을 노드와 연결선으로 펼쳐 반환하는 함수.
     Q_INVOKABLE QVariantMap graph() const;
+    /// 작업 중인 캔버스를 활성 규칙과 별개로 저장하고 실패 문구를 반환하는 함수.
+    Q_INVOKABLE QString saveCanvasDraft(const QVariantList& blocks, const QVariantList& edges, int nextId) const;
+    /// 마지막으로 저장한 캔버스 초안을 읽는 함수.
+    Q_INVOKABLE QVariantMap loadCanvasDraft() const;
     /// 현재 노드 배치를 분류 규칙과 별도 파일에 저장하는 함수.
     Q_INVOKABLE bool saveGraphLayout(const QVariantList& blocks, const QVariantList& edges);
     /// 저장하지 않은 수정을 버리고 저장본을 다시 불러오는 함수.
@@ -93,6 +97,8 @@ signals:
     void rulesSaved();
 
 private:
+    [[nodiscard]] QString canvasDraftPath() const;
+
     IRuleSetRepository& reader_;
     IRuleSetWriter& writer_;
     IRuleSetMigrator* migrator_;

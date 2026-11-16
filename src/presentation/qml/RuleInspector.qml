@@ -157,7 +157,7 @@ Frame {
             Label {
                 Layout.fillWidth: true
                 visible: documentDetails.visible && documentDetails.checked
-                text: qsTr("노드의 + 버튼으로 분류를 추가하세요. 초안은 저장하거나 실행할 수 없어요.")
+                text: qsTr("노드의 + 버튼으로 분류를 추가하세요. 파일 메뉴에서 편집 초안을 저장할 수 있어요.")
                 color: inspector.mutedText
                 wrapMode: Text.Wrap
             }

@@ -48,7 +48,7 @@ NookBit은 파일과 폴더의 분류 결과를 미리 보여주고, 사용자�
 
 - [SafeExecutor](../src/infrastructure/filesystem/safe_executor.cpp)는 승인한 계획을 기준으로 덮어쓰기 없는 이동을 실행하고 단계별 결과를 기록한다. 이미 목적지에 있는 항목은 이동 계획에서 제외한다. 되돌리기는 작업 기록의 원본 경로를 사용하며, 상태나 기록을 확정할 수 없으면 복구가 필요한 상태로 남긴다.
 - 모든 단계가 같은 볼륨 내 이동인 일부 새 계획에는 내용 해시 대신 파일 ID로 검증하는 [MetadataRename](same-volume-fast-move.md)을 쓴다. 다른 볼륨의 복사는 내용 검증과 [다운로드 표식 보존](download-marker-copy.md)을 적용한다. 취소는 확정 전 지원되는 복사 구간에 한해 가능하다. 복구 범위는 [중단 작업 복구](interrupted-operation-recovery.md)에서 확인한다.
-- `QStandardPaths::AppDataLocation` 아래에 활성 규칙 `rules.json`, 그래프 배치 `rule-graph-layout.json`, 대기 경로 `pending-files.json`, 감시 설정 `watch.json`, 승인·실행 기록 `history.sqlite`를 저장한다. 모듈 선택과 화면 설정은 `QSettings`에 저장한다. 대기 목록은 절대 경로만 원자적으로 저장하고, 복원이 실패하면 기존 파일을 보존한다. 앱을 다시 실행한 뒤에는 새로 미리보기와 확인을 거친다.
+- `QStandardPaths::AppDataLocation` 아래에 활성 규칙 `rules.json`, 그래프 배치 `rule-graph-layout.json`, 대기 경로 `pending-files.json`, 감시 설정 `watch.json`, 승인·실행 기록 `history.sqlite`를 저장한다. 분류 규칙의 파일 메뉴에서 저장하는 편집 초안은 `rule-graph-draft.json`에 한 개를 보관한다. 모듈 선택과 화면 설정은 `QSettings`에 저장한다. 대기 목록은 절대 경로만 원자적으로 저장하고, 복원이 실패하면 기존 파일을 보존한다. 앱을 다시 실행한 뒤에는 새로 미리보기와 확인을 거친다.
 
 ## 기능을 추가할 때
 

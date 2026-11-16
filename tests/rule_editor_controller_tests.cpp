@@ -542,6 +542,73 @@ void testGraphRoundTripAndLayout() {
     }
     expect(positionRestored, "saved node position should survive reopening the editor");
 }
+void testCanvasDraftPersistence() {
+    QTemporaryDir directory;
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto rulesPath = directory.filePath("rules.json");
+    const auto layoutPath = directory.filePath("rule-graph-layout.json");
+    nookbit::JsonRuleSetRepository defaults(projectPath("resources/rules/default.v3.json"), schema);
+    nookbit::JsonRuleSetRepository active(rulesPath, schema);
+    const auto initial = defaults.load();
+    if (!initial || !active.save(initial.value())) {
+        expect(false, "canvas draft fixture initializes");
+        return;
+    }
+    QFile rulesFile(rulesPath);
+    if (!rulesFile.open(QIODevice::ReadOnly)) {
+        expect(false, "active rule file should be readable");
+        return;
+    }
+    const auto original = rulesFile.readAll();
+    rulesFile.close();
+
+    nookbit::RuleEditorController editor(active, active, nullptr, nullptr, layoutPath);
+    expect(!editor.loadCanvasDraft().value("valid").toBool(), "show a missing draft");
+    const QVariantList categories{
+        QVariantMap{{"id", "category-9"}, {"label", "회의록"}, {"keywords", "안건, 참석자"}},
+        QVariantMap{{"id", "category-10"}, {"label", "매뉴얼"}, {"keywords", ""}},
+    };
+    const QVariantList blocks{
+        QVariantMap{{"id", 1}, {"type", "start"}, {"x", 70}, {"y", 220}},
+        QVariantMap{{"id", 2}, {"type", "documentAnalysis"}, {"x", -124.5}, {"y", 300},
+                    {"minimumSimilarity", 43}, {"categories", categories}},
+        QVariantMap{{"id", 3}, {"type", "destination"}, {"x", 760}, {"y", 160}, {"value", "회의록"}},
+        QVariantMap{{"id", 4}, {"type", "exclude"}, {"x", 760}, {"y", 480}},
+    };
+    const QVariantList edges{
+        QVariantMap{{"from", 1}, {"to", 2}},
+        QVariantMap{{"from", 2}, {"to", 3}, {"port", "category-9"}},
+        QVariantMap{{"from", 2}, {"to", 4}, {"port", "abstain"}},
+    };
+    expect(editor.saveCanvasDraft(blocks, edges, 11).isEmpty(), "canvas draft saves separately");
+    expect(!editor.importGraph(blocks, edges), "document analysis draft cannot become an active rule");
+    auto broken = edges;
+    broken[1] = QVariantMap{{"from", 2}, {"to", 3}, {"port", "category-8"}};
+    expect(!editor.saveCanvasDraft(blocks, broken, 11).isEmpty(), "reject a missing output pin");
+
+    nookbit::RuleEditorController reopened(active, active, nullptr, nullptr, layoutPath);
+    const auto restored = reopened.loadCanvasDraft();
+    const auto restoredBlocks = restored.value("blocks").toList();
+    const auto restoredEdges = restored.value("edges").toList();
+    const auto document = restoredBlocks.value(1).toMap();
+    expect(restored.value("valid").toBool() && restored.value("nextId").toInt() == 11
+           && document.value("minimumSimilarity").toInt() == 43 && document.value("x").toDouble() == -124.5
+           && document.value("categories").toList() == categories
+           && restoredEdges == edges, "reopening preserves pin IDs, their order, links, placement and settings");
+    expect(rulesFile.open(QIODevice::ReadOnly) && rulesFile.readAll() == original && !reopened.dirty(),
+           "draft persistence leaves the active rule and controller draft untouched");
+    rulesFile.close();
+
+    QFile draftFile(directory.filePath("rule-graph-draft.json"));
+    if (!draftFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        expect(false, "canvas draft file is writable");
+        return;
+    }
+    draftFile.write(R"({"format":2})");
+    draftFile.close();
+    expect(!reopened.loadCanvasDraft().value("valid").toBool(), "invalid draft does not restore");
+}
+
 // 새 크기 단위와 기존 단위가 저장·복원 과정에서 바이트 값을 보존하는지 검사하는 함수.
 void testSizeUnits() {
     QTemporaryDir directory;
@@ -1021,6 +1088,7 @@ int main(int argc, char* argv[]) {
     testNestedAndFallback();
     testGraphImport();
     testGraphRoundTripAndLayout();
+    testCanvasDraftPersistence();
     testSizeUnits();
     testExternalDestinations();
     testLogicalGraph();

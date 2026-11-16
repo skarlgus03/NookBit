@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointF>
@@ -478,7 +479,7 @@ Result<FolderFlowGraph> splitEditableGraph(const QVariantList& blocks, const QVa
         if (block.toMap().value("type").toString() == QStringLiteral("documentAnalysis")) {
             return Result<FolderFlowGraph>::failure({
                 "rules.document_analysis_draft",
-                "문서 분석 (TF-IDF)은 편집 초안이에요. 실제 규칙에 적용하려면 이 노드를 빼 주세요."
+                "문서 분석 (TF-IDF)은 편집 초안이에요. 파일 메뉴에서 편집 초안을 저장할 수 있어요."
             });
         }
     }
@@ -1142,6 +1143,101 @@ QVariantMap RuleEditorController::graph() const {
                                      {QStringLiteral("message"), message_}};
     return graphForRules(draft_, importedDraft_ ? QHash<QString, QPointF>{}
                                                 : readGraphPositions(graphLayoutPath_, draft_.id));
+}
+
+namespace {
+
+// 구성이 미완성인 초안도 보관하되 화면 복원에 필요한 ID와 핀은 확인한다.
+bool validCanvasDraft(const QJsonObject& draft) {
+    if (draft.value("format").toInt() != 1 || !draft.value("blocks").isArray() ||
+        !draft.value("edges").isArray()) return false;
+    const int nextId = draft.value("nextId").toInt();
+    if (nextId <= 1 || nextId == std::numeric_limits<int>::max()) return false;
+
+    QHash<int, QString> blockTypes;
+    QHash<int, QSet<QString>> documentPorts;
+    const auto savedBlocks = draft.value("blocks").toArray();
+    for (const auto& value : savedBlocks) {
+        const auto block = value.toObject();
+        const int id = block.value("id").toInt();
+        const auto type = block.value("type").toString();
+        if (id <= 0 || id >= nextId || blockTypes.contains(id) || type.isEmpty() ||
+            (id == 1) != (type == "start") || !block.value("x").isDouble() ||
+            !block.value("y").isDouble()) return false;
+        blockTypes.insert(id, type);
+        if (type != "documentAnalysis") continue;
+
+        const auto similarity = block.value("minimumSimilarity").toInt(-1);
+        const auto categories = block.value("categories");
+        if (similarity < 0 || similarity > 100 || (!categories.isUndefined() && !categories.isArray()))
+            return false;
+        auto& ports = documentPorts[id];
+        ports.insert(QStringLiteral("abstain"));
+        const auto savedCategories = categories.toArray();
+        for (const auto& item : savedCategories) {
+            const auto category = item.toObject();
+            const auto pin = category.value("id").toString();
+            const int number = pin.mid(9).toInt();
+            if (number <= 0 || number >= nextId || pin != QStringLiteral("category-%1").arg(number) ||
+                ports.contains(pin) || !category.value("label").isString() ||
+                !category.value("keywords").isString()) return false;
+            ports.insert(pin);
+        }
+    }
+    if (!blockTypes.contains(1)) return false;
+
+    const auto savedEdges = draft.value("edges").toArray();
+    for (const auto& value : savedEdges) {
+        const auto edge = value.toObject();
+        const int from = edge.value("from").toInt();
+        const int to = edge.value("to").toInt();
+        const auto port = edge.value("port").toString();
+        if (from == to || !blockTypes.contains(from) || !blockTypes.contains(to)) return false;
+        const auto ports = documentPorts.constFind(from);
+        if (ports == documentPorts.cend()) {
+            if (!port.isEmpty()) return false;
+            continue;
+        }
+        const auto target = blockTypes.value(to);
+        if (!ports->contains(port) || !edge.value("kind").toString().isEmpty() ||
+            (target != "destination" && target != "exclude")) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+QString RuleEditorController::canvasDraftPath() const {
+    if (graphLayoutPath_.isEmpty()) return {};
+    return QFileInfo(graphLayoutPath_).dir().filePath(QStringLiteral("rule-graph-draft.json"));
+}
+
+QString RuleEditorController::saveCanvasDraft(const QVariantList& blocks, const QVariantList& edges, int nextId) const {
+    const auto path = canvasDraftPath();
+    if (path.isEmpty()) return tr("편집 초안 저장 위치를 사용할 수 없어요.");
+    const QJsonObject draft{{"format", 1}, {"nextId", nextId},
+                            {"blocks", QJsonArray::fromVariantList(blocks)},
+                            {"edges", QJsonArray::fromVariantList(edges)}};
+    if (!validCanvasDraft(draft)) return tr("노드나 연결선 정보가 올바르지 않아 초안을 저장하지 못했어요.");
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return tr("편집 초안 저장 폴더를 만들지 못했어요.");
+    QSaveFile file(path);
+    const auto data = QJsonDocument(draft).toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
+        return tr("편집 초안 파일을 저장하지 못했어요.");
+    return {};
+}
+
+QVariantMap RuleEditorController::loadCanvasDraft() const {
+    QFile file(canvasDraftPath());
+    if (!file.exists()) return {{"valid", false}, {"message", tr("저장된 편집 초안이 없어요.")}};
+    if (!file.open(QIODevice::ReadOnly))
+        return {{"valid", false}, {"message", tr("편집 초안 파일을 열지 못했어요.")}};
+    const auto draft = QJsonDocument::fromJson(file.readAll()).object();
+    if (file.error() != QFileDevice::NoError || !validCanvasDraft(draft))
+        return {{"valid", false}, {"message", tr("편집 초안 파일을 읽지 못했어요.")}};
+    auto graph = draft.toVariantMap();
+    graph.insert(QStringLiteral("valid"), true);
+    return graph;
 }
 
 // 노드 ID별 좌표만 규칙 파일과 독립된 JSON 파일에 원자적으로 저장하는 함수.

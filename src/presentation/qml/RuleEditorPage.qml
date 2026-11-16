@@ -87,7 +87,8 @@ Item {
             dark: page.darkMode
             testOpened: testPanel.visible
             guideStatus: documents.guideStatus
-            hasUnsavedChanges: session.graphDirty || page.controller.dirty || page.oldEditorFormDirty
+            hasUnsavedChanges: (session.graphDirty && !session.canvasDraftSaved)
+                || page.controller.dirty || page.oldEditorFormDirty
             onSaveRequested: documents.requestSave()
             onTestRequested: testPanel.visible ? testPanel.close() : testPanel.open()
             onInspectRequested: {
@@ -97,6 +98,8 @@ Item {
             onImportRequested: documents.requestImport()
             onExportRequested: documents.requestExport()
             onReloadRequested: documents.requestReload()
+            onSaveCanvasDraftRequested: documents.saveCanvasDraft()
+            onOpenCanvasDraftRequested: documents.requestOpenCanvasDraft()
             onGuideRequested: documents.saveGuide()
             onAddRequested: canvas.openAddMenu(canvas.viewport.width / 2, canvas.viewport.height / 2)
             onFocusCanvasRequested: canvas.focusCanvas()

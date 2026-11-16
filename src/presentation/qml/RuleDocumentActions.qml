@@ -42,7 +42,33 @@ Item {
     }
     // 저장본을 다시 읽기 전에 초안 폐기 확인을 요청하는 함수.
     function requestReload() {
+        confirmReload.canvasDraft = null;
         confirmReload.open();
+    }
+    function saveCanvasDraft() {
+        const error = controller.saveCanvasDraft(editor.blocks, editor.edges, editor.nextId);
+        if (!error)
+            editor.canvasDraftSaved = true;
+        editor.statusText = error || qsTr("편집 초안을 저장했어요. 파일 메뉴에서 다시 열 수 있어요.");
+    }
+    function requestOpenCanvasDraft() {
+        const draft = controller.loadCanvasDraft();
+        if (!draft.valid) {
+            editor.statusText = draft.message;
+            return;
+        }
+        if (editor.graphDirty && !editor.canvasDraftSaved) {
+            confirmReload.canvasDraft = draft;
+            confirmReload.open();
+        } else {
+            openCanvasDraft(draft);
+        }
+    }
+    function openCanvasDraft(draft) {
+        showGraph(draft);
+        editor.graphDirty = true;
+        editor.canvasDraftSaved = true;
+        editor.statusText = qsTr("저장한 편집 초안을 열었어요.");
     }
     // 작성 가이드의 저장 위치를 요청하는 함수.
     function saveGuide() {
@@ -60,7 +86,10 @@ Item {
     }
     // Controller에서 읽은 초안만 세션에 전달하고 기본 시점을 맞추는 함수.
     function loadGraphFromDraft() {
-        editor.restoreGraph(controller.graph());
+        showGraph(controller.graph());
+    }
+    function showGraph(graph) {
+        editor.restoreGraph(graph);
         Qt.callLater(function () {
             editor.resetDefaultView();
         });
@@ -146,10 +175,11 @@ Item {
 
     Dialog {
         id: confirmReload
+        property var canvasDraft: null
         modal: true
         anchors.centerIn: parent
         width: Math.min(actions.width - UiMetrics.dialogInset * 2, UiMetrics.dialogCompactWidth)
-        title: qsTr("저장된 규칙 다시 열기")
+        title: canvasDraft ? qsTr("저장한 편집 초안을 열까요?") : qsTr("저장된 규칙 다시 열기")
         standardButtons: Dialog.NoButton
         palette.window: actions.surfaceColor
         palette.windowText: actions.primaryText
@@ -164,7 +194,8 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: actions.primaryText
-                text: qsTr("저장하지 않은 그래프와 기존 편집기의 규칙 초안을 버리고, 마지막 저장본을 다시 불러옵니다.")
+                text: confirmReload.canvasDraft ? qsTr("캔버스에서 저장하지 않은 변경이 사라집니다.")
+                    : qsTr("저장하지 않은 그래프와 기존 편집기의 규칙 초안을 버리고, 마지막 저장본을 다시 불러옵니다.")
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -176,9 +207,14 @@ Item {
                     onClicked: confirmReload.close()
                 }
                 ThemeButton {
-                    text: qsTr("다시 열기")
+                    text: confirmReload.canvasDraft ? qsTr("초안 열기") : qsTr("다시 열기")
                     onClicked: {
+                        const draft = confirmReload.canvasDraft;
                         confirmReload.close();
+                        if (draft) {
+                            actions.openCanvasDraft(draft);
+                            return;
+                        }
                         actions.controller.reload();
                         actions.loadGraphFromDraft();
                         actions.editorDraftReplaced();

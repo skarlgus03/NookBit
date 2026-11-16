@@ -16,6 +16,8 @@ ColumnLayout {
     signal importRequested
     signal exportRequested
     signal reloadRequested
+    signal saveCanvasDraftRequested
+    signal openCanvasDraftRequested
     signal guideRequested
     signal addRequested
     signal focusCanvasRequested
@@ -133,7 +135,8 @@ ColumnLayout {
         }
         Label {
             objectName: "ruleSaveState"
-            text: toolbar.hasUnsavedChanges ? qsTr("저장하지 않은 변경") : qsTr("저장됨")
+            text: toolbar.hasUnsavedChanges ? qsTr("저장하지 않은 변경")
+                : toolbar.editor.canvasDraftSaved ? qsTr("편집 초안 저장됨") : qsTr("저장됨")
             font.pixelSize: UiMetrics.textBody
             color: toolbar.hasUnsavedChanges ? toolbar.theme.accent : toolbar.mutedText
         }
@@ -256,6 +259,22 @@ ColumnLayout {
             onClicked: {
                 jsonFileMenu.close();
                 toolbar.reloadRequested();
+            }
+        }
+        MenuAction {
+            text: qsTr("편집 초안 저장")
+            objectName: "ruleSaveCanvasDraftAction"
+            onClicked: {
+                jsonFileMenu.close();
+                toolbar.saveCanvasDraftRequested();
+            }
+        }
+        MenuAction {
+            text: qsTr("편집 초안 열기")
+            objectName: "ruleOpenCanvasDraftAction"
+            onClicked: {
+                jsonFileMenu.close();
+                toolbar.openCanvasDraftRequested();
             }
         }
     }

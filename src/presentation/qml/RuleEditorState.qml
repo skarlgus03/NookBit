@@ -93,6 +93,7 @@ QtObject {
     property real snapGuideY: 0
     property int nextId: 5
     property bool graphDirty: false
+    property bool canvasDraftSaved: false
     property bool stagedGraph: false
     property int selectedId: -1
     property string editingFlowId: ""
@@ -130,6 +131,7 @@ QtObject {
 
     onBlocksChanged: {
         graphDirty = true;
+        canvasDraftSaved = false;
         stagedGraph = false;
         testTraceBlockIds = [];
         testResult = ({});
@@ -137,6 +139,7 @@ QtObject {
     }
     onEdgesChanged: {
         graphDirty = true;
+        canvasDraftSaved = false;
         stagedGraph = false;
         testTraceBlockIds = [];
         testResult = ({});
@@ -1047,6 +1050,7 @@ QtObject {
 
     // 현재 편집 초안의 규칙을 노드와 선으로 다시 펼치는 함수.
     function restoreGraph(restored) {
+        canvasDraftSaved = false;
         if (!restored.valid) {
             editingFlowId = "";
             selectOnly(-1);
