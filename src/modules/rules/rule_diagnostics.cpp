@@ -218,7 +218,9 @@ void inspectTree(const std::vector<RuleNode>& nodes, const Alternatives& incomin
     std::vector<EarlierBranch> earlier;
     for (const auto& node : nodes) {
         if (!node.enabled) continue;
-        const auto possible = inspectBranch({}, node.id, node.atomicCondition, node.otherwise, incoming, earlier, warnings);
+        const auto condition = node.documentAnalysis
+            ? std::optional<AtomicRuleCondition>{ExtensionPredicate{{"txt", "md", "pdf"}}} : node.atomicCondition;
+        const auto possible = inspectBranch({}, node.id, condition, node.otherwise, incoming, earlier, warnings);
         if (!possible.empty()) inspectTree(node.children, possible, warnings);
     }
 }
@@ -229,7 +231,9 @@ void inspectFlow(const RuleSet::FolderFlow& flow, const std::map<std::string, co
     std::vector<EarlierBranch> earlier;
     for (const auto& id : parent.next) {
         const auto& node = *nodes.at(id);
-        auto possible = inspectBranch(flow.id, id, node.condition, node.type == ProcessingNodeType::Otherwise, incoming, earlier, warnings);
+        const auto condition = node.documentAnalysis
+            ? std::optional<AtomicRuleCondition>{ExtensionPredicate{{"txt", "md", "pdf"}}} : node.condition;
+        auto possible = inspectBranch(flow.id, id, condition, node.type == ProcessingNodeType::Otherwise, incoming, earlier, warnings);
         if (possible.empty()) continue;
         if (node.type == ProcessingNodeType::Traverse) {
             Facts files;

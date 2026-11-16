@@ -2,6 +2,7 @@
 #include "presentation/rule_editor_controller.hpp"
 #include "application/use_cases/test_rule_use_case.hpp"
 #include "presentation/folder_flow_graph.hpp"
+#include "presentation/document_rule_graph.hpp"
 #include "modules/rules/rule_diagnostics.hpp"
 
 #include <QDateTime>
@@ -168,6 +169,7 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
     if (startId < 0) return graphError(0, QStringLiteral("파일 입력 노드가 필요해요."));
     QHash<int, QVector<int>> children;
     QHash<int, int> parent;
+    QHash<int, QString> outputPorts;
     for (const auto& item : edges) {
         const auto edge = item.toMap();
         bool validFrom = false;
@@ -177,12 +179,16 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
         if (!validFrom || !validTo || !byId.contains(from) || !byId.contains(to))
             return graphError(0, QStringLiteral("존재하지 않는 노드로 이어진 선이 있어요."));
         const auto sourceType = byId.value(from).value(QStringLiteral("type")).toString();
+        const auto port = edge.value("port").toString();
+        if ((sourceType == "documentAnalysis") != !port.isEmpty())
+            return graphError(from, QStringLiteral("문서 분석 출력의 연결 핀을 확인해 주세요."));
         if (to == startId || sourceType == QStringLiteral("destination") ||
             sourceType == QStringLiteral("exclude"))
             return graphError(to, QStringLiteral("이 방향으로는 연결할 수 없어요."));
         if (parent.contains(to))
             return graphError(to, QStringLiteral("입력에는 부모를 하나만 연결할 수 있어요."));
         parent.insert(to, from);
+        if (!port.isEmpty()) outputPorts.insert(to, port);
         children[from].push_back(to);
     }
     for (auto it = byId.cbegin(); it != byId.cend(); ++it) {
@@ -228,6 +234,22 @@ Result<std::vector<RuleNode>> baseGraphRules(const QVariantList& blocks,
             node.id = ruleId.toStdString();
             node.enabled = block.value(QStringLiteral("enabled"), true).toBool();
             node.otherwise = type == QStringLiteral("otherwise");
+            if (type == "documentAnalysis") {
+                QHash<QString, QVariantMap> terminals;
+                for (const int child : children.value(id)) {
+                    const auto port = outputPorts.value(child);
+                    if (terminals.contains(port) || !children.value(child).isEmpty())
+                        return graphError(id, QStringLiteral("각 출력에 종착 노드를 하나만 연결해 주세요."));
+                    terminals.insert(port, byId.value(child));
+                    visited.insert(child);
+                }
+                auto analysis = graphDocumentAnalysis(block, std::move(terminals));
+                if (!analysis) return graphError(id, QString::fromStdString(analysis.error().message));
+                node.documentAnalysis = std::move(analysis.value());
+                visited.insert(id);
+                converted.push_back(std::move(node));
+                continue;
+            }
             const auto value = block.value(QStringLiteral("value")).toString().trimmed();
             if (logicalOperatorFor(type.toStdString())) {
                 auto parsed = logicalGraphCondition(block);
@@ -475,14 +497,6 @@ Result<AtomicRuleCondition> flowCondition(const QVariantMap& value) {
 // 조건 계산 선을 먼저 검사한 뒤 이름 있는 흐름과 실행 트리를 분리하는 함수.
 Result<FolderFlowGraph> splitEditableGraph(const QVariantList& blocks, const QVariantList& edges,
                                          const FlowConditionParser& parser) {
-    for (const auto& block : blocks) {
-        if (block.toMap().value("type").toString() == QStringLiteral("documentAnalysis")) {
-            return Result<FolderFlowGraph>::failure({
-                "rules.document_analysis_draft",
-                "문서 분석 (TF-IDF)은 편집 초안이에요. 파일 메뉴에서 편집 초안을 저장할 수 있어요."
-            });
-        }
-    }
     const auto prepared = prepareLogicalGraph(blocks, edges);
     if (!prepared) return Result<FolderFlowGraph>::failure(prepared.error());
     return splitFolderFlowGraph(prepared.value().blocks, prepared.value().edges, parser);
@@ -509,6 +523,18 @@ QVariantMap graphForRules(const RuleSet& rules,
     appendNode = [&](const RuleNode& node, int depth) -> std::pair<int, double> {
         const int id = nextId++;
         auto block = graphBlockFor(node, id);
+        if (node.documentAnalysis) {
+            const auto stable = QString::fromStdString(node.id);
+            const auto position = graphPosition(savedPositions, "node:" + stable,
+                70 + depth * 310, 170 + nextRow * 170);
+            const auto outputs = static_cast<int>(node.documentAnalysis->categories.size()) + 1;
+            nextRow += 1 + (72 + outputs * 76) / 170;
+            block["x"] = position.x();
+            block["y"] = position.y();
+            appendGraphDocumentOutputs(*node.documentAnalysis, block, blocks, edges, savedPositions, stable, nextId);
+            blocks.append(block);
+            return {id, position.y() + 65};
+        }
         const int rows = logicalGraphRows(block);
         const int groupsBeforeChildren = logicalGroups;
         double y = 0;
@@ -1129,6 +1155,8 @@ QVariantMap RuleEditorController::testGraph(const QVariantList& blocks, const QV
             {QStringLiteral("outcome"), outcome},
             {QStringLiteral("matchedRuleId"), decision
                 ? QString::fromStdString(decision->matchedRuleId) : QString()},
+            {QStringLiteral("documentOutputId"), decision
+                ? QString::fromStdString(decision->documentOutputId) : QString()},
             {QStringLiteral("destination"), decision && !decision->excluded
                 ? QString::fromStdWString(decision->destinationRelativePath.wstring()) : QString()},
             {QStringLiteral("path"), path},
@@ -1177,9 +1205,8 @@ bool validCanvasDraft(const QJsonObject& draft) {
         for (const auto& item : savedCategories) {
             const auto category = item.toObject();
             const auto pin = category.value("id").toString();
-            const int number = pin.mid(9).toInt();
-            if (number <= 0 || number >= nextId || pin != QStringLiteral("category-%1").arg(number) ||
-                ports.contains(pin) || !category.value("label").isString() ||
+            static const QRegularExpression categoryId(QStringLiteral(R"(^[A-Za-z0-9._-]+$)"));
+            if (!categoryId.match(pin).hasMatch() || ports.contains(pin) || !category.value("label").isString() ||
                 !category.value("keywords").isString()) return false;
             ports.insert(pin);
         }
@@ -1250,6 +1277,7 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
     }
     QHash<int, QVariantMap> byId;
     QHash<int, int> parent;
+    QHash<int, QString> documentPorts;
     for (const auto& item : blocks) {
         const auto block = item.toMap();
         byId.insert(block.value(QStringLiteral("id")).toInt(), block);
@@ -1258,6 +1286,8 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
         const auto edge = item.toMap();
         parent.insert(edge.value(QStringLiteral("to")).toInt(),
                       edge.value(QStringLiteral("from")).toInt());
+        const auto port = edge.value("port").toString();
+        if (!port.isEmpty()) documentPorts.insert(edge.value("to").toInt(), port);
     }
     QHash<int, int> predicateOwner, operandOrder;
     QHash<int, int> operandCounts;
@@ -1288,6 +1318,14 @@ bool RuleEditorController::saveGraphLayout(const QVariantList& blocks,
             const auto stable = expressionKey(it.key(), 0);
             if (stable.isEmpty()) return false;
             key = "node:" + stable;
+        } else if (documentPorts.contains(it.key())) {
+            const auto ownerId = parent.value(it.key());
+            const auto owner = byId.value(ownerId);
+            const auto flowId = owner.value("flowId").toString();
+            const auto stable = flowId.isEmpty()
+                ? owner.value("ruleId", QStringLiteral("graph-%1").arg(ownerId)).toString()
+                : flowId + ':' + owner.value("flowNodeId", QStringLiteral("node-%1").arg(ownerId)).toString();
+            key = documentOutputPositionKey(stable, documentPorts.value(it.key()));
         } else if (!block.value("flowId").toString().isEmpty()) {
             key = "flow:" + block.value("flowId").toString() + ":" + block.value("flowNodeId", type).toString();
         } else if (type == QStringLiteral("start")) {

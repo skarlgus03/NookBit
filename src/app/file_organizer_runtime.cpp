@@ -61,7 +61,7 @@ struct FileOrganizerRuntime::State {
     SqliteTransferJournal transferJournal;
     JsonRuleSetRepository previewRules;
     FilesystemScanner previewScanner;
-    RuleEngine previewRuleEngine;
+    RuleEngine previewRuleEngine{document_recommendation::scoreDocument};
     TestRuleUseCase testRule;
     RuleEditorController ruleEditor;
     WindowsStagedCopy transferCopy;

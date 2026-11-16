@@ -236,6 +236,30 @@ Error atRuleLocation(const QString& location, Error error) {
     return error;
 }
 
+DocumentOutput convertDocumentOutput(const QJsonObject& object) {
+    DocumentOutput output;
+    output.exclude = object.value("exclude").toBool();
+    if (object.contains("destination")) output.destination = convertDestination(object.value("destination").toObject());
+    return output;
+}
+
+Result<DocumentAnalysis> convertDocumentAnalysis(const QJsonObject& object) {
+    DocumentAnalysis analysis;
+    analysis.minimumSimilarity = object.value("minimumSimilarity").toInt(-1);
+    const auto categories = object.value("categories").toArray();
+    for (const auto& value : categories) {
+        const auto category = value.toObject();
+        analysis.categories.push_back({category.value("id").toString().toStdString(),
+            category.value("label").toString().trimmed().toStdString(),
+            category.value("keywords").toString().trimmed().toStdString(),
+            convertDocumentOutput(category.value("output").toObject())});
+    }
+    analysis.abstain = convertDocumentOutput(object.value("abstain").toObject());
+    const auto valid = validateDocumentAnalysis(analysis);
+    if (!valid) return Result<DocumentAnalysis>::failure(valid.error());
+    return Result<DocumentAnalysis>::success(std::move(analysis));
+}
+
 // 조건·형제·리프 제약을 확인하며 노드 위치가 포함된 오류를 반환하는 함수.
 Result<std::vector<RuleNode>> convertAtomicNodes(const QJsonArray& array,
                                                   std::set<std::string>& ids,
@@ -258,6 +282,21 @@ Result<std::vector<RuleNode>> convertAtomicNodes(const QJsonArray& array,
         if (!ids.insert(node.id).second) return Result<std::vector<RuleNode>>::failure(
             atRuleLocation(nodePath + QStringLiteral(".id"),
                            {"rules.duplicate_id", "Duplicate rule ID: " + node.id}));
+        if (object.contains("documentAnalysis")) {
+            const auto location = nodePath + QStringLiteral(".documentAnalysis");
+            if (node.otherwise || object.contains("when") || object.contains("destination") ||
+                object.contains("exclude") || object.contains("children"))
+                return Result<std::vector<RuleNode>>::failure(atRuleLocation(location, {
+                    "rules.document_analysis_invalid", "A document analysis node owns its outputs and cannot combine other node fields."}));
+            auto analysis = convertDocumentAnalysis(object.value("documentAnalysis").toObject());
+            if (!analysis) return Result<std::vector<RuleNode>>::failure(atRuleLocation(location, analysis.error()));
+            nodeCount += 1 + static_cast<int>(analysis.value().categories.size());
+            if (nodeCount > 1000) return Result<std::vector<RuleNode>>::failure(atRuleLocation(location, {
+                "rules.tree_too_large", "Rule tree including document categories exceeds 1000 nodes."}));
+            node.documentAnalysis = std::move(analysis.value());
+            nodes.push_back(std::move(node));
+            continue;
+        }
         if (node.otherwise) {
             if (foundOtherwise || object.contains(QStringLiteral("when")))
                 return Result<std::vector<RuleNode>>::failure(atRuleLocation(
@@ -384,6 +423,36 @@ Result<QJsonObject> destinationObject(const RuleDestination& destination) {
     };
     if (destination.absolute) object.insert(QStringLiteral("base"), QStringLiteral("absolute"));
     return Result<QJsonObject>::success(object);
+}
+
+Result<QJsonObject> documentOutputObject(const DocumentOutput& output) {
+    QJsonObject object;
+    if (output.exclude) object.insert("exclude", true);
+    if (output.destination) {
+        auto destination = destinationObject(*output.destination);
+        if (!destination) return Result<QJsonObject>::failure(destination.error());
+        object.insert("destination", destination.value());
+    }
+    return Result<QJsonObject>::success(std::move(object));
+}
+
+Result<QJsonObject> documentAnalysisObject(const DocumentAnalysis& analysis) {
+    const auto valid = validateDocumentAnalysis(analysis);
+    if (!valid) return Result<QJsonObject>::failure(valid.error());
+    QJsonArray categories;
+    for (const auto& category : analysis.categories) {
+        auto output = documentOutputObject(category.output);
+        if (!output) return Result<QJsonObject>::failure(output.error());
+        QJsonObject entry{{"id", QString::fromStdString(category.id)}, {"label", QString::fromStdString(category.label)},
+                          {"keywords", QString::fromStdString(category.keywords)}};
+        if (!output.value().isEmpty()) entry.insert("output", output.value());
+        categories.append(entry);
+    }
+    auto abstain = documentOutputObject(analysis.abstain);
+    if (!abstain) return Result<QJsonObject>::failure(abstain.error());
+    QJsonObject object{{"minimumSimilarity", analysis.minimumSimilarity}, {"categories", categories}};
+    if (!abstain.value().isEmpty()) object.insert("abstain", abstain.value());
+    return Result<QJsonObject>::success(std::move(object));
 }
 
 // 파일 조건의 정밀도와 범위를 확인하며 JSON으로 변환하는 함수.
@@ -518,6 +587,19 @@ Result<QJsonArray> atomicNodesObject(const std::vector<RuleNode>& nodes,
         QJsonObject object{
             {QStringLiteral("id"), QString::fromStdString(node.id)},
             {QStringLiteral("enabled"), node.enabled}};
+        if (node.documentAnalysis) {
+            if (node.otherwise || node.atomicCondition || node.destination || node.exclude || !node.children.empty())
+                return Result<QJsonArray>::failure({"rules.document_analysis_invalid",
+                    "A document analysis node owns its outputs and cannot combine other node fields."});
+            auto analysis = documentAnalysisObject(*node.documentAnalysis);
+            if (!analysis) return Result<QJsonArray>::failure(analysis.error());
+            nodeCount += 1 + static_cast<int>(node.documentAnalysis->categories.size());
+            if (nodeCount > 1000) return Result<QJsonArray>::failure({
+                "rules.tree_too_large", "Rule tree including document categories exceeds 1000 nodes."});
+            object.insert("documentAnalysis", analysis.value());
+            result.append(object);
+            continue;
+        }
         if (node.otherwise) {
             if (foundOtherwise || node.atomicCondition) return Result<QJsonArray>::failure({
                 "rules.invalid_otherwise", "Else node cannot have a condition."});
@@ -737,6 +819,11 @@ Result<RuleSet> JsonRuleSetRepository::load() const {
                         node.condition = condition.value();
                     }
                     if (node.type == ProcessingNodeType::Destination) node.destination = convertDestination(object.value("destination").toObject());
+                    if (node.type == ProcessingNodeType::DocumentAnalysis) {
+                        auto analysis = convertDocumentAnalysis(object.value("documentAnalysis").toObject());
+                        if (!analysis) return Result<RuleSet>::failure(analysis.error());
+                        node.documentAnalysis = std::move(analysis.value());
+                    }
                     if (node.type == ProcessingNodeType::Call) node.targetFlow = object.value("target").toString().toStdString();
                     if (node.type == ProcessingNodeType::Traverse) {
                         node.recursive = object.value("recursive").toBool();
@@ -848,6 +935,12 @@ Result<void> JsonRuleSetRepository::save(const RuleSet& rules) const {
                     QJsonArray next;
                     for (const auto& id : node.next) next.append(QString::fromStdString(id));
                     QJsonObject value{{"id", QString::fromStdString(node.id)}, {"type", QString::fromUtf8(processingNodeTypeName(node.type))}, {"next", next}};
+                    if (node.documentAnalysis) {
+                        auto analysis = documentAnalysisObject(*node.documentAnalysis);
+                        if (!analysis) return Result<void>::failure(analysis.error());
+                        value.remove("next");
+                        value.insert("documentAnalysis", analysis.value());
+                    }
                     if (node.condition) {
                         const auto condition = atomicConditionObject(*node.condition);
                         if (!condition) return Result<void>::failure(condition.error());

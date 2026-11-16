@@ -7,6 +7,7 @@ namespace nookbit {
 std::optional<ProcessingNodeType> parseProcessingNodeType(std::string_view name);
 /// 규칙 JSON과 기존 승인 서명에 쓸 처리 노드 이름을 반환하는 함수.
 const char* processingNodeTypeName(ProcessingNodeType type);
+Result<void> validateDocumentAnalysis(const DocumentAnalysis& analysis);
 /// 이전 고정 프리셋을 수정 가능한 기본 노드들로 펼치는 함수.
 RuleSet::FolderFlow expandedFlow(const RuleSet::FolderFlow& flow);
 /// 모든 노드와 호출의 연결·입력 종류·순환을 파일 I/O 없이 검사하는 함수.

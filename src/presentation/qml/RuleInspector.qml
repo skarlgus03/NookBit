@@ -23,7 +23,7 @@ Frame {
     readonly property string selectedType: editor.selectedBlock ? editor.selectedBlock.type : ""
     readonly property string documentCategoryIds: JSON.stringify(selectedType === "documentAnalysis"
         ? (editor.selectedBlock.categories || []).map(category => category.id) : [])
-    readonly property string selectionKind: selectedType === "documentAnalysis" ? qsTr("편집 초안")
+    readonly property string selectionKind: selectedType === "documentAnalysis" ? qsTr("본문 분류")
         : editor.selectedBlock && editor.selectedBlock.flowId ? qsTr("처리 흐름") : selectedType === "start" ? qsTr("시작점")
         : ["destination", "exclude"].includes(selectedType) ? qsTr("종착점")
         : selectedType === "otherwise" ? qsTr("예외 분기") : qsTr("조건 검사")
@@ -157,7 +157,7 @@ Frame {
             Label {
                 Layout.fillWidth: true
                 visible: documentDetails.visible && documentDetails.checked
-                text: qsTr("노드의 + 버튼으로 분류를 추가하세요. 파일 메뉴에서 편집 초안을 저장할 수 있어요.")
+                text: qsTr("분류별 키워드를 입력하고 출력에 목적지를 연결하세요. 연결되지 않은 출력의 파일은 그대로 둬요.")
                 color: inspector.mutedText
                 wrapMode: Text.Wrap
             }

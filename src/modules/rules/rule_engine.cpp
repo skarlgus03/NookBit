@@ -380,6 +380,30 @@ Result<std::filesystem::path> destinationFor(const std::filesystem::path& relati
     return Result<std::filesystem::path>::success(path);
 }
 
+bool acceptsDocument(const FileFact& file) {
+    const auto& path = file.relativePath.empty() ? file.absolutePath : file.relativePath;
+    const auto extension = normalizedExtension(file.extension.empty() ? utf8Path(path.extension()) : file.extension);
+    return !file.fingerprint.directory && (extension == "txt" || extension == "md" || extension == "pdf");
+}
+
+Result<std::optional<RuleDecision>> documentDecision(const FileFact& file, const DocumentAnalysis& analysis,
+    RuleEngine::DocumentScorer scorer, const std::string& id) {
+    const auto match = scorer ? scorer(file, analysis) : std::nullopt;
+    const bool accepted = match && match->category < analysis.categories.size() &&
+        match->similarity > 0 && match->similarity + 1e-12 >= analysis.minimumSimilarity / 100.0;
+    const auto& output = accepted ? analysis.categories[match->category].output : analysis.abstain;
+    const auto outputId = accepted ? analysis.categories[match->category].id : std::string("abstain");
+    const auto reason = accepted ? "Document analysis: " + analysis.categories[match->category].label
+                                 : std::string("Document analysis: abstained.");
+    if (!output.destination || output.exclude)
+        return Result<std::optional<RuleDecision>>::success(RuleDecision{id, {}, reason, {}, true, false, outputId});
+    const auto& destination = *output.destination;
+    auto path = destinationFor(destination.relativePath, file, destination.absolute);
+    if (!path) return Result<std::optional<RuleDecision>>::failure(path.error());
+    return Result<std::optional<RuleDecision>>::success(RuleDecision{
+        id, std::move(path.value()), reason, destination.collisionPolicy, false, destination.absolute, outputId});
+}
+
 // 같은 높이에서 처음 맞는 일반 가지를 고르고, 없으면 else 가지를 고르는 함수.
 const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const FileFact& file,
                                   std::int64_t nowUtcMs, int schemaVersion, RuleTrace* trace) {
@@ -388,6 +412,10 @@ const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const File
         if (!node.enabled) continue;
         if (node.otherwise) {
             otherwise = &node;
+        } else if (schemaVersion == 3 && node.documentAnalysis) {
+            const bool matches = acceptsDocument(file);
+            if (trace) trace->conditions.emplace_back(node.id).result.matched = matches;
+            if (matches) return &node;
         } else if (schemaVersion == 3 && node.atomicCondition) {
             auto* evaluation = trace ? &trace->conditions.emplace_back(node.id).result : nullptr;
             if (matchesAtomic(*node.atomicCondition, file, nowUtcMs, evaluation)) return &node;
@@ -400,7 +428,7 @@ const RuleNode* firstMatchingNode(const std::vector<RuleNode>& nodes, const File
 
 // 선택한 리프의 목적지를 파일별 분류 결과로 변환하는 함수.
 Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const RuleSet& rules,
-                                                  std::int64_t nowUtcMs,
+                                                  std::int64_t nowUtcMs, RuleEngine::DocumentScorer scorer,
                                                   RuleTrace* trace = nullptr) {
     const RuleNode* node = firstMatchingNode(rules.nodes, file, nowUtcMs, rules.schemaVersion, trace);
     if (node && trace) trace->selectedNodeIds.push_back(node->id);
@@ -408,6 +436,8 @@ Result<std::optional<RuleDecision>> treeDecision(const FileFact& file, const Rul
         node = firstMatchingNode(node->children, file, nowUtcMs, rules.schemaVersion, trace);
         if (node && trace) trace->selectedNodeIds.push_back(node->id);
     }
+    if (node && node->documentAnalysis)
+        return documentDecision(file, *node->documentAnalysis, scorer, node->id);
     if (node && node->exclude) {
         return Result<std::optional<RuleDecision>>::success(RuleDecision{
             node->id, {}, "Explicitly excluded by classification rule: " + node->id,
@@ -460,19 +490,29 @@ Result<ProcessingRoute> RuleEngine::route(const FileFact& file, const RuleSet& r
             const auto* candidate = find(*flow, id);
             if (!candidate) return invalid("Unknown successor.");
             if (candidate->type == ProcessingNodeType::Otherwise) fallback = candidate;
+            else if (candidate->type == ProcessingNodeType::DocumentAnalysis) {
+                if (acceptsDocument(file)) { selected = candidate; break; }
+            }
             else if (candidate->type != ProcessingNodeType::Condition || (candidate->condition && matchesAtomic(*candidate->condition, file, nowUtcMs))) {
                 selected = candidate; break;
             }
         }
         node = selected ? selected : fallback;
         if (!node) return Result<ProcessingRoute>::success({});
+        if (node->type == ProcessingNodeType::DocumentAnalysis) {
+            if (!node->documentAnalysis) return invalid("Document analysis settings are missing.");
+            const auto decision = documentDecision(file, *node->documentAnalysis, documentScorer_,
+                                                   "flow-" + flow->id + "-" + node->id);
+            if (!decision) return Result<ProcessingRoute>::failure(decision.error());
+            return Result<ProcessingRoute>::success({decision.value()});
+        }
         if (node->type == ProcessingNodeType::Traverse) {
             if (!file.fingerprint.directory) return invalid("Traversal requires a folder.");
             return Result<ProcessingRoute>::success({{}, true, flow->id, node->id, node->recursive, node->maxDepth});
         }
         if (node->type == ProcessingNodeType::Call) {
             if (node->targetFlow.empty()) {
-                const auto decision = treeDecision(file, rules, nowUtcMs);
+                const auto decision = treeDecision(file, rules, nowUtcMs, documentScorer_);
                 if (!decision) return Result<ProcessingRoute>::failure(decision.error());
                 return Result<ProcessingRoute>::success({decision.value()});
             }
@@ -509,7 +549,7 @@ Result<std::optional<RuleDecision>> RuleEngine::decide(
         return Result<std::optional<RuleDecision>>::success(result.value().decision);
     }
     if (rules.schemaVersion == 2 || rules.schemaVersion == 3)
-        return treeDecision(file, rules, nowUtcMs);
+        return treeDecision(file, rules, nowUtcMs, documentScorer_);
     if (rules.schemaVersion != 1) {
         return Result<std::optional<RuleDecision>>::failure({
             "rules.schema_version", "Unsupported classification rule schema version."});
@@ -547,7 +587,7 @@ Result<RuleTrace> RuleEngine::trace(const FileFact& file, const RuleSet& rules,
     if (rules.schemaVersion != 3) return Result<RuleTrace>::failure({
         "rules.schema_version", "Rule testing requires a v3 rule tree."});
     RuleTrace trace;
-    auto decision = treeDecision(file, rules, nowUtcMs, &trace);
+    auto decision = treeDecision(file, rules, nowUtcMs, documentScorer_, &trace);
     if (!decision) return Result<RuleTrace>::failure(decision.error());
     trace.decision = std::move(decision.value());
     return Result<RuleTrace>::success(std::move(trace));

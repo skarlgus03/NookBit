@@ -131,7 +131,8 @@ Result<OperationPlan> Planner::buildPlan(
                     utf8Path(file.absolutePath),
             });
             plan.previewOutcomes.push_back({file.absolutePath, std::nullopt,
-                                            chosen.matchedRuleId, PreviewDisposition::Excluded});
+                chosen.matchedRuleId, chosen.documentOutputId == "abstain"
+                    ? PreviewDisposition::DocumentHeld : PreviewDisposition::Excluded});
             continue;
         }
         if (chosen.absoluteDestination ? !chosen.destinationRelativePath.is_absolute()

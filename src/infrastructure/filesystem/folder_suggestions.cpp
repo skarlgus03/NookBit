@@ -117,6 +117,25 @@ bool isDocumentExtension(const QString& extension) {
     return extension == "txt" || extension == "md" || extension == "pdf";
 }
 
+// 규칙에 적힌 키워드를 분류별 기준으로 삼아 실제 문서의 본문을 비교한다.
+std::optional<RuleEngine::DocumentMatch> scoreDocument(const FileFact& file, const DocumentAnalysis& analysis) {
+    if (file.absolutePath.empty() || !file.absolutePath.is_absolute()) return std::nullopt;
+    const auto excerpt = documentExcerpt(QFileInfo(QString::fromStdWString(file.absolutePath.wstring())), 4000);
+    if (excerpt.issue != ExcerptIssue::None) return std::nullopt;
+
+    std::vector<Profile> profiles;
+    profiles.reserve(analysis.categories.size());
+    for (const auto& category : analysis.categories) {
+        profiles.push_back({QString::fromStdString(category.id).toStdU16String(),
+                            countTextTerms(QString::fromStdString(category.keywords)), {}});
+    }
+    const auto idf = prepareProfiles(profiles);
+    const auto prediction = recommend(countTextTerms(excerpt.text), profiles, idf);
+    if (!prediction.bestScore) return std::nullopt;
+    const auto matched = std::ranges::find(profiles, prediction.ranked.front(), &Profile::label);
+    return RuleEngine::DocumentMatch{static_cast<std::size_t>(matched - profiles.begin()), *prediction.bestScore};
+}
+
 // 사용자가 체크할 수 있는 바로 아래 폴더 이름을 가져오는 함수.
 QFileInfoList candidateFolders(const QString& root) {
     if (root.isEmpty()) return {};

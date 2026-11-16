@@ -434,7 +434,7 @@ Rectangle {
             }
             DocumentLabel {
                 objectName: "ruleDocumentAbstainHint"
-                text: documentBody.categories.length === 0 ? qsTr("모든 문서") : qsTr("기준 미달")
+                text: qsTr("기준 미달 · 읽기 실패")
                 color: blockCard.mutedText
             }
         }

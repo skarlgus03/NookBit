@@ -2,6 +2,7 @@
 #include "infrastructure/filesystem/file_operation_service.hpp"
 #include "infrastructure/filesystem/interrupted_operation_recovery_service.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
+#include "infrastructure/filesystem/folder_suggestions.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
@@ -37,7 +38,7 @@ class ThreadLocalOperations final : public IFileOperations, public IInterruptedO
         JsonRuleSetRepository rules;
         FilesystemScanner scanner;
         QtPlanHasher hasher;
-        RuleEngine engine;
+        RuleEngine engine{document_recommendation::scoreDocument};
         WindowsStagedCopy copy;
         WindowsTransferSourceRemoval removal;
         WindowsTransferFileInspector files;

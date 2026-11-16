@@ -265,6 +265,7 @@ struct PreviewWorkflow {
     /// 테스트 규칙과 보호 경로로 미리보기 작업을 조립하는 생성자.
     PreviewWorkflow(QString rulesPath, QString schemaPath, std::filesystem::path appData, bool native = false)
         : rules(std::move(rulesPath), std::move(schemaPath)),
+          ruleEngine(nookbit::document_recommendation::scoreDocument),
           planner(ruleEngine, appData, native ? nookbit::CrossVolumeDrafts::Allow : nookbit::CrossVolumeDrafts::Reject),
           useCase(rules, scanner, planner, &hasher, native ? &copy : nullptr, &ruleEngine),
           history(QString::fromStdWString((appData.parent_path() / L"history.sqlite").wstring()),
@@ -797,6 +798,94 @@ QByteArray recommendationPdf(const QByteArray& pageContent) {
     return pdf;
 }
 #endif
+
+void testDocumentRulePreview() {
+    using namespace nookbit;
+    QTemporaryDir directory;
+    const auto home = directory.filePath("organized");
+    const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
+    const auto rulesPath = directory.filePath("rules.json");
+    const auto appData = std::filesystem::path(directory.filePath("appdata").toStdWString());
+    PreviewWorkflow workflow(rulesPath, schema, appData, true);
+    JsonRuleSetRepository bundled(projectPath("resources/rules/default.v3.json"), schema);
+    auto rules = bundled.load();
+    if (!rules) { expect(false, "document rule fixture"); return; }
+    RuleNode node;
+    node.id = "route-documents";
+    node.documentAnalysis = DocumentAnalysis{100,
+        {{"meeting", "Meetings", "agenda attendees decisions", {RuleDestination{L"Meetings", {}}}},
+         {"manual", "Manuals", "installation troubleshooting", {RuleDestination{L"Manuals", {}}}}},
+        {}};
+    rules.value().nodes = {node};
+    rules.value().globalOtherwise = RuleDestination{L"Other", {}};
+    if (!workflow.rules.save(rules.value())) { expect(false, "save active document rules"); return; }
+
+    const auto add = [&](PendingFilesModel& pending, const QString& name, const QByteArray& text) {
+        const auto path = directory.filePath(name);
+        QFile file(path);
+        expect(file.open(QIODevice::WriteOnly) && file.write(text) == text.size(), "write document rule fixture");
+        file.close();
+        pending.addUrl(QUrl::fromLocalFile(path));
+    };
+    PendingFilesModel pending;
+    add(pending, "manual-in-name.md", "agenda attendees decisions");
+    add(pending, "weak.txt", "agenda");
+    add(pending, "empty.txt", "");
+    add(pending, "opaque.bin", "agenda attendees decisions");
+#ifdef NOOKBIT_DOCUMENT_PDF
+    add(pending, "setup.pdf", recommendationPdf("BT /F1 12 Tf 72 700 Td (installation troubleshooting) Tj ET"));
+    add(pending, "scan.pdf", recommendationPdf("q Q"));
+#endif
+    auto flowRules = rules.value();
+    ProcessingNode flowAnalysis;
+    flowAnalysis.id = "analyze";
+    flowAnalysis.type = ProcessingNodeType::DocumentAnalysis;
+    flowAnalysis.documentAnalysis = node.documentAnalysis;
+    flowRules.folderFlows = {{"content", "Content", {{"input", ProcessingNodeType::Input, {"analyze"}},
+        flowAnalysis}, "input", false}};
+    FileFact flowFile;
+    flowFile.absolutePath = directory.filePath("manual-in-name.md").toStdWString();
+    flowFile.processingFlowId = "content";
+    const auto routed = workflow.ruleEngine.route(flowFile, flowRules, 0);
+    expect(routed && routed.value().decision && routed.value().decision->documentOutputId == "meeting" &&
+        routed.value().decision->destinationRelativePath == L"Meetings", "named flow uses the same document scoring");
+    UserSettings settings;
+    settings.homeRoot = std::filesystem::path(home.toStdWString());
+    RuntimeSettingsRepository preferences(settings);
+    ThreadLocalOperations operations(directory.filePath("history.sqlite"),
+        projectPath("src/infrastructure/persistence_sqlite/migrations/001_initial.sql"),
+        rulesPath, schema, {}, appData, preferences);
+    BackgroundTaskRunner runner;
+    PreviewController controller(pending, workflow.useCase, workflow.freezeUseCase, workflow.verifyUseCase,
+        workflow.approveUseCase, workflow.history, operations, rulesPath, schema, home);
+    controller.setTaskRunner(&runner);
+    controller.setSortWorkflow(&operations);
+    controller.createPreview(home);
+    expect(waitForBackground(runner) && controller.hasPreview(), "document rules produce a normal preview");
+    QMap<QString, QVariantMap> outcomes;
+    for (const auto& value : controller.outcomes()) {
+        const auto row = value.toMap();
+        outcomes.insert(row.value("fileName").toString(), row);
+    }
+    expect(outcomes.value("manual-in-name.md").value("destination").toString().contains("Meetings") &&
+        outcomes.value("opaque.bin").value("destination").toString().contains("Other"),
+        "content determines the document route and other formats stay available to normal rules");
+    expect(outcomes.value("weak.txt").value("status").toString() == QStringLiteral("문서 분류 보류") &&
+        outcomes.value("empty.txt").value("status").toString() == QStringLiteral("문서 분류 보류"),
+        "below-threshold and unreadable documents use abstain without the global fallback");
+#ifdef NOOKBIT_DOCUMENT_PDF
+    expect(outcomes.value("setup.pdf").value("destination").toString().contains("Manuals") &&
+        outcomes.value("scan.pdf").value("status").toString() == QStringLiteral("문서 분류 보류"),
+        "PDF text is classified and a PDF without text is held");
+#endif
+    controller.prepareSort();
+    expect(waitForBackground(runner) && controller.awaitingConfirmation() &&
+        QFile::exists(directory.filePath("manual-in-name.md")), "document plan reaches confirmation before moving files");
+    controller.confirmSort();
+    expect(waitForBackground(runner) && QFile::exists(home + "/Meetings/manual-in-name.md") &&
+        QFile::exists(directory.filePath("weak.txt")) && QFile::exists(directory.filePath("empty.txt")),
+        "approval recalculates document decisions and only moves planned files");
+}
 
 // 기존 문서로 폴더를 추천하면서 이동 계획을 보존하는지 검사하는 함수.
 void testDocumentFolderRecommendations() {
@@ -2170,6 +2259,7 @@ int main(int argc, char* argv[]) {
     testWatchedFilesUseNormalSortWorkflow();
     testSortConfirmationSafety();
     testEveryPreviewOutcomeIsVisible();
+    testDocumentRulePreview();
     testDocumentFolderRecommendations();
     testSavedEditorRulesReachMainPreview();
     testPreviewFromPendingFiles();

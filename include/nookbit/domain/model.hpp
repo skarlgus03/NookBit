@@ -85,6 +85,7 @@ struct RuleDecision {
     std::optional<CollisionPolicy> collisionPolicy;
     bool excluded{false};
     bool absoluteDestination{false};
+    std::string documentOutputId{};
 };
 
 /// 조건 하나의 결과와 논리 입력의 결과를 기록한다.
@@ -190,6 +191,26 @@ struct RuleDestination {
     bool absolute{false};
 };
 
+struct DocumentOutput {
+    std::optional<RuleDestination> destination;
+    bool exclude{false};
+};
+
+struct DocumentCategory {
+    std::string id;
+    std::string label;
+    std::string keywords;
+    DocumentOutput output;
+};
+
+struct DocumentAnalysis {
+    static constexpr std::size_t maxCategories = 32;
+    static constexpr int maxKeywordBytes = 4096;
+    int minimumSimilarity{35};
+    std::vector<DocumentCategory> categories;
+    DocumentOutput abstain;
+};
+
 /// 순서 있는 조건 가지와 같은 높이의 else 가지를 표현한다.
 struct RuleNode {
     std::string id;
@@ -200,9 +221,10 @@ struct RuleNode {
     std::optional<RuleDestination> destination;
     std::vector<RuleNode> children;
     bool exclude{false};
+    std::optional<DocumentAnalysis> documentAnalysis;
 };
 
-enum class ProcessingNodeType { Unspecified, Input, Traverse, Call, Condition, Otherwise, Destination, Exclude };
+enum class ProcessingNodeType { Unspecified, Input, Traverse, Call, Condition, Otherwise, Destination, Exclude, DocumentAnalysis };
 
 /// 조건·순회·다른 흐름 호출을 연결하는 Qt 독립 처리 노드.
 struct ProcessingNode {
@@ -215,6 +237,7 @@ struct ProcessingNode {
     bool recursive{true};
     // 선택한 폴더를 0단계로 세는 하위 폴더 깊이 제한.
     std::optional<int> maxDepth{};
+    std::optional<DocumentAnalysis> documentAnalysis{};
 };
 
 /// 버전이 있는 분류 규칙 묶음을 표현한다.
@@ -296,7 +319,7 @@ struct MoveStep {
 };
 
 /// 화면에서 파일별 분류 결과를 구분하는 미리보기 전용 상태.
-enum class PreviewDisposition { Planned, CollisionSkipped, Unmatched, Excluded, AlreadyAtDestination };
+enum class PreviewDisposition { Planned, CollisionSkipped, Unmatched, Excluded, AlreadyAtDestination, DocumentHeld };
 
 /// 실행 계획과 별개로 미분류·제외까지 보여주는 일시적인 파일별 판단 결과.
 struct PreviewFileOutcome {

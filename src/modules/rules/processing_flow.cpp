@@ -21,6 +21,7 @@ constexpr std::array nodeTypeNames{
     NodeTypeName{ProcessingNodeType::Otherwise, "otherwise"},
     NodeTypeName{ProcessingNodeType::Destination, "destination"},
     NodeTypeName{ProcessingNodeType::Exclude, "exclude"},
+    NodeTypeName{ProcessingNodeType::DocumentAnalysis, "documentAnalysis"},
 };
 // 논리 입력까지 포함한 조건 수를 제한해 편집 그래프가 과도하게 커지는 것을 막는 함수.
 std::size_t predicateSize(const AtomicRuleCondition& condition, int depth = 0) {
@@ -70,6 +71,30 @@ const char* processingNodeTypeName(ProcessingNodeType type) {
     return entry == nodeTypeNames.end() ? "" : entry->name;
 }
 
+Result<void> validateDocumentAnalysis(const DocumentAnalysis& analysis) {
+    const auto invalid = [](const char* message) {
+        return Result<void>::failure({"rules.document_analysis_invalid", message});
+    };
+    if (analysis.minimumSimilarity < 0 || analysis.minimumSimilarity > 100)
+        return invalid("Document similarity must be an integer from 0 to 100.");
+    if (analysis.categories.empty() || analysis.categories.size() > DocumentAnalysis::maxCategories)
+        return invalid("Document analysis requires 1 to 32 categories.");
+    const auto validOutput = [](const DocumentOutput& output) { return !output.destination || !output.exclude; };
+    if (!validOutput(analysis.abstain)) return invalid("The abstain output cannot both exclude and move.");
+    const std::regex id("^[A-Za-z0-9._-]+$");
+    std::set<std::string> ids;
+    for (const auto& category : analysis.categories) {
+        if (category.id == "abstain" || !std::regex_match(category.id, id) || !ids.insert(category.id).second)
+            return invalid("Each document category must have a unique ID distinct from abstain.");
+        if (category.label.find_first_not_of(" \t\r\n") == std::string::npos ||
+            category.keywords.find_first_not_of(" \t\r\n") == std::string::npos ||
+            category.keywords.size() > DocumentAnalysis::maxKeywordBytes)
+            return invalid("Each document category needs a label and up to 4096 bytes of keywords.");
+        if (!validOutput(category.output)) return invalid("A category output cannot both exclude and move.");
+    }
+    return Result<void>::success();
+}
+
 // 이전 프리셋을 기본 입력·순회·호출 그래프로 변환하는 함수.
 RuleSet::FolderFlow expandedFlow(const RuleSet::FolderFlow& value) {
     if (!value.nodes.empty()) return value;
@@ -94,7 +119,10 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
         if (!std::regex_match(flow.id, id) || flow.name.empty() || !flows.emplace(flow.id, flow).second)
             return invalid("$.folderFlows: missing or duplicate flow ID/name.");
         total += flow.nodes.size();
-        for (const auto& node : flow.nodes) if (node.condition) total += predicateSize(*node.condition) - 1;
+        for (const auto& node : flow.nodes) {
+            if (node.condition) total += predicateSize(*node.condition) - 1;
+            if (node.documentAnalysis) total += node.documentAnalysis->categories.size();
+        }
     }
     if (total > 1000) return invalid("$.folderFlows: total node limit is 1000.");
     std::map<std::string, std::set<std::string>> calls;
@@ -116,11 +144,18 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
             if (node.maxDepth && (node.type != ProcessingNodeType::Traverse || !node.recursive || *node.maxDepth < 1))
                 return fail("maxDepth requires a recursive traversal and a positive integer at " + key);
             const bool conditional = node.type == ProcessingNodeType::Condition;
-            const bool terminal = node.type == ProcessingNodeType::Destination || node.type == ProcessingNodeType::Exclude || node.type == ProcessingNodeType::Call;
+            const bool analyzesDocuments = node.type == ProcessingNodeType::DocumentAnalysis;
+            const bool terminal = node.type == ProcessingNodeType::Destination || node.type == ProcessingNodeType::Exclude ||
+                node.type == ProcessingNodeType::Call || analyzesDocuments;
             if (!*processingNodeTypeName(node.type)) return fail("unsupported node type at " + key);
             if ((node.type == ProcessingNodeType::Input && key != flow.entry) || conditional != node.condition.has_value() ||
                 (node.type == ProcessingNodeType::Destination) != node.destination.has_value() ||
+                analyzesDocuments != node.documentAnalysis.has_value() ||
                 (terminal ? !node.next.empty() : node.next.empty())) return fail("invalid fields or missing successor at " + key);
+            if (analyzesDocuments) {
+                const auto valid = validateDocumentAnalysis(*node.documentAnalysis);
+                if (!valid) return fail(key + ": " + valid.error().message);
+            }
             if (node.type != ProcessingNodeType::Call && !node.targetFlow.empty()) return fail("only call nodes can choose another flow.");
             if (node.type == ProcessingNodeType::Traverse && (inputTypes & 1)) return fail("traversal requires a folder input or folder-type guard at " + key);
             if (node.type == ProcessingNodeType::Call && !node.targetFlow.empty()) {
@@ -136,7 +171,8 @@ Result<void> validateProcessingFlows(const RuleSet& rules) {
                 const auto& child = node.next[index];
                 if (!nodes.contains(child)) return fail("unknown successor: " + child);
                 const auto& childType = nodes.at(child)->type;
-                if (node.next.size() > 1 && childType != ProcessingNodeType::Condition && childType != ProcessingNodeType::Otherwise)
+                if (node.next.size() > 1 && childType != ProcessingNodeType::Condition &&
+                    childType != ProcessingNodeType::Otherwise && childType != ProcessingNodeType::DocumentAnalysis)
                     return fail("branch siblings must be conditions or otherwise.");
                 if (childType == ProcessingNodeType::Otherwise) {
                     if (otherwiseSeen || index + 1 != node.next.size()) return fail("otherwise must be unique and last.");

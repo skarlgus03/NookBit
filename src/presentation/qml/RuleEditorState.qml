@@ -27,7 +27,7 @@ QtObject {
             { type: "exclude", title: qsTr("정리하지 않음") }
         ] },
         { title: qsTr("처리 단계"), nodes: [
-            { type: "documentAnalysis", title: qsTr("문서 분석 (TF-IDF) · 초안") },
+            { type: "documentAnalysis", title: qsTr("문서 분석 (TF-IDF)") },
             { type: "folderScan", title: qsTr("폴더 내부 순회") },
             { type: "callFlow", title: qsTr("분류 흐름 호출") }
         ] },
@@ -473,7 +473,10 @@ QtObject {
         if (!block || block.type !== "documentAnalysis")
             return;
         const categories = block.categories || [];
-        const category = {id: "category-" + nextId++, label: qsTr("분류 %1").arg(categories.length + 1), keywords: ""};
+        let id = "category-" + nextId++;
+        while (categories.some(category => category.id === id))
+            id = "category-" + nextId++;
+        const category = {id: id, label: qsTr("분류 %1").arg(categories.length + 1), keywords: ""};
         blocks = blocks.map(item => item.id === blockId
             ? Object.assign({}, item, {categories: categories.concat([category])}) : item);
         selectOnly(blockId);
@@ -1104,8 +1107,9 @@ QtObject {
         }
         if (result.outcome !== "unclassified" && result.path.length > 0) {
             const lastRule = result.path[result.path.length - 1];
-            const terminal = blocks.find(item => item.parentRuleId === lastRule && (item.type === "destination" || item.type
-                                                                                    === "exclude"));
+            const terminal = result.documentOutputId
+                ? blockForId(edges.find(edge => edge.from === ids[ids.length - 1] && edge.port === result.documentOutputId)?.to)
+                : blocks.find(item => item.parentRuleId === lastRule && (item.type === "destination" || item.type === "exclude"));
             if (terminal)
                 ids.push(terminal.id);
         }

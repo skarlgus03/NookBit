@@ -366,6 +366,12 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
             row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
             break;
+        case PreviewDisposition::DocumentHeld:
+            ++excludedCount;
+            row.insert(QStringLiteral("status"), tr("문서 분류 보류"));
+            row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
+            row.insert(QStringLiteral("reason"), tr("유사도가 기준보다 낮거나 본문을 읽지 못해 대기 목록에 남아요."));
+            break;
         case PreviewDisposition::AlreadyAtDestination:
             ++excludedCount;
             row.insert(QStringLiteral("status"), QStringLiteral("이미 목적지에 있음"));

@@ -215,7 +215,8 @@ Popup {
                 text: panel.editor.testResult.outcome === "destination" ? qsTr("목적지: %1").arg(
                                                                               panel.editor.testResult.destination) :
                                                                           panel.editor.testResult.outcome
-                                                                          === "excluded" ? qsTr("결과: 정리 제외") : qsTr(
+                                                                          === "excluded"
+                    ? (panel.editor.testResult.documentOutputId === "abstain" ? qsTr("결과: 문서 분류 보류") : qsTr("결과: 정리 제외")) : qsTr(
                                                                                                "결과: 미분류")
                 wrapMode: Text.WordWrap
             }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "modules/rules/rule_engine.hpp"
+
 #include <QFileInfo>
 #include <QMap>
 #include <QStringList>
@@ -23,6 +25,7 @@ inline constexpr qsizetype recommendationFolderLimit = 32;
 inline constexpr int exampleReadLimit = 8;
 
 bool isDocumentExtension(const QString& extension);
+std::optional<RuleEngine::DocumentMatch> scoreDocument(const FileFact& file, const DocumentAnalysis& analysis);
 QFileInfoList candidateFolders(const QString& root);
 FolderSuggestions suggestFolders(const QString& homePath, const QStringList& documents,
                                  const QStringList& previewSources,

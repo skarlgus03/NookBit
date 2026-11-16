@@ -566,7 +566,7 @@ void testCanvasDraftPersistence() {
     expect(!editor.loadCanvasDraft().value("valid").toBool(), "show a missing draft");
     const QVariantList categories{
         QVariantMap{{"id", "category-9"}, {"label", "회의록"}, {"keywords", "안건, 참석자"}},
-        QVariantMap{{"id", "category-10"}, {"label", "매뉴얼"}, {"keywords", ""}},
+        QVariantMap{{"id", "category-10"}, {"label", "매뉴얼"}, {"keywords", "설치, 설정"}},
     };
     const QVariantList blocks{
         QVariantMap{{"id", 1}, {"type", "start"}, {"x", 70}, {"y", 220}},
@@ -581,7 +581,6 @@ void testCanvasDraftPersistence() {
         QVariantMap{{"from", 2}, {"to", 4}, {"port", "abstain"}},
     };
     expect(editor.saveCanvasDraft(blocks, edges, 11).isEmpty(), "canvas draft saves separately");
-    expect(!editor.importGraph(blocks, edges), "document analysis draft cannot become an active rule");
     auto broken = edges;
     broken[1] = QVariantMap{{"from", 2}, {"to", 3}, {"port", "category-8"}};
     expect(!editor.saveCanvasDraft(blocks, broken, 11).isEmpty(), "reject a missing output pin");
@@ -607,6 +606,56 @@ void testCanvasDraftPersistence() {
     draftFile.write(R"({"format":2})");
     draftFile.close();
     expect(!reopened.loadCanvasDraft().value("valid").toBool(), "invalid draft does not restore");
+
+    auto activeBlocks = blocks;
+    activeBlocks.append(QVariantMap{{"id", 12}, {"type", "flowStart"}, {"flowId", "documents"},
+        {"flowNodeId", "input"}, {"flowInput", "item"}, {"value", "Documents"}, {"x", 70}, {"y", 900}});
+    auto flowDocument = blocks.at(1).toMap();
+    flowDocument["id"] = 13;
+    flowDocument["flowId"] = QStringLiteral("documents");
+    flowDocument["flowNodeId"] = QStringLiteral("classify");
+    activeBlocks.append(flowDocument);
+    auto flowTerminal = blocks.at(2).toMap();
+    flowTerminal["id"] = 14;
+    flowTerminal["flowId"] = QStringLiteral("documents");
+    activeBlocks.append(flowTerminal);
+    auto activeEdges = edges;
+    activeEdges.append(QVariantMap{{"from", 12}, {"to", 13}});
+    activeEdges.append(QVariantMap{{"from", 13}, {"to", 14}, {"port", "category-9"}});
+    expect(reopened.importGraph(activeBlocks, activeEdges) && reopened.save(), "document analysis saves in both rule trees and processing flows");
+    expect(reopened.saveGraphLayout(activeBlocks, activeEdges), "document output positions save with the graph");
+    const auto saved = active.load();
+    if (!saved || saved.value().nodes.empty() || saved.value().folderFlows.empty()) {
+        expect(false, "saved document rules reopen");
+        return;
+    }
+    const auto& analysis = saved.value().nodes.front().documentAnalysis;
+    const auto& flowNodes = saved.value().folderFlows.front().nodes;
+    const auto analysisNode = std::find_if(flowNodes.begin(), flowNodes.end(),
+        [](const auto& node) { return node.id == "classify"; });
+    expect(analysis && analysis->minimumSimilarity == 43 && analysis->categories.size() == 2 &&
+        analysis->categories.front().output.destination && analysis->abstain.exclude,
+        "rule JSON preserves thresholds and routes");
+    if (analysis) {
+        auto modified = saved.value();
+        ++modified.nodes.front().documentAnalysis->minimumSimilarity;
+        expect(nookbit::PlanSignature::rules(saved.value()) != nookbit::PlanSignature::rules(modified),
+            "changing the threshold invalidates the approved rule signature");
+    }
+    expect(flowNodes.size() == 2 && analysisNode != flowNodes.end() && analysisNode->documentAnalysis &&
+        analysisNode->documentAnalysis->categories.front().output.destination,
+        "flow JSON stores output destinations inside the document node");
+    auto graph = reopened.graph();
+    int categoryLinks = 0;
+    int abstainLinks = 0;
+    for (const auto& item : graph.value("edges").toList()) {
+        const auto pin = item.toMap().value("port").toString();
+        if (pin == "category-9") ++categoryLinks;
+        if (pin == "abstain") ++abstainLinks;
+    }
+    expect(categoryLinks == 2 && abstainLinks == 1 &&
+        reopened.importGraph(graph.value("blocks").toList(), graph.value("edges").toList()),
+        "active JSON round trip restores the output pins and valid graph");
 }
 
 // 새 크기 단위와 기존 단위가 저장·복원 과정에서 바이트 값을 보존하는지 검사하는 함수.

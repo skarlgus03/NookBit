@@ -107,6 +107,24 @@ void appendNode(std::string& output, const RuleNode& node) {
     for (const auto& child : node.children) appendNode(output, child);
 }
 
+void appendDocumentAnalysis(std::string& output, const DocumentAnalysis& analysis) {
+    const auto appendOutput = [&](const DocumentOutput& pin) {
+        appendNumber(output, pin.exclude);
+        appendNumber(output, pin.destination.has_value());
+        if (pin.destination) appendDestination(output, *pin.destination);
+    };
+    append(output, "document-analysis-v1");
+    appendNumber(output, analysis.minimumSimilarity);
+    appendNumber(output, analysis.categories.size());
+    for (const auto& category : analysis.categories) {
+        append(output, category.id);
+        append(output, category.label);
+        append(output, category.keywords);
+        appendOutput(category.output);
+    }
+    appendOutput(analysis.abstain);
+}
+
 // v3 노드의 단일 조건과 자식을 순서대로 서명에 추가하는 함수.
 void appendAtomicNode(std::string& output, const RuleNode& node) {
     append(output, node.id);
@@ -114,6 +132,7 @@ void appendAtomicNode(std::string& output, const RuleNode& node) {
     appendNumber(output, node.otherwise);
     appendNumber(output, node.atomicCondition.has_value());
     if (node.atomicCondition) appendAtomicCondition(output, *node.atomicCondition);
+    if (node.documentAnalysis) appendDocumentAnalysis(output, *node.documentAnalysis);
     appendNumber(output, node.destination.has_value());
     if (node.destination) appendDestination(output, *node.destination);
     appendNumber(output, node.exclude);
@@ -258,6 +277,7 @@ std::string PlanSignature::rules(const RuleSet& rules) {
                         for (const auto& next : node.next) append(output, next);
                         appendNumber(output, node.condition.has_value());
                         if (node.condition) appendAtomicCondition(output, *node.condition);
+                        if (node.documentAnalysis) appendDocumentAnalysis(output, *node.documentAnalysis);
                         appendNumber(output, node.destination.has_value());
                         if (node.destination) appendDestination(output, *node.destination);
                         append(output, node.targetFlow);

@@ -1,6 +1,6 @@
 # NookBit rule-tree v3: AI authoring contract
 
-Contract revision: 2026-11-04. Instructions are in English; preserve user-supplied
+Contract revision: 2026-11-16. Instructions are in English; preserve user-supplied
 folder names, filename substrings and paths in their original language. This
 document works as a standalone attachment; no conversation history, model-specific
 memory, skill, API connection or MCP server is required to generate the JSON.
@@ -9,15 +9,11 @@ Standalone authoring contract for an LLM generating `nookbit_rules.json`. No oth
 
 ## Output shape
 
-The editor's `documentAnalysis` prototype and the preview's document-folder
-recommendations are outside the v3 JSON contract. Use only the supported
-conditions and processing nodes below to author runnable rules.
-
 The top-level object must contain exactly `schemaVersion`, `ruleSetId`, `version`, and `nodes`, plus optional `globalOtherwise` and `folderFlows`. Use `"schemaVersion": 3`. `ruleSetId` and every node `id` must match `[A-Za-z0-9._-]+`; node IDs must be unique throughout the entire tree. `version` is an ISO 8601 date-time with a timezone, such as `2026-10-01T00:00:00Z`. `nodes` is a nonempty array of root nodes. Preserve array order: it is rule priority.
 
-Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain exactly one `when` condition. An else node has `"otherwise": true` instead of `when`; at most one else node is allowed in each sibling array. Put it last for readability. A node either has a nonempty `children` array, is a leaf with `destination`, or is a leaf with `"exclude": true`. An internal node must not have `destination` or `exclude`. A leaf must not omit its terminal action, even if `globalOtherwise` exists. Do not add unlisted fields.
+Every node must contain `id` and a Boolean `enabled`. An ordinary node must contain one `when` condition. An else node has `"otherwise": true` instead of `when`. At most one else node is allowed in each sibling array. Put it last. Ordinary and else nodes use a nonempty `children` array or one terminal action (`destination` or `"exclude": true`). A document analysis node owns its outputs as described below. Do not add unlisted fields.
 
-Use at most 1000 rule nodes, with root depth 0 and maximum nesting depth 32.
+Use at most 1000 rule nodes including logical operands and document categories, with root depth 0 and maximum nesting depth 32.
 
 Supported `when` objects (use exactly the keys shown for the selected type):
 
@@ -39,6 +35,39 @@ Logical expressions contain only conditions. Maximum expression depth is 32, wit
 For each destination use `{"base":"home","path":"Pictures/{yyyy}/{MM}","collisionPolicy":"inherit"}`. `base` is optional and defaults to `home` for older rules. In `home` mode, `path` is nonempty and relative to the user's configured organizing root; never use a drive letter or absolute path. For a user-requested separate destination use `{"base":"absolute","path":"D:/ImportantFiles","collisionPolicy":"inherit"}` with a fully qualified local folder path. Do not invent machine-specific absolute folders unless the user supplies them. A rule JSON NEVER grants permission to external folders: the user must separately allow the folder in the app before preview/execution. Never use `..` segments in either mode. The only supported date tokens are `{yyyy}` and `{MM}`. They use the file's modification date in the PC's local time zone. `collisionPolicy` is required and is one of `inherit`, `rename`, `skip`, `abort`. `inherit` uses the user's configured default. If no date folders are wanted, use a plain path such as `Pictures`.
 
 `globalOtherwise`, if present, is a destination object of the same shape. It applies only when traversal finds neither a destination nor an explicit exclusion. If omitted, an unmatched file remains unclassified in the pending list. `"exclude": true` is an explicit do-not-move result, not a destination named “Unclassified”; it takes precedence over `globalOtherwise`.
+
+## Document analysis by content
+
+Use a node with exactly `id`, `enabled`, and `documentAnalysis`. At that
+position in rule order it matches TXT, Markdown (.md), and PDF files. It can
+also be a child of an ordinary condition. Put narrower rules ahead of it
+when those rules should take priority. The app scores a local body excerpt
+using TF-IDF. Keywords supply reference text, so author categories using
+specific words and short phrases typical of their documents. No reference
+folders or model downloads are needed. This fragment is one entry of `nodes`.
+
+```text
+{
+  "id": "classify-documents",
+  "enabled": true,
+  "documentAnalysis": {
+    "minimumSimilarity": 35,
+    "categories": [
+      {"id":"minutes","label":"Meeting minutes","keywords":"agenda, attendees, decisions, action items",
+       "output":{"destination":{"path":"Documents/Meeting Minutes","collisionPolicy":"inherit"}}},
+      {"id":"manual","label":"Manuals","keywords":"installation, configuration, troubleshooting",
+       "output":{"destination":{"path":"Documents/Manuals","collisionPolicy":"inherit"}}}
+    ],
+    "abstain": {"exclude":true}
+  }
+}
+```
+
+- `minimumSimilarity` is an integer percentage from 0 through 100. The editor displays 35 as 0.35. A positive score must meet the threshold. Equal scores use category order.
+- Include 1–32 categories. Each category requires a unique ID matching `[A-Za-z0-9._-]+` other than `abstain`, a nonblank label, and nonblank keywords of at most 4096 UTF-8 bytes.
+- A category's optional `output` and the node's optional `abstain` each allow one `destination` or `"exclude": true`. Omission or an empty object leaves the file in place. Both outcomes take precedence over the global fallback.
+- Below-threshold scores, no positive score, or an unreadable body (including image-only PDF) use the abstain output. Other extensions and folders remain eligible for subsequent branches.
+- In a named flow use `{"id":"docs","type":"documentAnalysis","documentAnalysis":{...}}`. The payload is identical, with its destinations embedded and no `next`.
 
 ## Evaluation rules
 
@@ -88,10 +117,11 @@ exactly one input node. Use the following processing nodes and no other fields:
 | `call` | `target` | Terminal call: empty string selects default top-level rules; a flow ID calls that flow. No return continuation. |
 | `destination` | `destination` | Terminal destination object with the same path/permission/collision contract as ordinary rules. |
 | `exclude` | none | Terminal explicit do-not-move result. |
+| `documentAnalysis` | `documentAnalysis` | Terminal content scoring and output selection, described above. |
 
 `next` is an ordered array of successor node IDs. Terminal nodes omit it or use
-`[]`; other nodes require successors. With multiple successors, all must be
-`condition` or `otherwise` nodes. Select the first matching condition, then
+`[]`; document analysis omits it. Other nodes require successors. With multiple successors, all must be
+`condition`, `documentAnalysis`, or `otherwise` nodes. Select the first matching branch, then
 continue only in that branch; no backtracking. A single processing successor
 executes directly. If no branch matches, leave the item unclassified; a graph
 never implicitly uses top-level `globalOtherwise`. Explicitly call the default

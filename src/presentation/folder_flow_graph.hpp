@@ -1,6 +1,7 @@
 #pragma once
 #include <nookbit/domain/model.hpp>
 #include "modules/rules/processing_flow.hpp"
+#include "presentation/document_rule_graph.hpp"
 #include <QHash>
 #include <QPointF>
 #include <QSet>
@@ -54,6 +55,8 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         }
     }
     QHash<int, QVector<int>> outgoing;
+    QHash<int, int> incomingCount;
+    QHash<int, QString> documentPorts;
     for (const auto& value : edges) {
         const auto edge = value.toMap();
         const int from = edge.value("from").toInt(), to = edge.value("to").toInt();
@@ -61,8 +64,16 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         const auto owner = byId.value(from).value("flowId").toString();
         if (owner != byId.value(to).value("flowId").toString())
             return invalid(QStringLiteral("영역 사이에는 선 대신 '분류 흐름 호출' 노드를 사용해 주세요."));
-        if (owner.isEmpty()) result.edges.append(value);
-        else outgoing[from].append(to);
+        if (owner.isEmpty()) {
+            result.edges.append(value);
+        } else {
+            const auto port = edge.value("port").toString();
+            if ((byId.value(from).value("type") == "documentAnalysis") != !port.isEmpty())
+                return invalid(QStringLiteral("블록 %1: 문서 분석 출력의 연결 핀을 확인해 주세요.").arg(from));
+            if (!port.isEmpty()) documentPorts.insert(to, port);
+            outgoing[from].append(to);
+            ++incomingCount[to];
+        }
     }
     QSet<QString> names;
     for (const auto& value : blocks) {
@@ -81,7 +92,29 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         for (const auto id : groups.take(flowId)) {
             const auto block = byId.value(id);
             const auto type = block.value("type").toString();
+            if (documentPorts.contains(id)) {
+                if (incomingCount.value(id) != 1 || !outgoing.value(id).isEmpty() ||
+                    (type != "destination" && type != "exclude"))
+                    return invalid(QStringLiteral("블록 %1: 문서 분석 출력에는 전용 종착 노드를 연결해 주세요.").arg(id));
+                continue;
+            }
             ProcessingNode node; node.id = nodeIds.value(id).toStdString();
+            if (type == "documentAnalysis") {
+                QHash<QString, QVariantMap> terminals;
+                for (const auto child : outgoing.value(id)) {
+                    const auto port = documentPorts.value(child);
+                    if (terminals.contains(port))
+                        return invalid(QStringLiteral("블록 %1: 각 출력에 종착 노드를 하나만 연결해 주세요.").arg(id));
+                    terminals.insert(port, byId.value(child));
+                }
+                auto analysis = graphDocumentAnalysis(block, std::move(terminals));
+                if (!analysis) return invalid(QStringLiteral("블록 %1: %2").arg(QString::number(id),
+                    QString::fromStdString(analysis.error().message)));
+                node.type = ProcessingNodeType::DocumentAnalysis;
+                node.documentAnalysis = std::move(analysis.value());
+                flow.nodes.push_back(std::move(node));
+                continue;
+            }
             for (const auto child : outgoing.value(id)) node.next.push_back(nodeIds.value(child).toStdString());
             if (type == "flowStart") node.type = ProcessingNodeType::Input;
             else if (type == "folderScan") {
@@ -154,8 +187,11 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
         arrange = [&](const std::string& key, int depth) {
             const auto node = std::find_if(flow.nodes.begin(), flow.nodes.end(), [&](const auto& item) { return item.id == key; });
             if (node == flow.nodes.end()) return top;
-            const int rows = node->type == ProcessingNodeType::Condition && formatCondition
+            const int logicalRows = node->type == ProcessingNodeType::Condition && formatCondition
                 ? logicalGraphRows(formatCondition(*node, ids.value(QString::fromStdString(key)))) : 1;
+            const int rows = node->documentAnalysis
+                ? 1 + (72 + (static_cast<int>(node->documentAnalysis->categories.size()) + 1) * 76) / 170
+                : logicalRows;
             const int groupsBeforeChildren = logicalGroups;
             double y = top;
             if (!node->next.empty()) {
@@ -167,7 +203,7 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
                 y = top + row * 170;
                 row += rows;
             }
-            if (rows > 1) ++logicalGroups;
+            if (logicalRows > 1) ++logicalGroups;
             defaults.insert(QString::fromStdString(key), QPointF(70 + depth * 310, y));
             return y;
         };
@@ -200,6 +236,9 @@ inline void appendFolderFlowGraph(const std::vector<RuleSet::FolderFlow>& flows,
                 block.insert("homeRelative", !node.destination->absolute);
                 block.insert("collisionPolicy", !node.destination->collisionPolicy ? "inherit" : *node.destination->collisionPolicy == CollisionPolicy::Rename ? "rename" : *node.destination->collisionPolicy == CollisionPolicy::Skip ? "skip" : "abort");
             }
+            if (node.documentAnalysis)
+                appendGraphDocumentOutputs(*node.documentAnalysis, block, blocks, edges, positions,
+                                           flowId + ':' + key, nextId);
             blocks.append(block);
             for (const auto& child : node.next) edges.append(QVariantMap{{"from", id}, {"to", ids.value(QString::fromStdString(child))}});
         }
