@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/persistence_sqlite/sqlite_history_repository.hpp"
 #include "presentation/history_controller.hpp"
 #include <QCoreApplication>
@@ -11,11 +13,8 @@
 #include <iostream>
 
 namespace {
-int failures{};
-// 기록 조회 결과가 기대와 다르면 원인을 남기는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 파일을 건드리지 않고 실행 요청 여부와 되돌림 범위만 기록하는 대역.
 class Operations final : public nookbit::IFileOperations {
 public:

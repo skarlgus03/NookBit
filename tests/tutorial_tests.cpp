@@ -1,14 +1,13 @@
+#include "test_expect.hpp"
+
 #include "presentation/tutorial_controller.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <iostream>
 
 namespace {
-int failures{};
-// 튜토리얼의 완료·재열기 계약이 달라지면 이유와 함께 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 완료 기록 외 개인 설정을 바꾸지 않는지 임시 저장소에서 검사하는 함수.
 int main(int argc, char** argv) {

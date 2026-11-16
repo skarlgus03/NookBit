@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/feature_connections.hpp"
 #include "presentation/notification_controller.hpp"
 #include "presentation/watch_controller.hpp"
@@ -12,11 +14,8 @@
 #include <vector>
 
 namespace {
-int failures{};
-// 예상과 다른 연결 동작을 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 class CharacterRecipient final : public QObject, public nookbit::ICharacterChannel, public nookbit::ICharacterReactionChannel {
 public:

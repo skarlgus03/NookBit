@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 
 #include <chrono>
@@ -8,15 +10,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 조건이 거짓이면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 테스트가 만든 임시 폴더만 마지막에 정리하는 보조 객체.
 struct FixtureDirectory {

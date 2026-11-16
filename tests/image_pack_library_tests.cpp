@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/configuration/directory_image_pack_library.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include "presentation/character_settings_controller.hpp"
@@ -17,11 +19,8 @@
 #include <limits>
 
 namespace {
-int failures = 0;
-// 기대값과 다른 동작을 검사 실패로 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // Qt 파일 경로를 백엔드 경로로 변환하는 함수.
 std::filesystem::path path(const QString& text) { return std::filesystem::path(text.toStdWString()); }
 // 테스트가 소유한 파일만 작성하는 함수.

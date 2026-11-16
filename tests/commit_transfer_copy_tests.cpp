@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/application/commit_transfer_copy_use_case.hpp>
 #include <nookbit/application/inspect_transfer_recovery_use_case.hpp>
 #include <nookbit/application/finalize_transfer_use_case.hpp>
@@ -29,11 +31,8 @@
 
 namespace {
 using namespace nookbit;
-int failures{};
-// 기대와 다른 결과를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 테스트 전용 파일을 작성하는 함수.
 void write(const std::filesystem::path& path, const std::string& contents) {
     std::ofstream file(path, std::ios::binary);

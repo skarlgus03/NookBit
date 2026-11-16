@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "presentation/rule_editor_controller.hpp"
 #include "presentation/folder_flow_graph.hpp"
@@ -22,14 +24,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-
-// 검사 결과가 틀리면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (condition) return;
-    std::cerr << "FAIL: " << message << '\n';
-    ++failures;
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 프로젝트에 들어 있는 테스트 규칙 파일 경로를 반환하는 함수.
 QString projectPath(const char* relative) {

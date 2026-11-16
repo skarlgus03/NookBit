@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/domain/transfer.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
@@ -13,12 +15,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-
-// 예상 결과와 다르면 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 실제 마이그레이션 파일의 경로를 반환하는 함수.
 QString migrationPath() {

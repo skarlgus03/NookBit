@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "application/use_cases/create_preview_use_case.hpp"
 
 #include <filesystem>
@@ -7,16 +9,9 @@
 
 namespace {
 
-int failures = 0;
+using nookbit::test::expect;
+using nookbit::test::failures;
 const std::vector<std::filesystem::path> sampleSelection{L"C:/watch/file.txt"};
-
-// 조건이 거짓일 때 테스트 실패를 기록하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
 
 class FakeSettingsRepository final : public nookbit::ISettingsRepository {
 public:

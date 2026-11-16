@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/configuration/json_rule_set_repository.hpp"
 #include "infrastructure/configuration/json_settings_repository.hpp"
 #include "infrastructure/configuration/json_watch_settings_repository.hpp"
@@ -18,15 +20,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 조건이 맞지 않을 때 테스트 실패를 출력하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 프로젝트 내부의 예제 또는 Schema 절대 경로를 만드는 함수.
 QString projectPath(const char* relativePath) {

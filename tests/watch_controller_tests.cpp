@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
 #include "presentation/watch_controller.hpp"
@@ -21,15 +23,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 예상 결과와 다르면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 프로젝트 파일의 절대 경로를 만드는 함수.
 QString projectPath(const char* relativePath) {

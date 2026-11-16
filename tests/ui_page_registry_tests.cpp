@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/ui_page_registry.hpp"
 #include <QCoreApplication>
 #include <QThread>
@@ -5,11 +7,8 @@
 #include <memory>
 
 namespace {
-int failures{};
-// 등록 계약의 위반이나 상태 변경을 설명과 함께 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면을 생성하지 않는 작은 등록 문서를 만드는 함수.
 nookbit::UiPageContribution entry(QString id, int route, int order = 40) {
     return {std::move(id), "companion", route, "Companion", "companion", "Companion", order,

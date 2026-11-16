@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -7,11 +9,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 편집 상태 계약이 달라지면 해당 동작을 설명하고 실패시키는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면이나 컨트롤러 없이 실제 편집 상태만 생성하는 함수.
 std::unique_ptr<QObject> create(QQmlEngine& engine, const QVariantMap& inputs) {
     QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(NOOKBIT_SOURCE_DIR "/src/presentation/qml/CompanionEditState.qml")));

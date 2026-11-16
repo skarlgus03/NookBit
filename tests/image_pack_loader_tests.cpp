@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -11,11 +13,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 조건이 다르면 검사 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 프로젝트 예제·스키마의 절대 경로를 만드는 함수.
 QString projectPath(const char* relative) {
     return QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/" + QString::fromUtf8(relative);

@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <QGuiApplication>
 #include <QQmlEngine>
 #include <QQmlComponent>
@@ -13,11 +15,8 @@
 #include <cmath>
 
 namespace {
-int failures = 0;
-// 배치 조건이 다르면 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 음수 화면과 네 모서리에서도 말풍선이 작업 영역 안에 있는지 검사하는 함수.
 void checkArea(QQuickWindow& bubble, QRectF screen, QPointF anchor, bool left, bool below) {
     bubble.setProperty("screenArea", screen);

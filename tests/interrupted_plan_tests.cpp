@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/application/inspect_interrupted_plan_use_case.hpp>
 #include <nookbit/application/recover_interrupted_plan_use_case.hpp>
 #include <nookbit/application/cleanup_preserved_staging_use_case.hpp>
@@ -7,11 +9,8 @@
 
 namespace {
 using namespace nookbit;
-int failures = 0;
-// 실패한 조건을 누적해 전체 검사 결과를 반환하도록 돕는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 운영체제에 맞는 가상 절대 경로를 만드는 함수.
 std::filesystem::path path(const char* relative) {
 #ifdef _WIN32

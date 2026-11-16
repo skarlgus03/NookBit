@@ -1,14 +1,13 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/diagnostics/operation_timing.hpp"
 #include <fstream>
 #include <iostream>
 #include <thread>
 
 namespace {
-int failures = 0;
-// 진단 결과가 예상과 다르면 실패로 표시하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 테스트가 만든 작은 로그만 읽는 함수.
 std::string read(const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary);

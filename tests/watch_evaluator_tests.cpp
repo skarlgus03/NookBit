@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "modules/watch/watch_evaluator.hpp"
 #include "application/use_cases/evaluate_watch_folder_use_case.hpp"
 #include "modules/watch/watch_file_readiness.hpp"
@@ -7,15 +9,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 예상한 판단 결과와 다르면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 테스트용 파일 정보를 지정한 크기와 경과 시간으로 만드는 함수.
 nookbit::FileFact fact(std::uintmax_t size, std::int64_t modifiedMs) {

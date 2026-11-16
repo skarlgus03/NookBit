@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/companion_interaction_controller.hpp"
 #include "presentation/character_controller.hpp"
 #include <QCoreApplication>
@@ -7,11 +9,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 표현 복귀나 입력 수명 검사에 실패하면 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 현재 행동·일시 반응·숨김·짧은 타이머의 연결을 검사하는 함수.
 int main(int argc, char** argv) {

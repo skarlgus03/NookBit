@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_source_removal.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
@@ -19,13 +21,10 @@
 #endif
 
 namespace {
-int failures{};
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 다운로드 표식 원문을 보존하고 비지원 스트림/기존 계약을 계속 거부하는 함수.
 void testZonePreservation(const std::filesystem::path& root);
-// 조건이 거짓이면 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
 // 테스트 전용 파일을 작성하는 함수.
 void write(const std::filesystem::path& path, const std::string& bytes) {
     std::ofstream file(path, std::ios::binary);

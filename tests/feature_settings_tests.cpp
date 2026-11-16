@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/feature_preferences.hpp"
 #include "presentation/feature_settings_controller.hpp"
 #include <QCoreApplication>
@@ -8,11 +10,8 @@
 #include <iostream>
 
 namespace {
-int failures{};
-// 요청 상태·보관 상태·실행 상태가 섞이면 검사 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면에 전달한 모듈 행을 안정적인 식별자로 찾는 함수.
 QVariantMap row(const nookbit::FeatureSettingsController& controller, const QString& id) {
     for (const auto& value : controller.modules()) if (value.toMap().value("id").toString() == id) return value.toMap();

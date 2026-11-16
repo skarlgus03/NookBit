@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <QGuiApplication>
 #include <QQmlEngine>
 #include <QQmlComponent>
@@ -14,12 +16,8 @@
 #include <cmath>
 
 namespace {
-int failures = 0;
-
-// 편집 상태와 화면 연결의 조건이 다르면 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 앱 전역 객체 없이 명시적인 입력으로 편집기 부품을 생성하는 함수.
 std::unique_ptr<QObject> create(QQmlEngine& engine, const char* name, const QVariantMap& properties = {}) {

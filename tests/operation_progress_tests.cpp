@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/application/operation_progress.hpp>
 #include <iostream>
 #include <thread>
@@ -5,11 +7,8 @@
 #include <stdexcept>
 
 namespace {
-int failures{};
-// 기대한 진행 데이터가 아니면 실패를 표시하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 
 // 화면 없는 코어에서 진행 값·제한·수명·예외 격리를 검증하는 함수.

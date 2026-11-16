@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/notification_runtime.hpp"
 #include "app/folder_watch_runtime.hpp"
 #include "app/ui_page_registry.hpp"
@@ -13,12 +15,9 @@
 #include <utility>
 
 namespace {
-int failures{};
+using nookbit::test::expect;
+using nookbit::test::failures;
 const nookbit::NotificationType offerType{"file.offer", "folder-watch", "Watch", "Offer", "Test offer", true};
-// 기능 묶음의 수명과 설정 결과가 예상과 다르면 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
 
 // 알림 묶음 종료 후 컨트롤러는 사라지고 표시 설정은 유지되는지 검사하는 함수.
 void testNotificationOwnership() {

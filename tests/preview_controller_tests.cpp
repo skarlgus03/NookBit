@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
 #include "application/use_cases/classify_files_use_case.hpp"
@@ -63,8 +65,8 @@
 
 namespace {
 
-int failures = 0;
-void expect(bool condition, const std::string& message);
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 화면 이벤트를 계속 처리하면서 정해진 시간 안에 작업 완료를 기다리는 함수.
 bool waitForBackground(nookbit::BackgroundTaskRunner& runner) {
@@ -227,14 +229,6 @@ public:
         return nookbit::Result<nookbit::RuleSet>::success(rules);
     }
 };
-
-// 조건이 거짓이면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
 
 // 프로젝트의 예제 규칙 및 Schema 경로를 만드는 함수.
 QString projectPath(const char* relativePath) {

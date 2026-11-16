@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "infrastructure/filesystem/windows_directory_mover.hpp"
 #include "infrastructure/filesystem/windows_file_mover.hpp"
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
@@ -21,11 +23,8 @@
 #include <iostream>
 
 namespace {
-int failures{};
-/// 검사 실패를 기록하는 함수.
-void expect(bool value, const std::string& message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 /// 테스트 전용 파일에 내용을 기록하는 함수.
 void write(const std::filesystem::path& path, const QByteArray& content) {
     QFile file(QString::fromStdWString(path.wstring()));

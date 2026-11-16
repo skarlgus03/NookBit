@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/file_organizer_runtime.hpp"
 #include "app/companion_runtime.hpp"
 #include "app/ui_page_registry.hpp"
@@ -29,11 +31,8 @@
 #include <iostream>
 
 namespace {
-int failures{};
-// 예상과 다른 수명·설정·파일 상태를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면을 띄우지 않고 실행기와 결과 전달이 끝나도록 기다리는 함수.
 void waitIdle(nookbit::BackgroundTaskRunner& runner) {
     if (!runner.busy()) return;

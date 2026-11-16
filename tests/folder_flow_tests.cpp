@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "application/use_cases/create_preview_use_case.hpp"
 #include "application/use_cases/freeze_preview_use_case.hpp"
 #include "application/use_cases/verify_saved_plan_use_case.hpp"
@@ -22,11 +24,8 @@
 namespace {
 using nookbit::ProcessingNodeType;
 
-int failures = 0;
-// 실패한 기능 계약을 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 시험 소유 파일만 생성하는 함수.
 void write(const std::filesystem::path& path) {
     QFile file(QString::fromStdWString(path.wstring()));

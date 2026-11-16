@@ -1,12 +1,11 @@
+#include "test_expect.hpp"
+
 #include "modules/notifications/notification_center.hpp"
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 기대와 다른 알림 정책 결과를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 표시 정책이 발생 사실과 분리되고 중복·해제·종류 참조가 일관적인지 검사하는 함수.
 int main() {

@@ -1,13 +1,12 @@
+#include "test_expect.hpp"
+
 #include "presentation/app_lifecycle_controller.hpp"
 #include <QCoreApplication>
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 종료 정책이 기대와 다르면 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 트레이 닫기·복원·실행 중 종료 차단·트레이 유실을 검사하는 함수.
 int main(int argc, char** argv) {

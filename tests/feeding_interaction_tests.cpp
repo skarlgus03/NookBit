@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/companion_feeding_runtime.hpp"
 #include "presentation/companion_interaction_controller.hpp"
 #include "presentation/character_controller.hpp"
@@ -9,11 +11,8 @@
 #include <iostream>
 
 namespace {
-int failures{};
-// 기능 등록·반응·복귀가 기대와 다르면 원인을 남기는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 메뉴에 제공된 먹이 주기 동작이 현재 실행 가능한지 반환하는 함수.
 bool canFeed(const nookbit::CompanionInteractionController& controller) {
     const auto actions = controller.menuActions();

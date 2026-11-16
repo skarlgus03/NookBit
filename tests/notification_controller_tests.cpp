@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/notification_controller.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -6,11 +8,8 @@
 #include <vector>
 
 namespace {
-int failures = 0;
-// 예상과 다른 화면 전달 또는 저장 결과를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 알림 창구의 전달 중복 방지·표시 전환·저장 실패·재실행 복원을 검사하는 함수.
 int main(int argc, char** argv) {

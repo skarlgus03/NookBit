@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "application/use_cases/classify_files_use_case.hpp"
 #include "modules/rules/rule_engine.hpp"
 #include <functional>
@@ -7,11 +9,8 @@
 #include <sstream>
 
 namespace {
-int failures{};
-// 분류 조회 계약의 예상 결과와 다르면 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 struct Rules final : nookbit::IRuleSetRepository {
     mutable int reads{};

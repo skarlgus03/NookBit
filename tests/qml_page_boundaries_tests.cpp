@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <QGuiApplication>
 #include <QQmlEngine>
 #include <QQmlComponent>
@@ -17,7 +19,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 /// 실제 파일 없이 대기 목록의 아이콘 요청에 응답하는 시험용 제공자.
 class QueuePreviewFixture final : public QQuickImageProvider {
@@ -32,11 +35,6 @@ public:
         return image;
     }
 };
-
-// 화면 경계가 지켜지지 않으면 설명과 함께 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
 
 // 팝업 열기·닫기의 실제 이벤트 반영을 기다리는 함수.
 void settle() {

@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/application/prepare_transfer_plan_use_case.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include "infrastructure/cryptography/qt_plan_hasher.hpp"
@@ -11,14 +13,10 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
+using nookbit::test::expect;
+using nookbit::test::failures;
 const std::wstring guidA = L"\\\\?\\Volume{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}\\";
 const std::wstring guidB = L"\\\\?\\Volume{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}\\";
-
-// 실패한 예상 결과를 누적하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
 
 // 복사 기능 없이 실제 볼륨 조회만 흉내 내는 테스트 일꾼.
 struct Volumes final : nookbit::ITransferVolumeInspector {

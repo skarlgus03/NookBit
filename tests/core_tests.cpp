@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include <nookbit/domain/model.hpp>
 #include "modules/planner/collision_resolver.hpp"
 #include "modules/planner/path_safety_validator.hpp"
@@ -10,14 +12,8 @@
 
 namespace {
 
-int failures = 0;
-
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 void testSafetyInvariants() {
     expect(nookbit::SafetyInvariants::approvalRequired,

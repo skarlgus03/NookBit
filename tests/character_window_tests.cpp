@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/character_window_controller.hpp"
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -5,11 +7,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 기대한 위치·상태와 다르면 실패를 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 }
 // 위치 보정·모니터 제거·숨기기·개인 위치 저장을 검사하는 함수.
 int main(int argc, char** argv) {

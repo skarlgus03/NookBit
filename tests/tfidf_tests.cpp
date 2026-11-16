@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "modules/document_recommendation/tfidf.hpp"
 
 #include <cmath>
@@ -10,13 +12,8 @@ using nookbit::document_recommendation::Profile;
 using nookbit::document_recommendation::prepareProfiles;
 using nookbit::document_recommendation::recommend;
 
-int failures = 0;
-
-void expect(bool condition, std::string_view message) {
-    if (condition) return;
-    ++failures;
-    std::cerr << "FAIL: " << message << '\n';
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 void testSimilarity() {
     std::vector<Profile> profiles{

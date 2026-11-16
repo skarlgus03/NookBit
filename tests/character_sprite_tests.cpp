@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/character_controller.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
 #include "infrastructure/configuration/json_image_pack_loader.hpp"
@@ -16,7 +18,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 정상적인 비동기 이미지 지연을 재현해 상태 전환 중 빈 프레임을 검사하는 제공자.
 class DelayedFrameProvider final : public QQuickImageProvider {
 public:
@@ -31,10 +34,6 @@ public:
         return frame;
     }
 };
-// 예상과 다르면 검사 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
 // 테스트용 소스·시트의 절대 경로를 만드는 함수.
 QString projectPath(const char* relative) {
     return QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/" + QString::fromUtf8(relative);

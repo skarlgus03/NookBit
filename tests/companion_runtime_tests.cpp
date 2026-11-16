@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "modules/character/behavior_manager.hpp"
 #include "modules/character/interaction_manager.hpp"
 #include <iostream>
@@ -5,11 +7,8 @@
 #include <stdexcept>
 
 namespace {
-int failures = 0;
-// 기대한 행동 선택이나 세션 결과와 다르면 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 행동 조건·동률·발신자 독립성을 검사하는 함수.
 void testBehaviors() {
     nookbit::BehaviorManager manager;

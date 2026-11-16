@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "modules/rules/rule_engine.hpp"
 #include "application/use_cases/plan_signature.hpp"
 
@@ -17,15 +19,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 조건이 거짓이면 테스트 실패를 출력하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 테스트에서 사용할 날짜의 UTC 밀리초를 계산하는 함수.
 std::int64_t utcMillis(int year, unsigned month, unsigned day) {

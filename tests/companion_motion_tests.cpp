@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "modules/character/idle_walk_state.hpp"
 #include "presentation/companion_motion_controller.hpp"
 #include "presentation/character_controller.hpp"
@@ -11,9 +13,8 @@
 #include <iostream>
 
 namespace {
-int failures = 0;
-// 이동 범위나 중단 결과가 예상과 다르면 기록하는 함수.
-void expect(bool value, const char* message) { if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; } }
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면 없이 이벤트를 처리하며 조건을 기다리는 함수.
 bool waitFor(const std::function<bool()>& condition, int limitMs = 1500) {
     QElapsedTimer clock; clock.start();

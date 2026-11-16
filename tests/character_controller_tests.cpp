@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/character_controller.hpp"
 #include "presentation/background_task_runner.hpp"
 #include "infrastructure/configuration/json_character_presentation.hpp"
@@ -17,11 +19,8 @@
 #include <QTimer>
 
 namespace {
-int failures = 0;
-// 예상과 다르면 검사 실패를 기록하는 함수.
-void expect(bool value, const char* message) {
-    if (!value) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 화면 이벤트를 처리하며 제한된 시간 안에 작업 완료를 기다리는 함수.
 bool waitForIdle(nookbit::BackgroundTaskRunner& runner) {
     QElapsedTimer timeout;

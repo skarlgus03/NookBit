@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "presentation/pending_files_model.hpp"
 #include "app/pending_queue_adapter.hpp"
 #include "infrastructure/configuration/json_pending_files_repository.hpp"
@@ -12,15 +14,8 @@
 
 namespace {
 
-int failures = 0;
-
-// 조건이 거짓이면 테스트 실패를 기록하는 함수.
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 
 // 등록·중복 방지·제외가 원본 파일을 건드리지 않는지 검사하는 함수.
 void testPendingFilesModel() {

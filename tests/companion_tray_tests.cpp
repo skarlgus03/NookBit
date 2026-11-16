@@ -1,3 +1,5 @@
+#include "test_expect.hpp"
+
 #include "app/companion_tray_action.hpp"
 #include "presentation/character_window_controller.hpp"
 #include <QApplication>
@@ -7,11 +9,8 @@
 #include <memory>
 
 namespace {
-int failures{};
-// 표시 명령과 수명 처리의 예상 결과가 다르면 기록하는 함수.
-void expect(bool condition, const char* message) {
-    if (!condition) { ++failures; std::cerr << "FAIL: " << message << '\n'; }
-}
+using nookbit::test::expect;
+using nookbit::test::failures;
 // 메뉴와 설정의 표시 상태가 일치하고 기여 객체만 종료해도 메뉴가 정리되는지 검사하는 함수.
 void testVisibilityAndBindingLifetime() {
     nookbit::CharacterWindowController placement({QRect(0, 0, 1000, 800)}, QPoint(500, 500), true);
