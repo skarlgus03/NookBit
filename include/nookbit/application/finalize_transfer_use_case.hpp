@@ -5,6 +5,8 @@
 #include <memory>
 
 namespace nookbit {
+class IStagedCopySession;
+
 class ITransferRemovalSession {
 public:
     /// 제거 예약 없이 핸들만 해제하는 함수.
@@ -43,6 +45,9 @@ public:
     /// 다시 검증한 전송만 제거 의도·실제 제거·완료 기록 순서로 처리하는 함수.
     [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId,
         const std::function<bool()>& cancelled = {});
+    /// 정상 이동에서 이어진 보호 세션을 같은 제거 절차에 사용한다.
+    [[nodiscard]] Result<TransferAttempt> execute(const std::string& attemptId,
+        const std::function<bool()>& cancelled, std::unique_ptr<IStagedCopySession> committedCopy);
 private:
     ITransferJournal& journal_;
     ITransferSourceRemoval& removal_;

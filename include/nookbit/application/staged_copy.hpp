@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nookbit/application/finalize_transfer_use_case.hpp>
 #include <nookbit/domain/model.hpp>
 #include <functional>
 #include <memory>
@@ -32,6 +33,11 @@ public:
     }
     /// 검증된 임시 파일만 같은 부모의 최종 이름으로 덮어쓰기 없이 확정하는 함수.
     [[nodiscard]] virtual Result<FileFingerprint> commitNoReplace(const std::filesystem::path& destination) = 0;
+    /// 연속 보호된 세션만 제거용 증거를 넘긴다. 미지원 시 새 제거 세션을 열도록 빈 값을 반환한다.
+    [[nodiscard]] virtual Result<std::unique_ptr<ITransferRemovalSession>> takeRemovalSession(
+        const TransferAttempt&, const MoveContract&) {
+        return Result<std::unique_ptr<ITransferRemovalSession>>::success(nullptr);
+    }
 };
 
 /// 계획 단계는 복사 기능이 아닌 볼륨 조회 인터페이스만 사용한다.
@@ -67,6 +73,12 @@ public:
     [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> openApproved(
         const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&, const MoveContract&) {
         return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.contract_unsupported", "Approved volume handles are required."});
+    }
+    /// 한 번에 완료되는 이동에서만 삭제까지 파일 핸들을 유지할 수 있는 세션을 연다.
+    [[nodiscard]] virtual Result<std::unique_ptr<IStagedCopySession>> openForMove(
+        const std::filesystem::path& source, const FileFingerprint& expected,
+        const std::filesystem::path& staging, const MoveContract& movement) {
+        return openApproved(source, expected, staging, movement);
     }
 };
 

@@ -33,10 +33,11 @@ Result<void> ExecuteTransferStepUseCase::execute(const PlanId& planId, const Ste
     attempt.staging = staging;
     attempt.sourceFingerprint = step->fingerprint;
     CommitTransferCopyUseCase copy(copy_, journal_);
-    const auto committed = copy.execute(attempt, &OperationProgressScope::cancellationRequested, &*step->movement, true);
+    std::unique_ptr<IStagedCopySession> committedCopy;
+    const auto committed = copy.execute(attempt, &OperationProgressScope::cancellationRequested, &*step->movement, true, &committedCopy);
     if (!committed) return Result<void>::failure(committed.error());
     FinalizeTransferUseCase finalize(journal_, removal_, history_, hasher_);
-    const auto completed = finalize.execute(attemptId);
+    const auto completed = finalize.execute(attemptId, {}, std::move(committedCopy));
     if (!completed) return Result<void>::failure(completed.error());
     return Result<void>::success();
 }

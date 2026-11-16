@@ -1,5 +1,6 @@
 #include <nookbit/application/finalize_transfer_use_case.hpp>
 #include <nookbit/application/operation_progress.hpp>
+#include <nookbit/application/staged_copy.hpp>
 #include "application/use_cases/plan_signature.hpp"
 #include <algorithm>
 #include <cwctype>
@@ -21,9 +22,14 @@ FinalizeTransferUseCase::FinalizeTransferUseCase(ITransferJournal& journal, ITra
     const IHistoryRepository& history, const IPlanHasher& hasher)
     : journal_(journal), removal_(removal), history_(history), hasher_(hasher) {}
 
-// 제거 의도 저장 전 실패에는 제거하지 않고 이후 불확실성은 복구 필요로 남기는 함수.
 Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& attemptId,
     const std::function<bool()>& cancelled) {
+    return execute(attemptId, cancelled, nullptr);
+}
+
+// 제거 의도 저장 전 실패에는 제거하지 않고 이후 불확실성은 복구 필요로 남기는 함수.
+Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& attemptId,
+    const std::function<bool()>& cancelled, std::unique_ptr<IStagedCopySession> committedCopy) {
     const auto loaded = journal_.load(attemptId);
     if (!loaded) return Result<TransferAttempt>::failure(loaded.error());
     auto state = loaded.value();
@@ -86,7 +92,14 @@ Result<TransferAttempt> FinalizeTransferUseCase::execute(const std::string& atte
         if (!forward) std::swap(movement->sourceVolume, movement->destinationVolume);
     }
     OperationProgressScope::phase(OperationPhase::VerifyingBeforeRemoval);
-    auto session = movement ? removal_.openApproved(state, *movement) : removal_.open(state);
+    auto session = [&]() -> Result<std::unique_ptr<ITransferRemovalSession>> {
+        if (committedCopy && movement) {
+            auto retained = committedCopy->takeRemovalSession(state, *movement);
+            if (!retained || retained.value()) return retained;
+        }
+        committedCopy.reset();
+        return movement ? removal_.openApproved(state, *movement) : removal_.open(state);
+    }();
     if (!session) return stop(session.error());
     const auto verified = session.value()->verify();
     if (!verified) return stop(verified.error());

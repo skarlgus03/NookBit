@@ -18,6 +18,7 @@
 #include "infrastructure/filesystem/filesystem_scanner.hpp"
 #include "infrastructure/filesystem/file_identity.hpp"
 #include "infrastructure/filesystem/operation_mutex.hpp"
+#include "infrastructure/diagnostics/operation_timing.hpp"
 #include "infrastructure/filesystem/windows_staged_copy.hpp"
 #include "infrastructure/filesystem/windows_transfer_file_inspector.hpp"
 #include "infrastructure/filesystem/windows_transfer_recovery.hpp"
@@ -96,6 +97,7 @@ public:
     QString stopAt;
     std::optional<TransferPhase> throwAt;
     bool throwBeforeCompletion{false};
+    std::function<void(TransferPhase)> beforeRecord;
     // 실제 SQLite 저널을 빌려 받는 함수.
     explicit FaultJournal(ITransferJournal& inner) : inner_(inner) {}
     // 실제 제거 전 영수증 저장을 전달하는 함수.
@@ -106,9 +108,11 @@ public:
     Result<void> begin(const TransferAttempt& attempt) override { return inner_.begin(attempt); }
     // 실제 파일 작업 뒤 지정한 기록 경계에서 한 번만 실패하는 함수.
     Result<void> advance(const std::string& id, const TransferUpdate& update) override {
+        if (beforeRecord) beforeRecord(update.nextPhase);
         if (stopAt == "before-copy" && update.nextPhase == TransferPhase::CopyIntent) checkpoint(stopAt);
         if (throwAt == update.nextPhase) throw std::runtime_error("owned-transfer-stop");
         if ((stopAt == "after-rename" && update.nextPhase == TransferPhase::DestinationCommitted) ||
+            (stopAt == "before-remove" && update.nextPhase == TransferPhase::SourceRemoveIntent) ||
             (stopAt == "after-remove" && update.nextPhase == TransferPhase::SourceRemoved)) checkpoint(stopAt);
         if (failAt == update.nextPhase) {
             failAt.reset();
@@ -384,7 +388,7 @@ void zoneRecoveryScenario(const QString& sourceRun, const QString& targetRun, in
 
 // 실제 두 볼륨에서 성공·충돌·중단 재개·기록 복구의 한 시나리오를 검사하는 함수.
 void scenario(const QString& sourceRun, const QString& targetRun, int index) {
-    Fixture fixture(sourceRun, targetRun, QString("case-%1").arg(index));
+    Fixture fixture(sourceRun, targetRun, QString("case-%1").arg(index), index == 0);
     if (index == 1) {
         std::filesystem::create_directories(fixture.attempt.destination.parent_path());
         createFile(fixture.attempt.destination, "owned collision sentinel");
@@ -395,7 +399,39 @@ void scenario(const QString& sourceRun, const QString& targetRun, int index) {
         require(take(fixture.journal.load(fixture.attempt.id)).phase != TransferPhase::Completed, "Collision falsely completed");
         return;
     }
-    if (index == 2) {
+    if (index == 0) {
+        class RejectReopen final : public ITransferSourceRemoval {
+        public:
+            Result<std::unique_ptr<ITransferRemovalSession>> open(const TransferAttempt&) override {
+                return Result<std::unique_ptr<ITransferRemovalSession>>::failure({"test.reopened", "Fresh removal would hash both files"});
+            }
+        } rejectReopen;
+        int protectionChecks = 0;
+        fixture.faults.beforeRecord = [&](TransferPhase phase) {
+            if (phase != TransferPhase::DestinationCommitted && phase != TransferPhase::SourceRemoveIntent) return;
+            QProcess writer;
+            writer.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) { args->flags |= CREATE_NO_WINDOW; });
+            writer.start(QCoreApplication::applicationFilePath(), {"--check-transfer-write-locks",
+                QString::fromStdWString(fixture.attempt.source.wstring()),
+                QString::fromStdWString(fixture.attempt.destination.wstring())});
+            require(writer.waitForFinished(5000) && writer.exitStatus() == QProcess::NormalExit && writer.exitCode() == 0,
+                "A second process must be denied write access at both journal boundaries");
+            ++protectionChecks;
+        };
+        ExecuteTransferStepUseCase move(fixture.copy, rejectReopen, fixture.faults, fixture.history, fixture.hasher);
+        {
+            OperationTiming timing(fixture.targetRoot, "move", 1, fixture.attempt.sourceFingerprint.size);
+            saved(move.execute(fixture.attempt.planId, fixture.attempt.stepId, fixture.attempt.id, fixture.attempt.staging));
+            timing.completed(true);
+        }
+        require(protectionChecks == 2, "Both journal boundaries must be checked");
+        QFile log(QString::fromStdWString((fixture.targetRoot / "last-move-timing.log").wstring()));
+        require(log.open(QIODevice::ReadOnly), "Live move timing report missing");
+        const auto timings = log.readAll();
+        require(timings.contains("removal_cached_check") && !timings.contains("removal_full_check") &&
+            !timings.contains("removal_source_digest") && !timings.contains("removal_destination_digest"),
+            "Live move should reuse both digests");
+    } else if (index == 2) {
         int checks = 0;
         // 한 블록을 실제 복사한 뒤 취소해 부분 파일을 남기는 함수.
         require(!fixture.commit([&] { return ++checks >= 3; }), "Partial copy cancellation should stop");
@@ -407,7 +443,16 @@ void scenario(const QString& sourceRun, const QString& targetRun, int index) {
         take(commit.execute(fixture.attempt.id));
         WindowsTransferRecoveryGuard guard;
         ResumeCommittedTransferUseCase finish(fixture.history, fixture.journal, fixture.removal, guard, fixture.hasher);
-        take(finish.execute(fixture.attempt.id));
+        {
+            OperationTiming timing(fixture.targetRoot, "move", 1, fixture.attempt.sourceFingerprint.size);
+            take(finish.execute(fixture.attempt.id));
+            timing.completed(true);
+        }
+        QFile log(QString::fromStdWString((fixture.targetRoot / "last-move-timing.log").wstring()));
+        require(log.open(QIODevice::ReadOnly), "Resumed move timing report missing");
+        const auto timings = log.readAll();
+        require(timings.contains("removal_full_check") && timings.contains("removal_source_digest") &&
+            timings.contains("removal_destination_digest"), "Resumed transfer rehashes both reopened files");
     } else if (index == 3) {
         fixture.faults.failAt = TransferPhase::DestinationCommitted;
         require(!fixture.commit(), "Commit result interruption should fail");
@@ -1296,7 +1341,8 @@ OperationPlan ownedPlan(SqliteHistoryRepository& history, const QString& databas
 
 // 저장된 v2 시험 계획을 새 프로세스에서 실행하거나 중단 후 복구하는 함수.
 int child(const QString& database, const QString& stopAt, bool recovering) {
-    require(QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"}.contains(stopAt), "Unknown checkpoint");
+    require(QStringList{"mid-copy", "after-rename", "before-remove", "after-remove", "before-complete"}.contains(stopAt),
+        "Unknown checkpoint");
     const auto migration = QString::fromUtf8(NOOKBIT_SOURCE_DIR) + "/src/infrastructure/persistence_sqlite/migrations/001_initial.sql";
     OperationMutex lock;
     saved(lock.acquire());
@@ -1317,14 +1363,15 @@ int child(const QString& database, const QString& stopAt, bool recovering) {
         attempt.staging = attempt.destination.parent_path() / "stage.tmp";
         attempt.sourceFingerprint = plan.steps[0].fingerprint;
         CommitTransferCopyUseCase commit(copy, faults);
+        std::unique_ptr<IStagedCopySession> committedCopy;
         // 실제 첫 블록 기록 이후에만 중단 지점에 도착하는 함수.
         take(commit.execute(attempt, [&] {
             if (stopAt == "mid-copy" && std::filesystem::exists(attempt.staging) &&
                 std::filesystem::file_size(attempt.staging) >= 1024 * 1024) checkpoint(stopAt);
             return false;
-        }, &*plan.steps[0].movement));
+        }, &*plan.steps[0].movement, false, &committedCopy));
         FinalizeTransferUseCase finish(faults, removal, history, hasher);
-        take(finish.execute("forward"));
+        take(finish.execute("forward", {}, std::move(committedCopy)));
         throw std::runtime_error("Worker completed without hitting requested checkpoint");
     }
     const auto pending = take(journal.load("forward"));
@@ -1346,6 +1393,22 @@ int child(const QString& database, const QString& stopAt, bool recovering) {
         take(recover.execute("forward"));
         ResumeCommittedTransferUseCase finish(history, journal, removal, finalGuard, hasher);
         take(finish.execute("forward"));
+    } else if (stopAt == "before-remove") {
+        require(pending.phase == TransferPhase::DestinationCommitted && !pending.sourceRemovalIntentRecorded &&
+            std::filesystem::exists(pending.source) && std::filesystem::exists(pending.destination),
+            "Killed live removal before intent must preserve both files");
+        ResumeCommittedTransferUseCase finish(history, journal, removal, finalGuard, hasher);
+        const auto root = pending.destination.parent_path();
+        {
+            OperationTiming timing(root, "move", 1, pending.sourceFingerprint.size);
+            take(finish.execute("forward"));
+            timing.completed(true);
+        }
+        QFile log(QString::fromStdWString((root / "last-move-timing.log").wstring()));
+        require(log.open(QIODevice::ReadOnly), "Process restart timing report missing");
+        const auto timings = log.readAll();
+        require(timings.contains("removal_source_digest") && timings.contains("removal_destination_digest"),
+            "A new process must hash both files after the live session was lost");
     } else {
         require(pending.phase == (stopAt == "after-remove" ? TransferPhase::SourceRemoveIntent : TransferPhase::SourceRemoved) &&
             !std::filesystem::exists(pending.source) && !std::filesystem::exists(pending.staging), "Killed source removal state differs");
@@ -1460,6 +1523,17 @@ QJsonObject crashScenario(const QString& sourceRun, const QString& targetRun, in
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+    if (args.size() == 4 && args[1] == "--check-transfer-write-locks") {
+        for (const auto& path : {args[2], args[3]}) {
+            const auto wide = path.toStdWString();
+            const auto handle = CreateFileW(wide.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, 0, nullptr);
+            if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION) continue;
+            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+            return 2;
+        }
+        return 0;
+    }
     if (args.size() == 6 && (args[1] == "--mixed-crash-worker" || args[1] == "--edge-crash-worker")) {
         try {
             require(QDir(args[2]).dirName().startsWith("NookBit-cross-source-") && QDir(args[3]).dirName().startsWith("NookBit-cross-target-") &&
@@ -1523,7 +1597,7 @@ int main(int argc, char** argv) {
             edgeCrash ? QStringList{"cleanup-intent", "cleanup-removed", "cleanup-removed-occupant", "before-copy", "reverse-mid-copy"} :
             cleaning ? QStringList{"explicit-partial-cleanup", "stale-plan-approval", "changed-original-blocked", "replaced-stage-blocked", "changed-prefix-blocked", "intent-audit-failure", "removed-audit-only-retry", "later-occupant-blocked", "stale-stage-approval", "readonly-stage-blocked", "final-occupant-blocked", "unrecorded-absence-blocked", "corrupt-cleanup-audit-visible"} :
             mixedCrash ? QStringList{"before-last|resume", "before-last|undo", "mid-copy|resume", "mid-copy|undo", "after-rename|resume", "after-remove|resume", "before-complete|resume"} :
-            crashing ? QStringList{"mid-copy", "after-rename", "after-remove", "before-complete"} :
+            crashing ? QStringList{"mid-copy", "after-rename", "before-remove", "after-remove", "before-complete"} :
             preserving ? QStringList{"undo-prefix-preserve-partial", "preserved-undo-audit-failure", "changed-partial-source-blocked", "replaced-staging-blocked", "no-moves-partial-preserved", "late-undo-collision-retains-registration"} :
             resolving ? QStringList{"partial-then-whole-resume", "verified-stage-then-whole-resume", "commit-record-then-whole-resume", "committed-source-retained-resume", "removed-source-record-resume", "completion-record-resume", "last-partial-completes-whole", "partial-collision-preserved", "partial-audit-failure-preserved", "partial-undo-preserves-staging", "corrupt-prefix-stops-whole"} :
             recovering ? QStringList{"explicit-resume", "explicit-undo", "later-preserves", "changed-source-blocked", "changed-settings-blocked", "audit-atomic-failure", "stale-choice-blocked", "missing-service-blocked", "undo-record-completion", "resume-final-copy"} :

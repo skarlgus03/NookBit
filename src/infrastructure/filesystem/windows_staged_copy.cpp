@@ -28,6 +28,12 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openApproved(
     const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract& movement) {
     return openImpl(source, expected, staging, &movement);
 }
+
+Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openForMove(
+    const std::filesystem::path& source, const FileFingerprint& expected,
+    const std::filesystem::path& staging, const MoveContract& movement) {
+    return openImpl(source, expected, staging, &movement, true);
+}
 // 기존 승인 형식의 제거 세션을 여는 함수.
 Result<std::unique_ptr<ITransferRemovalSession>> WindowsTransferSourceRemoval::open(const TransferAttempt& attempt) {
     return openImpl(attempt, nullptr);
@@ -388,6 +394,9 @@ public:
     std::filesystem::path sourcePath;
     std::filesystem::path stagingPath;
     std::optional<FileFingerprint> verifiedCopy;
+    std::optional<FileFingerprint> committedCopy;
+    std::filesystem::path committedPath;
+    bool retainForRemoval{false};
     bool attempted{false};
     bool commitAttempted{false};
     bool ownsNewStaging{false};
@@ -414,6 +423,8 @@ public:
 
     // 세션을 연 시점의 임시 파일 객체 지문을 반환하는 함수.
     const FileFingerprint& createdFingerprint() const override { return created; }
+    Result<std::unique_ptr<ITransferRemovalSession>> takeRemovalSession(
+        const TransferAttempt& attempt, const MoveContract& movement) override;
 
     // 확정 시도 전까지 보호 중인 새 임시 파일 핸들만 제거한다.
     Result<void> discardCancelledStaging() override {
@@ -627,6 +638,10 @@ public:
             finalBasic.LastWriteTime.QuadPart != metadata.LastWriteTime.QuadPart ||
             finalBasic.FileAttributes != expectedAttributes)
             return Result<FileFingerprint>::failure({"transfer.commit_verify", "Renamed file differs from verified copy"});
+        if (retainForRemoval) {
+            committedCopy = final.value();
+            committedPath = destination;
+        }
         return final;
     }
 };
@@ -642,8 +657,14 @@ class RemovalSession final : public ITransferRemovalSession {
     std::vector<Handle> sourceZoneLocks_, destinationZoneLocks_;
 public:
     // 보호 핸들과 확정된 전송 증거를 소유하는 함수.
-    RemovalSession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt, bool allowZone = false)
-        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)), attempt_(std::move(attempt)), allowZone_(allowZone) {}
+    RemovalSession(std::vector<Handle> parents, Handle source, Handle destination, TransferAttempt attempt, bool allowZone,
+        bool contentsVerified = false, ZoneSnapshot sourceZone = {}, ZoneSnapshot destinationZone = {})
+        : parents_(std::move(parents)), source_(std::move(source)), destination_(std::move(destination)),
+          attempt_(std::move(attempt)), contentsVerified_(contentsVerified), allowZone_(allowZone),
+          zoneChecked_(contentsVerified && allowZone), expectedZone_(std::move(sourceZone.bytes)) {
+        if (sourceZone.handle.value != INVALID_HANDLE_VALUE) sourceZoneLocks_.push_back(std::move(sourceZone.handle));
+        if (destinationZone.handle.value != INVALID_HANDLE_VALUE) destinationZoneLocks_.push_back(std::move(destinationZone.handle));
+    }
     // 두 파일의 지원 범위·객체 ID·내용·수정 시각을 보유 핸들로 재검증하는 함수.
     Result<void> verify() override {
         OperationProgressScope::phase(OperationPhase::VerifyingBeforeRemoval);
@@ -746,6 +767,30 @@ public:
         return Result<void>::success();
     }
 };
+
+Result<std::unique_ptr<ITransferRemovalSession>> Session::takeRemovalSession(
+    const TransferAttempt& attempt, const MoveContract& movement) {
+    using Return = Result<std::unique_ptr<ITransferRemovalSession>>;
+    if (!retainForRemoval) return Return::success(nullptr);
+    if (source.value == INVALID_HANDLE_VALUE || staging.value == INVALID_HANDLE_VALUE ||
+        !committedCopy || !verifiedCopy || !attempt.stagingFingerprint || !attempt.destinationFingerprint ||
+        attempt.source.lexically_normal() != sourcePath.lexically_normal() ||
+        attempt.staging.lexically_normal() != stagingPath.lexically_normal() ||
+        attempt.destination.lexically_normal() != committedPath.lexically_normal() ||
+        !sameFingerprint(expected, attempt.sourceFingerprint) ||
+        !sameFingerprint(*verifiedCopy, *attempt.stagingFingerprint) ||
+        !sameFingerprint(*committedCopy, *attempt.destinationFingerprint) ||
+        !TransferValidation::advance(attempt, {TransferPhase::DestinationCommitted, TransferPhase::SourceRemoveIntent}))
+        return Return::failure({"transfer.removal_evidence", "Committed journal does not match the protected copy"});
+    const auto sourceVolume = volume(source.value), destinationVolume = volume(staging.value);
+    const auto preservation = allowZone ? PreservationPolicy::LocalNtfsBasicWithZone : PreservationPolicy::LocalNtfsBasic;
+    if (movement.strategy != MoveStrategy::VerifiedCopy || movement.preservation != preservation ||
+        !sourceVolume || !destinationVolume || !approvedVolume(sourceVolume.value(), movement.sourceVolume) ||
+        !approvedVolume(destinationVolume.value(), movement.destinationVolume))
+        return Return::failure({"transfer.volume_changed", "Protected removal volume differs from approval."});
+    return Return::success(std::make_unique<RemovalSession>(std::move(parents), std::move(source),
+        std::move(staging), attempt, allowZone, true, std::move(sourceZone), std::move(stagingZone)));
+}
 } // namespace
 
 // 확정 증거가 있는 두 파일만 독점 보호하는 함수.
@@ -1287,7 +1332,8 @@ TransferFileObservation WindowsTransferFileInspector::inspectImpl(const std::fil
 
 // 지원 범위와 원본을 검사한 뒤 독점적인 새 임시 파일 세션을 만드는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
-    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging, const MoveContract* movement) {
+    const std::filesystem::path& source, const FileFingerprint& expected, const std::filesystem::path& staging,
+    const MoveContract* movement, bool retainForRemoval) {
     TimingStage opening("protected_copy_open");
     OperationProgressScope::phase(OperationPhase::ProtectingSource);
     using Return = Result<std::unique_ptr<IStagedCopySession>>;
@@ -1298,7 +1344,8 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     std::vector<Handle> locks;
     const auto sourceParents = lockParents(source, locks);
     if (!sourceParents) return Return::failure(sourceParents.error());
-    Handle input(CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+    const DWORD sourceAccess = retainForRemoval ? GENERIC_READ | DELETE : GENERIC_READ;
+    Handle input(CreateFileW(source.c_str(), sourceAccess, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     BY_HANDLE_FILE_INFORMATION info{};
     FILE_BASIC_INFO basic{};
@@ -1358,6 +1405,7 @@ Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
     const auto initial = fingerprint(output.value);
     if (!initial) return Return::failure(initial.error());
     auto session = std::make_unique<Session>(std::move(locks), std::move(input), std::move(output), expected, initial.value(), basic, source, staging);
+    session->retainForRemoval = retainForRemoval;
     session->ownsNewStaging = true;
     session->allowZone = allowZone; session->sourceZone = std::move(marker);
     return Return::success(std::move(session));
@@ -1559,7 +1607,7 @@ Result<TransferVolume> WindowsStagedCopy::inspectVolume(const std::filesystem::p
 }
 // Windows 외 플랫폼에서는 파일을 생성하지 않는 함수.
 Result<std::unique_ptr<IStagedCopySession>> WindowsStagedCopy::openImpl(
-    const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&, const MoveContract*) {
+    const std::filesystem::path&, const FileFingerprint&, const std::filesystem::path&, const MoveContract*, bool) {
     return Result<std::unique_ptr<IStagedCopySession>>::failure({"transfer.unsupported", "Windows only"});
 }
 } // namespace nookbit

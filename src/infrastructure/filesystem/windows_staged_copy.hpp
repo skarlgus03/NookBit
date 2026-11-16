@@ -33,6 +33,9 @@ public:
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openApproved(
         const std::filesystem::path& source, const FileFingerprint& expected,
         const std::filesystem::path& staging, const MoveContract& movement) override;
+    [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openForMove(
+        const std::filesystem::path& source, const FileFingerprint& expected,
+        const std::filesystem::path& staging, const MoveContract& movement) override;
 private:
     /// 기존 임시 파일을 변경 없이 검사해 이어쓰기 또는 확정 세션을 여는 함수.
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openExistingImpl(
@@ -40,7 +43,7 @@ private:
     /// 승인 계약 유무에 따라 동일한 보호 복사 세션을 여는 함수.
     [[nodiscard]] Result<std::unique_ptr<IStagedCopySession>> openImpl(
         const std::filesystem::path& source, const FileFingerprint& expected,
-        const std::filesystem::path& staging, const MoveContract* movement);
+        const std::filesystem::path& staging, const MoveContract* movement, bool retainForRemoval = false);
 };
 
 } // namespace nookbit

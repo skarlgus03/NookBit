@@ -38,9 +38,9 @@ The first two lines identify the format and overall request. Stage rows are tab 
 | `copy_source_digest` | Streaming hash finalization, or full-source hash for nonempty resume |
 | `copy_metadata_and_markers` | Identity/metadata/marker checks, preservation and final metadata flush |
 | `destination_commit` | Verified staging no-replace rename, flush and retained evidence checks |
-| `removal_full_check` | Fresh protected source/final content and metadata checks |
+| `removal_full_check` | Full content and metadata checks when the removal session reopens the two files |
 | `source_remove_total` | Source removal including its nested cached recheck |
-| `removal_cached_check` | Recheck while the same exclusive handles remain held |
+| `removal_cached_check` | Identity, metadata, stream, and path checks with content evidence from the still-protected files. A normal forward VerifiedCopy move uses this stage through deletion |
 | `source_delete_and_confirm` | Native source deletion and confirmation of source absence/final evidence |
 
 Parent and child rows overlap: **do not add them together**. `depth` indicates nesting. Whole-request total also includes uninstrumented journaling, volume checks, service teardown and other small work. Small differences from the UI total are expected. The measurement does not promise a speed improvement; it identifies where the observed time is spent. Same-volume metadata moves do not copy/read back data, so their reports correctly omit copy stages. Interrupted recovery and explicit undo are not currently given a top-level report.

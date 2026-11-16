@@ -13,7 +13,7 @@ public:
     /// 새 시도를 기록하고 검증된 복사본 확정 단계까지만 수행하는 함수.
     [[nodiscard]] Result<TransferAttempt> execute(const TransferAttempt& attempt,
         const std::function<bool()>& cancelled = {}, const MoveContract* movement = nullptr,
-        bool discardCancelledStaging = false);
+        bool discardCancelledStaging = false, std::unique_ptr<IStagedCopySession>* committedCopy = nullptr);
 private:
     IStagedCopy& copy_;
     ITransferJournal& journal_;
