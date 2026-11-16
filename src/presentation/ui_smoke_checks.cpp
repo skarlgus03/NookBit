@@ -709,22 +709,45 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
     return true;
 }
 
-// 무파일 작업으로 검사·되돌리기 표시가 서브창에 속하고 제목 이동은 잠기지 않는지 검사하는 함수.
+// 무파일 작업으로 페이지별 진행 표시와 창 이동을 검사하는 함수.
 static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
     auto* popup = findUiChild<QObject*>(root, QStringLiteral("operationProgressPopup"));
     auto* veil = findUiChild<QQuickItem*>(root, QStringLiteral("operationProgressVeil"));
     auto* recoveryIndicator = findUiChild<QQuickItem*>(root, QStringLiteral("recoveryInspectionIndicator"));
     auto* drag = findUiChild<QQuickItem*>(root, QStringLiteral("homeWindowDragArea"));
     auto* menu = findUiChild<QQuickItem*>(root, QStringLiteral("homeNavigationMenu"));
-    if (!popup || !veil || !recoveryIndicator || !drag || !menu) return false;
+    auto* panel = findUiChild<QQuickItem*>(root, QStringLiteral("extensionPanel"));
+    auto* sortPage = findUiChild<QQuickItem*>(root, QStringLiteral("fileSortPage"));
+    auto* stepper = findVisualItem(sortPage, QStringLiteral("fileSortStepper"));
+    auto* sortProgress = findVisualItem(sortPage, QStringLiteral("fileSortProgress"));
+    auto* dropArea = findVisualItem(sortPage, QStringLiteral("fileSortPageDropArea"));
+    if (!popup || !veil || !recoveryIndicator || !drag || !menu || !panel || !stepper || !sortProgress || !dropArea) return false;
     using Kind = nookbit::BackgroundTaskRunner::TaskKind;
-    struct BusyCase { int page; Kind kind; };
-    const BusyCase cases[] = {{7, Kind::Inspection}, {4, Kind::FileWork},
-        {10, Kind::Inspection}, {10, Kind::FileWork}, {0, Kind::FileWork}};
+    using Phase = nookbit::OperationPhase;
+    struct BusyCase {
+        int page;
+        Kind kind;
+        Phase phase;
+        int step = 0;
+        bool preparing = false;
+        QString title;
+    };
+    const BusyCase cases[] = {
+        {7, Kind::Inspection, Phase::Preparing, 0, true, QStringLiteral("파일을 검사하고 있어요")},
+        {7, Kind::Inspection, Phase::Starting, 1, false, QStringLiteral("파일을 검사하고 있어요")},
+        {7, Kind::FileWork, Phase::Restoring, 0, false, QStringLiteral("되돌리고 있어요")},
+        {7, Kind::Sort, Phase::Copying, 3, false, QStringLiteral("파일을 정리하고 있어요")},
+        {4, Kind::FileWork, Phase::Restoring},
+        {4, Kind::FileWork, Phase::Copying},
+        {10, Kind::Inspection, Phase::Recovering},
+        {10, Kind::FileWork, Phase::Recovering},
+        {0, Kind::FileWork, Phase::Restoring}
+    };
     for (const auto& test : cases) {
         const int page = test.page;
         const bool inlineInspection = page == 10 && test.kind == Kind::Inspection;
-        const bool showPopup = page != 0 && !inlineInspection;
+        const bool inlineSort = page == 7;
+        const bool showPopup = page != 0 && !inlineSort && !inlineInspection;
         root->setProperty("currentPage", page);
         QCoreApplication::processEvents();
         // 복구 페이지가 자체 시작한 읽기 검사를 끝낸 뒤 표시 전용 대기 작업을 넣는다.
@@ -737,30 +760,50 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
             startup.exec();
             if (runner.busy()) return false;
         }
+        if (inlineSort) {
+            sortPage->setProperty("workflowStep", test.step);
+            sortPage->setProperty("manualSortRequested", test.preparing);
+        }
         const auto gate = std::make_shared<QSemaphore>();
         const auto finished = std::make_shared<bool>(false);
         // 화면 상태 검사를 기다리기만 하고 파일에 접근하지 않는 함수.
-        if (!runner.submit(root, [gate] { gate->acquire(); return nookbit::Result<void>::success(); },
+        if (!runner.submit(root, [gate, phase = test.phase] {
+                nookbit::OperationProgressScope::phase(phase);
+                gate->acquire();
+                return nookbit::Result<void>::success();
+            },
                 [finished](const auto&) { *finished = true; }, test.kind)) return false;
         QEventLoop frame;
         QTimer::singleShot(40, &frame, &QEventLoop::quit);
         frame.exec();
         auto* content = qobject_cast<QQuickItem*>(popup->property("contentItem").value<QObject*>());
+        auto* copyHint = findVisualItem(content, QStringLiteral("operationProgressCopyHint"));
         const bool valid = drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
             && !popup->property("modal").toBool()
             && popup->property("visible").toBool() == showPopup
             && veil->isVisible() == showPopup
+            && sortProgress->isVisible() == inlineSort
+            && (!inlineSort || (sortProgress->window() == extension && sortProgress->isEnabled() && !dropArea->isEnabled()
+                && sortProgress->x() == 0 && sortProgress->y() == stepper->height()
+                && sortProgress->property("progressTitle").toString() == test.title
+                && sortPage->property("workflowStep").toInt() == test.step
+                && stepper->property("currentStep").toInt() == (test.preparing ? 2 : test.step)))
             && recoveryIndicator->isVisible() == inlineInspection
             && (!inlineInspection || recoveryIndicator->window() == extension)
             && (!showPopup || (content && content->window() == extension && veil->window() == extension
-                && veil->property("color").value<QColor>() == QColor(Qt::white)
+                && copyHint && copyHint->isVisible() == (test.phase == Phase::Copying)
+                && veil->property("color").value<QColor>() == panel->property("color").value<QColor>()
                 && std::abs(popup->property("x").toDouble() + popup->property("width").toDouble() / 2 - extension->width() / 2.0) < 1
                 && std::abs(popup->property("y").toDouble() + popup->property("height").toDouble() / 2
                     - (veil->mapToScene(QPointF()).y() + veil->height() / 2)) < 1));
         gate->release();
         QTimer::singleShot(150, &frame, &QEventLoop::quit);
         frame.exec();
-        if (!valid || !*finished || runner.busy() || veil->isVisible() || recoveryIndicator->isVisible()) return false;
+        if (inlineSort) {
+            sortPage->setProperty("workflowStep", 0);
+            sortPage->setProperty("manualSortRequested", false);
+        }
+        if (!valid || !*finished || runner.busy() || veil->isVisible() || recoveryIndicator->isVisible() || sortProgress->isVisible()) return false;
     }
     return true;
 }

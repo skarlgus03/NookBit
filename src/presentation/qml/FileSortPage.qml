@@ -24,6 +24,7 @@ Rectangle {
     property string resultMessage: ""
     readonly property bool previewOpen: workflowStep === 1
     readonly property bool transitioning: slideAnimation.running
+    readonly property bool inlineProgress: progress.busy && workflowStep < 3
     clip: true
     NumberAnimation {
         id: slideAnimation
@@ -120,11 +121,11 @@ Rectangle {
         id: stepper
         anchors.left: parent.left
         anchors.right: parent.right
-        workflowStep: home.workflowStep
+        workflowStep: home.inlineProgress && home.manualSortRequested && !home.progress.fileWorkActive ? 2 : home.workflowStep
         dark: home.dark
     }
     FileSortInput {
-        enabled: home.workflowStep === 0 && !home.transitioning
+        enabled: home.workflowStep === 0 && !home.transitioning && !home.progress.busy
         visible: home.paneVisible(0)
         x: home.paneX(0)
         y: stepper.height
@@ -155,7 +156,7 @@ Rectangle {
         objectName: "fileSortPageDropArea"
         anchors.fill: parent
         z: 10
-        enabled: home.visible && home.enabled && home.workflowStep === 0 && !home.transitioning
+        enabled: home.visible && home.enabled && home.workflowStep === 0 && !home.transitioning && !home.progress.busy
         // 외부 파일 드래그만 받아 목록 등록에 복사 응답을 사용하는 함수.
         onEntered: function(drag) {
             if (drag.hasUrls && (drag.supportedActions & Qt.CopyAction)) drag.accept(Qt.CopyAction)
@@ -201,7 +202,7 @@ Rectangle {
         y: stepper.height
         height: home.height - stepper.height
         visible: home.paneVisible(1)
-        enabled: home.previewOpen && !home.transitioning
+        enabled: home.previewOpen && !home.transitioning && !home.progress.busy
         controller: home.controller
         dark: home.dark
         onBackRequested: home.showStep(0)
@@ -214,7 +215,7 @@ Rectangle {
         y: stepper.height
         height: home.height - stepper.height
         visible: home.paneVisible(2)
-        enabled: home.workflowStep === 2 && !home.transitioning
+        enabled: home.workflowStep === 2 && !home.transitioning && !home.progress.busy
         controller: home.controller
         dark: home.dark
         onCancelRequested: home.cancelConfirmation()
@@ -225,13 +226,17 @@ Rectangle {
         model: [3, 4]
         delegate: FileSortStatus {
             required property int modelData
+            readonly property bool showingProgress: modelData === 3 && (home.inlineProgress || home.workflowStep === 3) && home.progress.busy
             objectName: modelData === 3 ? "fileSortProgress" : "fileSortComplete"
-            x: home.paneX(modelData)
+            x: showingProgress ? 0 : home.paneX(modelData)
             width: home.width
             y: stepper.height
             height: home.height - stepper.height
-            visible: home.paneVisible(modelData)
-            enabled: home.workflowStep === modelData && !home.transitioning
+            z: showingProgress ? pageDrop.z + 1 : 0
+            visible: showingProgress || home.paneVisible(modelData)
+            enabled: showingProgress || (home.workflowStep === modelData && !home.transitioning && !home.progress.busy)
+            progressTitle: home.workflowStep === 3 ? qsTr("파일을 정리하고 있어요")
+                : home.progress.fileWorkActive ? qsTr("되돌리고 있어요") : qsTr("파일을 검사하고 있어요")
             completed: modelData === 4
             success: home.sortSuccess
             cancelled: home.sortCancelled

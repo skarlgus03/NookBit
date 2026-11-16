@@ -58,7 +58,9 @@ Popup {
             Layout.fillWidth: true
         }
         Label {
-            text: "복사 후 검증·확정까지 마쳐야 완료돼요."
+            objectName: "operationProgressCopyHint"
+            text: qsTr("복사 후 검증·확정까지 마쳐야 완료돼요.")
+            visible: popup.progress.copyPhaseActive
             wrapMode: Text.WordWrap
             color: popup.theme.muted
             font.pixelSize: UiMetrics.textBody

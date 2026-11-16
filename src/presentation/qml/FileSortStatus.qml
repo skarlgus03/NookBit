@@ -7,6 +7,7 @@ Rectangle {
     id: status
     required property var controller
     required property var progress
+    required property string progressTitle
     property bool completed: false
     property bool success: false
     property bool cancelled: false
@@ -32,7 +33,7 @@ Rectangle {
         NavigationIcon { visible: !status.completed; Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: UiMetrics.filePreviewSize; Layout.preferredHeight: UiMetrics.filePreviewSize; kind: "folder"; strokeColor: status.dark ? status.theme.text : status.theme.accent }
         Label {
             Layout.fillWidth: true
-            text: !status.completed ? qsTr("파일을 정리하고 있어요")
+            text: !status.completed ? status.progressTitle
                 : status.success ? qsTr("정리를 마쳤어요")
                 : status.cancelled ? qsTr("복사를 취소했어요") : qsTr("정리를 완료하지 못했어요")
             font.pixelSize: UiMetrics.textSectionTitle
@@ -49,6 +50,7 @@ Rectangle {
             from: 0; to: 1
             value: status.progress.byteFraction
             indeterminate: !status.progress.byteProgressKnown
+            Accessible.name: status.progress.stageLabel
         }
         Label { visible: !status.completed && status.progress.byteProgressKnown; text: status.progress.byteProgressText }
         AppButton {

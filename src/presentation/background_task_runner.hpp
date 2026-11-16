@@ -19,6 +19,7 @@ class BackgroundTaskRunner final : public QObject {
     Q_PROPERTY(QString currentFileName READ currentFileName NOTIFY progressChanged)
     Q_PROPERTY(QString filePosition READ filePosition NOTIFY progressChanged)
     Q_PROPERTY(bool byteProgressKnown READ byteProgressKnown NOTIFY progressChanged)
+    Q_PROPERTY(bool copyPhaseActive READ copyPhaseActive NOTIFY progressChanged)
     Q_PROPERTY(double byteFraction READ byteFraction NOTIFY progressChanged)
     Q_PROPERTY(QString byteProgressText READ byteProgressText NOTIFY progressChanged)
     Q_PROPERTY(bool canCancelCopy READ canCancelCopy NOTIFY progressChanged)
@@ -37,6 +38,19 @@ public:
     bool busy() const { return busy_; }
     /// 읽기 전용 검사와 구분해 실제 파일 작업 요청의 실행 여부를 반환하는 함수.
     bool fileWorkActive() const { return busy_ && taskKind_ != TaskKind::Inspection; }
+    /// 복사와 복사본 검증·확정에 해당하는 진행 단계인지 반환하는 함수.
+    bool copyPhaseActive() const {
+        switch (progress_.phase) {
+        case OperationPhase::Copying:
+        case OperationPhase::FlushingCopy:
+        case OperationPhase::VerifyingCopy:
+        case OperationPhase::PreservingMetadata:
+        case OperationPhase::CommittingDestination:
+            return true;
+        default:
+            return false;
+        }
+    }
     /// 현재 복사 구간의 취소 버튼을 표시할지 반환하는 함수.
     bool canCancelCopy() const {
         return busy_ && progress_.canCancelCopy && cancellation_.load() == CopyCancellation::Available;

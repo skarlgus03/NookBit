@@ -46,8 +46,7 @@ ApplicationWindow {
                 parent: extensionWindow.contentItem
                 progress: backgroundTasks
                 dark: root.editorDark
-                visible: root.workBusy && extensionWindow.visible && !root.inlineRecoveryInspection
-                         && !(root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)
+                visible: root.workBusy && extensionWindow.visible && root.currentPage !== 7 && !root.inlineRecoveryInspection
                 x: (parent.width - width) / 2
                 y: extensionHost.y + (extensionHost.height - height) / 2
             }
@@ -306,7 +305,7 @@ ApplicationWindow {
     }
     Item {
         id: extensionHost
-        enabled: (!root.workBusy || (root.currentPage === 7 && fileSortPane && fileSortPane.workflowStep === 3)) && (!root.confirmationPending || root.inlineSortConfirmation)
+        enabled: (!root.workBusy || root.currentPage === 7) && (!root.confirmationPending || root.inlineSortConfirmation)
         parent: extensionWindow.contentItem
         anchors.fill: parent
         anchors.topMargin: UiMetrics.extensionHeaderHeight
@@ -314,7 +313,7 @@ ApplicationWindow {
         clip: true
         z: 1
     }
-    // 검사·되돌리기 진행 표시는 서브창 본문만 밝게 덮고 창 이동 영역은 남긴다.
+    // 전역 진행 표시는 서브창 본문만 덮고 창 이동 영역은 남긴다.
     Rectangle {
         objectName: "operationProgressVeil"
         parent: extensionWindow.contentItem
