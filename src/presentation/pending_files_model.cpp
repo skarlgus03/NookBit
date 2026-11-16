@@ -60,7 +60,7 @@ std::vector<PendingFileEntry> PendingFilesModel::entries() const {
 
 // 통째로 처리 기본값을 항상 첫 항목으로 제공하는 함수.
 QVariantList PendingFilesModel::folderFlowOptions() const {
-    QVariantList result{QVariantMap{{"text", QStringLiteral("폴더 통째로")}, {"value", QString()}}};
+    QVariantList result{QVariantMap{{"text", tr("폴더 통째로")}, {"value", QString()}}};
     result.append(folderFlows_);
     return result;
 }
@@ -89,7 +89,7 @@ void PendingFilesModel::setFolderFlows(const QString& ruleSetId, const std::vect
         reset = true;
     }
     if (reset) {
-        setLastMessage(QStringLiteral("사용할 수 없는 폴더 처리 선택을 '폴더 통째로'로 되돌렸어요. 미리보기를 다시 확인해 주세요."));
+        setLastMessage(tr("사용할 수 없는 폴더 처리 선택을 '폴더 통째로'로 되돌렸어요. 미리보기를 다시 확인해 주세요."));
         emit selectionsChanged();
     }
 }
@@ -106,8 +106,8 @@ void PendingFilesModel::setFolderFlow(int row, const QString& flowId) {
     entry.ruleSetId = flowId.isEmpty() ? QString() : ruleSetId_;
     emit dataChanged(index(row), index(row), {FolderFlowRole});
     emit selectionsChanged();
-    setLastMessage(flowId.isEmpty() ? QStringLiteral("폴더 전체를 하나의 대상으로 정리해요.")
-        : QStringLiteral("선택한 처리 흐름으로 폴더를 분류해요. 미리보기에서 대상을 확인해 주세요."));
+    setLastMessage(flowId.isEmpty() ? tr("폴더 전체를 하나의 대상으로 정리해요.")
+        : tr("선택한 처리 흐름으로 폴더를 분류해요. 미리보기에서 대상을 확인해 주세요."));
 }
 
 // 저장된 선택을 복원한 다음 현재 규칙으로 사용할 수 있는지 검사하는 함수.
@@ -160,7 +160,7 @@ void PendingFilesModel::restorePaths(const QStringList& paths) {
     endResetModel();
     emit countChanged();
     emit availabilityChanged();
-    if (!entries_.isEmpty()) setLastMessage(QStringLiteral("대기 파일 %1개를 복원했어요. 정리하려면 새 미리보기를 만들어 주세요.").arg(count()));
+    if (!entries_.isEmpty()) setLastMessage(tr("대기 파일 %1개를 복원했어요. 정리하려면 새 미리보기를 만들어 주세요.").arg(count()));
 }
 
 // 파일 존재 여부를 다시 확인하고 바뀐 항목을 알리는 함수.
@@ -188,7 +188,7 @@ void PendingFilesModel::setStorageNotice(const QString& notice) {
 // 로컬 파일 URL 하나를 원본 변경 없이 대기 목록에 등록하는 함수.
 void PendingFilesModel::addUrl(const QUrl& url) {
     if (!url.isLocalFile()) {
-        setLastMessage(QStringLiteral("컴퓨터에 있는 파일만 추가할 수 있어요."));
+        setLastMessage(tr("컴퓨터에 있는 파일만 추가할 수 있어요."));
         return;
     }
     (void)addPath(std::filesystem::path(url.toLocalFile().toStdWString()));
@@ -198,23 +198,23 @@ void PendingFilesModel::addUrl(const QUrl& url) {
 Result<std::filesystem::path> PendingFilesModel::addPath(const std::filesystem::path& path) {
     const auto localPath = QString::fromStdWString(path.wstring());
     if (!path.is_absolute() || localPath.contains(QChar::Null)) {
-        setLastMessage(QStringLiteral("파일이나 폴더의 전체 경로가 필요해요."));
+        setLastMessage(tr("파일이나 폴더의 전체 경로가 필요해요."));
         return Result<std::filesystem::path>::failure({"pending.path_invalid", lastMessage_.toStdString()});
     }
     const QFileInfo info(localPath);
     if (!info.exists() || (!info.isFile() && !info.isDir()) || info.isSymLink() || QDir(info.absoluteFilePath()).isRoot()) {
-        setLastMessage(QStringLiteral("존재하는 파일이나 폴더만 추가할 수 있어요. 바로가기와 드라이브 전체는 제외해요."));
+        setLastMessage(tr("존재하는 파일이나 폴더만 추가할 수 있어요. 바로가기와 드라이브 전체는 제외해요."));
         return Result<std::filesystem::path>::failure({"pending.path_unavailable", lastMessage_.toStdString()});
     }
     const auto fullPath = QDir::cleanPath(info.absoluteFilePath());
     for (const auto& entry : entries_) {
         if (QString::compare(entry.fullPath, fullPath, Qt::CaseInsensitive) == 0) {
-            setLastMessage(QStringLiteral("이미 대기 목록에 있는 파일이에요."));
+            setLastMessage(tr("이미 대기 목록에 있는 파일이에요."));
             return Result<std::filesystem::path>::failure({"pending.duplicate", lastMessage_.toStdString()});
         }
         if (fullPath.startsWith(entry.fullPath + "/", Qt::CaseInsensitive) ||
             entry.fullPath.startsWith(fullPath + "/", Qt::CaseInsensitive)) {
-            setLastMessage(QStringLiteral("폴더와 그 안의 항목은 함께 등록할 수 없어요. 폴더 전체 또는 내부 항목 중 하나를 선택해 주세요."));
+            setLastMessage(tr("폴더와 그 안의 항목은 함께 등록할 수 없어요. 폴더 전체 또는 내부 항목 중 하나를 선택해 주세요."));
             return Result<std::filesystem::path>::failure({"pending.overlap", lastMessage_.toStdString()});
         }
     }
@@ -223,8 +223,8 @@ Result<std::filesystem::path> PendingFilesModel::addPath(const std::filesystem::
     entries_.push_back({info.fileName(), fullPath});
     endInsertRows();
     emit countChanged();
-    setLastMessage(info.isDir() ? QStringLiteral("폴더 전체를 하나의 대상으로 추가했어요. 내부 항목은 따로 분류하지 않아요.")
-                              : QStringLiteral("파일을 대기 목록에 추가했어요. 원본은 그대로 있어요."));
+    setLastMessage(info.isDir() ? tr("폴더 전체를 하나의 대상으로 추가했어요. 내부 항목은 따로 분류하지 않아요.")
+                              : tr("파일을 대기 목록에 추가했어요. 원본은 그대로 있어요."));
     return Result<std::filesystem::path>::success(std::filesystem::path(fullPath.toStdWString()));
 }
 
@@ -236,7 +236,7 @@ void PendingFilesModel::removeAt(int index) {
     endRemoveRows();
     emit countChanged();
     emit availabilityChanged();
-    setLastMessage(QStringLiteral("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
+    setLastMessage(tr("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
 }
 
 // 한 번의 모델 초기화와 저장 알림으로 목록만 제거하고 원본은 보존하는 함수.
@@ -247,7 +247,7 @@ void PendingFilesModel::clear() {
     endResetModel();
     emit countChanged();
     emit availabilityChanged();
-    setLastMessage(QStringLiteral("대기 목록을 비웠어요. 원본 파일과 폴더는 그대로 있어요."));
+    setLastMessage(tr("대기 목록을 비웠어요. 원본 파일과 폴더는 그대로 있어요."));
 }
 
 // 화면에 보여줄 결과 문구를 갱신하는 함수.

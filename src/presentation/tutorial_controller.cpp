@@ -24,7 +24,7 @@ bool TutorialController::close() {
         settings_.sync();
         if (settings_.status() != QSettings::NoError) {
             settings_.remove(QStringLiteral("tutorial/completed"));
-            message_ = QStringLiteral("튜토리얼 완료 기록을 저장하지 못했어요. 설정 저장 권한을 확인해 주세요.");
+            message_ = tr("튜토리얼 완료 기록을 저장하지 못했어요. 설정 저장 권한을 확인해 주세요.");
             emit messageChanged();
             return false;
         }

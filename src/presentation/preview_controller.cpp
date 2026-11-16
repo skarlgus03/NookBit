@@ -108,7 +108,7 @@ void PreviewController::recommendDocumentFolders() {
     if (!hasPreview_ || !draft_ || recommendationBusy_ || (runner_ && runner_->busy())) return;
     const bool usesSelectedFolders = !recommendationRoot_.isEmpty();
     if (usesSelectedFolders && selectedRecommendationFolders_.isEmpty()) {
-        recommendationStatus_ = QStringLiteral("설정의 문서 추천에서 후보 폴더를 하나 이상 선택해 주세요.");
+        recommendationStatus_ = tr("설정의 문서 추천에서 후보 폴더를 하나 이상 선택해 주세요.");
         emit previewChanged();
         return;
     }
@@ -123,7 +123,7 @@ void PreviewController::recommendDocumentFolders() {
         if (document_recommendation::isDocumentExtension(extension)) documents.append(source);
     }
     if (documents.isEmpty()) {
-        recommendationStatus_ = QStringLiteral("추천할 TXT·Markdown·PDF 문서가 없어요.");
+        recommendationStatus_ = tr("추천할 TXT·Markdown·PDF 문서가 없어요.");
         emit previewChanged();
         return;
     }
@@ -134,7 +134,7 @@ void PreviewController::recommendDocumentFolders() {
         ? std::optional<QStringList>(selectedRecommendationFolders_) : std::nullopt;
     auto suggestions = std::make_shared<document_recommendation::FolderSuggestions>();
     recommendationBusy_ = true;
-    recommendationStatus_ = QStringLiteral("기존 문서를 바탕으로 폴더를 찾고 있어요.");
+    recommendationStatus_ = tr("기존 문서를 바탕으로 폴더를 찾고 있어요.");
     emit previewChanged();
     dispatchOperation(runner_, this, [root, documents, sources, folders, suggestions] {
         *suggestions = document_recommendation::suggestFolders(root, documents, sources, folders);
@@ -151,25 +151,25 @@ void PreviewController::recommendDocumentFolders() {
             using document_recommendation::ExcerptIssue;
             switch (suggestions->unreadableDocuments.value(source)) {
             case ExcerptIssue::None: break;
-            case ExcerptIssue::Unreadable: note = QStringLiteral("이 문서를 열거나 읽을 수 없어요."); break;
-            case ExcerptIssue::Encoding: note = QStringLiteral("지원하는 텍스트 인코딩으로 본문을 읽을 수 없어요."); break;
-            case ExcerptIssue::Empty: note = QStringLiteral("문서 앞부분에 읽을 텍스트가 없어요."); break;
-            case ExcerptIssue::PdfNoText: note = QStringLiteral("앞쪽 5페이지에서 읽을 수 있는 PDF 텍스트가 없어요."); break;
-            case ExcerptIssue::PdfUnavailable: note = QStringLiteral("이 빌드에서는 PDF 본문 추천을 지원하지 않아요."); break;
+            case ExcerptIssue::Unreadable: note = tr("이 문서를 열거나 읽을 수 없어요."); break;
+            case ExcerptIssue::Encoding: note = tr("지원하는 텍스트 인코딩으로 본문을 읽을 수 없어요."); break;
+            case ExcerptIssue::Empty: note = tr("문서 앞부분에 읽을 텍스트가 없어요."); break;
+            case ExcerptIssue::PdfNoText: note = tr("앞쪽 5페이지에서 읽을 수 있는 PDF 텍스트가 없어요."); break;
+            case ExcerptIssue::PdfUnavailable: note = tr("이 빌드에서는 PDF 본문 추천을 지원하지 않아요."); break;
             }
             row.insert("recommendationNote", note);
             value = row;
         }
-        if (!result) recommendationStatus_ = QStringLiteral("문서 추천을 완료하지 못했어요.");
-        else if (!suggestions->usedFolderCount) recommendationStatus_ = QStringLiteral("검사한 폴더에서 읽을 수 있는 문서 예시를 찾지 못했어요.");
-        else if (suggestions->destinations.isEmpty()) recommendationStatus_ = QStringLiteral("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
-        else recommendationStatus_ = QStringLiteral("문서 %1개에 후보를 찾았어요.")
+        if (!result) recommendationStatus_ = tr("문서 추천을 완료하지 못했어요.");
+        else if (!suggestions->usedFolderCount) recommendationStatus_ = tr("검사한 폴더에서 읽을 수 있는 문서 예시를 찾지 못했어요.");
+        else if (suggestions->destinations.isEmpty()) recommendationStatus_ = tr("기존 문서와 충분히 비슷한 목적지를 찾지 못했어요.");
+        else recommendationStatus_ = tr("문서 %1개에 후보를 찾았어요.")
             .arg(suggestions->destinations.size());
         if (result && suggestions->candidateCount) {
-            recommendationStatus_ += QStringLiteral("\n후보 폴더 %1개 중 %2개 검사 · %3개 사용")
+            recommendationStatus_ += tr("\n후보 폴더 %1개 중 %2개 검사 · %3개 사용")
                 .arg(suggestions->candidateCount).arg(suggestions->inspectedFolderCount).arg(suggestions->usedFolderCount);
             if (suggestions->cappedFolderCount) {
-                recommendationStatus_ += QStringLiteral("\n문서 %1개 읽기 한도에 도달한 폴더 %2개")
+                recommendationStatus_ += tr("\n문서 %1개 읽기 한도에 도달한 폴더 %2개")
                     .arg(document_recommendation::exampleReadLimit).arg(suggestions->cappedFolderCount);
             }
         }
@@ -237,7 +237,7 @@ void PreviewController::refreshActiveRules() {
     const auto label = loaded
         ? QStringLiteral("%1 · %2").arg(QString::fromStdString(loaded.value().id),
                                           QString::fromStdString(loaded.value().version))
-        : QStringLiteral("읽기 실패. %1").arg(reportFileOperationError(loaded.error()));
+        : tr("읽기 실패. %1").arg(reportFileOperationError(loaded.error()));
     if (activeRuleLabel_ != label) {
         activeRuleLabel_ = label;
         emit activeRuleChanged();
@@ -251,17 +251,17 @@ void PreviewController::createPreview(const QString& destinationRoot) {
     refreshActiveRules();
     pendingFiles_.refreshAvailability();
     if (pendingFiles_.unavailableCount() > 0) {
-        showError(QStringLiteral("찾을 수 없는 파일 %1개가 있어요. 대기 목록에서 해당 항목을 빼고 다시 미리보기를 만들어 주세요.")
+        showError(tr("찾을 수 없는 파일 %1개가 있어요. 대기 목록에서 해당 항목을 빼고 다시 미리보기를 만들어 주세요.")
                       .arg(pendingFiles_.unavailableCount()));
         return;
     }
     if (pendingFiles_.count() == 0) {
-        showError(QStringLiteral("먼저 파일을 대기 목록에 추가해 주세요."));
+        showError(tr("먼저 파일을 대기 목록에 추가해 주세요."));
         return;
     }
     const QFileInfo homeInfo(destinationRoot.trimmed());
     if (!homeInfo.isAbsolute() || QDir(homeInfo.absoluteFilePath()).isRoot()) {
-        showError(QStringLiteral("정리할 위치는 드라이브 루트가 아닌 절대 경로로 지정해 주세요."));
+        showError(tr("정리할 위치는 드라이브 루트가 아닌 절대 경로로 지정해 주세요."));
         return;
     }
 
@@ -284,7 +284,7 @@ void PreviewController::createPreview(const QString& destinationRoot) {
             *result = useCase->execute(request);
             return *result ? Result<void>::success() : Result<void>::failure(result->error());
         }, [this, result, homePath, inputs](const Result<void>&) {
-            if (inputs != pendingFiles_.entries()) { showError(QStringLiteral("검사 중 대기 목록이나 폴더 처리 방식이 바뀌었어요. 다시 미리보기를 만들어 주세요.")); return; }
+            if (inputs != pendingFiles_.entries()) { showError(tr("검사 중 대기 목록이나 폴더 처리 방식이 바뀌었어요. 다시 미리보기를 만들어 주세요.")); return; }
             acceptPreview(*result, homePath);
         });
         return;
@@ -296,14 +296,14 @@ void PreviewController::createPreview(const QString& destinationRoot) {
 void PreviewController::acceptPreview(const Result<OperationPlan>& result, const QString& homePath) {
     if (!result) {
         if (result.error().code == "path.destination_outside_home") {
-            showError(QStringLiteral("외부 목적지가 아직 허용되지 않았어요. 규칙 편집기의 목적지 설정에서 해당 폴더를 허용해 주세요."));
+            showError(tr("외부 목적지가 아직 허용되지 않았어요. 규칙 편집기의 목적지 설정에서 해당 폴더를 허용해 주세요."));
             return;
         }
         if (result.error().code == "collision.abort") {
-            showError(QStringLiteral("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
+            showError(tr("목적지 파일 이름이 충돌해 '작업 중단' 정책에 따라 미리보기를 중단했어요. 파일은 이동하지 않았어요."));
             return;
         }
-        showError(QStringLiteral("미리보기를 만들지 못했어요. %1").arg(reportFileOperationError(result.error())));
+        showError(tr("미리보기를 만들지 못했어요. %1").arg(reportFileOperationError(result.error())));
         return;
     }
     draft_ = result.value();
@@ -325,8 +325,8 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
         row.insert(QStringLiteral("destination"), displayPath(step.destination));
         row.insert(QStringLiteral("rule"), QString::fromStdString(step.matchedRuleId));
         row.insert(QStringLiteral("status"), step.status == StepStatus::Skipped
-                                                  ? QStringLiteral("건너뜀")
-                                                  : QStringLiteral("예정"));
+                                                  ? tr("건너뜀")
+                                                  : tr("예정"));
         steps_.append(row);
     }
     int plannedCount = 0;
@@ -344,27 +344,27 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
         switch (outcome.disposition) {
         case PreviewDisposition::Planned:
             ++plannedCount;
-            row.insert(QStringLiteral("status"), QStringLiteral("이동 예정"));
+            row.insert(QStringLiteral("status"), tr("이동 예정"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("planned"));
-            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에 일치했어요.").arg(ruleId));
+            row.insert(QStringLiteral("reason"), tr("규칙 '%1'에 일치했어요.").arg(ruleId));
             break;
         case PreviewDisposition::CollisionSkipped:
             ++skippedCount;
-            row.insert(QStringLiteral("status"), QStringLiteral("충돌로 건너뜀"));
+            row.insert(QStringLiteral("status"), tr("충돌로 건너뜀"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("skipped"));
-            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에 일치했지만 목적지에 같은 이름의 파일이 있어 이동하지 않아요.").arg(ruleId));
+            row.insert(QStringLiteral("reason"), tr("규칙 '%1'에 일치했지만 목적지에 같은 이름의 파일이 있어 이동하지 않아요.").arg(ruleId));
             break;
         case PreviewDisposition::Unmatched:
             ++unmatchedCount;
-            row.insert(QStringLiteral("status"), QStringLiteral("미분류"));
+            row.insert(QStringLiteral("status"), tr("미분류"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("unmatched"));
-            row.insert(QStringLiteral("reason"), QStringLiteral("일치하는 규칙이 없어 대기 목록에 남아요."));
+            row.insert(QStringLiteral("reason"), tr("일치하는 규칙이 없어 대기 목록에 남아요."));
             break;
         case PreviewDisposition::Excluded:
             ++excludedCount;
-            row.insert(QStringLiteral("status"), QStringLiteral("제외"));
+            row.insert(QStringLiteral("status"), tr("제외"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
-            row.insert(QStringLiteral("reason"), QStringLiteral("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
+            row.insert(QStringLiteral("reason"), tr("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
             break;
         case PreviewDisposition::DocumentHeld:
             ++excludedCount;
@@ -374,9 +374,9 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
             break;
         case PreviewDisposition::AlreadyAtDestination:
             ++excludedCount;
-            row.insert(QStringLiteral("status"), QStringLiteral("이미 목적지에 있음"));
+            row.insert(QStringLiteral("status"), tr("이미 목적지에 있음"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
-            row.insert(QStringLiteral("reason"), QStringLiteral("현재 위치가 규칙의 목적지와 같아서 그대로 두어요."));
+            row.insert(QStringLiteral("reason"), tr("현재 위치가 규칙의 목적지와 같아서 그대로 두어요."));
             break;
         }
         outcomes_.append(row);
@@ -386,12 +386,12 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
         warnings_.append(QString::fromStdString(warning.message));
     }
     hasPreview_ = true;
-    message_ = QStringLiteral("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
+    message_ = tr("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
                    .arg(plannedCount).arg(skippedCount).arg(unmatchedCount)
                    .arg(excludedCount).arg(warnings_.size());
     const auto pendingEntries = pendingFiles_.entries();
     if (std::any_of(pendingEntries.begin(), pendingEntries.end(), [](const PendingFileEntry& entry) { return !entry.folderFlowId.empty(); }))
-        message_.prepend(QStringLiteral("선택한 폴더 처리 흐름을 적용했어요. 이동 대상을 확인해 주세요. "));
+        message_.prepend(tr("선택한 폴더 처리 흐름을 적용했어요. 이동 대상을 확인해 주세요. "));
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
 }
@@ -418,7 +418,7 @@ bool PreviewController::prepareSort() {
     if (runner_ && runner_->busy()) return false;
     awaitingConfirmation_ = false;
     if (!hasPreview_ || !hasMovableSteps() || approval_) {
-        message_ = QStringLiteral("먼저 이동 예정인 파일의 미리보기를 만들어 주세요.");
+        message_ = tr("먼저 이동 예정인 파일의 미리보기를 만들어 주세요.");
         emit previewChanged();
         return false;
     }
@@ -430,7 +430,7 @@ bool PreviewController::prepareSort() {
         return false;
     }
     awaitingConfirmation_ = true;
-    message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
+    message_ = tr("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
     emit previewChanged();
     return true;
 }
@@ -440,7 +440,7 @@ void PreviewController::cancelSort() {
     if (runner_ && runner_->busy()) return;
     if (!awaitingConfirmation_) return;
     awaitingConfirmation_ = false;
-    message_ = QStringLiteral("정리를 취소했어요. 파일은 그대로 있어요.");
+    message_ = tr("정리를 취소했어요. 파일은 그대로 있어요.");
     emit previewChanged();
 }
 
@@ -470,7 +470,7 @@ void PreviewController::prepareSortInBackground() {
     const auto selections = pendingFiles_.entries();
     auto prepared = std::make_shared<Result<OperationPlan>>(Result<OperationPlan>::failure({"sort.not_prepared", "Preparation did not complete."}));
     auto elapsedMs = std::make_shared<qint64>(-1);
-    message_ = QStringLiteral("정리할 파일을 검사하고 있어요. 아직 이동하지 않았어요.");
+    message_ = tr("정리할 파일을 검사하고 있어요. 아직 이동하지 않았어요.");
     emit previewChanged();
     dispatchOperation(runner_, this,
         [workflow = sortWorkflow_, plan = *draft_, frozen = hasFrozenPlan_, selected, settings, prepared, elapsedMs] {
@@ -480,14 +480,14 @@ void PreviewController::prepareSortInBackground() {
             return *prepared ? Result<void>::success() : Result<void>::failure(prepared->error());
         }, [this, paths, selections, prepared, elapsedMs](const Result<void>& result) {
             if (!result) {
-                auto error = QStringLiteral("정리 준비 검사에 실패했어요. %1").arg(reportFileOperationError(result.error()));
-                if (*elapsedMs >= 0) error += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
+                auto error = tr("정리 준비 검사에 실패했어요. %1").arg(reportFileOperationError(result.error()));
+                if (*elapsedMs >= 0) error += tr(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 showError(error); return;
             }
-            if (pendingFiles_.filePaths() != paths || pendingFiles_.entries() != selections) { showError(QStringLiteral("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
+            if (pendingFiles_.filePaths() != paths || pendingFiles_.entries() != selections) { showError(tr("검사 중 대기 목록이 바뀌었어요. 새 미리보기를 만들어 주세요.")); return; }
             draft_ = prepared->value(); hasFrozenPlan_ = true; awaitingConfirmation_ = true;
-            message_ = QStringLiteral("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
-            message_ += QStringLiteral(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
+            message_ = tr("이동할 파일과 목적지를 최종 확인해 주세요. 아직 파일은 이동하지 않았어요.");
+            message_ += tr(" (검사 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
             emit previewChanged();
         });
 }
@@ -502,7 +502,7 @@ void PreviewController::confirmSortInBackground() {
     const auto selected = previewSelectedFiles_;
     const auto plan = *draft_;
     auto elapsedMs = std::make_shared<qint64>(-1);
-    message_ = QStringLiteral("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
+    message_ = tr("승인 내용을 다시 검사한 뒤 정리하고 있어요."); emit previewChanged();
     emit sortExecutionStarted();
     dispatchOperation(runner_, this,
         [workflow = sortWorkflow_, plan, selected, settings, elapsedMs] {
@@ -514,7 +514,7 @@ void PreviewController::confirmSortInBackground() {
         [this, plan, elapsedMs](const Result<void>& result) {
             finishMovement(plan.id, plan.steps, result);
             if (*elapsedMs >= 0) {
-                message_ += QStringLiteral(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
+                message_ += tr(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 emit previewChanged();
             }
         }, BackgroundTaskRunner::TaskKind::Sort);
@@ -524,7 +524,7 @@ void PreviewController::confirmSortInBackground() {
 void PreviewController::freezePreview() {
     if (runner_ && runner_->busy()) return;
     if (!draft_ || !hasPreview_ || hasFrozenPlan_) {
-        showError(QStringLiteral("먼저 새 미리보기를 만들어 주세요."));
+        showError(tr("먼저 새 미리보기를 만들어 주세요."));
         return;
     }
     UserSettings settings;
@@ -535,12 +535,12 @@ void PreviewController::freezePreview() {
 
     const auto result = freezePreview_.execute(*draft_, selectedFiles, settings);
     if (!result) {
-        showError(QStringLiteral("계획을 저장하지 못했어요. %1").arg(reportFileOperationError(result.error())));
+        showError(tr("계획을 저장하지 못했어요. %1").arg(reportFileOperationError(result.error())));
         return;
     }
     draft_ = result.value();
     hasFrozenPlan_ = true;
-    message_ = QStringLiteral("계획을 안전하게 저장했어요. 아직 승인하거나 파일을 이동하지 않았어요.");
+    message_ = tr("계획을 안전하게 저장했어요. 아직 승인하거나 파일을 이동하지 않았어요.");
     emit previewChanged();
 }
 
@@ -548,7 +548,7 @@ void PreviewController::freezePreview() {
 bool PreviewController::verifySavedPlan() {
     if (runner_ && runner_->busy()) return false;
     if (!draft_ || !hasFrozenPlan_) {
-        message_ = QStringLiteral("먼저 계획을 고정·저장해 주세요.");
+        message_ = tr("먼저 계획을 고정·저장해 주세요.");
         emit previewChanged();
         return false;
     }
@@ -560,11 +560,11 @@ bool PreviewController::verifySavedPlan() {
 
     const auto result = verifySavedPlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
-        message_ = QStringLiteral("저장한 계획을 확인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
+        message_ = tr("저장한 계획을 확인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
         emit previewChanged();
         return false;
     }
-    message_ = QStringLiteral("검사 시점에는 저장 계획과 현재 상태가 일치해요. 아직 승인·이동하지 않았어요.");
+    message_ = tr("검사 시점에는 저장 계획과 현재 상태가 일치해요. 아직 승인·이동하지 않았어요.");
     emit previewChanged();
     return true;
 }
@@ -574,7 +574,7 @@ void PreviewController::approvePlan() {
     if (runner_ && runner_->busy()) return;
     if (!draft_ || !hasFrozenPlan_ || approval_ || pendingFiles_.count() == 0 ||
         !hasMovableSteps()) {
-        message_ = QStringLiteral("승인하려면 이동 예정인 파일의 계획을 고정·저장해 주세요.");
+        message_ = tr("승인하려면 이동 예정인 파일의 계획을 고정·저장해 주세요.");
         emit previewChanged();
         return;
     }
@@ -585,12 +585,12 @@ void PreviewController::approvePlan() {
     const auto selectedFiles = previewSelectedFiles_;
     const auto result = approvePlan_.execute(draft_->id, selectedFiles, settings);
     if (!result) {
-        message_ = QStringLiteral("승인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
+        message_ = tr("승인하지 못했어요. %1").arg(reportFileOperationError(result.error()));
         emit previewChanged();
         return;
     }
     approval_ = result.value();
-    message_ = QStringLiteral("파일 이동을 승인했어요. 실제 이동은 '승인한 파일들 이동'을 눌러야 시작돼요.");
+    message_ = tr("파일 이동을 승인했어요. 실제 이동은 '승인한 파일들 이동'을 눌러야 시작돼요.");
     emit previewChanged();
 }
 
@@ -598,7 +598,7 @@ void PreviewController::approvePlan() {
 void PreviewController::moveApprovedFile() {
     if (runner_ && runner_->busy()) return;
     if (!draft_ || !approval_ || pendingFiles_.count() == 0 || previewHomeRoot_.isEmpty()) {
-        message_ = QStringLiteral("먼저 파일 이동 계획을 승인해 주세요.");
+        message_ = tr("먼저 파일 이동 계획을 승인해 주세요.");
         emit previewChanged();
         return;
     }
@@ -606,7 +606,7 @@ void PreviewController::moveApprovedFile() {
     const auto loaded = history_.loadPlan(draft_->id);
     if (!loaded || loaded.value().status != PlanStatus::Approved) {
         approval_.reset();
-        message_ = QStringLiteral("승인된 계획을 읽지 못했어요. 새 미리보기부터 다시 시작해 주세요.");
+        message_ = tr("승인된 계획을 읽지 못했어요. 새 미리보기부터 다시 시작해 주세요.");
         emit previewChanged();
         return;
     }
@@ -616,7 +616,7 @@ void PreviewController::moveApprovedFile() {
     settings.defaultCollisionPolicy = collisionPolicy_;
     const auto movedPlanId = draft_->id;
     const auto movedSteps = loaded.value().steps;
-    message_ = QStringLiteral("파일을 정리하고 있어요. 작업이 끝날 때까지 앱을 닫지 마세요.");
+    message_ = tr("파일을 정리하고 있어요. 작업이 끝날 때까지 앱을 닫지 마세요.");
     emit previewChanged();
     emit sortExecutionStarted();
     dispatchOperation(runner_, this,
@@ -653,10 +653,10 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
         emit recoveryReconcileRequested();
         const auto reason = reportFileOperationError(result.error());
         if (cancelled) {
-            message_ = applied ? QStringLiteral("먼저 옮긴 파일 %1개는 현재 위치에 있어요. 나머지는 대기 목록에 남아 있어요.").arg(applied)
-                               : QStringLiteral("파일을 옮기기 전에 정리를 취소했어요. 대기 목록에서 다시 시작할 수 있어요.");
+            message_ = applied ? tr("먼저 옮긴 파일 %1개는 현재 위치에 있어요. 나머지는 대기 목록에 남아 있어요.").arg(applied)
+                               : tr("파일을 옮기기 전에 정리를 취소했어요. 대기 목록에서 다시 시작할 수 있어요.");
         } else {
-            message_ = QStringLiteral("이동을 완료하지 못했어요. %1").arg(reason);
+            message_ = tr("이동을 완료하지 못했어요. %1").arg(reason);
         }
         emit previewChanged();
         emit sortExecutionFinished(false, message_);
@@ -672,7 +672,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
     }
     clear();
     undoPlanId_ = movedPlanId;
-    message_ = QStringLiteral("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
+    message_ = tr("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
                    .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
                        return step.status == StepStatus::Planned;
                    }));
@@ -684,7 +684,7 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
 void PreviewController::undoLastMove() {
     if (runner_ && runner_->busy()) return;
     if (!undoPlanId_) {
-        message_ = QStringLiteral("되돌릴 이동 작업이 없어요.");
+        message_ = tr("되돌릴 이동 작업이 없어요.");
         emit previewChanged();
         return;
     }
@@ -697,12 +697,12 @@ void PreviewController::undoLastMove() {
                 current.value().status != PlanStatus::Failed && current.value().status != PlanStatus::Cancelled) {
                 undoPlanId_.reset();
             }
-            message_ = QStringLiteral("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
+            message_ = tr("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
             emit previewChanged();
             return;
         }
         undoPlanId_.reset();
-        message_ = QStringLiteral("파일을 원래 위치로 되돌렸어요.");
+        message_ = tr("파일을 원래 위치로 되돌렸어요.");
         emit previewChanged();
     }, BackgroundTaskRunner::TaskKind::FileWork);
 }

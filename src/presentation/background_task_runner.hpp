@@ -58,8 +58,8 @@ public:
     /// 현재 처리 파일 순서와 실제 기록 완료 개수를 표시하는 함수.
     QString filePosition() const {
         if (!progress_.fileCount) return {};
-        if (!progress_.fileIndex) return QStringLiteral("대상 파일 %1개").arg(progress_.fileCount);
-        return QStringLiteral("파일 %1 / %2개 · 완료 %3개").arg(progress_.fileIndex).arg(progress_.fileCount).arg(progress_.completedFiles);
+        if (!progress_.fileIndex) return tr("대상 파일 %1개").arg(progress_.fileCount);
+        return tr("파일 %1 / %2개 · 완료 %3개").arg(progress_.fileIndex).arg(progress_.fileCount).arg(progress_.completedFiles);
     }
     /// 크기가 알려진 현재 복사 구간만 퍼센트 표시 대상으로 반환하는 함수.
     bool byteProgressKnown() const { return progress_.phase == OperationPhase::Copying && progress_.byteProgressKnown; }
@@ -73,29 +73,29 @@ public:
     }
     /// 백엔드 처리 단계를 한국어 화면 문구로만 변환하는 함수.
     QString stageLabel() const {
-        if (copyCancellationRequested()) return QStringLiteral("복사를 멈추고 있어요");
+        if (copyCancellationRequested()) return tr("복사를 멈추고 있어요");
         switch (progress_.phase) {
-        case OperationPhase::Preparing: return QStringLiteral("정리할 파일 검사 중");
-        case OperationPhase::Approving: return QStringLiteral("승인 내용 검사 중");
-        case OperationPhase::CheckingPlan: return QStringLiteral("정리 계획 확인 중");
-        case OperationPhase::CheckingSource: return QStringLiteral("원본 파일 확인 중");
-        case OperationPhase::ProtectingSource: return QStringLiteral("원본 보호·내용 검증 중");
-        case OperationPhase::Copying: return QStringLiteral("복사 중");
-        case OperationPhase::FlushingCopy: return QStringLiteral("복사 내용 디스크 반영 중");
-        case OperationPhase::VerifyingCopy: return QStringLiteral("복사본 검증 중");
-        case OperationPhase::PreservingMetadata: return QStringLiteral("파일 속성·다운로드 표식 보존 중");
-        case OperationPhase::CommittingDestination: return QStringLiteral("최종 목적지 확정 중");
-        case OperationPhase::VerifyingBeforeRemoval: return QStringLiteral("원본 삭제 전 안전 검사 중");
-        case OperationPhase::RemovingSource: return QStringLiteral("검증된 원본 제거 중");
-        case OperationPhase::Moving: return QStringLiteral("파일 이동 중");
-        case OperationPhase::CheckingResult: return QStringLiteral("이동 결과 확인 중");
-        case OperationPhase::SavingHistory: return QStringLiteral("작업 기록 저장 중");
-        case OperationPhase::Restoring: return QStringLiteral("원래 위치로 되돌리는 중");
-        case OperationPhase::Recovering: return QStringLiteral("중단 작업 확인·복구 중");
-        case OperationPhase::Completed: return QStringLiteral("작업 완료");
-        case OperationPhase::Cancelled: return QStringLiteral("복사 취소됨");
-        case OperationPhase::Failed: return QStringLiteral("작업 실패 · 결과를 확인해 주세요");
-        default: return QStringLiteral("파일 작업 준비 중");
+        case OperationPhase::Preparing: return tr("정리할 파일 검사 중");
+        case OperationPhase::Approving: return tr("승인 내용 검사 중");
+        case OperationPhase::CheckingPlan: return tr("정리 계획 확인 중");
+        case OperationPhase::CheckingSource: return tr("원본 파일 확인 중");
+        case OperationPhase::ProtectingSource: return tr("원본 보호·내용 검증 중");
+        case OperationPhase::Copying: return tr("복사 중");
+        case OperationPhase::FlushingCopy: return tr("복사 내용 디스크 반영 중");
+        case OperationPhase::VerifyingCopy: return tr("복사본 검증 중");
+        case OperationPhase::PreservingMetadata: return tr("파일 속성·다운로드 표식 보존 중");
+        case OperationPhase::CommittingDestination: return tr("최종 목적지 확정 중");
+        case OperationPhase::VerifyingBeforeRemoval: return tr("원본 삭제 전 안전 검사 중");
+        case OperationPhase::RemovingSource: return tr("검증된 원본 제거 중");
+        case OperationPhase::Moving: return tr("파일 이동 중");
+        case OperationPhase::CheckingResult: return tr("이동 결과 확인 중");
+        case OperationPhase::SavingHistory: return tr("작업 기록 저장 중");
+        case OperationPhase::Restoring: return tr("원래 위치로 되돌리는 중");
+        case OperationPhase::Recovering: return tr("중단 작업 확인·복구 중");
+        case OperationPhase::Completed: return tr("작업 완료");
+        case OperationPhase::Cancelled: return tr("복사 취소됨");
+        case OperationPhase::Failed: return tr("작업 실패 · 결과를 확인해 주세요");
+        default: return tr("파일 작업 준비 중");
         }
     }
     /// 값으로 고정된 작업을 실행하고 결과만 화면 스레드에 전달하는 함수.

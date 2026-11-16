@@ -1,4 +1,5 @@
 #pragma once
+#include <QCoreApplication>
 
 #include "modules/rules/processing_flow.hpp"
 
@@ -12,10 +13,10 @@ namespace nookbit {
 inline Result<DocumentOutput> graphDocumentOutput(const QVariantMap& terminal) {
     if (terminal.isEmpty()) return Result<DocumentOutput>::success({});
     if (terminal.value("type") == "exclude") return Result<DocumentOutput>::success({{}, true});
-    const auto invalid = [](const char* message) {
-        return Result<DocumentOutput>::failure({"rules.document_analysis_invalid", message});
+    const auto invalid = [](const QString& message) {
+        return Result<DocumentOutput>::failure({"rules.document_analysis_invalid", message.toStdString()});
     };
-    if (terminal.value("type") != "destination") return invalid("출력은 목적지 또는 정리 제외에 연결해 주세요.");
+    if (terminal.value("type") != "destination") return invalid(QCoreApplication::translate("DocumentRuleGraph", "출력은 목적지 또는 정리 제외에 연결해 주세요."));
     const auto text = terminal.value("value").toString().trimmed();
     const std::filesystem::path path(text.toStdWString());
     const bool absolute = !terminal.value("homeRelative", true).toBool();
@@ -24,15 +25,15 @@ inline Result<DocumentOutput> graphDocumentOutput(const QVariantMap& terminal) {
     tokens.replace("{MM}", "");
     if (text.isEmpty() || text.contains(QChar(0)) || (absolute ? !path.is_absolute() : path.has_root_path()) ||
         tokens.contains('{') || tokens.contains('}'))
-        return invalid("목적지 경로와 기준 폴더를 확인해 주세요.");
+        return invalid(QCoreApplication::translate("DocumentRuleGraph", "목적지 경로와 기준 폴더를 확인해 주세요."));
     for (const auto& part : path)
-        if (part == "..") return invalid("목적지에 상위 경로를 사용할 수 없어요.");
+        if (part == "..") return invalid(QCoreApplication::translate("DocumentRuleGraph", "목적지에 상위 경로를 사용할 수 없어요."));
     std::optional<CollisionPolicy> policy;
     const auto collision = terminal.value("collisionPolicy", "inherit").toString();
     if (collision == "rename") policy = CollisionPolicy::Rename;
     else if (collision == "skip") policy = CollisionPolicy::Skip;
     else if (collision == "abort") policy = CollisionPolicy::Abort;
-    else if (collision != "inherit") return invalid("충돌 처리 설정이 올바르지 않아요.");
+    else if (collision != "inherit") return invalid(QCoreApplication::translate("DocumentRuleGraph", "충돌 처리 설정이 올바르지 않아요."));
     return Result<DocumentOutput>::success({RuleDestination{path, policy, absolute}});
 }
 
@@ -43,7 +44,7 @@ inline Result<DocumentAnalysis> graphDocumentAnalysis(const QVariantMap& block,
     bool validSimilarity = false;
     analysis.minimumSimilarity = block.value("minimumSimilarity").toInt(&validSimilarity);
     if (!validSimilarity || block.value("minimumSimilarity").toDouble() != analysis.minimumSimilarity)
-        return Result<DocumentAnalysis>::failure({"rules.document_analysis_invalid", "최소 유사도를 확인해 주세요."});
+        return Result<DocumentAnalysis>::failure({"rules.document_analysis_invalid", QCoreApplication::translate("DocumentRuleGraph", "최소 유사도를 확인해 주세요.").toStdString()});
     auto abstain = graphDocumentOutput(terminals.take("abstain"));
     if (!abstain) return Result<DocumentAnalysis>::failure(abstain.error());
     analysis.abstain = std::move(abstain.value());
@@ -57,7 +58,7 @@ inline Result<DocumentAnalysis> graphDocumentAnalysis(const QVariantMap& block,
             category.value("keywords").toString().trimmed().toStdString(), std::move(output.value())});
     }
     if (!terminals.isEmpty())
-        return Result<DocumentAnalysis>::failure({"rules.document_analysis_invalid", "존재하지 않는 분류 출력에 선이 연결됐어요."});
+        return Result<DocumentAnalysis>::failure({"rules.document_analysis_invalid", QCoreApplication::translate("DocumentRuleGraph", "존재하지 않는 분류 출력에 선이 연결됐어요.").toStdString()});
     const auto valid = validateDocumentAnalysis(analysis);
     if (!valid) return Result<DocumentAnalysis>::failure(valid.error());
     return Result<DocumentAnalysis>::success(std::move(analysis));
@@ -96,7 +97,7 @@ inline void appendGraphDocumentOutputs(const DocumentAnalysis& analysis, QVarian
             terminal["homeRelative"] = !output.destination->absolute;
             terminal["collisionPolicy"] = documentOutputPolicy(output.destination->collisionPolicy);
         } else {
-            terminal["value"] = QStringLiteral("이 파일은 이동하지 않음");
+            terminal["value"] = QCoreApplication::translate("DocumentRuleGraph", "이 파일은 이동하지 않음");
         }
         if (!flowId.isEmpty()) terminal["flowId"] = flowId;
         blocks.append(terminal);

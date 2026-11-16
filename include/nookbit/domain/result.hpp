@@ -9,6 +9,8 @@ namespace nookbit {
 struct Error {
     std::string code;
     std::string message;
+    // 그래프 편집기에서 오류가 난 블록으로 이동할 때 사용하는 번호.
+    int graphBlockId{0};
 };
 
 template <typename T>

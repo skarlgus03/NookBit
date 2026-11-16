@@ -115,13 +115,13 @@ struct FileOrganizerRuntime::State {
                 const auto persistPending = [this] {
                     const auto saved = pendingRepository.saveEntries(pendingFiles.entries());
                     pendingFiles.setStorageNotice(saved ? QString() :
-                        QStringLiteral("대기 목록을 저장하지 못했어요. 이번 변경은 재시작 후 복원되지 않을 수 있어요: %1")
+                        QCoreApplication::translate("OrganizerUi", "대기 목록을 저장하지 못했어요. 이번 변경은 재시작 후 복원되지 않을 수 있어요: %1")
                             .arg(QString::fromStdString(saved.error().message)));
                 };
                 QObject::connect(&pendingFiles, &PendingFilesModel::countChanged, &connections, persistPending);
                 QObject::connect(&pendingFiles, &PendingFilesModel::selectionsChanged, &connections, persistPending);
             } else {
-                pendingFiles.setStorageNotice(QStringLiteral("대기 목록을 복원하지 못했어요. 기존 저장 파일은 보존하며 이번 실행의 목록 변경은 저장하지 않아요: %1")
+                pendingFiles.setStorageNotice(QCoreApplication::translate("OrganizerUi", "대기 목록을 복원하지 못했어요. 기존 저장 파일은 보존하며 이번 실행의 목록 변경은 저장하지 않아요: %1")
                     .arg(QString::fromStdString(restored.error().message)));
             }
         }
@@ -220,51 +220,47 @@ FileOrganizerRuntime::FileOrganizerRuntime(FileOrganizerRuntimeConfig config, QS
 FileOrganizerRuntime::~FileOrganizerRuntime() = default;
 // 페이지 구성과 준비 동작은 기능에 맡기고 호스트에는 메뉴·입력 정보만 등록하는 함수.
 Result<void> FileOrganizerRuntime::registerUi(UiPageRegistry& registry) {
-    const auto title = [](const char* text) {
-        // 같은 화면 문맥으로 정리 기능의 메뉴 이름을 번역하는 함수.
-        return QCoreApplication::translate("OrganizerUi", text);
-    };
     const auto object = [](QObject* value) {
         // 소유권을 넘기지 않고 QML에 빌려줄 입력 객체를 포장하는 함수.
         return QVariant::fromValue(value);
     };
     const auto prefix = QStringLiteral("qrc:/qt/qml/NookBit/presentation/qml/");
     const auto tutorial = registry.addTutorialSteps({
-        {"organizer.sort", "file-organizer", title("파일을 모으고 정리하기"),
-            title("모으기 → 미리보기 → 정리, 세 단계면 돼요."),
-            {title("파일 정리 페이지에 파일이나 폴더를 끌어다 놓아요."),
-             title("정리할 위치를 정하고 결과 미리보기로 목적지를 확인해요."),
-             title("정리하기를 누르고 최종 확인에서 승인하면 이동해요.")},
-            title("맞는 규칙이 없거나 정리하지 않음으로 지정된 항목은 옮기지 않아요. 폴더는 내부를 나누지 않고 하나의 대상으로 다뤄요."), 10},
-        {"organizer.rules", "file-organizer", title("분류 규칙 만들기"),
-            title("조건을 연결해 원하는 목적지로 보내요."),
-            {title("캔버스에서 우클릭해 조건과 목적지 노드를 추가해요."),
-             title("파일 입력 → 조건 → 목적지 순으로 연결해요. 옮기지 않을 항목은 정리하지 않음으로 끝내요."),
-             title("규칙 테스트로 확인하고 전체 저장을 눌러요.")},
-            title("형제 조건은 순서대로 검사하고 먼저 맞은 가지를 따라가요. 다른 형제로 되돌아가지는 않아요. 파일 메뉴에서 JSON을 불러올 수 있고, AI용 작성 문서로 초안도 만들 수 있어요."), 20},
-        {"organizer.history", "file-organizer", title("작업 기록과 되돌리기"),
-            title("이동 결과를 확인하고 필요한 작업을 되돌릴 수 있어요."),
-            {title("작업을 선택하면 파일별 이동 결과와 경로가 보여요."),
-             title("파일명·경로 검색과 기간·결과 필터로 원하는 작업을 찾아요."),
-             title("복원하려면 이 작업 되돌리기를 눌러 확인해요.")},
-            title("중단된 작업은 설정의 중단 작업 확인에서 검토해요. 원본 위치에 다른 파일이 생기는 등 상태가 바뀌면 되돌리기가 제한될 수 있어요."), 30}
+        {"organizer.sort", "file-organizer", QCoreApplication::translate("OrganizerUi", "파일을 모으고 정리하기"),
+            QCoreApplication::translate("OrganizerUi", "모으기 → 미리보기 → 정리, 세 단계면 돼요."),
+            {QCoreApplication::translate("OrganizerUi", "파일 정리 페이지에 파일이나 폴더를 끌어다 놓아요."),
+             QCoreApplication::translate("OrganizerUi", "정리할 위치를 정하고 결과 미리보기로 목적지를 확인해요."),
+             QCoreApplication::translate("OrganizerUi", "정리하기를 누르고 최종 확인에서 승인하면 이동해요.")},
+            QCoreApplication::translate("OrganizerUi", "맞는 규칙이 없거나 정리하지 않음으로 지정된 항목은 옮기지 않아요. 폴더는 내부를 나누지 않고 하나의 대상으로 다뤄요."), 10},
+        {"organizer.rules", "file-organizer", QCoreApplication::translate("OrganizerUi", "분류 규칙 만들기"),
+            QCoreApplication::translate("OrganizerUi", "조건을 연결해 원하는 목적지로 보내요."),
+            {QCoreApplication::translate("OrganizerUi", "캔버스에서 우클릭해 조건과 목적지 노드를 추가해요."),
+             QCoreApplication::translate("OrganizerUi", "파일 입력 → 조건 → 목적지 순으로 연결해요. 옮기지 않을 항목은 정리하지 않음으로 끝내요."),
+             QCoreApplication::translate("OrganizerUi", "규칙 테스트로 확인하고 전체 저장을 눌러요.")},
+            QCoreApplication::translate("OrganizerUi", "형제 조건은 순서대로 검사하고 먼저 맞은 가지를 따라가요. 다른 형제로 되돌아가지는 않아요. 파일 메뉴에서 JSON을 불러올 수 있고, AI용 작성 문서로 초안도 만들 수 있어요."), 20},
+        {"organizer.history", "file-organizer", QCoreApplication::translate("OrganizerUi", "작업 기록과 되돌리기"),
+            QCoreApplication::translate("OrganizerUi", "이동 결과를 확인하고 필요한 작업을 되돌릴 수 있어요."),
+            {QCoreApplication::translate("OrganizerUi", "작업을 선택하면 파일별 이동 결과와 경로가 보여요."),
+             QCoreApplication::translate("OrganizerUi", "파일명·경로 검색과 기간·결과 필터로 원하는 작업을 찾아요."),
+             QCoreApplication::translate("OrganizerUi", "복원하려면 이 작업 되돌리기를 눌러 확인해요.")},
+            QCoreApplication::translate("OrganizerUi", "중단된 작업은 설정의 중단 작업 확인에서 검토해요. 원본 위치에 다른 파일이 생기는 등 상태가 바뀌면 되돌리기가 제한될 수 있어요."), 30}
     }, state_->connections);
     if (!tutorial) return tutorial;
     return registry.addPages({
-        {"organizer.sort", "file-organizer", 7, title("파일 정리"), "folder", title("파일 관리"), 10,
+        {"organizer.sort", "file-organizer", 7, QCoreApplication::translate("OrganizerUi", "파일 정리"), "folder", QCoreApplication::translate("OrganizerUi", "파일 관리"), 10,
             QUrl(prefix + "OrganizerSortPage.qml"),
             {{"controller", object(&preview())}, {"pending", object(&pendingFiles())},
              {"recovery", object(&recovery())}, {"progress", object(&tasks())}}, true, UiPageHost::Extension, true},
-        {"organizer.rules", "file-organizer", 1, title("분류 규칙"), "rules", title("파일 관리"), 20,
+        {"organizer.rules", "file-organizer", 1, QCoreApplication::translate("OrganizerUi", "분류 규칙"), "rules", QCoreApplication::translate("OrganizerUi", "파일 관리"), 20,
             QUrl(prefix + "OrganizerRulesPage.qml"),
             {{"controller", object(&rules())}, {"destinations", object(&destinations())}, {"progress", object(&tasks())}}, true, UiPageHost::Extension, true},
-        {"organizer.history", "file-organizer", 4, title("작업 기록"), "history", title("파일 관리"), 30,
+        {"organizer.history", "file-organizer", 4, QCoreApplication::translate("OrganizerUi", "작업 기록"), "history", QCoreApplication::translate("OrganizerUi", "파일 관리"), 30,
             QUrl(prefix + "OrganizerHistoryPage.qml"),
             {{"controller", object(&history())}, {"progress", object(&tasks())}}, true, UiPageHost::Extension, true},
-        {"organizer.recovery", "file-organizer", 10, title("중단 작업 확인"), "alert", {}, 31,
+        {"organizer.recovery", "file-organizer", 10, QCoreApplication::translate("OrganizerUi", "중단 작업 확인"), "alert", {}, 31,
             QUrl(prefix + "OrganizerRecoveryPage.qml"),
             {{"controller", object(&recovery())}, {"progress", object(&tasks())}}, false},
-        {"organizer.collision", "file-organizer", 6, title("이름 충돌 설정"), "settings", {}, 32,
+        {"organizer.collision", "file-organizer", 6, QCoreApplication::translate("OrganizerUi", "이름 충돌 설정"), "settings", {}, 32,
             QUrl(prefix + "OrganizerCollisionPage.qml"), {{"controller", object(&preview())}}, false}
     }, state_->connections);
 }

@@ -22,26 +22,26 @@ QString displayPath(const std::filesystem::path& path) {
 // 저장된 작업 상태를 기록 화면의 한국어 문구로 바꾸는 함수.
 QString historyStatusText(PlanStatus status) {
     switch (status) {
-    case PlanStatus::Completed: return QStringLiteral("이동 완료");
-    case PlanStatus::RolledBack: return QStringLiteral("되돌림 완료");
-    case PlanStatus::Failed: return QStringLiteral("이동 실패");
-    case PlanStatus::Cancelled: return QStringLiteral("정리 취소");
-    case PlanStatus::NeedsRecovery: return QStringLiteral("확인 필요");
-    case PlanStatus::Executing: return QStringLiteral("실행 중단");
-    case PlanStatus::RollingBack: return QStringLiteral("되돌리기 중단");
-    default: return QStringLiteral("저장됨");
+    case PlanStatus::Completed: return HistoryController::tr("이동 완료");
+    case PlanStatus::RolledBack: return HistoryController::tr("되돌림 완료");
+    case PlanStatus::Failed: return HistoryController::tr("이동 실패");
+    case PlanStatus::Cancelled: return HistoryController::tr("정리 취소");
+    case PlanStatus::NeedsRecovery: return HistoryController::tr("확인 필요");
+    case PlanStatus::Executing: return HistoryController::tr("실행 중단");
+    case PlanStatus::RollingBack: return HistoryController::tr("되돌리기 중단");
+    default: return HistoryController::tr("저장됨");
     }
 }
 
 // 저장된 파일 단계 상태를 기록 화면의 한국어 문구로 바꾸는 함수.
 QString historyStepStatusText(StepStatus status) {
     switch (status) {
-    case StepStatus::Applied: return QStringLiteral("이동됨");
-    case StepStatus::RolledBack: return QStringLiteral("되돌림");
-    case StepStatus::Skipped: return QStringLiteral("건너뜀");
-    case StepStatus::Failed: return QStringLiteral("실패");
-    case StepStatus::NeedsRecovery: return QStringLiteral("확인 필요");
-    default: return QStringLiteral("미완료");
+    case StepStatus::Applied: return HistoryController::tr("이동됨");
+    case StepStatus::RolledBack: return HistoryController::tr("되돌림");
+    case StepStatus::Skipped: return HistoryController::tr("건너뜀");
+    case StepStatus::Failed: return HistoryController::tr("실패");
+    case StepStatus::NeedsRecovery: return HistoryController::tr("확인 필요");
+    default: return HistoryController::tr("미완료");
     }
 }
 
@@ -121,10 +121,10 @@ bool HistoryController::applyHistoryFilters(const QString& text, const QString& 
     else if (result == "completed") search.result = HistoryResultFilter::Completed;
     else if (result == "rolledBack") search.result = HistoryResultFilter::RolledBack;
     else if (result == "problem") search.result = HistoryResultFilter::Problem;
-    else return invalid(QStringLiteral("작업 결과 필터를 확인해 주세요."));
+    else return invalid(tr("작업 결과 필터를 확인해 주세요."));
     if (order == "newest") search.order = HistoryOrder::Newest;
     else if (order == "oldest") search.order = HistoryOrder::Oldest;
-    else return invalid(QStringLiteral("정렬 순서를 확인해 주세요."));
+    else return invalid(tr("정렬 순서를 확인해 주세요."));
     QDate start, end;
     const auto today = QDate::currentDate();
     if (period == "today" || period == "7days" || period == "30days") {
@@ -134,8 +134,8 @@ bool HistoryController::applyHistoryFilters(const QString& text, const QString& 
         start = QDate::fromString(from, "yyyy-MM-dd");
         end = QDate::fromString(to, "yyyy-MM-dd");
         if (!start.isValid() || !end.isValid() || start.toString("yyyy-MM-dd") != from || end.toString("yyyy-MM-dd") != to || start > end)
-            return invalid(QStringLiteral("시작일과 종료일을 YYYY-MM-DD 형식으로 입력해 주세요. 시작일은 종료일보다 늦을 수 없어요."));
-    } else if (period != "all") return invalid(QStringLiteral("기간을 확인해 주세요."));
+            return invalid(tr("시작일과 종료일을 YYYY-MM-DD 형식으로 입력해 주세요. 시작일은 종료일보다 늦을 수 없어요."));
+    } else if (period != "all") return invalid(tr("기간을 확인해 주세요."));
     if (start.isValid()) {
         const auto zone = QTimeZone::systemTimeZone();
         search.fromUtc = start.startOfDay(zone).toUTC().toString(Qt::ISODateWithMs).toStdString();
@@ -193,8 +193,8 @@ bool HistoryController::readSearchPage(const HistorySearch& search, bool append)
         row.insert("statusTone", historyStatusTone(entry.status));
         const auto local = utc.toLocalTime();
         row.insert("shortTime", utc.isValid() ? local.toString("hh:mm") : row.value("time").toString());
-        const auto dateLabel = local.date() == today ? QStringLiteral("오늘")
-            : local.date() == today.addDays(-1) ? QStringLiteral("어제") : local.toString("M월 d일");
+        const auto dateLabel = local.date() == today ? tr("오늘")
+            : local.date() == today.addDays(-1) ? tr("어제") : local.toString(tr("M월 d일"));
         row.insert("detailTime", utc.isValid() ? dateLabel + " " + local.toString("hh:mm") : row.value("time").toString());
         row.insert("fileCount", entry.fileCount);
         row.insert("appliedCount", entry.appliedCount);
@@ -202,9 +202,9 @@ bool HistoryController::readSearchPage(const HistorySearch& search, bool append)
         historyEntries_.append(row);
     }
     nextCursor_ = result.value().next;
-    searchMessage_ = historyEntries_.isEmpty() ? QStringLiteral("조건에 맞는 작업 기록이 없어요.")
-        : QStringLiteral("작업 %1건을 표시해요.%2").arg(historyEntries_.size()).arg(nextCursor_ ? QStringLiteral(" 더 불러올 수 있어요.") : QString());
-    if (!append) historyMessage_ = QStringLiteral("작업을 선택하면 전체 파일과 일치한 파일을 확인할 수 있어요.");
+    searchMessage_ = historyEntries_.isEmpty() ? tr("조건에 맞는 작업 기록이 없어요.")
+        : tr("작업 %1건을 표시해요.%2").arg(historyEntries_.size()).arg(nextCursor_ ? tr(" 더 불러올 수 있어요.") : QString());
+    if (!append) historyMessage_ = tr("작업을 선택하면 전체 파일과 일치한 파일을 확인할 수 있어요.");
     return true;
 }
 
@@ -218,13 +218,13 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
             return entry.toMap().value(QStringLiteral("planId")).toString() == planId;
         });
     if (!listed) {
-        historyMessage_ = QStringLiteral("목록을 다시 불러온 뒤 작업을 선택해 주세요.");
+        historyMessage_ = tr("목록을 다시 불러온 뒤 작업을 선택해 주세요.");
         emit historyChanged();
         return;
     }
     const auto loaded = history_.loadPlan(planId.toStdString());
     if (!loaded) {
-        historyMessage_ = QStringLiteral("선택한 작업을 읽지 못했어요. %1").arg(reportFileOperationError(loaded.error()));
+        historyMessage_ = tr("선택한 작업을 읽지 못했어요. %1").arg(reportFileOperationError(loaded.error()));
         emit historyChanged();
         return;
     }
@@ -243,7 +243,7 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         row.insert(QStringLiteral("applied"), step.status == StepStatus::Applied);
         row.insert(QStringLiteral("rolledBack"), step.status == StepStatus::RolledBack);
         if (step.failure && step.failure->code == "transfer.cancelled") {
-            row["status"] = QStringLiteral("취소됨");
+            row["status"] = tr("취소됨");
             row["statusTone"] = QStringLiteral("neutral");
         } else if (step.failure) {
             row["status"] = historyStepStatusText(step.status) + QStringLiteral(" · ")
@@ -252,8 +252,8 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
         historySteps_.append(row);
     }
     historyMessage_ = canUndoSelectedHistory()
-        ? QStringLiteral("원본과 목적지를 확인한 뒤 되돌리기를 선택해 주세요. 파일이 바뀌었으면 안전 검사가 중단해요.")
-        : QStringLiteral("이 작업은 현재 기록 상태에서 되돌릴 이동 파일이 없어요.");
+        ? tr("원본과 목적지를 확인한 뒤 되돌리기를 선택해 주세요. 파일이 바뀌었으면 안전 검사가 중단해요.")
+        : tr("이 작업은 현재 기록 상태에서 되돌릴 이동 파일이 없어요.");
     emit historyChanged();
 }
 
@@ -261,7 +261,7 @@ void HistoryController::selectHistoryPlan(const QString& planId) {
 void HistoryController::undoSelectedHistory() {
     if (runner_ && runner_->busy()) return;
     if (!canUndoSelectedHistory()) {
-        historyMessage_ = QStringLiteral("되돌릴 수 있는 작업을 먼저 선택해 주세요.");
+        historyMessage_ = tr("되돌릴 수 있는 작업을 먼저 선택해 주세요.");
         emit historyChanged();
         return;
     }
@@ -275,9 +275,9 @@ void HistoryController::undoSelectedHistory() {
             if (current && current.value().status == PlanStatus::NeedsRecovery) {
                 emit recoveryRefreshRequested();
             }
-            historyMessage_ = QStringLiteral("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
+            historyMessage_ = tr("되돌리지 못했어요. %1").arg(reportFileOperationError(result.error()));
         } else {
-            historyMessage_ = QStringLiteral("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
+            historyMessage_ = tr("선택한 작업의 파일을 원래 위치로 되돌렸어요.");
         }
         emit historyChanged();
     }, BackgroundTaskRunner::TaskKind::FileWork);

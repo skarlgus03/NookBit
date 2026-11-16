@@ -1,4 +1,5 @@
 #include "presentation/pending_files_model.hpp"
+#include <QCoreApplication>
 #include "app/feature_connections.hpp"
 #include "app/feature_runtime_host.hpp"
 #include "app/feature_preferences.hpp"
@@ -172,20 +173,16 @@ int main(int argc, char* argv[]) {
     auto* notificationRuntime = features.notifications();
     auto* companion = features.companion();
     nookbit::TutorialController tutorial(uiPreferences, !verifyUi || verifyTutorial);
-    const auto tutorialText = [](const char* text) {
-        // 기본 기능과 분리된 공통 사용 안내를 번역하는 함수.
-        return QCoreApplication::translate("Tutorial", text);
-    };
     const auto hostTutorial = uiPages.addTutorialSteps({
-        {"host.welcome", "host", tutorialText("NookBit에 오신 걸 환영해요"),
-            tutorialText("파일 정리부터 컴패니언까지, 사용법을 살펴봐요."),
-            {tutorialText("메인 메뉴에서 기능을 선택하면 옆에 페이지가 열려요."),
-             tutorialText("다음을 누르거나 아래 목차에서 궁금한 항목을 골라 보세요.")}, {}, 0},
-        {"host.finish", "host", tutorialText("이제 직접 사용해 보세요"),
-            tutorialText("작은 테스트 파일부터 시작해 보세요."),
-            {tutorialText("파일 정리에 파일을 넣고 결과 미리보기를 확인해 보세요."),
-             tutorialText("필요한 기능은 모듈 관리에서 선택할 수 있어요. 저장 후 앱을 완전히 종료했다 다시 켜면 적용돼요.")},
-            tutorialText("이 안내는 설정 → 정보 → 튜토리얼 다시 보기에서 다시 열 수 있어요."), 1000}
+        {"host.welcome", "host", QCoreApplication::translate("Tutorial", "NookBit에 오신 걸 환영해요"),
+            QCoreApplication::translate("Tutorial", "파일 정리부터 컴패니언까지, 사용법을 살펴봐요."),
+            {QCoreApplication::translate("Tutorial", "메인 메뉴에서 기능을 선택하면 옆에 페이지가 열려요."),
+             QCoreApplication::translate("Tutorial", "다음을 누르거나 아래 목차에서 궁금한 항목을 골라 보세요.")}, {}, 0},
+        {"host.finish", "host", QCoreApplication::translate("Tutorial", "이제 직접 사용해 보세요"),
+            QCoreApplication::translate("Tutorial", "작은 테스트 파일부터 시작해 보세요."),
+            {QCoreApplication::translate("Tutorial", "파일 정리에 파일을 넣고 결과 미리보기를 확인해 보세요."),
+             QCoreApplication::translate("Tutorial", "필요한 기능은 모듈 관리에서 선택할 수 있어요. 저장 후 앱을 완전히 종료했다 다시 켜면 적용돼요.")},
+            QCoreApplication::translate("Tutorial", "이 안내는 설정 → 정보 → 튜토리얼 다시 보기에서 다시 열 수 있어요."), 1000}
     }, tutorial);
     if (!hostTutorial) {
         QTextStream(stderr) << QString::fromStdString(hostTutorial.error().message) << Qt::endl;
@@ -277,12 +274,12 @@ int main(int argc, char* argv[]) {
 
     // 호스트는 공통 트레이 동작을 만들고 컴패니언의 메뉴 기여 수명만 보관한다.
     QMenu trayMenu;
-    auto* openAction = trayMenu.addAction(QStringLiteral("NookBit 열기"));
+    auto* openAction = trayMenu.addAction(QCoreApplication::translate("MainTray", "NookBit 열기"));
     auto companionTray = companion ? companion->createTrayAction(trayMenu) : std::unique_ptr<nookbit::CompanionTrayAction>{};
     trayMenu.addSeparator();
-    auto* exitAction = trayMenu.addAction(QStringLiteral("완전 종료"));
+    auto* exitAction = trayMenu.addAction(QCoreApplication::translate("MainTray", "완전 종료"));
     QSystemTrayIcon tray(application.windowIcon());
-    tray.setToolTip(QStringLiteral("NookBit · 창을 닫아도 실행 중"));
+    tray.setToolTip(QCoreApplication::translate("MainTray", "NookBit · 창을 닫아도 실행 중"));
     tray.setContextMenu(&trayMenu);
     QObject::connect(openAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::openWindow);
     QObject::connect(exitAction, &QAction::triggered, &appLifecycle, &nookbit::AppLifecycleController::requestExit);
@@ -311,7 +308,7 @@ int main(int argc, char* argv[]) {
         const bool busy = features.busy();
         appLifecycle.setBusy(busy);
         exitAction->setEnabled(!busy);
-        exitAction->setText(busy ? QStringLiteral("작업 중 · 완료 후 종료 가능") : QStringLiteral("완전 종료"));
+        exitAction->setText(busy ? QCoreApplication::translate("MainTray", "작업 중 · 완료 후 종료 가능") : QCoreApplication::translate("MainTray", "완전 종료"));
     };
     QObject::connect(&features, &nookbit::FeatureRuntimeHost::busyChanged, &appLifecycle, refreshExitState);
     refreshExitState();

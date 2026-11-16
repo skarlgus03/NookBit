@@ -95,7 +95,7 @@ private:
     QString reactionMessage_;
     std::optional<CharacterReaction> outcome_;
     QTimer outcomeDeadline_;
-    QString message_{QStringLiteral("잠깐 쉬고 있어요.")};
+    QString message_{tr("잠깐 쉬고 있어요.")};
     QString cueId_{QStringLiteral("resting")};
     QString animationId_;
     CharacterPresentation presentation_;

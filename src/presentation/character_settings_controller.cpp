@@ -39,17 +39,17 @@ bool CharacterSettingsController::selectPack(const QString& key) {
     const auto applied = apply_(std::move(pack.value()));
     if (!applied) { status_ = QString::fromStdString(applied.error().message); emit changed(); return false; }
     selectedKey_ = key;
-    status_ = QStringLiteral("캐릭터 팩을 적용했어요.");
+    status_ = tr("캐릭터 팩을 적용했어요.");
     emit selected(key); emit changed(); return true;
 }
 // 화면을 막지 않고 보관소에 가져온 뒤 성공한 팩을 선택하는 함수.
 void CharacterSettingsController::importFolder(const QUrl& folder) {
     if (busy()) return;
-    if (!folder.isLocalFile()) { status_ = QStringLiteral("로컬 ImagePack 폴더를 선택해 주세요."); emit changed(); return; }
+    if (!folder.isLocalFile()) { status_ = tr("로컬 ImagePack 폴더를 선택해 주세요."); emit changed(); return; }
     const std::filesystem::path source(folder.toLocalFile().toStdWString());
     const auto imported = std::make_shared<std::string>();
     auto* library = &library_;
-    status_ = QStringLiteral("캐릭터 팩을 검증하고 가져오는 중…");
+    status_ = tr("캐릭터 팩을 검증하고 가져오는 중…");
     // 보관소 작업 결과의 식별자만 화면 스레드로 전달하는 함수.
     runner_.submit(this, [library, source, imported] {
         auto result = library->importFolder(source);

@@ -1,4 +1,5 @@
 #include "app/feature_preferences.hpp"
+#include <QCoreApplication>
 #include <QSettings>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,7 +10,7 @@ const auto selectionKey = QStringLiteral("modules/selection");
 // 문서 손상 시 일부 선택만 임의로 적용하지 않고 오류를 반환하는 함수.
 Result<FeatureSelection> invalidSelection() {
     return Result<FeatureSelection>::failure({"feature.invalid_preferences",
-        "모듈 설정을 읽지 못해 기능을 시작하지 않았어요. 모듈 관리에서 선택한 뒤 저장해 주세요."});
+        QCoreApplication::translate("FeaturePreferences", "모듈 설정을 읽지 못해 기능을 시작하지 않았어요. 모듈 관리에서 선택한 뒤 저장해 주세요.").toStdString()});
 }
 }
 // 사용자 기능 설정 전체를 읽고 버전과 실제 불리언 자료형을 검사하는 함수.
@@ -42,6 +43,6 @@ Result<void> FeaturePreferences::save(FeatureSelection selection) {
     if (settings_.status() == QSettings::NoError) return Result<void>::success();
     if (existed) settings_.setValue(selectionKey, previous); else settings_.remove(selectionKey);
     settings_.sync();
-    return Result<void>::failure({"feature.save_failed", "모듈 선택을 저장하지 못했어요. 이전 선택을 유지해요."});
+    return Result<void>::failure({"feature.save_failed", QCoreApplication::translate("FeaturePreferences", "모듈 선택을 저장하지 못했어요. 이전 선택을 유지해요.").toStdString()});
 }
 }

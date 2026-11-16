@@ -38,7 +38,7 @@ bool CompanionEditController::applyChanges(const QVariantMap& edits) {
         result = apply_(edits);
         if (!result) {
             const auto restored = save_(key_, applied_);
-            if (!restored) rollbackError = QStringLiteral(" 이전 저장값 복원도 실패했어요: ") + QString::fromStdString(restored.error().message);
+            if (!restored) rollbackError = tr(" 이전 저장값 복원도 실패했어요: ") + QString::fromStdString(restored.error().message);
         }
     }
     if (!result) {

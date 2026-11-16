@@ -34,7 +34,7 @@ public:
         QSaveFile file(destination.toLocalFile());
         if (content.isEmpty() || !destination.isLocalFile() || !file.open(QIODevice::WriteOnly) ||
             file.write(content) != content.size() || !file.commit()) {
-            error_ = QStringLiteral("문서를 저장하지 못했어요. 저장할 위치와 권한을 확인해 주세요.");
+            error_ = tr("문서를 저장하지 못했어요. 저장할 위치와 권한을 확인해 주세요.");
             emit errorChanged();
             return false;
         }

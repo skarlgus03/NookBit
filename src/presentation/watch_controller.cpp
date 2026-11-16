@@ -146,7 +146,7 @@ void WatchController::restoreSnoozeUntil(qint64 deadlineUtcMs) {
     if (snoozedUntilUtcMs_ > 0) {
         clearProposal();
         readinessTimer_.stop();
-        statusMessage_ = QStringLiteral("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
+        statusMessage_ = tr("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
             .arg(QDateTime::fromMSecsSinceEpoch(snoozedUntilUtcMs_).toString(QStringLiteral("HH:mm")));
         if (settings_.enabled) snoozeTimer_.start(static_cast<int>(snoozedUntilUtcMs_ - now));
     }
@@ -160,8 +160,8 @@ void WatchController::loadSettings(const QString& defaultFolder) {
     if (loaded) {
         settings_ = loaded.value();
         statusMessage_ = settings_.enabled
-            ? QStringLiteral("저장된 감시 조건을 불러왔어요.")
-            : QStringLiteral("감시 조건은 저장돼 있고 자동 감시는 꺼져 있어요.");
+            ? tr("저장된 감시 조건을 불러왔어요.")
+            : tr("감시 조건은 저장돼 있고 자동 감시는 꺼져 있어요.");
         return;
     }
     settings_.folder = std::filesystem::path(defaultFolder.toStdWString());
@@ -169,8 +169,8 @@ void WatchController::loadSettings(const QString& defaultFolder) {
     settings_.conditions = {{WatchConditionType::FileCount, 20}};
     settings_.excludePatterns = {"*.partial", "*.crdownload", "~$*"};
     statusMessage_ = loaded.error().code == "json.document.open_failed"
-        ? QStringLiteral("감시를 시작하려면 폴더와 조건을 저장해 주세요.")
-        : QStringLiteral("저장된 감시 설정을 읽지 못했어요. 조건을 다시 저장해 주세요: %1")
+        ? tr("감시를 시작하려면 폴더와 조건을 저장해 주세요.")
+        : tr("저장된 감시 설정을 읽지 못했어요. 조건을 다시 저장해 주세요: %1")
               .arg(QString::fromStdString(loaded.error().message));
 }
 
@@ -232,13 +232,13 @@ void WatchController::saveSettings(const QString& folder,
         if (!pattern.isEmpty()) proposed.excludePatterns.push_back(pattern.toStdString());
     }
     if (enabled && !QFileInfo(folder.trimmed()).isDir()) {
-        statusMessage_ = QStringLiteral("자동 감시를 켜려면 존재하는 폴더를 선택해 주세요.");
+        statusMessage_ = tr("자동 감시를 켜려면 존재하는 폴더를 선택해 주세요.");
         emit watchChanged();
         return;
     }
     const auto saved = repository_.save(proposed);
     if (!saved) {
-        statusMessage_ = QStringLiteral("감시 조건을 저장하지 못했어요: %1")
+        statusMessage_ = tr("감시 조건을 저장하지 못했어요: %1")
                              .arg(QString::fromStdString(saved.error().message));
         emit watchChanged();
         return;
@@ -251,8 +251,8 @@ void WatchController::saveSettings(const QString& folder,
     clearProposal();
     restartMonitoring();
     statusMessage_ = settings_.enabled
-        ? QStringLiteral("감시 조건을 저장하고 폴더 감시를 시작했어요. 파일은 이동하지 않아요.")
-        : QStringLiteral("감시 조건을 저장했어요. 자동 감시는 꺼져 있어요.");
+        ? tr("감시 조건을 저장하고 폴더 감시를 시작했어요. 파일은 이동하지 않아요.")
+        : tr("감시 조건을 저장했어요. 자동 감시는 꺼져 있어요.");
     emit settingsChanged();
     emit watchChanged();
 }
@@ -264,7 +264,7 @@ void WatchController::checkNow() {
     const auto nowUtcMs = QDateTime::currentMSecsSinceEpoch();
     if (snoozedUntilUtcMs_ > nowUtcMs) {
         clearProposal();
-        statusMessage_ = QStringLiteral("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
+        statusMessage_ = tr("%1까지 정리 제안을 잠시 쉬어요. 그 뒤 다시 확인할게요.")
             .arg(QDateTime::fromMSecsSinceEpoch(snoozedUntilUtcMs_).toString(QStringLiteral("HH:mm")));
         if (settings_.enabled)
             snoozeTimer_.start(static_cast<int>(std::min(snoozedUntilUtcMs_ - nowUtcMs, proposalSnoozeMs)));
@@ -273,7 +273,7 @@ void WatchController::checkNow() {
     }
     if (snoozedUntilUtcMs_ != 0) restoreSnoozeUntil(0);
     if (settings_.folder.empty() || settings_.conditions.empty()) {
-        statusMessage_ = QStringLiteral("먼저 감시 폴더와 조건을 저장해 주세요.");
+        statusMessage_ = tr("먼저 감시 폴더와 조건을 저장해 주세요.");
         emit watchChanged();
         return;
     }
@@ -283,14 +283,14 @@ void WatchController::checkNow() {
     const auto pendingPaths = pendingPaths_.pendingPaths();
     if (!pendingPaths) {
         clearProposal();
-        statusMessage_ = QStringLiteral("대기 목록을 확인하지 못했어요: %1").arg(QString::fromStdString(pendingPaths.error().message));
+        statusMessage_ = tr("대기 목록을 확인하지 못했어요: %1").arg(QString::fromStdString(pendingPaths.error().message));
         emit watchChanged();
         return;
     }
     const auto result = evaluateWatchFolder_.execute(settings_, nowUtcMs, pendingPaths.value());
     if (!result) {
         clearProposal();
-        statusMessage_ = QStringLiteral("감시 폴더를 평가하지 못했어요: %1")
+        statusMessage_ = tr("감시 폴더를 평가하지 못했어요: %1")
                              .arg(QString::fromStdString(result.error().message));
         emit watchChanged();
         return;
@@ -310,12 +310,12 @@ void WatchController::checkNow() {
     }
     if (!evaluation.shouldOffer) {
         clearProposal();
-        statusMessage_ = QStringLiteral("조건 미충족: 분류 가능한 파일 %1개 · 총 %2 MiB · 가장 오래된 파일 %3분")
+        statusMessage_ = tr("조건 미충족: 분류 가능한 파일 %1개 · 총 %2 MiB · 가장 오래된 파일 %3분")
                              .arg(evaluation.fileCount)
                              .arg(evaluation.totalBytes / (1024ULL * 1024ULL))
                              .arg(evaluation.oldestAgeMinutes);
         if (result.value().waitingFileCount > 0) {
-            statusMessage_ += QStringLiteral(" · 전송 완료 확인 중 %1개 (크기·수정 시간 안정 대기)")
+            statusMessage_ += tr(" · 전송 완료 확인 중 %1개 (크기·수정 시간 안정 대기)")
                                   .arg(result.value().waitingFileCount);
         }
         emit watchChanged();
@@ -323,7 +323,7 @@ void WatchController::checkNow() {
     }
     const auto signature = snapshotSignature(eligible, result.value().rulesRevision);
     if (signature == lastOfferedSignature_) {
-        statusMessage_ = QStringLiteral("조건 충족: 같은 파일 상태에 대해서는 이미 제안했어요.");
+        statusMessage_ = tr("조건 충족: 같은 파일 상태에 대해서는 이미 제안했어요.");
         emit watchChanged();
         return;
     }
@@ -335,9 +335,9 @@ void WatchController::checkNow() {
     }
     proposalVisible_ = true;
     proposalRulesRevision_ = QString::fromStdString(result.value().rulesRevision);
-    proposalText_ = QStringLiteral("분류 가능한 파일 %1개가 설정한 조건에 닿았어요. 정리 대기 목록에 담을까요? 실제 이동은 별도 승인 후에만 합니다.")
+    proposalText_ = tr("분류 가능한 파일 %1개가 설정한 조건에 닿았어요. 정리 대기 목록에 담을까요? 실제 이동은 별도 승인 후에만 합니다.")
                         .arg(eligible.size());
-    statusMessage_ = QStringLiteral("감시 조건이 충족돼 정리를 제안했어요. 파일은 이동하지 않았어요.");
+    statusMessage_ = tr("감시 조건이 충족돼 정리를 제안했어요. 파일은 이동하지 않았어요.");
     emit watchChanged();
 }
 
@@ -350,7 +350,7 @@ void WatchController::addProposalToPending() {
     checkNow();
     if (!proposalVisible_) return;
     if (proposedFiles_ != files || proposalRulesRevision_ != rulesRevision) {
-        statusMessage_ = QStringLiteral("제안 파일이나 분류 규칙이 바뀌었어요. 새 제안을 확인해 주세요.");
+        statusMessage_ = tr("제안 파일이나 분류 규칙이 바뀌었어요. 새 제안을 확인해 주세요.");
         emit watchChanged();
         return;
     }
@@ -359,15 +359,15 @@ void WatchController::addProposalToPending() {
     for (const auto& path : files) paths.emplace_back(path.toStdWString());
     const auto enqueued = pendingCommands_.enqueuePaths(paths);
     if (!enqueued) {
-        statusMessage_ = QStringLiteral("대기 목록에 등록하지 못했어요: %1").arg(QString::fromStdString(enqueued.error().message));
+        statusMessage_ = tr("대기 목록에 등록하지 못했어요: %1").arg(QString::fromStdString(enqueued.error().message));
         emit watchChanged();
         return;
     }
     clearProposal();
-    statusMessage_ = QStringLiteral("파일 %1개를 대기 목록에만 담았어요. 이동하려면 미리보기와 승인이 필요해요.")
+    statusMessage_ = tr("파일 %1개를 대기 목록에만 담았어요. 이동하려면 미리보기와 승인이 필요해요.")
                          .arg(enqueued.value().added.size());
     if (!enqueued.value().rejected.empty())
-        statusMessage_ += QStringLiteral(" 등록하지 못한 항목 %1개: %2")
+        statusMessage_ += tr(" 등록하지 못한 항목 %1개: %2")
             .arg(enqueued.value().rejected.size()).arg(QString::fromStdString(enqueued.value().rejected.front().error.message));
     emit watchChanged();
 }
@@ -375,7 +375,7 @@ void WatchController::addProposalToPending() {
 // 현재 제안을 닫고 같은 파일 상태에서는 다시 묻지 않는 함수.
 void WatchController::dismissProposal() {
     clearProposal();
-    statusMessage_ = QStringLiteral("이번 제안을 닫았어요. 파일 상태가 바뀌면 다시 검사해요.");
+    statusMessage_ = tr("이번 제안을 닫았어요. 파일 상태가 바뀌면 다시 검사해요.");
     emit watchChanged();
 }
 

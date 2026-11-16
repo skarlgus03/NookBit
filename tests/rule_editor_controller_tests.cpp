@@ -15,6 +15,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QTranslator>
 #include <QUrl>
 
 #include <cstdlib>
@@ -1123,6 +1124,21 @@ void testRuleInspection() {
     report = editor.inspectGraph(blocks, broken);
     expect(!report.value("error").toString().isEmpty() && report.value("blockId") == 4
         && !editor.importGraph(blocks, broken), "incomplete AND reports a navigable structural error and cannot save");
+
+    class BlockLabelTranslator final : public QTranslator {
+    public:
+        bool isEmpty() const override { return false; }
+        QString translate(const char* context, const char* source, const char*, int) const override {
+            if (qstrcmp(context, "LogicalRuleGraph") == 0 && qstrcmp(source, "블록 %1") == 0)
+                return QStringLiteral("Block %1");
+            return {};
+        }
+    } translator;
+    QCoreApplication::installTranslator(&translator);
+    const auto translated = editor.inspectGraph(blocks, broken);
+    QCoreApplication::removeTranslator(&translator);
+    expect(translated.value("error").toString().startsWith("Block 4: ")
+        && translated.value("blockId") == 4, "translated graph errors still locate the same node");
 }
 } // namespace
 

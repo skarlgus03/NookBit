@@ -1,4 +1,5 @@
 #include "app/feature_connections.hpp"
+#include <QCoreApplication>
 #include "presentation/watch_controller.hpp"
 #include "presentation/notification_controller.hpp"
 #include "presentation/background_task_runner.hpp"
@@ -26,7 +27,10 @@ void reportDelivery(const Result<void>& result) {
 
 // 기존 설정 키와 상황 이름을 바꾸지 않고 알림 등록 정보를 만드는 함수.
 NotificationType folderWatchOfferType() {
-    return {offerType, "folder-watch", "폴더 감시", "정리 제안", "감시 폴더에서 정리할 파일이 발견되면 알려줘요.", true};
+    return {offerType, "folder-watch",
+        QCoreApplication::translate("FeatureConnections", "폴더 감시").toStdString(),
+        QCoreApplication::translate("FeatureConnections", "정리 제안").toStdString(),
+        QCoreApplication::translate("FeatureConnections", "감시 폴더에서 정리할 파일이 발견되면 알려줘요.").toStdString(), true};
 }
 
 // 객체를 생성하지 않고 연결의 해제 문맥만 준비하는 생성자.
@@ -42,7 +46,9 @@ Result<void> FeatureConnections::watchToNotifications(WatchController& watch,
     // 제안 상태만 복사해 전달하고 파괴된 발신자나 수신자에는 접근하지 않는 함수.
     const auto report = [source, recipient, &channel] {
         if (!source || !recipient) return;
-        reportDelivery(channel.publish({offerType, offerInstance, source->proposalVisible(), "정리 제안", "정리할 파일이 있어요!"}));
+        reportDelivery(channel.publish({offerType, offerInstance, source->proposalVisible(),
+            QCoreApplication::translate("FeatureConnections", "정리 제안").toStdString(),
+            QCoreApplication::translate("FeatureConnections", "정리할 파일이 있어요!").toStdString()}));
     };
     QObject::connect(&watch, &WatchController::watchChanged, this, report);
     report();
@@ -97,7 +103,10 @@ Result<void> FeatureConnections::workResultsToCompanion(BackgroundTaskRunner& ta
             if (!source || !recipient) return;
             reportDelivery(channel.present({"file-operations", "last-operation",
                 succeeded ? "file.work.completed" : "file.work.failed",
-                succeeded ? "파일 작업을 마쳤어요." : "작업을 끝내지 못했어요. 파일 위치와 작업 기록을 확인해 주세요.", 2400}));
+                succeeded ? QCoreApplication::translate("FeatureConnections", "파일 작업을 마쳤어요.").toStdString()
+                          : QCoreApplication::translate("FeatureConnections",
+                                "작업을 끝내지 못했어요. 파일 위치와 작업 기록을 확인해 주세요.").toStdString(),
+                2400}));
         });
     return Result<void>::success();
 }

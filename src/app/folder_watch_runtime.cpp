@@ -7,17 +7,13 @@
 namespace nookbit {
 // 공통 설정 흐름에는 컨트롤러 대신 화면 경로와 명시적인 입력만 등록하는 함수.
 Result<void> FolderWatchRuntime::registerUi(UiPageRegistry& registry) {
-    const auto text = [](const char* value) {
-        // 감시 모듈의 안내 문구를 번역하는 함수.
-        return QCoreApplication::translate("WatchTutorial", value);
-    };
     const auto tutorial = registry.addTutorialSteps({
-        {"watch.basics", "folder-watch", text("폴더 감시로 정리 제안 받기"),
-            text("지정한 폴더가 설정한 조건에 닿으면 정리를 제안해요."),
-            {text("설정 → 폴더 감시에서 지켜볼 폴더를 골라요."),
-             text("확인 간격과 파일 개수·크기·경과 시간 조건을 정하고 저장해요."),
-             text("지금 검사로 확인해 보세요. 정리 제안은 검토하거나 나중으로 미룰 수 있어요.")},
-            text("감시 폴더와 파일 정리의 기본 목적지는 다른 설정이에요. 제안이 발생했다는 것만으로 파일을 즉시 이동하지 않아요."), 50}
+        {"watch.basics", "folder-watch", QCoreApplication::translate("WatchTutorial", "폴더 감시로 정리 제안 받기"),
+            QCoreApplication::translate("WatchTutorial", "지정한 폴더가 설정한 조건에 닿으면 정리를 제안해요."),
+            {QCoreApplication::translate("WatchTutorial", "설정 → 폴더 감시에서 지켜볼 폴더를 골라요."),
+             QCoreApplication::translate("WatchTutorial", "확인 간격과 파일 개수·크기·경과 시간 조건을 정하고 저장해요."),
+             QCoreApplication::translate("WatchTutorial", "지금 검사로 확인해 보세요. 정리 제안은 검토하거나 나중으로 미룰 수 있어요.")},
+            QCoreApplication::translate("WatchTutorial", "감시 폴더와 파일 정리의 기본 목적지는 다른 설정이에요. 제안이 발생했다는 것만으로 파일을 즉시 이동하지 않아요."), 50}
     }, uiLifetime_);
     if (!tutorial) return tutorial;
     return registry.addPage({"watch.settings", "folder-watch", 3,

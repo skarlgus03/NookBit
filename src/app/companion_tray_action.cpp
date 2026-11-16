@@ -1,11 +1,12 @@
 #include "app/companion_tray_action.hpp"
+#include <QCoreApplication>
 #include "presentation/character_window_controller.hpp"
 #include <QMenu>
 
 namespace nookbit {
 // 표시 명령과 외부 표시 변경만 연결하고 앱 종료나 파일 작업은 알지 않는 생성자.
 CompanionTrayAction::CompanionTrayAction(QMenu& menu, CharacterWindowController& placement)
-    : menu_(&menu), placement_(&placement), action_(QStringLiteral("캐릭터 표시")) {
+    : menu_(&menu), placement_(&placement), action_(QCoreApplication::translate("CompanionTrayAction", "캐릭터 표시")) {
     action_.setObjectName(QStringLiteral("companionVisibilityAction"));
     action_.setCheckable(true);
     action_.setChecked(placement.shown());

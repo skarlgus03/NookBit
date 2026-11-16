@@ -1,4 +1,5 @@
 #pragma once
+#include <QCoreApplication>
 #include <nookbit/domain/model.hpp>
 #include "modules/rules/processing_flow.hpp"
 #include "presentation/document_rule_graph.hpp"
@@ -37,17 +38,22 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
     QHash<int, QVariantMap> byId;
     QHash<QString, QVector<int>> groups;
     QHash<int, QString> nodeIds;
-    const auto invalid = [](const QString& message) { return Result<FolderFlowGraph>::failure({"rules.folder_flow_graph_invalid", message.toStdString()}); };
+    const auto invalid = [](const QString& reason, int id = 0) {
+        const auto message = id > 0
+            ? QCoreApplication::translate("FolderFlowGraph", "블록 %1").arg(id) + QStringLiteral(": ") + reason
+            : reason;
+        return Result<FolderFlowGraph>::failure({"rules.folder_flow_graph_invalid", message.toStdString(), id});
+    };
     for (const auto& value : blocks) {
         const auto block = value.toMap();
         const int id = block.value("id").toInt();
-        if (id <= 0 || byId.contains(id)) return invalid(QStringLiteral("노드 번호가 없거나 중복돼요."));
+        if (id <= 0 || byId.contains(id)) return invalid(QCoreApplication::translate("FolderFlowGraph", "노드 번호가 없거나 중복돼요."));
         byId.insert(id, block);
         const auto flowId = block.value("flowId").toString();
         const auto type = block.value("type").toString();
         if (flowId.isEmpty()) {
             if (type == "flowStart" || type == "folderScan" || type == "callFlow" || type == "applyDefault")
-                return invalid(QStringLiteral("처리 노드는 이름 있는 흐름 안에 추가해 주세요."));
+                return invalid(QCoreApplication::translate("FolderFlowGraph", "처리 노드는 이름 있는 흐름 안에 추가해 주세요."));
             result.blocks.append(value);
         } else {
             groups[flowId].append(id);
@@ -60,16 +66,16 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
     for (const auto& value : edges) {
         const auto edge = value.toMap();
         const int from = edge.value("from").toInt(), to = edge.value("to").toInt();
-        if (!byId.contains(from) || !byId.contains(to)) return invalid(QStringLiteral("없는 노드로 연결된 선이 있어요."));
+        if (!byId.contains(from) || !byId.contains(to)) return invalid(QCoreApplication::translate("FolderFlowGraph", "없는 노드로 연결된 선이 있어요."));
         const auto owner = byId.value(from).value("flowId").toString();
         if (owner != byId.value(to).value("flowId").toString())
-            return invalid(QStringLiteral("영역 사이에는 선 대신 '분류 흐름 호출' 노드를 사용해 주세요."));
+            return invalid(QCoreApplication::translate("FolderFlowGraph", "영역 사이에는 선 대신 '분류 흐름 호출' 노드를 사용해 주세요."));
         if (owner.isEmpty()) {
             result.edges.append(value);
         } else {
             const auto port = edge.value("port").toString();
             if ((byId.value(from).value("type") == "documentAnalysis") != !port.isEmpty())
-                return invalid(QStringLiteral("블록 %1: 문서 분석 출력의 연결 핀을 확인해 주세요.").arg(from));
+                return invalid(QCoreApplication::translate("FolderFlowGraph", "문서 분석 출력의 연결 핀을 확인해 주세요."), from);
             if (!port.isEmpty()) documentPorts.insert(to, port);
             outgoing[from].append(to);
             ++incomingCount[to];
@@ -82,12 +88,12 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         const auto flowId = root.value("flowId").toString();
         const auto name = root.value("value").toString().trimmed();
         if (name.isEmpty() || name.size() > 60 || name.contains('\n') || names.contains(name.toCaseFolded()) || !groups.contains(flowId))
-            return invalid(QStringLiteral("흐름 이름은 서로 다르게, 1~60자로 입력하고 입력 노드는 하나만 두세요."));
+            return invalid(QCoreApplication::translate("FolderFlowGraph", "흐름 이름은 서로 다르게, 1~60자로 입력하고 입력 노드는 하나만 두세요."));
         names.insert(name.toCaseFolded());
         RuleSet::FolderFlow flow{flowId.toStdString(), name.toStdString()};
         flow.entry = nodeIds.value(root.value("id").toInt()).toStdString();
         if (root.value("flowInput", "folder") != "folder" && root.value("flowInput", "folder") != "item")
-            return invalid(QStringLiteral("흐름 입력에서 폴더 또는 파일·폴더를 선택해 주세요."));
+            return invalid(QCoreApplication::translate("FolderFlowGraph", "흐름 입력에서 폴더 또는 파일·폴더를 선택해 주세요."));
         flow.folderInput = root.value("flowInput", "folder").toString() == "folder";
         for (const auto id : groups.take(flowId)) {
             const auto block = byId.value(id);
@@ -95,7 +101,7 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
             if (documentPorts.contains(id)) {
                 if (incomingCount.value(id) != 1 || !outgoing.value(id).isEmpty() ||
                     (type != "destination" && type != "exclude"))
-                    return invalid(QStringLiteral("블록 %1: 문서 분석 출력에는 전용 종착 노드를 연결해 주세요.").arg(id));
+                    return invalid(QCoreApplication::translate("FolderFlowGraph", "문서 분석 출력에는 전용 종착 노드를 연결해 주세요."), id);
                 continue;
             }
             ProcessingNode node; node.id = nodeIds.value(id).toStdString();
@@ -104,12 +110,11 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
                 for (const auto child : outgoing.value(id)) {
                     const auto port = documentPorts.value(child);
                     if (terminals.contains(port))
-                        return invalid(QStringLiteral("블록 %1: 각 출력에 종착 노드를 하나만 연결해 주세요.").arg(id));
+                        return invalid(QCoreApplication::translate("FolderFlowGraph", "각 출력에 종착 노드를 하나만 연결해 주세요."), id);
                     terminals.insert(port, byId.value(child));
                 }
                 auto analysis = graphDocumentAnalysis(block, std::move(terminals));
-                if (!analysis) return invalid(QStringLiteral("블록 %1: %2").arg(QString::number(id),
-                    QString::fromStdString(analysis.error().message)));
+                if (!analysis) return invalid(QString::fromStdString(analysis.error().message), id);
                 node.type = ProcessingNodeType::DocumentAnalysis;
                 node.documentAnalysis = std::move(analysis.value());
                 flow.nodes.push_back(std::move(node));
@@ -130,7 +135,7 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
                     if (!numeric ||
                         !std::isfinite(depth) || depth < 1 || depth > std::numeric_limits<int>::max() ||
                         std::floor(depth) != depth || !node.recursive)
-                        return invalid(QStringLiteral("블록 %1: 하위 폴더 깊이는 1 이상의 정수로 입력해 주세요.").arg(id));
+                        return invalid(QCoreApplication::translate("FolderFlowGraph", "하위 폴더 깊이는 1 이상의 정수로 입력해 주세요."), id);
                     node.maxDepth = static_cast<int>(depth);
                 }
             }
@@ -144,17 +149,17 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
                 const bool absolute = !block.value("homeRelative", true).toBool();
                 auto tokens = text; tokens.replace("{yyyy}", ""); tokens.replace("{MM}", "");
                 if (text.isEmpty() || (absolute ? !path.is_absolute() : path.has_root_path()) || tokens.contains('{') || tokens.contains('}'))
-                    return invalid(QStringLiteral("목적지 경로와 기준 폴더를 확인해 주세요."));
-                for (const auto& part : path) if (part == "..") return invalid(QStringLiteral("목적지에 상위 경로를 사용할 수 없어요."));
+                    return invalid(QCoreApplication::translate("FolderFlowGraph", "목적지 경로와 기준 폴더를 확인해 주세요."));
+                for (const auto& part : path) if (part == "..") return invalid(QCoreApplication::translate("FolderFlowGraph", "목적지에 상위 경로를 사용할 수 없어요."));
                 std::optional<CollisionPolicy> policy;
                 const auto collision = block.value("collisionPolicy", "inherit").toString();
                 if (collision == "rename") policy = CollisionPolicy::Rename;
                 else if (collision == "skip") policy = CollisionPolicy::Skip;
                 else if (collision == "abort") policy = CollisionPolicy::Abort;
-                else if (collision != "inherit") return invalid(QStringLiteral("충돌 처리 설정이 올바르지 않아요."));
+                else if (collision != "inherit") return invalid(QCoreApplication::translate("FolderFlowGraph", "충돌 처리 설정이 올바르지 않아요."));
                 node.destination = RuleDestination{path, policy, absolute};
             } else {
-                if (!conditionParser) return invalid(QStringLiteral("알 수 없는 처리 노드예요."));
+                if (!conditionParser) return invalid(QCoreApplication::translate("FolderFlowGraph", "알 수 없는 처리 노드예요."));
                 const auto condition = conditionParser(block);
                 if (!condition) return Result<FolderFlowGraph>::failure(condition.error());
                 node.type = ProcessingNodeType::Condition; node.condition = condition.value();
@@ -163,7 +168,7 @@ inline Result<FolderFlowGraph> splitFolderFlowGraph(const QVariantList& blocks, 
         }
         result.flows.push_back(std::move(flow));
     }
-    if (!groups.isEmpty()) return invalid(QStringLiteral("흐름에 입력 노드가 없어요."));
+    if (!groups.isEmpty()) return invalid(QCoreApplication::translate("FolderFlowGraph", "흐름에 입력 노드가 없어요."));
     RuleSet check; check.folderFlows = result.flows;
     const auto valid = validateProcessingFlows(check);
     if (!valid) return Result<FolderFlowGraph>::failure(valid.error());

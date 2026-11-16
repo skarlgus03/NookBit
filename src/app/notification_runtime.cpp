@@ -5,16 +5,12 @@
 namespace nookbit {
 // 알림 표시 정책만 변경하는 화면을 등록하고 실제 기능 명령과 분리하는 함수.
 Result<void> NotificationRuntime::registerUi(UiPageRegistry& registry) {
-    const auto text = [](const char* value) {
-        // 알림 모듈이 소유한 안내 문구를 번역하는 함수.
-        return QCoreApplication::translate("NotificationTutorial", value);
-    };
     const auto tutorial = registry.addTutorialSteps({
-        {"notifications.basics", "notifications", text("알림 골라 받기"),
-            text("모듈이 등록한 알림 종류를 한곳에서 관리해요."),
-            {text("메인 메뉴에서 알림을 열어요."),
-             text("받고 싶은 알림만 켜 두세요.")},
-            text("알림을 끄는 것과 해당 기능 모듈을 끄는 것은 달라요. 기능 자체를 끄려면 모듈 관리를 사용해 주세요."), 60}
+        {"notifications.basics", "notifications", QCoreApplication::translate("NotificationTutorial", "알림 골라 받기"),
+            QCoreApplication::translate("NotificationTutorial", "모듈이 등록한 알림 종류를 한곳에서 관리해요."),
+            {QCoreApplication::translate("NotificationTutorial", "메인 메뉴에서 알림을 열어요."),
+             QCoreApplication::translate("NotificationTutorial", "받고 싶은 알림만 켜 두세요.")},
+            QCoreApplication::translate("NotificationTutorial", "알림을 끄는 것과 해당 기능 모듈을 끄는 것은 달라요. 기능 자체를 끄려면 모듈 관리를 사용해 주세요."), 60}
     }, uiLifetime_);
     if (!tutorial) return tutorial;
     return registry.addPage({"notifications.settings", "notifications", 11,
@@ -50,6 +46,6 @@ Result<void> NotificationRuntime::saveEnabled(const QString& id, bool value) {
     if (preferences_.status() == QSettings::NoError) return Result<void>::success();
     if (existed) preferences_.setValue(key, previous); else preferences_.remove(key);
     preferences_.sync();
-    return Result<void>::failure({"notification.save_failed", "알림 설정을 저장하지 못했어요. 이전 설정을 유지해요."});
+    return Result<void>::failure({"notification.save_failed", QCoreApplication::translate("NotificationUi", "알림 설정을 저장하지 못했어요. 이전 설정을 유지해요.").toStdString()});
 }
 }

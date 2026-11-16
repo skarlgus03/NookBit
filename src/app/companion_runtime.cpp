@@ -1,4 +1,5 @@
 #include "app/companion_runtime.hpp"
+#include <QCoreApplication>
 #include "app/ui_page_registry.hpp"
 #include "app/companion_tray_action.hpp"
 #include "presentation/background_task_runner.hpp"
@@ -81,7 +82,9 @@ struct CompanionRuntime::State {
                   const auto document = QJsonDocument::fromJson(bytes);
                   const auto root = document.object();
                   if (!document.isObject() || root.value("schemaVersion").toInt() != 1 || !root.value("edits").isObject())
-                      return Result<QVariantMap>::failure({"character.invalid_saved_edits", "저장된 컴패니언 편집값을 읽지 못했어요. 팩 기본값을 사용해요."});
+                      return Result<QVariantMap>::failure({"character.invalid_saved_edits",
+                          QCoreApplication::translate("CompanionUi",
+                              "저장된 컴패니언 편집값을 읽지 못했어요. 팩 기본값을 사용해요.").toStdString()});
                   return Result<QVariantMap>::success(root.value("edits").toObject().toVariantMap());
               },
               [this](const QString& key, const QVariantMap& edits) -> Result<void> {
@@ -96,7 +99,9 @@ struct CompanionRuntime::State {
                   if (uiPreferences.status() == QSettings::NoError) return Result<void>::success();
                   if (existed) uiPreferences.setValue(path, previous); else uiPreferences.remove(path);
                   uiPreferences.sync();
-                  return Result<void>::failure({"character.save_edits_failed", "컴패니언 편집값을 저장하지 못했어요. 변경 내용은 초안에 남아 있어요."});
+                  return Result<void>::failure({"character.save_edits_failed",
+                      QCoreApplication::translate("CompanionUi",
+                          "컴패니언 편집값을 저장하지 못했어요. 변경 내용은 초안에 남아 있어요.").toStdString()});
               }),
           characterWindow(characterScreens(), verifyUi ? initialAnchor()
               : uiPreferences.value(QStringLiteral("character/windowAnchor"), initialAnchor()).toPoint(),
@@ -280,17 +285,13 @@ std::unique_ptr<CompanionTrayAction> CompanionRuntime::createTrayAction(QMenu& m
 // 관리 페이지의 실제 입력은 이 기능이 선택하고 호스트에는 등록 정보만 전달하는 함수.
 Result<void> CompanionRuntime::registerUi(UiPageRegistry& registry) {
     if (!startupResult()) return startupResult();
-    const auto text = [](const char* value) {
-        // 컴패니언이 소유한 안내 문구를 같은 번역 문맥으로 제공하는 함수.
-        return QCoreApplication::translate("CompanionTutorial", value);
-    };
     const auto tutorial = registry.addTutorialSteps({
-        {"companion.basics", "companion", text("컴패니언과 함께하기"),
-            text("바탕화면의 컴패니언은 알림과 작업 상황을 표현해요."),
-            {text("컴패니언 페이지에서 표시 여부와 크기를 조정해요."),
-             text("캐릭터 팩을 가져와 모습을 바꾸고, 미리보기에서 행동을 재생해 보세요."),
-             text("바탕화면에서 클릭하면 반응하고, 드래그하면 위치를 옮길 수 있어요.")},
-            text("컴패니언은 작업 상황을 보여주는 역할이에요. 파일 이동은 파일 정리 기능이 처리하므로 컴패니언을 숨겨도 작업은 계속돼요."), 40}
+        {"companion.basics", "companion", QCoreApplication::translate("CompanionTutorial", "컴패니언과 함께하기"),
+            QCoreApplication::translate("CompanionTutorial", "바탕화면의 컴패니언은 알림과 작업 상황을 표현해요."),
+            {QCoreApplication::translate("CompanionTutorial", "컴패니언 페이지에서 표시 여부와 크기를 조정해요."),
+             QCoreApplication::translate("CompanionTutorial", "캐릭터 팩을 가져와 모습을 바꾸고, 미리보기에서 행동을 재생해 보세요."),
+             QCoreApplication::translate("CompanionTutorial", "바탕화면에서 클릭하면 반응하고, 드래그하면 위치를 옮길 수 있어요.")},
+            QCoreApplication::translate("CompanionTutorial", "컴패니언은 작업 상황을 보여주는 역할이에요. 파일 이동은 파일 정리 기능이 처리하므로 컴패니언을 숨겨도 작업은 계속돼요."), 40}
     }, state_->connections);
     if (!tutorial) return tutorial;
     const auto title = QCoreApplication::translate("CompanionUi", "컴패니언");

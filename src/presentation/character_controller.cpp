@@ -132,7 +132,10 @@ QVariantMap CharacterController::animation() const {
 }
 // 참조·좌표·시간을 모두 검사하여 개인 편집값을 검증하는 함수.
 Result<void> CharacterController::validateEdits(const QVariantMap& edits) const {
-    const auto fail = [] { return Result<void>::failure({"character.invalid_edits", "편집값의 프레임·애니메이션 참조 또는 좌표·지속시간을 확인해 주세요."}); };
+    const auto fail = [] {
+        return Result<void>::failure({"character.invalid_edits",
+            tr("편집값의 프레임·애니메이션 참조 또는 좌표·지속시간을 확인해 주세요.").toStdString()});
+    };
     // JSON 숫자만 허용하고 문자열·불리언의 자동 변환을 차단하는 함수.
     const auto number = [](const QVariant& value) {
         const auto type = value.metaType().id();
@@ -281,7 +284,7 @@ void CharacterController::refreshState() {
     const auto behavior = behaviors_.current();
     const auto behaviorName = QString::fromStdString(behavior ? behavior->id : "resting");
     const auto next = behaviorName == "working" ? State::Working : behaviorName == "calling" ? State::Calling : State::Resting;
-    auto text = QStringLiteral("잠깐 쉬고 있어요.");
+    auto text = tr("잠깐 쉬고 있어요.");
     const auto fallback = next == State::Working ? "working" : next == State::Calling ? "calling" : "resting";
     std::string requestedCue = behavior ? behavior->cueId : fallback;
     const CharacterUpdate* selected = nullptr;
@@ -289,7 +292,7 @@ void CharacterController::refreshState() {
         const auto& entries = next == State::Working ? activities_ : attentions_;
         if (!entries.empty()) selected = &entries.begin()->second;
         if (selected && !selected->cueId.empty()) requestedCue = selected->cueId;
-        text = next == State::Working ? QStringLiteral("작업 중이에요.") : QStringLiteral("확인할 내용이 있어요!");
+        text = next == State::Working ? tr("작업 중이에요.") : tr("확인할 내용이 있어요!");
     }
     const bool showOutcome = activities_.empty() && outcome_.has_value();
     const bool showInteraction = activities_.empty() && !showOutcome && !reactionId_.isEmpty();
