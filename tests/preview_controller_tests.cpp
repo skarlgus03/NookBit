@@ -771,6 +771,25 @@ void testEveryPreviewOutcomeIsVisible() {
     expect(QFile::exists(directory.filePath(QStringLiteral("photo.jpg"))) &&
                QFile::exists(directory.filePath(QStringLiteral("already.jpg"))),
            "preview outcome display must not move files");
+
+    const auto inPlace = home + QStringLiteral("/Pictures/in-place.jpg");
+    QFile placed(inPlace);
+    expect(placed.open(QIODevice::WriteOnly) && placed.write("already organized") > 0, "in-place fixture");
+    placed.close();
+    pending.clear();
+    pending.addUrl(QUrl::fromLocalFile(inPlace));
+    for (const auto& name : {QStringLiteral("already.jpg"), QStringLiteral("notes.txt"), QStringLiteral("ignore.tmp")})
+        pending.addUrl(QUrl::fromLocalFile(directory.filePath(name)));
+    controller.createPreview(home);
+    expect(controller.hasPreview() && !controller.hasMovableSteps() && !controller.awaitingConfirmation() &&
+               controller.outcomes().size() == 4 && pending.count() == 4,
+           "no-move preview preserves every outcome and queued file without preparing approval");
+    const auto summary = controller.message();
+    expect(summary.contains(QStringLiteral("이미 목적지에 있는 파일 1개")) &&
+               summary.contains(QStringLiteral("일치하는 규칙이 없는 파일 1개")) &&
+               summary.contains(QStringLiteral("같은 이름이 있어 건너뛴 파일 1개")) &&
+               summary.contains(QStringLiteral("규칙에서 제외한 파일 1개")),
+           "no-move preview counts each reason separately");
 }
 
 #ifdef NOOKBIT_DOCUMENT_PDF

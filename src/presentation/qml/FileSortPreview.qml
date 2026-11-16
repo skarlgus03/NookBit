@@ -14,6 +14,7 @@ Rectangle {
     readonly property color foreground: theme.text
     readonly property color muted: theme.muted
     readonly property color surface: theme.alternate
+    readonly property bool noMove: controller.hasPreview && !controller.hasMovableSteps
     color: theme.surface
     ColumnLayout {
         anchors.fill: parent
@@ -24,10 +25,39 @@ Rectangle {
             onClicked: preview.backRequested()
         }
         Label { text: qsTr("결과 미리보기"); font.pixelSize: UiMetrics.textSectionTitle; font.bold: true; color: preview.foreground }
-        Label { Layout.fillWidth: true; text: qsTr("아직 파일은 이동하지 않았어요. 결과를 확인한 뒤 정리할 수 있어요."); wrapMode: Text.Wrap; color: preview.muted }
+        Label { Layout.fillWidth: true; visible: !preview.noMove; text: qsTr("아직 파일은 이동하지 않았어요. 결과를 확인한 뒤 정리할 수 있어요."); wrapMode: Text.Wrap; color: preview.muted }
+        Rectangle {
+            objectName: "filePreviewNoMoveNotice"
+            Layout.fillWidth: true
+            visible: preview.noMove
+            implicitHeight: noticeContent.implicitHeight + 2 * UiMetrics.spaceGroup
+            radius: UiMetrics.radiusCard
+            color: preview.surface
+            border.color: preview.theme.border
+            ColumnLayout {
+                id: noticeContent
+                anchors.fill: parent
+                anchors.margins: UiMetrics.spaceGroup
+                spacing: UiMetrics.spaceSmall
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("정리할 파일이 없어요")
+                    color: preview.foreground
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: preview.controller.message
+                    textFormat: Text.PlainText
+                    color: preview.muted
+                    wrapMode: Text.Wrap
+                }
+            }
+        }
         Label {
             Layout.fillWidth: true
-            visible: text.length > 0
+            visible: !preview.noMove && text.length > 0
             text: preview.controller.message
             wrapMode: Text.Wrap
             color: preview.foreground
@@ -98,10 +128,10 @@ Rectangle {
             objectName: "filePreviewSortButton"
             Layout.fillWidth: true
             primary: true
-            text: qsTr("정리하기")
-            enabled: preview.controller.hasPreview && preview.controller.hasMovableSteps && !preview.controller.awaitingConfirmation
+            text: preview.noMove ? qsTr("대기 목록으로") : qsTr("정리하기")
+            enabled: preview.controller.hasPreview && !preview.controller.awaitingConfirmation
                      && !preview.controller.recommendationBusy
-            onClicked: preview.sortRequested()
+            onClicked: preview.noMove ? preview.backRequested() : preview.sortRequested()
         }
     }
 }

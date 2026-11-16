@@ -333,6 +333,8 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
     int skippedCount = 0;
     int unmatchedCount = 0;
     int excludedCount = 0;
+    int heldCount = 0;
+    int alreadyAtDestinationCount = 0;
     for (const auto& outcome : result.value().previewOutcomes) {
         QVariantMap row;
         row.insert(QStringLiteral("fileName"), displayPath(outcome.source.filename()));
@@ -367,13 +369,13 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
             row.insert(QStringLiteral("reason"), tr("규칙 '%1'에서 명시적으로 제외해 대기 목록에 남아요.").arg(ruleId));
             break;
         case PreviewDisposition::DocumentHeld:
-            ++excludedCount;
+            ++heldCount;
             row.insert(QStringLiteral("status"), tr("문서 분류 보류"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
             row.insert(QStringLiteral("reason"), tr("유사도가 기준보다 낮거나 본문을 읽지 못해 대기 목록에 남아요."));
             break;
         case PreviewDisposition::AlreadyAtDestination:
-            ++excludedCount;
+            ++alreadyAtDestinationCount;
             row.insert(QStringLiteral("status"), tr("이미 목적지에 있음"));
             row.insert(QStringLiteral("statusKey"), QStringLiteral("excluded"));
             row.insert(QStringLiteral("reason"), tr("현재 위치가 규칙의 목적지와 같아서 그대로 두어요."));
@@ -386,12 +388,22 @@ void PreviewController::acceptPreview(const Result<OperationPlan>& result, const
         warnings_.append(QString::fromStdString(warning.message));
     }
     hasPreview_ = true;
-    message_ = tr("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
-                   .arg(plannedCount).arg(skippedCount).arg(unmatchedCount)
-                   .arg(excludedCount).arg(warnings_.size());
-    const auto pendingEntries = pendingFiles_.entries();
-    if (std::any_of(pendingEntries.begin(), pendingEntries.end(), [](const PendingFileEntry& entry) { return !entry.folderFlowId.empty(); }))
-        message_.prepend(tr("선택한 폴더 처리 흐름을 적용했어요. 이동 대상을 확인해 주세요. "));
+    if (plannedCount == 0) {
+        QStringList reasons;
+        if (alreadyAtDestinationCount) reasons << tr("이미 목적지에 있는 파일 %1개").arg(alreadyAtDestinationCount);
+        if (unmatchedCount) reasons << tr("일치하는 규칙이 없는 파일 %1개").arg(unmatchedCount);
+        if (skippedCount) reasons << tr("같은 이름이 있어 건너뛴 파일 %1개").arg(skippedCount);
+        if (excludedCount) reasons << tr("규칙에서 제외한 파일 %1개").arg(excludedCount);
+        if (heldCount) reasons << tr("문서 분류를 보류한 파일 %1개").arg(heldCount);
+        message_ = reasons.isEmpty() ? tr("선택한 항목에서 이동 대상을 찾지 못했어요.") : reasons.join(QStringLiteral(" · "));
+    } else {
+        message_ = tr("이동 예정 %1 · 충돌 건너뜀 %2 · 미분류 %3 · 제외 %4 · 기타 경고 %5건. 실제 파일은 변경하지 않았어요.")
+                       .arg(plannedCount).arg(skippedCount).arg(unmatchedCount)
+                       .arg(excludedCount + heldCount + alreadyAtDestinationCount).arg(warnings_.size());
+        const auto pendingEntries = pendingFiles_.entries();
+        if (std::any_of(pendingEntries.begin(), pendingEntries.end(), [](const PendingFileEntry& entry) { return !entry.folderFlowId.empty(); }))
+            message_.prepend(tr("선택한 폴더 처리 흐름을 적용했어요. 이동 대상을 확인해 주세요. "));
+    }
     emit previewChanged();
     emit destinationRootAccepted(previewHomeRoot_);
 }

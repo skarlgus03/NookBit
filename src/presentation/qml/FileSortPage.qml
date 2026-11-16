@@ -91,8 +91,10 @@ Rectangle {
             Qt.callLater(function() {
                 if (home.sortAfterPreview && !home.progress.busy) {
                     home.sortAfterPreview = false;
-                    if (home.controller.hasPreview && home.controller.hasMovableSteps && home.visible && home.workflowStep === 0)
-                        home.requestSort();
+                    if (home.controller.hasPreview && home.visible && home.workflowStep === 0) {
+                        if (home.controller.hasMovableSteps) home.requestSort()
+                        else home.showStep(1)
+                    }
                 }
                 if (home.controller.awaitingConfirmation && home.manualSortRequested && home.visible)
                     home.showStep(2)

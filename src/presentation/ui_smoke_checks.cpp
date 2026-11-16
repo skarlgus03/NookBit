@@ -889,8 +889,57 @@ static bool verifyPageFileDrop(QQuickWindow* window, QQuickItem* page, nookbit::
     if (!drop(QUrl::fromLocalFile(path), Qt::CopyAction) || pending.count() != 2) return false;
     auto* clearQueue = findUiChild<QQuickItem*>(page, QStringLiteral("pendingQueueClearButton"));
     if (!clearQueue || !clearQueue->isEnabled() || !QMetaObject::invokeMethod(clearQueue, "clicked")) return false;
-    return loaded && pending.count() == 0 && !clearQueue->isEnabled() && QFile::exists(picturePath)
-        && fixture.open(QIODevice::ReadOnly) && fixture.readAll() == "unchanged";
+    if (!loaded || pending.count() != 0 || clearQueue->isEnabled() || !QFile::exists(picturePath)
+        || !fixture.open(QIODevice::ReadOnly) || fixture.readAll() != "unchanged") return false;
+    fixture.close();
+
+    // 실제 정리 요청이 이동 대상이 없으면 같은 창의 결과로 안내하는지 검사한다.
+    const auto home = directory.filePath("organized");
+    const auto pdfFolder = QDir(home).filePath("Documents/PDF");
+    if (!QDir().mkpath(pdfFolder)) return false;
+    QFile placed(QDir(pdfFolder).filePath("placed.pdf"));
+    QFile unmatched(directory.filePath("notes.nookbit-smoke"));
+    for (auto* source : {&placed, &unmatched}) {
+        if (!source->open(QIODevice::WriteOnly) || source->write("unchanged") != 9) return false;
+        source->close();
+        pending.addUrl(QUrl::fromLocalFile(source->fileName()));
+    }
+    auto* input = page->findChild<QQuickItem*>(QStringLiteral("fileSortScroll"));
+    auto* preview = page->findChild<QQuickItem*>(QStringLiteral("fileSortPreview"));
+    auto* notice = findVisualItem(preview, QStringLiteral("filePreviewNoMoveNotice"));
+    auto* action = findVisualItem(preview, QStringLiteral("filePreviewSortButton"));
+    auto* controller = preview ? qobject_cast<nookbit::PreviewController*>(preview->property("controller").value<QObject*>()) : nullptr;
+    if (!input || !notice || !action || !controller ||
+        !QMetaObject::invokeMethod(input, "sortRequested", Q_ARG(QString, home))) return false;
+    QEventLoop layout;
+    QTimer transition;
+    QObject::connect(&transition, &QTimer::timeout, &layout, [&] {
+        if (notice->isVisible() && !page->property("transitioning").toBool()) layout.quit();
+    });
+    transition.start(20);
+    QTimer::singleShot(1500, &layout, &QEventLoop::quit);
+    layout.exec();
+    transition.stop();
+    const bool explained = notice->isVisible() && notice->window() == window && action->isEnabled()
+        && action->property("text").toString() == QStringLiteral("대기 목록으로")
+        && controller->message().contains(QStringLiteral("이미 목적지에 있는 파일 1개"))
+        && controller->message().contains(QStringLiteral("일치하는 규칙이 없는 파일 1개"))
+        && !controller->awaitingConfirmation() && pending.count() == 2 && placed.exists() && unmatched.exists();
+    if (!explained) {
+        QTextStream(stderr) << "No-move feedback missing. stage=" << page->property("workflowStep").toInt()
+                            << " visible=" << notice->isVisible() << " action=" << action->property("text").toString()
+                            << " same window=" << (notice->window() == window) << " enabled=" << action->isEnabled()
+                            << " sliding=" << page->property("transitioning").toBool()
+                            << " confirmation=" << controller->awaitingConfirmation() << " sources=" << placed.exists() << unmatched.exists()
+                            << " pending=" << pending.count() << " summary=" << controller->message() << Qt::endl;
+    }
+    if (!QMetaObject::invokeMethod(action, "clicked")) return false;
+    QTimer::singleShot(250, &layout, &QEventLoop::quit);
+    layout.exec();
+    const bool returned = input->isVisible() && !notice->isVisible() && pending.count() == 2;
+    if (!returned) QTextStream(stderr) << "No-move action did not return to the unchanged queue." << Qt::endl;
+    pending.clear();
+    return explained && returned;
 }
 
 // 소수 기준점의 반복 위치 저장이 바탕화면 좌표를 밀어내지 않는지 검사하는 함수.
