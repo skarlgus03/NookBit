@@ -703,8 +703,8 @@ int main(int argc, char** argv) {
             property int pickedRow: -1
             function setFolderFlow(row, value) { pickedRow = row; setProperty(row, "folderFlowId", value) }
             function addFolders() {
-                append({fileName:"first", fullPath:"D:/test/first", available:true, directory:true, folderFlowId:""})
-                append({fileName:"second", fullPath:"D:/test/second", available:true, directory:true, folderFlowId:""})
+                append({fileName:"first", fullPath:"D:/test/first", available:true, directory:true, folderFlowId:"", sortNote:"규칙 없음"})
+                append({fileName:"second", fullPath:"D:/test/second", available:true, directory:true, folderFlowId:"", sortNote:""})
             }
         })", QUrl());
     std::unique_ptr<QObject> pending(pendingComponent.create());
@@ -754,6 +754,9 @@ int main(int argc, char** argv) {
     QMetaObject::invokeMethod(pending.get(), "addFolders");
     settle();
     auto* folderChoice = find(find, inputItem, "pendingFolderFlow_0");
+    auto* queuePath = find(find, inputItem, "pendingQueuePath");
+    expect(queuePath && queuePath->property("text").toString().startsWith(QStringLiteral("규칙 없음 · ")),
+        "retained queue row displays its reason before the path");
     expect(folderChoice && folderChoice->isVisible() && folderChoice->property("currentIndex").toInt() == 0,
         "queued folders offer a whole-folder default without unfolding rows");
     if (folderChoice) {

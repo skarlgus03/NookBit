@@ -8,6 +8,7 @@
 #include <nookbit/domain/model.hpp>
 #include <QVariantList>
 #include <filesystem>
+#include <utility>
 
 namespace nookbit {
 
@@ -27,6 +28,7 @@ public:
         AvailableRole,
         DirectoryRole,
         FolderFlowRole,
+        SortNoteRole,
     };
 
     /// 비어 있는 대기 목록을 생성하는 생성자.
@@ -82,6 +84,10 @@ public:
 
     /// 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.
     Q_INVOKABLE void removeAt(int index);
+    /// 이동을 마친 항목을 목록에서 빼고, 수동 제외 안내를 지운다.
+    void removeMovedAt(int index);
+    /// 마지막 정리에서 남은 항목의 사유를 표시하고 그중 대기 목록에 속한 개수를 반환한다.
+    int showSortRemainders(const QList<std::pair<QString, QString>>& remainders);
     /// 파일과 폴더는 건드리지 않고 대기 목록 전체를 한 번에 비우는 함수.
     Q_INVOKABLE void clear();
 
@@ -100,10 +106,12 @@ private:
         bool available{true};
         QString folderFlowId;
         QString ruleSetId;
+        QString sortNote;
     };
 
     /// 화면에 보여줄 결과 문구를 갱신하는 함수.
     void setLastMessage(const QString& message);
+    bool removeRowAt(int row);
 
     QVector<Entry> entries_;
     QString lastMessage_;

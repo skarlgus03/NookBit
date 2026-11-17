@@ -72,8 +72,8 @@ Rectangle {
             onClicked: { status.controller.undoLastMove(); status.backRequested() }
         }
         AppButton {
-            visible: status.completed && status.cancelled
-            text: status.controller.canUndoCancelledSort ? qsTr("그대로 두기") : qsTr("대기 목록으로")
+            visible: status.completed && (status.cancelled || (status.success && status.controller.lastSortRemainingCount > 0))
+            text: status.cancelled && status.controller.canUndoCancelledSort ? qsTr("그대로 두기") : qsTr("대기 목록으로")
             onClicked: status.backRequested()
         }
         Item { Layout.fillHeight: true }

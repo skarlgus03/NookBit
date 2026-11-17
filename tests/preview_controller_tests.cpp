@@ -289,6 +289,9 @@ void testNamedFolderFlowPreview() {
     for (const auto& path : {folder + "/first.png", nested + "/second.jpg"}) {
         QFile file(path); expect(file.open(QIODevice::WriteOnly), "open flow source"); file.write("individual source");
     }
+    QFile unmatched(nested + "/unmatched.txt");
+    expect(unmatched.open(QIODevice::WriteOnly) && unmatched.write("no matching rule") > 0, "unmatched folder contents");
+    unmatched.close();
     const auto schema = projectPath("schemas/rules-tree-v3.schema.json");
     const auto active = directory.filePath("rules.json");
     const auto home = directory.filePath("organized");
@@ -320,6 +323,9 @@ void testNamedFolderFlowPreview() {
     controller.confirmSort();
     expect(controller.canUndo() && !controller.hasPreview() && pending.count() == 1 && QDir(nested).exists()
         && !QFile::exists(folder + "/first.png") && !QFile::exists(nested + "/second.jpg"), "flow moves files and retains the input folder and queue entry");
+    expect(controller.lastSortRemainingCount() == 1 && unmatched.exists() &&
+        pending.data(pending.index(0), nookbit::PendingFilesModel::SortNoteRole).toString() == QStringLiteral("폴더 안: 규칙 없음"),
+        "unmatched children contribute to the result and their queued parent shows the reason");
     controller.undoLastMove();
     expect(QFile::exists(folder + "/first.png") && QFile::exists(nested + "/second.jpg"), "UI undo restores original subfolder paths");
 }
@@ -772,6 +778,17 @@ void testEveryPreviewOutcomeIsVisible() {
                QFile::exists(directory.filePath(QStringLiteral("already.jpg"))),
            "preview outcome display must not move files");
 
+    expect(controller.prepareSort(), "matched subset can be prepared");
+    controller.confirmSort();
+    expect(controller.lastSortRemainingCount() == 3 && pending.count() == 3 &&
+        controller.message().contains(QStringLiteral("1개를 옮겼어요. 3개는 대기 목록에 남았어요.")) &&
+        QFile::exists(home + QStringLiteral("/Pictures/photo.jpg")) && !QFile::exists(directory.filePath(QStringLiteral("photo.jpg"))),
+        "successful partial sort reports moved and retained counts after removing moved files");
+    const QStringList retainedReasons{QStringLiteral("이름 충돌"), QStringLiteral("규칙 없음"), QStringLiteral("규칙에서 제외")};
+    for (int row = 0; row < pending.count() && row < retainedReasons.size(); ++row)
+        expect(pending.data(pending.index(row), nookbit::PendingFilesModel::SortNoteRole).toString() == retainedReasons[row],
+            "each retained queue row keeps its own reason");
+
     const auto inPlace = home + QStringLiteral("/Pictures/in-place.jpg");
     QFile placed(inPlace);
     expect(placed.open(QIODevice::WriteOnly) && placed.write("already organized") > 0, "in-place fixture");
@@ -784,6 +801,8 @@ void testEveryPreviewOutcomeIsVisible() {
     expect(controller.hasPreview() && !controller.hasMovableSteps() && !controller.awaitingConfirmation() &&
                controller.outcomes().size() == 4 && pending.count() == 4,
            "no-move preview preserves every outcome and queued file without preparing approval");
+    expect(pending.data(pending.index(1), nookbit::PendingFilesModel::SortNoteRole).toString().isEmpty(),
+        "removing and re-adding an item discards its previous sort note");
     const auto summary = controller.message();
     expect(summary.contains(QStringLiteral("이미 목적지에 있는 파일 1개")) &&
                summary.contains(QStringLiteral("일치하는 규칙이 없는 파일 1개")) &&

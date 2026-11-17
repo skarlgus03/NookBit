@@ -38,6 +38,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(bool hasMovableSteps READ hasMovableSteps NOTIFY previewChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY previewChanged)
     Q_PROPERTY(bool canUndoCancelledSort READ canUndoCancelledSort NOTIFY previewChanged)
+    Q_PROPERTY(int lastSortRemainingCount READ lastSortRemainingCount NOTIFY previewChanged)
     Q_PROPERTY(bool awaitingConfirmation READ awaitingConfirmation NOTIFY previewChanged)
     Q_PROPERTY(QVariantList confirmationSteps READ confirmationSteps NOTIFY previewChanged)
     Q_PROPERTY(QString defaultDestinationRoot READ defaultDestinationRoot CONSTANT)
@@ -45,6 +46,7 @@ class PreviewController final : public QObject {
     Q_PROPERTY(QString collisionPolicy READ collisionPolicy WRITE setCollisionPolicy NOTIFY collisionPolicyChanged)
 
 public:
+    [[nodiscard]] int lastSortRemainingCount() const noexcept { return lastSortRemainingCount_; }
     /// 앱 조립부의 단일 백그라운드 실행기를 빌려 받는 함수.
     void setTaskRunner(BackgroundTaskRunner* runner) { runner_ = runner; }
     /// 확인 전후의 무거운 검사를 화면 밖으로 전달하는 계약을 받는 함수.
@@ -184,7 +186,8 @@ private:
     /// 고정 계획의 사용자 확인 이후 승인·이동을 비동기로 요청하는 함수.
     void confirmSortInBackground();
     /// 이동 결과를 화면 스레드에서만 대기 목록·기록 안내에 반영하는 함수.
-    void finishMovement(const PlanId& id, const std::vector<MoveStep>& steps, const Result<void>& result);
+    void finishMovement(const PlanId& id, const std::vector<MoveStep>& steps,
+        const std::vector<PreviewFileOutcome>& previewOutcomes, const Result<void>& result);
     BackgroundTaskRunner* runner_{nullptr};
     /// 실패 이유를 화면에 알리고 기존 초안을 지우는 함수.
     void showError(const QString& message);
@@ -209,6 +212,7 @@ private:
     std::optional<ApprovalRecord> approval_;
     std::optional<PlanId> undoPlanId_;
     bool undoCancelledSort_{false};
+    int lastSortRemainingCount_{0};
     QVariantList steps_;
     QVariantList outcomes_;
     QStringList warnings_;

@@ -24,12 +24,14 @@ QVariant PendingFilesModel::data(const QModelIndex& index, int role) const {
     if (role == AvailableRole) return entry.available;
     if (role == DirectoryRole) return QFileInfo(entry.fullPath).isDir();
     if (role == FolderFlowRole) return entry.folderFlowId;
+    if (role == SortNoteRole) return entry.sortNote;
     return {};
 }
 
 // QML에서 사용할 역할 이름을 반환하는 함수.
 QHash<int, QByteArray> PendingFilesModel::roleNames() const {
-    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}, {DirectoryRole, "directory"}, {FolderFlowRole, "folderFlowId"}};
+    return {{FileNameRole, "fileName"}, {FullPathRole, "fullPath"}, {AvailableRole, "available"}, {DirectoryRole, "directory"},
+        {FolderFlowRole, "folderFlowId"}, {SortNoteRole, "sortNote"}};
 }
 
 // 현재 대기 중인 파일 개수를 반환하는 함수.
@@ -230,13 +232,52 @@ Result<std::filesystem::path> PendingFilesModel::addPath(const std::filesystem::
 
 // 지정한 위치의 파일을 대기 목록에서만 제외하는 함수.
 void PendingFilesModel::removeAt(int index) {
-    if (index < 0 || index >= entries_.size()) return;
+    if (removeRowAt(index)) setLastMessage(tr("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
+}
+
+void PendingFilesModel::removeMovedAt(int index) {
+    if (removeRowAt(index)) setLastMessage({});
+}
+
+bool PendingFilesModel::removeRowAt(int index) {
+    if (index < 0 || index >= entries_.size()) return false;
     beginRemoveRows({}, index, index);
     entries_.removeAt(index);
     endRemoveRows();
     emit countChanged();
     emit availabilityChanged();
-    setLastMessage(tr("대기 목록에서만 뺐어요. 원본 파일은 그대로 있어요."));
+    return true;
+}
+
+int PendingFilesModel::showSortRemainders(const QList<std::pair<QString, QString>>& remainders) {
+    QHash<QString, int> rows;
+    QList<QStringList> notes(entries_.size());
+    for (int row = 0; row < entries_.size(); ++row)
+        rows.insert(entries_[row].fullPath.toCaseFolded(), row);
+    int count = 0;
+    for (const auto& [path, reason] : remainders) {
+        auto key = QDir::cleanPath(QDir::fromNativeSeparators(path)).toCaseFolded();
+        auto row = rows.constFind(key);
+        const bool nested = row == rows.cend();
+        // 폴더 흐름이 내부 파일을 따로 검사한 경우 대기 목록에 등록된 상위 폴더를 찾는다.
+        while (row == rows.cend()) {
+            const auto slash = key.lastIndexOf('/');
+            if (slash <= 0) break;
+            key.truncate(slash);
+            row = rows.constFind(key);
+        }
+        if (row == rows.cend()) continue;
+        ++count;
+        const auto note = nested ? tr("폴더 안: %1").arg(reason) : reason;
+        if (!notes[*row].contains(note)) notes[*row].append(note);
+    }
+    for (int row = 0; row < entries_.size(); ++row) {
+        const auto note = notes[row].join(QStringLiteral(" · "));
+        if (entries_[row].sortNote == note) continue;
+        entries_[row].sortNote = note;
+        emit dataChanged(index(row), index(row), {SortNoteRole});
+    }
+    return count;
 }
 
 // 한 번의 모델 초기화와 저장 알림으로 목록만 제거하고 원본은 보존하는 함수.

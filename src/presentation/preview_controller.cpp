@@ -48,7 +48,10 @@ PreviewController::PreviewController(PendingFilesModel& pendingFiles,
     connect(&pendingFiles_, &QAbstractItemModel::rowsInserted, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::rowsRemoved, this, [this] { clear(); });
     connect(&pendingFiles_, &QAbstractItemModel::modelReset, this, [this] { clear(); });
-    connect(&pendingFiles_, &QAbstractItemModel::dataChanged, this, [this] { clear(); });
+    connect(&pendingFiles_, &QAbstractItemModel::dataChanged, this,
+        [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+            if (roles != QList<int>{PendingFilesModel::SortNoteRole}) clear();
+        });
     refreshActiveRules();
 }
 
@@ -524,7 +527,7 @@ void PreviewController::confirmSortInBackground() {
             return result;
         },
         [this, plan, elapsedMs](const Result<void>& result) {
-            finishMovement(plan.id, plan.steps, result);
+            finishMovement(plan.id, plan.steps, plan.previewOutcomes, result);
             if (*elapsedMs >= 0) {
                 message_ += tr(" (검사·이동 총 %1초)").arg(static_cast<double>(*elapsedMs) / 1000.0, 0, 'f', 2);
                 emit previewChanged();
@@ -628,20 +631,23 @@ void PreviewController::moveApprovedFile() {
     settings.defaultCollisionPolicy = collisionPolicy_;
     const auto movedPlanId = draft_->id;
     const auto movedSteps = loaded.value().steps;
+    const auto previewOutcomes = draft_->previewOutcomes;
     message_ = tr("파일을 정리하고 있어요. 작업이 끝날 때까지 앱을 닫지 마세요.");
     emit previewChanged();
     emit sortExecutionStarted();
     dispatchOperation(runner_, this,
         [operations = &operations_, plan = loaded.value(), approval = *approval_, selectedFiles, settings] {
             return operations->executeApproved(plan, approval, selectedFiles, settings);
-        }, [this, movedPlanId, movedSteps](const Result<void>& result) {
-        finishMovement(movedPlanId, movedSteps, result);
+        }, [this, movedPlanId, movedSteps, previewOutcomes](const Result<void>& result) {
+        finishMovement(movedPlanId, movedSteps, previewOutcomes, result);
       }, BackgroundTaskRunner::TaskKind::Sort);
 }
 
 // 이동 완료/실패를 화면 스레드에서 동일한 규칙으로 처리하는 함수.
-void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps, const Result<void>& result) {
+void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vector<MoveStep>& movedSteps,
+    const std::vector<PreviewFileOutcome>& previewOutcomes, const Result<void>& result) {
     undoCancelledSort_ = false;
+    lastSortRemainingCount_ = 0;
     if (!result) {
         const auto current = history_.loadPlan(movedPlanId);
         const bool cancelled = current && current.value().status == PlanStatus::Cancelled;
@@ -674,20 +680,37 @@ void PreviewController::finishMovement(const PlanId& movedPlanId, const std::vec
         emit sortExecutionFinished(false, message_);
         return;
     }
+    const auto queued = pendingFiles_.filePaths();
     for (int index = pendingFiles_.count() - 1; index >= 0; --index) {
-        const auto path = std::filesystem::path(pendingFiles_.filePaths().at(index).toStdWString());
+        const auto path = std::filesystem::path(queued.at(index).toStdWString());
         if (std::any_of(movedSteps.begin(), movedSteps.end(), [&path](const MoveStep& step) {
                 return step.status == StepStatus::Planned && step.source == path;
             })) {
-            pendingFiles_.removeAt(index);
+            pendingFiles_.removeMovedAt(index);
         }
     }
+    QList<std::pair<QString, QString>> remainders;
+    for (const auto& outcome : previewOutcomes) {
+        QString reason;
+        switch (outcome.disposition) {
+        case PreviewDisposition::Planned: continue;
+        case PreviewDisposition::CollisionSkipped: reason = tr("이름 충돌"); break;
+        case PreviewDisposition::Unmatched: reason = tr("규칙 없음"); break;
+        case PreviewDisposition::Excluded: reason = tr("규칙에서 제외"); break;
+        case PreviewDisposition::DocumentHeld: reason = tr("문서 분류 보류"); break;
+        case PreviewDisposition::AlreadyAtDestination: reason = tr("이미 목적지에 있음"); break;
+        }
+        remainders.append({displayPath(outcome.source), reason});
+    }
     clear();
+    lastSortRemainingCount_ = pendingFiles_.showSortRemainders(remainders);
     undoPlanId_ = movedPlanId;
-    message_ = tr("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.")
-                   .arg(std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
-                       return step.status == StepStatus::Planned;
-                   }));
+    const auto movedCount = std::count_if(movedSteps.begin(), movedSteps.end(), [](const MoveStep& step) {
+        return step.status == StepStatus::Planned;
+    });
+    message_ = lastSortRemainingCount_ > 0
+        ? tr("%1개를 옮겼어요. %2개는 대기 목록에 남았어요.").arg(movedCount).arg(lastSortRemainingCount_)
+        : tr("파일 %1개를 이동했어요. '마지막 이동 되돌리기'로 원래 위치에 돌려놓을 수 있어요.").arg(movedCount);
     emit previewChanged();
     emit sortExecutionFinished(true, message_);
 }

@@ -212,6 +212,7 @@ Item {
                     required property bool available
                     required property bool directory
                     required property string folderFlowId
+                    required property string sortNote
                     readonly property string extension: fileName.lastIndexOf(".") > 0 ? fileName.slice(fileName.lastIndexOf(".") + 1).toUpperCase() : ""
                     width: files.width - UiMetrics.spaceGroup
                     height: UiMetrics.pendingRowHeight
@@ -240,17 +241,18 @@ Item {
                             color: available ? input.theme.text : input.theme.danger
                         }
                         Text {
+                            objectName: "pendingQueuePath"
                             Layout.fillWidth: true
-                            text: fullPath
+                            text: sortNote.length > 0 ? qsTr("%1 · %2").arg(sortNote).arg(fullPath) : fullPath
                             textFormat: Text.PlainText
-                            elide: Text.ElideMiddle
+                            elide: sortNote.length > 0 ? Text.ElideRight : Text.ElideMiddle
                             font.pixelSize: UiMetrics.textBody
                             color: input.theme.muted
                         }
                         HoverHandler { id: pathHover }
                         ToolTip.visible: pathHover.hovered
                         ToolTip.delay: UiMetrics.tooltipDelayMs
-                        ToolTip.text: fullPath
+                        ToolTip.text: sortNote.length > 0 ? qsTr("%1\n마지막 정리: %2").arg(fullPath).arg(sortNote) : fullPath
                     }
                     Label {
                         visible: !directory || (input.pending.folderFlowOptions || []).length <= 1
