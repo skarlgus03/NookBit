@@ -24,8 +24,18 @@ Rectangle {
     property string resultMessage: ""
     readonly property bool previewOpen: workflowStep === 1
     readonly property bool transitioning: slideAnimation.running
-    readonly property bool inlineProgress: progress.busy && workflowStep < 3
+    readonly property bool inlineWork: visible && progress.busy && workflowStep < 3
+    property bool inlineProgressReady: false
+    readonly property bool inlineProgress: inlineWork && inlineProgressReady
+    onInlineWorkChanged: {
+        if (!inlineWork) inlineProgressReady = false
+    }
     clip: true
+    Timer {
+        interval: UiMetrics.inlineProgressDelayMs
+        running: home.inlineWork
+        onTriggered: home.inlineProgressReady = true
+    }
     NumberAnimation {
         id: slideAnimation
         target: home
@@ -123,7 +133,7 @@ Rectangle {
         id: stepper
         anchors.left: parent.left
         anchors.right: parent.right
-        workflowStep: home.inlineProgress && home.manualSortRequested && !home.progress.fileWorkActive ? 2 : home.workflowStep
+        workflowStep: home.workflowStep
         dark: home.dark
     }
     FileSortInput {
@@ -228,9 +238,10 @@ Rectangle {
         model: [3, 4]
         delegate: FileSortStatus {
             required property int modelData
-            readonly property bool showingProgress: modelData === 3 && (home.inlineProgress || home.workflowStep === 3) && home.progress.busy
+            readonly property bool coveringPane: modelData === 3 && home.inlineProgress
+            readonly property bool showingProgress: coveringPane || (modelData === 3 && home.workflowStep === 3 && home.progress.busy)
             objectName: modelData === 3 ? "fileSortProgress" : "fileSortComplete"
-            x: showingProgress ? 0 : home.paneX(modelData)
+            x: coveringPane ? 0 : home.paneX(modelData)
             width: home.width
             y: stepper.height
             height: home.height - stepper.height

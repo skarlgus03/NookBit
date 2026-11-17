@@ -710,7 +710,8 @@ static bool verifyHomeMenuAlignment(QQuickWindow* root, QObject* metrics) {
 }
 
 // 무파일 작업으로 페이지별 진행 표시와 창 이동을 검사하는 함수.
-static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, nookbit::BackgroundTaskRunner& runner) {
+static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension,
+    nookbit::BackgroundTaskRunner& runner, QObject* uiMetrics) {
     auto* popup = findUiChild<QObject*>(root, QStringLiteral("operationProgressPopup"));
     auto* veil = findUiChild<QQuickItem*>(root, QStringLiteral("operationProgressVeil"));
     auto* recoveryIndicator = findUiChild<QQuickItem*>(root, QStringLiteral("recoveryInspectionIndicator"));
@@ -724,6 +725,8 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
     if (!popup || !veil || !recoveryIndicator || !drag || !menu || !panel || !stepper || !sortProgress || !dropArea) return false;
     using Kind = nookbit::BackgroundTaskRunner::TaskKind;
     using Phase = nookbit::OperationPhase;
+    const int delay = uiMetrics->property("inlineProgressDelayMs").toInt();
+    const int slideDuration = uiMetrics->property("pageSlideDuration").toInt();
     struct BusyCase {
         int page;
         Kind kind;
@@ -761,7 +764,7 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
             if (runner.busy()) return false;
         }
         if (inlineSort) {
-            sortPage->setProperty("workflowStep", test.step);
+            sortPage->setProperty("workflowStep", test.step == 3 ? 2 : test.step);
             sortPage->setProperty("manualSortRequested", test.preparing);
         }
         const auto gate = std::make_shared<QSemaphore>();
@@ -773,12 +776,17 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
                 return nookbit::Result<void>::success();
             },
                 [finished](const auto&) { *finished = true; }, test.kind)) return false;
+        const bool delayedInline = inlineSort && test.step < 3;
+        const bool startedHidden = !delayedInline || (!sortProgress->isVisible() && !dropArea->isEnabled());
+        const bool enteredThroughSlide = !inlineSort || test.step != 3 ||
+            (QMetaObject::invokeMethod(sortPage, "showStep", Q_ARG(QVariant, QVariant(3))) &&
+                sortPage->property("transitioning").toBool() && sortProgress->x() > 0);
         QEventLoop frame;
-        QTimer::singleShot(40, &frame, &QEventLoop::quit);
+        QTimer::singleShot(delayedInline ? delay + 80 : (inlineSort ? slideDuration + 80 : 40), &frame, &QEventLoop::quit);
         frame.exec();
         auto* content = qobject_cast<QQuickItem*>(popup->property("contentItem").value<QObject*>());
         auto* copyHint = findVisualItem(content, QStringLiteral("operationProgressCopyHint"));
-        const bool valid = drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
+        const bool valid = startedHidden && enteredThroughSlide && drag->isEnabled() && !menu->isEnabled() && root->contentItem()->isEnabled()
             && !popup->property("modal").toBool()
             && popup->property("visible").toBool() == showPopup
             && veil->isVisible() == showPopup
@@ -787,7 +795,7 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
                 && sortProgress->x() == 0 && sortProgress->y() == stepper->height()
                 && sortProgress->property("progressTitle").toString() == test.title
                 && sortPage->property("workflowStep").toInt() == test.step
-                && stepper->property("currentStep").toInt() == (test.preparing ? 2 : test.step)))
+                && stepper->property("currentStep").toInt() == test.step))
             && recoveryIndicator->isVisible() == inlineInspection
             && (!inlineInspection || recoveryIndicator->window() == extension)
             && (!showPopup || (content && content->window() == extension && veil->window() == extension
@@ -805,7 +813,20 @@ static bool verifyBusyPresentation(QQuickWindow* root, QQuickWindow* extension, 
         }
         if (!valid || !*finished || runner.busy() || veil->isVisible() || recoveryIndicator->isVisible() || sortProgress->isVisible()) return false;
     }
-    return true;
+    root->setProperty("currentPage", 7);
+    QCoreApplication::processEvents();
+    QEventLoop frame;
+    bool flashed = false;
+    const auto finished = std::make_shared<bool>(false);
+    QObject::connect(sortProgress, &QQuickItem::visibleChanged, &frame, [&] {
+        flashed |= sortProgress->isVisible();
+    });
+    if (!runner.submit(root, [] { return nookbit::Result<void>::success(); },
+            [finished](const auto&) { *finished = true; }, Kind::Inspection)) return false;
+    QTimer::singleShot(delay + 50, &frame, &QEventLoop::quit);
+    frame.exec();
+    root->setProperty("currentPage", 0);
+    return *finished && !flashed && !sortProgress->isVisible() && !popup->property("visible").toBool();
 }
 
 // 상단 안내 밖의 드롭·중복·폴더 거절·아이콘 로딩이 원본을 바꾸지 않는지 검사하는 함수.
@@ -1294,7 +1315,7 @@ int verifyUi(QApplication& application, QQmlApplicationEngine& engine, FeatureRu
             checkLayout(window->width() == 380 && !extension->isVisible() && !developer->property("visible").toBool(), "close extension");
             checkLayout(verifyExtensionInteraction(window, extension, uiMetrics, notifications), "page content, notification toggles and real close clicks");
             checkLayout(verifyHomeMenuAlignment(window, uiMetrics), "left aligned home menu text and icons");
-            checkLayout(verifyBusyPresentation(window, extension, backgroundTasks), "subwindow busy overlay and unlocked window movement");
+            checkLayout(verifyBusyPresentation(window, extension, backgroundTasks, uiMetrics), "subwindow busy overlay and unlocked window movement");
         }
     }
     bool closeToTray = false;
