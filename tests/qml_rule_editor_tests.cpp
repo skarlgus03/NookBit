@@ -283,9 +283,11 @@ int main(int argc, char** argv) {
             property bool dirty: false
             property bool allowImport: true
             property bool allowSave: true
+            property bool allowLayout: true
             property string message: "Blocked"
             property int saves: 0
             property int layouts: 0
+            property int graphReads: 0
             // 실제 파일시스템 없이 목적지 표시 문자열만 반환하는 대역 함수.
             function resolvedPath(path, relative) { return relative ? "D:/Test/" + path : path }
             signal rulesSaved()
@@ -294,9 +296,9 @@ int main(int argc, char** argv) {
             // 저장 완료 알림의 실제 연결 순서만 재현하는 대역 함수.
             function save() { ++saves; if (!allowSave) return false; rulesSaved(); return true }
             // 노드 위치 저장 요청을 세는 대역 함수.
-            function saveGraphLayout(blocks, edges) { ++layouts; return true }
+            function saveGraphLayout(blocks, edges) { ++layouts; return allowLayout }
             // 파일을 읽지 않고 고정된 저장본을 반환하는 대역 함수.
-            function graph() { return {valid: true, blocks: [{id: 1, type: "start", x: 70, y: 220, value: "Input"}], edges: [], nextId: 2, incompleteLeaves: 0} }
+            function graph() { ++graphReads; return {valid: true, blocks: [{id: 1, type: "start", x: 70, y: 220, value: "Input"}], edges: [], nextId: 2, incompleteLeaves: 0} }
             // 화면 이동을 시험할 검사 결과를 반환하는 대역 함수.
             function inspectGraph(blocks, edges) { return {warnings: [{blockId: 1, reason: "Warning"}]} }
         })", QUrl());
@@ -307,23 +309,54 @@ int main(int argc, char** argv) {
         {"width", 1000}, {"height", 720}});
     if (!documents) return 1;
     qobject_cast<QQuickItem*>(documents.get())->setParentItem(host.contentItem());
+    auto* notice = documents->findChild<QQuickItem*>("ruleDocumentNotice");
+    auto* noticeText = documents->findChild<QQuickItem*>("ruleDocumentNoticeText");
+    if (!notice || !noticeText) return 1;
+    state->setProperty("zoom", 0.85);
+    state->setProperty("panX", 124);
+    state->setProperty("panY", -56);
+    call(engine, state.get(), "selectOnly", {1});
+    const auto savedBlocks = list(state.get(), "blocks");
+    const auto savedEdges = list(state.get(), "edges");
     call(engine, documents.get(), "saveAll");
     settle();
     expect(controller->property("saves").toInt() == 1 && controller->property("layouts").toInt() == 1
-        && !state->property("graphDirty").toBool() && !state->property("stagedGraph").toBool(),
-        "save completion persists layout and reloads the same session exactly once");
+        && controller->property("graphReads").toInt() == 0
+        && !state->property("graphDirty").toBool() && !state->property("stagedGraph").toBool()
+        && list(state.get(), "blocks") == savedBlocks && list(state.get(), "edges") == savedEdges
+        && state->property("zoom").toDouble() == 0.85 && state->property("panX").toInt() == 124
+        && state->property("panY").toInt() == -56 && state->property("selectedId").toInt() == 1,
+        "saving persists the layout without reopening the graph or changing the viewport and selection");
+    expect(notice->isVisible() && notice->property("tone").toString() == "success" &&
+        noticeText->property("text").toString() == QStringLiteral("저장했어요"), "successful save shows a brief confirmation");
     call(engine, state.get(), "addBlock", {"size", 300, 200});
     const auto unsaved = list(state.get(), "blocks");
     controller->setProperty("allowImport", false);
     call(engine, documents.get(), "saveAll");
     expect(controller->property("saves").toInt() == 1 && list(state.get(), "blocks") == unsaved
-        && state->property("graphDirty").toBool() && state->property("statusText").toString() == "Blocked",
+        && state->property("graphDirty").toBool() && state->property("statusText").toString() == "Blocked"
+        && notice->property("tone").toString() == "error",
         "validation failure keeps the edited graph and cannot call save");
     controller->setProperty("allowImport", true);
     controller->setProperty("allowSave", false);
     call(engine, documents.get(), "saveAll");
     expect(controller->property("layouts").toInt() == 1 && list(state.get(), "blocks") == unsaved
         && !state->property("stagedGraph").toBool(), "save failure cannot claim a saved graph or discard its draft");
+    controller->setProperty("allowSave", true);
+    controller->setProperty("allowLayout", false);
+    call(engine, documents.get(), "saveAll");
+    expect(controller->property("layouts").toInt() == 2 && list(state.get(), "blocks") == unsaved
+        && state->property("graphDirty").toBool() && !state->property("stagedGraph").toBool()
+        && notice->property("tone").toString() == "warning", "layout failure keeps edits and distinguishes a partial save");
+    controller->setProperty("allowLayout", true);
+    call(engine, documents.get(), "saveAll");
+    expect(!state->property("graphDirty").toBool() && notice->property("tone").toString() == "success",
+        "saving again replaces the warning with a confirmation");
+    QEventLoop noticeLifetime;
+    QTimer::singleShot(metrics->property("transientNoticeHoldMs").toInt() +
+        metrics->property("transientNoticeFadeMs").toInt() * 2 + 100, &noticeLifetime, &QEventLoop::quit);
+    noticeLifetime.exec();
+    expect(!notice->isVisible(), "save feedback clears itself after the notice duration");
     // 최소 편집기 폭에서도 메뉴와 주요 명령이 잘리거나 겹치지 않는지 검사한다.
     auto toolbar = create(engine, "RuleEditorToolbar", {{"editor", QVariant::fromValue(state.get())},
         {"canvasHost", QVariant::fromValue(host.contentItem())}, {"width", 828}});
@@ -568,6 +601,13 @@ int main(int argc, char** argv) {
                 && inspectionPage->property("zoom").toDouble() == 1.25, "warning selects its node and preserves zoom");
         }
     }
+    auto* pageSave = inspectionPage->findChild<QObject*>("ruleSaveButton");
+    auto* pageNotice = inspectionPage->findChild<QQuickItem*>("ruleDocumentNotice");
+    if (!pageSave || !pageNotice) return 1;
+    QMetaObject::invokeMethod(pageSave, "clicked");
+    settle();
+    expect(pageNotice->isVisible() && inspectionPage->property("zoom").toDouble() == 1.25,
+        "the page save button confirms saving without resetting the canvas");
     auto testPanel = create(engine, "RuleTestPanel", {
         {"editor", QVariant::fromValue(state.get())}, {"controller", QVariant::fromValue(controller.get())},
         {"parent", QVariant::fromValue(host.contentItem())}

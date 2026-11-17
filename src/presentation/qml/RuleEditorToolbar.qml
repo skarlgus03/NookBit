@@ -10,6 +10,7 @@ ColumnLayout {
     property string guideStatus: ""
     property bool testOpened: false
     property bool hasUnsavedChanges: false
+    property bool saving: false
     signal saveRequested
     signal testRequested
     signal inspectRequested
@@ -154,6 +155,7 @@ ColumnLayout {
             text: qsTr("전체 저장")
             font.bold: true
             primary: true
+            enabled: !toolbar.saving
             onClicked: {
                 toolbar.saveRequested();
             }

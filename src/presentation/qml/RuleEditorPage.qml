@@ -64,6 +64,7 @@ Item {
     RuleDocumentActions {
         id: documents
         anchors.fill: parent
+        z: 1
         editor: session
         controller: page.controller
         guideService: page.guideService
@@ -87,6 +88,7 @@ Item {
             dark: page.darkMode
             testOpened: testPanel.visible
             guideStatus: documents.guideStatus
+            saving: documents.saving
             hasUnsavedChanges: (session.graphDirty && !session.canvasDraftSaved)
                 || page.controller.dirty || page.oldEditorFormDirty
             onSaveRequested: documents.requestSave()

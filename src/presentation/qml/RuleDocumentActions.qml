@@ -13,6 +13,7 @@ Item {
     property string importErrorLocation: ""
     property string importErrorReason: ""
     property string exportErrorReason: ""
+    property bool saving: false
     readonly property alias guideStatus: rulesGuideDownload.status
     signal editorDraftReplaced
     property bool dark: false
@@ -49,7 +50,9 @@ Item {
         const error = controller.saveCanvasDraft(editor.blocks, editor.edges, editor.nextId);
         if (!error)
             editor.canvasDraftSaved = true;
-        editor.statusText = error || qsTr("편집 초안을 저장했어요. 파일 메뉴에서 다시 열 수 있어요.");
+        reportResult(error || qsTr("편집 초안을 저장했어요. 파일 메뉴에서 다시 열 수 있어요."),
+                     error ? qsTr("초안을 저장하지 못했어요") : qsTr("초안을 저장했어요"),
+                     error ? "error" : "success");
     }
     function requestOpenCanvasDraft() {
         const draft = controller.loadCanvasDraft();
@@ -80,6 +83,8 @@ Item {
                              confirmImportReplace, importErrorDialog])
             popup.close();
         rulesGuideDownload.closeDialog();
+        noticeTimer.stop();
+        notice.opacity = 0;
     }
     component ThemeButton: RuleEditorButton {
         dark: actions.dark
@@ -96,32 +101,86 @@ Item {
     }
     // 그래프를 검증한 뒤 규칙 초안과 노드 위치를 한 번에 저장하는 함수.
     function saveAll() {
-        if (!actions.controller.importGraph(editor.blocks, editor.edges)) {
-            editor.statusText = actions.controller.message;
-            return;
+        if (saving) return;
+        saving = true;
+        editor.statusText = qsTr("규칙을 저장하고 있어요.");
+        try {
+            if (!controller.importGraph(editor.blocks, editor.edges)) {
+                reportResult(controller.message, qsTr("저장하지 못했어요"), "error");
+                return;
+            }
+            editorDraftReplaced();
+            editor.stagedGraph = true;
+            if (!controller.save()) {
+                editor.stagedGraph = false;
+                reportResult(controller.message, qsTr("저장하지 못했어요"), "error");
+            }
+        } finally {
+            saving = false;
         }
-        actions.editorDraftReplaced();
-        editor.stagedGraph = true;
-        if (!actions.controller.save()) {
-            editor.stagedGraph = false;
-            editor.statusText = actions.controller.message;
-        }
+    }
+    function reportResult(detail, summary, tone) {
+        editor.statusText = detail;
+        noticeText.text = summary;
+        notice.tone = tone;
+        notice.opacity = 1;
+        noticeTimer.restart();
     }
     Connections {
         target: actions.controller
-        // 규칙 저장 후에는 확정한 그래프의 배치를 남기고 새 저장본을 다시 펼치는 함수.
+        // 현재 그래프에서 저장한 경우 배치만 기록하고 작업 중인 캔버스를 유지한다.
         function onRulesSaved() {
             if (actions.editor.stagedGraph) {
                 const layoutSaved = actions.controller.saveGraphLayout(actions.editor.blocks, actions.editor.edges);
-                actions.loadGraphFromDraft();
-                actions.editor.statusText = layoutSaved ? qsTr("규칙과 노드 위치를 모두 저장했어요.") : qsTr(
-                                                              "규칙은 저장됐지만 노드 위치는 저장하지 못했어요.");
+                actions.editor.stagedGraph = false;
+                actions.editor.graphDirty = !layoutSaved;
+                if (layoutSaved) {
+                    actions.editor.canvasDraftSaved = false;
+                    actions.reportResult(qsTr("규칙과 노드 위치를 모두 저장했어요."), qsTr("저장했어요"), "success");
+                } else {
+                    actions.reportResult(qsTr("규칙은 저장됐지만 노드 위치는 저장하지 못했어요."),
+                                         qsTr("노드 위치를 저장하지 못했어요"), "warning");
+                }
             } else if (actions.editor.graphDirty) {
                 actions.editor.statusText = qsTr("규칙 저장본이 바뀌었어요. 화면의 미저장 그래프는 유지했으니 필요하면 다시 불러오세요.");
             } else {
                 actions.loadGraphFromDraft();
             }
         }
+    }
+    Rectangle {
+        id: notice
+        objectName: "ruleDocumentNotice"
+        property string tone: "success"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: UiMetrics.ruleStatusHeight + UiMetrics.spaceSection + UiMetrics.spaceGroup
+        width: Math.min(parent.width - UiMetrics.spaceSection * 2, noticeText.implicitWidth + UiMetrics.spaceSection * 2)
+        height: noticeText.implicitHeight + UiMetrics.spaceControl * 2
+        radius: UiMetrics.radiusControl
+        color: tone === "success" ? actions.theme.successSurface
+            : tone === "warning" ? actions.theme.warningSurface : actions.theme.dangerSurface
+        border.color: tone === "success" ? actions.theme.successBorder
+            : tone === "warning" ? actions.theme.warning : actions.theme.danger
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: UiMetrics.transientNoticeFadeMs } }
+        Label {
+            id: noticeText
+            objectName: "ruleDocumentNoticeText"
+            anchors.centerIn: parent
+            width: parent.width - UiMetrics.spaceSection * 2
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            color: actions.primaryText
+            textFormat: Text.PlainText
+            font.pixelSize: UiMetrics.textBody
+        }
+    }
+    Timer {
+        id: noticeTimer
+        interval: UiMetrics.transientNoticeHoldMs + UiMetrics.transientNoticeFadeMs
+        onTriggered: notice.opacity = 0
     }
     GuideDownload {
         id: rulesGuideDownload
@@ -256,7 +315,8 @@ Item {
                 exportErrorDialog.open();
                 return;
             }
-            actions.editor.statusText = qsTr("현재 그래프를 JSON으로 내보냈어요. 앱에 적용된 규칙과 편집 초안은 바뀌지 않았어요.");
+            actions.reportResult(qsTr("현재 그래프를 JSON으로 내보냈어요. 앱에 적용된 규칙과 편집 초안은 바뀌지 않았어요."),
+                                 qsTr("JSON으로 내보냈어요"), "success");
         }
     }
 
